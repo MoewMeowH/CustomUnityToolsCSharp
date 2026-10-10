@@ -1,0 +1,10 @@
+C:\Users\user\Desktop\Trunk\Client\AOS\EString\EString\bin\Release\netstandard2.0\EString.deps.json
+C:\Users\user\Desktop\Trunk\Client\AOS\EString\EString\bin\Release\netstandard2.0\EString.dll
+C:\Users\user\Desktop\Trunk\Client\AOS\EString\EString\bin\Release\netstandard2.0\EString.pdb
+C:\Users\user\Desktop\Trunk\Client\AOS\EString\EString\obj\Release\netstandard2.0\EString.csproj.AssemblyReference.cache
+C:\Users\user\Desktop\Trunk\Client\AOS\EString\EString\obj\Release\netstandard2.0\EString.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\user\Desktop\Trunk\Client\AOS\EString\EString\obj\Release\netstandard2.0\EString.AssemblyInfoInputs.cache
+C:\Users\user\Desktop\Trunk\Client\AOS\EString\EString\obj\Release\netstandard2.0\EString.AssemblyInfo.cs
+C:\Users\user\Desktop\Trunk\Client\AOS\EString\EString\obj\Release\netstandard2.0\EString.csproj.CoreCompileInputs.cache
+C:\Users\user\Desktop\Trunk\Client\AOS\EString\EString\obj\Release\netstandard2.0\EString.dll
+C:\Users\user\Desktop\Trunk\Client\AOS\EString\EString\obj\Release\netstandard2.0\EString.pdb
