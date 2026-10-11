@@ -41,8 +41,7 @@ namespace EString.Script
                 foreach (var attribute in attributeList.Attributes)
                 {
                     var name = attribute.Name.ToString();
-                    if (name.EndsWith("E2String") || name.EndsWith("E2StringAttribute") ||
-                        name.EndsWith("EnumToString") || name.EndsWith("EnumToStringAttribute"))
+                    if (name.EndsWith("E2String") || name.EndsWith("E2StringAttribute"))
                     {
                         return true;
                     }
