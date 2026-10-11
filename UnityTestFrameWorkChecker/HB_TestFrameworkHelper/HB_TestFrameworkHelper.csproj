@@ -14,7 +14,6 @@
     <NoWarn>$(NoWarn);RS2008</NoWarn>
     <IncludeBuildOutput>true</IncludeBuildOutput>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
-    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
   <ItemGroup>

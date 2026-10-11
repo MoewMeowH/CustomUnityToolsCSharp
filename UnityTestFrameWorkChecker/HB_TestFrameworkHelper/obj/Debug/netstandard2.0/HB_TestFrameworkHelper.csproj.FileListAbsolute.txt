@@ -88,3 +88,4 @@ F:\AI\ToolWithCS\UnityTestFrameWorkChecker\HB_TestFrameworkHelper\bin\Debug\nets
 F:\AI\ToolWithCS\UnityTestFrameWorkChecker\HB_TestFrameworkHelper\obj\Debug\netstandard2.0\HB_TestF.8547066B.Up2Date
 F:\AI\ToolWithCS\UnityTestFrameWorkChecker\HB_TestFrameworkHelper\obj\Debug\netstandard2.0\HB_TestFrameworkHelper.dll
 F:\AI\ToolWithCS\UnityTestFrameWorkChecker\HB_TestFrameworkHelper\obj\Debug\netstandard2.0\HB_TestFrameworkHelper.pdb
+F:\AI\ToolWithCS\UnityTestFrameWorkChecker\HB_TestFrameworkHelper\obj\Debug\netstandard2.0\HB_TestFrameworkHelper.sourcelink.json

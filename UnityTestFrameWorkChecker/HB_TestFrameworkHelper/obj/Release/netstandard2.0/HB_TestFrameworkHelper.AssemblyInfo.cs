@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("HB_TestFrameworkHelper")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+c72e8e6d9f146838d783c10d70d33f01b117a62c")]
 [assembly: System.Reflection.AssemblyProductAttribute("HB_TestFrameworkHelper")]
 [assembly: System.Reflection.AssemblyTitleAttribute("HB_TestFrameworkHelper")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
