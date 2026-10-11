@@ -16,7 +16,7 @@ namespace HB_TestFrameworkHelper.CodeFixes
     public class HBNeedSlotNullCheckSerializeFieldCodeFixProvider : CodeFixProvider
     {
         public sealed override ImmutableArray<string> FixableDiagnosticIds =>
-            ImmutableArray.Create(HBNeedSlotNullCheckSerializeFieldAnalyzer.DiagnosticId);
+            ImmutableArray.Create(HBNeedSlotNullCheckSerializeFieldAnalyzer.DiagnosticIdSerializeField);
 
         public sealed override FixAllProvider GetFixAllProvider() =>
             WellKnownFixAllProviders.BatchFixer;
