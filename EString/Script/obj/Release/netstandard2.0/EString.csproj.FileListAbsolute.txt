@@ -8,3 +8,4 @@ F:\AI\ToolWithCS\EString\Script\obj\Release\netstandard2.0\EString.AssemblyInfo.
 F:\AI\ToolWithCS\EString\Script\obj\Release\netstandard2.0\EString.csproj.CoreCompileInputs.cache
 F:\AI\ToolWithCS\EString\Script\obj\Release\netstandard2.0\EString.Script.Generator.dll
 F:\AI\ToolWithCS\EString\Script\obj\Release\netstandard2.0\EString.Script.Generator.pdb
+F:\AI\ToolWithCS\EString\Script\obj\Release\netstandard2.0\EString.sourcelink.json
