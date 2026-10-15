@@ -10,7 +10,9 @@
     <IsRoslynAnalyzer>true</IsRoslynAnalyzer>
 
     <RootNamespace>EString.Script</RootNamespace>
-    <AssemblyName>EString.Script.Generator</AssemblyName>
+    <AssemblyName>EString</AssemblyName>
+    <!-- 분석기 릴리스 추적(AnalyzerReleases.*.md)은 사용하지 않음 -->
+    <NoWarn>$(NoWarn);RS2008</NoWarn>
 
     <!-- 패키징 및 종속성 관리 설정 -->
     <IncludeBuildOutput>false</IncludeBuildOutput>
