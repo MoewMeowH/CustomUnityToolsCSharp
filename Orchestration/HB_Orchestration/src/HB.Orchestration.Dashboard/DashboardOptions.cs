@@ -1,3 +1,4 @@
+using HB.Orchestration.Agents;
 using HB.Orchestration.Shared;
 
 namespace HB.Orchestration.Dashboard;
@@ -24,21 +25,11 @@ public sealed class DashboardOptions
     /// </summary>
     public string FileLinkTemplate { get; set; } = "http://localhost:63342/api/file?file={path}&line={line}";
 
-    /// <summary>모델별 1M 토큰당 가격(USD). 비워두면 비용 칸은 '-'.</summary>
+    /// <summary>
+    /// (예전 방식) 모델별 1M 토큰당 가격(USD). 단가는 이제 MCP appsettings.json의 Orchestration:Pricing에 두고
+    /// 모드 화면에서 편집한다. 여기 값은 그쪽에 없는 모델에만 쓰인다.
+    /// </summary>
     public Dictionary<string, ModelPrice> Prices { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     public string ResolvedLogPath => string.IsNullOrWhiteSpace(LogPath) ? CallLog.DefaultPath : LogPath;
-
-    public decimal? CostOf(CallRecord r)
-    {
-        if (!Prices.TryGetValue(r.Model, out var p)) return null;
-        return (r.InputTokens ?? 0) / 1_000_000m * p.InputPerMillion
-             + (r.OutputTokens ?? 0) / 1_000_000m * p.OutputPerMillion;
-    }
-}
-
-public sealed class ModelPrice
-{
-    public decimal InputPerMillion { get; set; }
-    public decimal OutputPerMillion { get; set; }
 }

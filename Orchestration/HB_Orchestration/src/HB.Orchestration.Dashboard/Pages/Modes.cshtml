@@ -41,6 +41,10 @@
         border: 1px solid var(--line); background: var(--panel); color: var(--text); width: 140px; }
     .agents.edit input.wide { width: 200px; }
     .agents.edit input[type=number] { width: 90px; }
+    .agents.edit input.price { width: 72px; text-align: right; }
+    .agents.edit th.price { text-align: right; }
+    .rate { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 10px; font-size: 12.5px; color: var(--muted); }
+    .rate input { font: inherit; width: 90px; padding: 3px 6px; border-radius: 5px; border: 1px solid var(--line); background: var(--panel); color: var(--text); text-align: right; }
     .agents.edit input[type=checkbox] { width: auto; }
     .agents.edit tr.newrow td { background: var(--code); }
     .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 10px 0 4px; }
@@ -122,17 +126,23 @@
             <input type="hidden" name="stamp" value="@snap.Stamp" />
             <input type="hidden" name="settingsStamp" value="@snap.SettingsStamp" />
             <input type="hidden" name="rowCount" value="@(snap.Agents.Count + 1)" />
+            <div class="rate">
+                <span>환율 1$ =</span>
+                <input name="krwPerUsd" inputmode="decimal" value="@PricingService.Number(snap.Pricing.KrwPerUsd)" placeholder="비우면 $만" />
+                <span>원 · 단가는 모두 USD / 1M 토큰 · 대시보드 비용은 $와 ₩를 함께 표시</span>
+            </div>
             <section class="panel">
                 <div class="table-scroll">
                     <table class="agents edit">
                         <thead>
-                        <tr><th>이름</th><th>제공사</th><th>모델 ID</th><th>출력 상한</th><th>사용</th><th>삭제</th><th>쓰는 모드</th></tr>
+                        <tr><th>이름</th><th>제공사</th><th>모델 ID</th><th>출력 상한</th><th class="price">입력 $</th><th class="price">캐시 입력 $</th><th class="price">출력 $</th><th>사용</th><th>삭제</th><th>쓰는 모드</th></tr>
                         </thead>
                         <tbody>
                         @for (var i = 0; i <= snap.Agents.Count; i++)
                         {
                             var a = i < snap.Agents.Count ? snap.Agents[i] : null;
                             var used = a is null ? new List<string>() : Model.UsedBy(a.Name).ToList();
+                            var price = Model.PriceOf(a?.Model);
                             <tr class="@(a is null ? "newrow" : null)">
                                 <td>
                                     <input type="hidden" name="@("ag.orig." + i)" value="@(a?.Name)" />
@@ -148,6 +158,9 @@
                                 </td>
                                 <td><input class="mono wide" name="@("ag.model." + i)" value="@(a?.Model)" placeholder="모델 ID" /></td>
                                 <td><input type="number" min="1" name="@("ag.max." + i)" value="@(a?.MaxOutputTokens)" placeholder="없음" /></td>
+                                <td><input class="price mono" inputmode="decimal" name="@("ag.pin." + i)" value="@PricingService.Number(price?.InputPerMillion)" placeholder="-" /></td>
+                                <td><input class="price mono" inputmode="decimal" name="@("ag.pcache." + i)" value="@PricingService.Number(price?.CachedInputPerMillion)" placeholder="=입력" /></td>
+                                <td><input class="price mono" inputmode="decimal" name="@("ag.pout." + i)" value="@PricingService.Number(price?.OutputPerMillion)" placeholder="-" /></td>
                                 <td><input type="checkbox" name="@("ag.enabled." + i)" value="true" checked="@(a?.Enabled ?? true)" /></td>
                                 <td>
                                     @if (a is not null)
@@ -165,7 +178,7 @@
             </section>
             <div class="actions">
                 <button type="submit" class="btn primary">에이전트 저장</button>
-                <span class="muted">마지막 빈 줄 = 새 에이전트 · 이름을 바꾸면 그 이름을 쓰는 모드도 같이 바뀝니다 · 백업: <span class="mono">settings-backup/</span></span>
+                <span class="muted">마지막 빈 줄 = 새 에이전트 · 이름을 바꾸면 그 이름을 쓰는 모드도 같이 바뀝니다 · 단가는 모델 단위(같은 모델을 쓰는 줄은 같은 값), 셋 다 비우면 삭제 · 백업: <span class="mono">settings-backup/</span></span>
             </div>
         </form>
     }

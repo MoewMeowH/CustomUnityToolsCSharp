@@ -52,10 +52,10 @@
 
 <section class="stats">
     <div class="panel stat"><div class="label">호출</div><div class="value">@Model.Calls.Count.ToString("N0")</div></div>
-    <div class="panel stat"><div class="label">입력 토큰</div><div class="value">@Model.TotalIn.ToString("N0")</div></div>
+    <div class="panel stat"><div class="label">입력 토큰@(Model.TotalCached > 0 ? $" (캐시 {Model.TotalCached:N0})" : "")</div><div class="value">@Model.TotalIn.ToString("N0")</div></div>
     <div class="panel stat"><div class="label">출력 토큰</div><div class="value">@Model.TotalOut.ToString("N0")</div></div>
     <div class="panel stat"><div class="label">평균 응답</div><div class="value">@Model.AvgSeconds.ToString("0.0")s</div></div>
-    <div class="panel stat"><div class="label">예상 비용</div><div class="value">@(Model.TotalCost is { } @decimal ? "$" + @decimal.ToString("0.000") : "-")</div></div>
+    <div class="panel stat"><div class="label">예상 비용@(Model.Pricing.Current.KrwPerUsd is { } rate ? $" · 1$ = ₩{rate:N0}" : "")</div><div class="value">@Model.Pricing.Format(Model.TotalCost, 3)</div></div>
     <div class="panel stat"><div class="label">실패</div><div class="value @(Model.Failures > 0 ? "err" : "")">@Model.Failures</div></div>
 </section>
 
@@ -94,7 +94,7 @@
             <tbody>
             @foreach (var c in Model.Calls)
             {
-                var cost = Model.Opt.CostOf(c);
+                var cost = Model.Pricing.CostOf(c);
                 <tr>
                     <td class="num"><a class="row-link" href="/Call/@c.Id">@c.Timestamp.LocalDateTime.ToString("MM-dd HH:mm:ss")</a></td>
                     <td><span class="badge">@c.Tool</span></td>
@@ -112,7 +112,7 @@
                     <td class="num">@(c.InputTokens?.ToString("N0") ?? "-")</td>
                     <td class="num">@(c.OutputTokens?.ToString("N0") ?? "-")</td>
                     <td class="num">@((c.ElapsedMs / 1000.0).ToString("0.0"))s</td>
-                    <td class="num">@(cost is { } v ? "$" + v.ToString("0.0000") : "-")</td>
+                    <td class="num">@Model.Pricing.Format(cost)</td>
                 </tr>
             }
             </tbody>

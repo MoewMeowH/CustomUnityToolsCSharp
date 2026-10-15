@@ -6,8 +6,10 @@ using Microsoft.Extensions.Options;
 
 namespace HB.Orchestration.Dashboard.Pages;
 
-public sealed class CallModel(IOptions<DashboardOptions> options) : PageModel
+public sealed class CallModel(IOptions<DashboardOptions> options, PricingService pricing) : PageModel
 {
+    public PricingService Pricing => pricing;
+
     // 에이전트 응답을 렌더링하므로 원시 HTML은 막는다.
     private static readonly MarkdownPipeline Pipeline =
         new MarkdownPipelineBuilder().UseAdvancedExtensions().DisableHtml().Build();
@@ -34,7 +36,7 @@ public sealed class CallModel(IOptions<DashboardOptions> options) : PageModel
         ResponseHtml = Markdown.ToHtml(call.Response ?? "", Pipeline);
         Links = call.Files.Select(f => FileLinks.Build(f, call.ProjectDir, Opt.FileLinkTemplate)).ToList();
         ContextLinks = call.Context.Select(f => FileLinks.Build(f, call.ProjectDir, Opt.FileLinkTemplate)).ToList();
-        Cost = Opt.CostOf(call);
+        Cost = pricing.CostOf(call);
         if (call.RunId is { } runId)
             RunSteps = all.Where(c => c.RunId == runId).OrderBy(c => c.Step).ToList();
         return Page();

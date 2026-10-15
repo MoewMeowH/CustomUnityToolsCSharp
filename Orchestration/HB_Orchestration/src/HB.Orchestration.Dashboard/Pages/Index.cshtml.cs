@@ -5,9 +5,10 @@ using Microsoft.Extensions.Options;
 
 namespace HB.Orchestration.Dashboard.Pages;
 
-public sealed class IndexModel(IOptions<DashboardOptions> options) : PageModel
+public sealed class IndexModel(IOptions<DashboardOptions> options, PricingService pricing) : PageModel
 {
     public DashboardOptions Opt => options.Value;
+    public PricingService Pricing => pricing;
 
     /// <summary>최근 N일. 0이면 전체.</summary>
     [BindProperty(SupportsGet = true)] public int Days { get; set; } = 7;
@@ -22,18 +23,12 @@ public sealed class IndexModel(IOptions<DashboardOptions> options) : PageModel
     public List<(DateOnly Day, long Tokens, int Count)> Daily { get; private set; } = [];
 
     public long TotalIn => Calls.Sum(c => c.InputTokens ?? 0);
+    public long TotalCached => Calls.Sum(c => c.CachedInputTokens ?? 0);
     public long TotalOut => Calls.Sum(c => c.OutputTokens ?? 0);
     public int Failures => Calls.Count(c => !c.Success);
     public double AvgSeconds => Calls.Count == 0 ? 0 : Calls.Average(c => c.ElapsedMs) / 1000.0;
 
-    public decimal? TotalCost
-    {
-        get
-        {
-            var costs = Calls.Select(Opt.CostOf).ToList();
-            return costs.Any(c => c.HasValue) ? costs.Sum(c => c ?? 0) : null;
-        }
-    }
+    public decimal? TotalCost => pricing.TotalOf(Calls);
 
     public void OnGet()
     {

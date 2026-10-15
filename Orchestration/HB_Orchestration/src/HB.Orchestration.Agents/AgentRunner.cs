@@ -36,6 +36,7 @@ public sealed class AgentRunner(ILogger<AgentRunner> logger)
             text = response.Text;
             var inTokens = response.Usage?.InputTokenCount;
             var outTokens = response.Usage?.OutputTokenCount;
+            var cachedTokens = response.Usage?.CachedInputTokenCount;
 
             if (string.IsNullOrWhiteSpace(text))
             {
@@ -49,6 +50,7 @@ public sealed class AgentRunner(ILogger<AgentRunner> logger)
                 record = NewRecord() with
                 {
                     InputTokens = inTokens,
+                    CachedInputTokens = cachedTokens,
                     OutputTokens = outTokens,
                     ElapsedMs = sw.ElapsedMilliseconds,
                     Success = false,
@@ -62,6 +64,7 @@ public sealed class AgentRunner(ILogger<AgentRunner> logger)
                 {
                     Response = text,
                     InputTokens = inTokens,
+                    CachedInputTokens = cachedTokens,
                     OutputTokens = outTokens,
                     ElapsedMs = sw.ElapsedMilliseconds,
                     Success = true,

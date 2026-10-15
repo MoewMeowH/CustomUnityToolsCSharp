@@ -22,6 +22,34 @@ public sealed class OrchestrationOptions
     public BudgetOptions Budget { get; set; } = new();
 
     public ContextOptions Context { get; set; } = new();
+
+    /// <summary>모델 단가(USD)와 원화 환율. 서버는 쓰지 않고 대시보드가 비용 표시에 쓴다 (같은 파일에서 함께 편집).</summary>
+    public PricingOptions Pricing { get; set; } = new();
+}
+
+/// <summary>appsettings.json의 "Orchestration:Pricing".</summary>
+public sealed class PricingOptions
+{
+    /// <summary>1달러당 원. 비우면 대시보드는 달러만 표시한다.</summary>
+    public decimal? KrwPerUsd { get; set; }
+
+    /// <summary>
+    /// 키 = 모델 ID (호출 기록의 Model과 같은 값). 에이전트 이름이 아니라 모델로 두는 이유:
+    /// 기록에는 모델이 남고 에이전트 이름은 나중에 바뀔 수 있으며, 같은 모델을 쓰는 에이전트는 단가가 같다.
+    /// 지금 에이전트가 쓰지 않는 예전 모델도 남겨 두면 예전 기록의 비용이 계속 계산된다.
+    /// </summary>
+    public Dictionary<string, ModelPrice> Models { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
+/// <summary>1M 토큰당 가격 (USD).</summary>
+public sealed class ModelPrice
+{
+    public decimal InputPerMillion { get; set; }
+
+    /// <summary>프롬프트 캐시에 걸린 입력 토큰 단가. 비우면 InputPerMillion과 같다고 본다.</summary>
+    public decimal? CachedInputPerMillion { get; set; }
+
+    public decimal OutputPerMillion { get; set; }
 }
 
 /// <summary>run_mode의 context(서버가 읽어 붙이는 코드 범위) 제한.</summary>

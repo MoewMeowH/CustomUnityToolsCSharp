@@ -47,7 +47,7 @@ public sealed class ModesModel(ModesConfigService service) : PageModel
     }
 
     // ── 에이전트 저장 ────────────────────────────────────────────────────────
-    public IActionResult OnPostAgents(string settingsStamp, string stamp, int rowCount)
+    public IActionResult OnPostAgents(string settingsStamp, string stamp, int rowCount, string? krwPerUsd)
     {
         TryLoad();
         if (Snapshot is null) return Page();
@@ -63,10 +63,13 @@ public sealed class ModesModel(ModesConfigService service) : PageModel
                 Model: F("model"),
                 MaxOutputTokens: F("max"),
                 Enabled: F("enabled") == "true",
-                Delete: F("del") == "true"));
+                Delete: F("del") == "true",
+                InputPrice: F("pin"),
+                CachedInputPrice: F("pcache"),
+                OutputPrice: F("pout")));
         }
 
-        return Finish(() => service.SaveAgents(settingsStamp ?? "", stamp ?? "", rows), "agents");
+        return Finish(() => service.SaveAgents(settingsStamp ?? "", stamp ?? "", rows, krwPerUsd ?? ""), "agents");
     }
 
     // ── 없는 에이전트 일괄 교체 ─────────────────────────────────────────────────
@@ -123,6 +126,9 @@ public sealed class ModesModel(ModesConfigService service) : PageModel
 
     public string? Raw(string mode, string key) =>
         Snapshot is null ? null : ModesConfigService.GetRaw(Snapshot.Root, mode, key);
+
+    public ModelPrice? PriceOf(string? model) =>
+        model is not null && Snapshot is not null && Snapshot.Pricing.Models.TryGetValue(model, out var p) ? p : null;
 
     public AgentInfo? FindAgent(string name) =>
         Snapshot?.Agents.FirstOrDefault(a => string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase));

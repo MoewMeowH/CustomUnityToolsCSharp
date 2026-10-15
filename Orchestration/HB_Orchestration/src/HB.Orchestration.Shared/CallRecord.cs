@@ -35,7 +35,12 @@ public sealed record CallRecord
     public required string Prompt { get; init; }
     public string? Response { get; init; }
 
+    /// <summary>입력 토큰 합계 (캐시에 걸린 토큰 포함).</summary>
     public long? InputTokens { get; init; }
+
+    /// <summary>InputTokens 중 제공사 프롬프트 캐시에 걸린 토큰. 제공사가 알려주지 않거나 예전 기록이면 null.</summary>
+    public long? CachedInputTokens { get; init; }
+
     public long? OutputTokens { get; init; }
     public long ElapsedMs { get; init; }
 

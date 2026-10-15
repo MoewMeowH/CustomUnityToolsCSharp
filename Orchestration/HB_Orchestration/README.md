@@ -92,6 +92,8 @@ dotnet build HB_Orchestration.slnx
 | `Context.DenyPatterns` | 외부로 보내지 않을 파일 glob **추가분**. 내장 목록(`.env`, `*.pem`, `*.key`, `*.keystore`, `*.jks`, `*.p12`, `*.pfx`, `*.mobileprovision`, `credentials*`, `secrets*`, `.git/**` 등)은 항상 적용 |
 | `Budget.DefaultMaxRunsPerSession` | `MaxRunsPerSession`이 없는 모드의 세션당 실행 한도 |
 | `Budget.FreeProviders` | 비용 집계에서 뺄 제공사 (기본 `local`) |
+| `Pricing.KrwPerUsd` | 1달러당 원. 비우면 대시보드는 달러만 표시 |
+| `Pricing.Models.<모델 ID>` | `InputPerMillion`, `CachedInputPerMillion`(비우면 입력과 같음), `OutputPerMillion` — USD / 1M 토큰. 키는 에이전트 이름이 아니라 **모델 ID**(기록에 남는 값). 지금 안 쓰는 예전 모델도 남겨 두면 예전 기록의 비용이 계속 계산됨. 서버는 쓰지 않고 대시보드만 읽음 |
 
 ### 재시작이 필요한 경우
 | 바꾼 것 | 필요한 동작 |
@@ -233,11 +235,15 @@ unity skill install --help
 **호출 기록** (`/`)
 - 기간 · 모드 · 제공사 필터, 호출 수 · 토큰 · 평균 응답 · 예상 비용 · 실패, 일별 토큰
 - 상세: 요청/응답, **같은 실행의 다른 단계와 실행 전체 토큰 합계**, 관련 파일 → Rider로 열기
-- 비용: 대시보드 `appsettings.json`의 `Prices`에 모델별 1M 토큰 단가
+- 비용: **달러와 원화를 함께** 표시 (`$0.0416 (₩57)`). 캐시된 입력 토큰은 캐시 단가로 계산
+  - 계산: `(입력 - 캐시) × 입력 단가 + 캐시 × 캐시 단가 + 출력 × 출력 단가` (입력 토큰에는 캐시 토큰이 포함됨)
+  - 단가·환율은 MCP `appsettings.json`의 `Orchestration:Pricing`에 USD로 저장하고, **모드 화면의 에이전트 표에서 편집**한다
+  - 캐시 토큰 수는 이 기능을 넣은 뒤의 호출부터 기록된다 (그 전 기록은 전부 일반 입력 단가로 계산)
 
 **모드** (`/Modes`)
 - MCP publish 폴더의 `modes.json`을 읽어 모드마다 흐름을 그림으로 보여준다 (순차 → / 동시 묶음 / 토론 ⇄ → 판정).
 - 단계별 에이전트(드롭다운), 세션당 실행 한도, 최대 회차, 반환 범위를 바꿔 **저장**하면 다음 `run_mode`부터 바로 반영된다 (재시작 불필요).
+- 에이전트 표에서 모델별 **입력 / 캐시 입력 / 출력 단가(USD / 1M 토큰)**와 환율을 함께 편집한다. 같은 모델을 쓰는 줄은 같은 값이어야 하고, 셋 다 비우면 그 모델의 단가를 지운다. 표에 없는 예전 모델의 단가는 그대로 둔다.
 - 저장 전 검증: 없는 에이전트·역할, Debate 단계 수, 회차 범위. 꺼진 에이전트는 경고만.
 - 저장 방식: `modes-backup/`에 백업(최근 10개) → 임시 파일에 쓰고 한 번에 교체. 화면을 연 뒤 파일이 다른 곳에서 바뀌었으면 저장을 거부하니 **다시 불러오기** 후 수정.
 
