@@ -51,13 +51,11 @@ public sealed class ModesSnapshot
 /// </summary>
 public sealed record ModeEdit(string Mode, IReadOnlyList<string> StepAgents, IReadOnlyDictionary<string, string> Settings);
 
-/// <summary>
-/// 에이전트 표의 한 줄. OriginalName이 비어 있으면 새 에이전트.
-/// 단가 3칸(USD / 1M 토큰)은 모델 단위로 저장된다. 셋 다 비우면 그 모델의 단가를 지운다.
-/// </summary>
-public sealed record AgentEdit(
-    string? OriginalName, string Name, string Provider, string Model, string MaxOutputTokens, bool Enabled, bool Delete,
-    string InputPrice = "", string CachedInputPrice = "", string OutputPrice = "");
+/// <summary>에이전트 표의 한 줄. OriginalName이 비어 있으면 새 에이전트.</summary>
+public sealed record AgentEdit(string? OriginalName, string Name, string Provider, string Model, string MaxOutputTokens, bool Enabled, bool Delete);
+
+/// <summary>모델 단가 표의 한 줄 (USD / 1M 토큰). 셋 다 비우면 그 모델의 단가를 지운다.</summary>
+public sealed record PriceEdit(string Model, string InputPrice, string CachedInputPrice, string OutputPrice);
 
 public sealed record SaveResult(List<string> Errors, List<string> Warnings)
 {
@@ -328,7 +326,7 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
     /// appsettings.json의 Agents를 표 내용으로 바꾼다. 이름을 바꾼 에이전트는 modes.json의 단계도 같이 바꾼다.
     /// 모드가 쓰고 있는 에이전트는 삭제할 수 없다.
     /// </summary>
-    public SaveResult SaveAgents(string expectedSettingsStamp, string expectedModesStamp, IReadOnlyList<AgentEdit> rows, string krwPerUsd = "")
+    public SaveResult SaveAgents(string expectedSettingsStamp, string expectedModesStamp, IReadOnlyList<AgentEdit> rows)
     {
         var snap = Load();
         if (snap.McpSettingsPath is null || snap.SettingsRoot is null)
@@ -354,8 +352,6 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var renames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var deleted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        // 모델 → 단가 (null = 셋 다 비움 → 삭제). 같은 모델을 쓰는 줄끼리 값이 다르면 오류.
-        var prices = new Dictionary<string, (ModelPrice? Price, string Label)>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var row in rows)
         {
@@ -404,15 +400,6 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
             newArray.Add(obj);
             finalAgents.Add(new AgentInfo(name, row.Provider, model, max, row.Enabled));
 
-            if (model.Length > 0)
-            {
-                var (price, priceError) = ParsePrice(row);
-                if (priceError is not null) errors.Add($"[{label}] {priceError}");
-                else if (prices.TryGetValue(model, out var other) && !SamePrice(other.Price, price))
-                    errors.Add($"[{label}] 모델 '{model}'을(를) 쓰는 '{other.Label}'과(와) 단가가 다릅니다. 단가는 모델 단위라 같게 맞추세요.");
-                else prices[model] = (price, label);
-            }
-
             if (original.Length > 0 && !string.Equals(original, name, StringComparison.Ordinal))
                 renames[original] = name;
         }
@@ -421,13 +408,6 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
         foreach (var (modeName, mode) in snap.Typed.Modes)
             foreach (var step in mode.Steps.Where(s => deleted.Contains(s.Agent)))
                 errors.Add($"[{modeName}] '{step.Agent}'을(를) 쓰고 있어 삭제할 수 없습니다. 모드의 에이전트를 먼저 바꾸세요.");
-
-        decimal? rate = null;
-        if (!string.IsNullOrWhiteSpace(krwPerUsd))
-        {
-            if (TryParseMoney(krwPerUsd, out var r) && r > 0) rate = r;
-            else errors.Add($"환율 '{krwPerUsd}'은(는) 0보다 큰 숫자이거나 비워야 합니다.");
-        }
 
         if (errors.Count > 0) return new SaveResult(errors.Distinct().ToList(), []);
 
@@ -438,7 +418,6 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
         if (!result.Ok) return result;
 
         orch[KeyOf(orch, "Agents")] = newArray;
-        ApplyPricing(orch, prices, rate);
         var settingsJson = Serialize(snap.SettingsRoot);
 
         // appsettings를 먼저 쓴다. 이름 변경이 있으면 modes.json도 바로 이어서 쓴다.
@@ -455,9 +434,44 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
     // ── 단가 ────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Orchestration:Pricing을 고친다. 표에 있는 모델만 바꾸고, 표에 없는 모델(예전 기록용)의 단가는 그대로 둔다.
+    /// 모델 단가 표와 환율을 appsettings.json의 Orchestration:Pricing에 저장한다.
+    /// 표에 있는 모델만 바꾸고, 표에 없는 모델의 단가는 그대로 둔다. 에이전트와 상관없이 모델 단위로 관리한다.
     /// </summary>
-    private static void ApplyPricing(JsonObject orch, Dictionary<string, (ModelPrice? Price, string Label)> prices, decimal? rate)
+    public SaveResult SavePrices(string expectedSettingsStamp, IReadOnlyList<PriceEdit> rows, string krwPerUsd)
+    {
+        var snap = Load();
+        if (snap.McpSettingsPath is null || snap.SettingsRoot is null)
+            return SaveResult.Fail("MCP appsettings.json을 찾지 못했습니다. Dashboard:McpConfigDir를 확인하세요.");
+        if (snap.SettingsStamp != expectedSettingsStamp) return SaveResult.Fail(ChangedElsewhere);
+        if (Child(snap.SettingsRoot, "Orchestration") is not JsonObject orch)
+            return SaveResult.Fail("appsettings.json에 Orchestration 섹션이 없습니다.");
+
+        var errors = new List<string>();
+        var prices = new Dictionary<string, ModelPrice?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in rows)
+        {
+            var model = row.Model.Trim();
+            if (model.Length == 0) continue;
+            var (price, error) = ParsePrice(row);
+            if (error is not null) errors.Add($"[{model}] {error}");
+            else prices[model] = price;
+        }
+
+        decimal? rate = null;
+        if (!string.IsNullOrWhiteSpace(krwPerUsd))
+        {
+            if (TryParseMoney(krwPerUsd, out var r) && r > 0) rate = r;
+            else errors.Add($"환율 '{krwPerUsd}'은(는) 0보다 큰 숫자이거나 비워야 합니다.");
+        }
+
+        if (errors.Count > 0) return new SaveResult(errors, []);
+
+        ApplyPricing(orch, prices, rate);
+        WriteSafely(snap.McpSettingsPath, Serialize(snap.SettingsRoot), "settings-backup");
+        return new SaveResult([], []);
+    }
+
+    private static void ApplyPricing(JsonObject orch, Dictionary<string, ModelPrice?> prices, decimal? rate)
     {
         // 이미 있는 노드는 그 자리에서 고치고, 새로 만든 노드만 부모에 붙인다
         if (Child(orch, "Pricing") is not JsonObject pricing)
@@ -475,7 +489,7 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
             pricing[KeyOf(pricing, "Models")] = models;
         }
 
-        foreach (var (model, (price, _)) in prices)
+        foreach (var (model, price) in prices)
         {
             var key = KeyOf(models, model);
             if (price is null) { models.Remove(key); continue; }
@@ -492,7 +506,7 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
         }
     }
 
-    private static (ModelPrice? Price, string? Error) ParsePrice(AgentEdit row)
+    private static (ModelPrice? Price, string? Error) ParsePrice(PriceEdit row)
     {
         var input = row.InputPrice?.Trim() ?? "";
         var cached = row.CachedInputPrice?.Trim() ?? "";
@@ -512,11 +526,6 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
         }
         return (new ModelPrice { InputPerMillion = i, CachedInputPerMillion = c, OutputPerMillion = o }, null);
     }
-
-    private static bool SamePrice(ModelPrice? a, ModelPrice? b) =>
-        a is null ? b is null
-        : b is not null && a.InputPerMillion == b.InputPerMillion
-          && a.CachedInputPerMillion == b.CachedInputPerMillion && a.OutputPerMillion == b.OutputPerMillion;
 
     // 소수점은 '.'만 받는다. ','는 올바른 천 단위 구분("1,380", "12,345.5")일 때만 허용 ("1,5"처럼 애매한 값은 거부).
     // 저장은 JSON 숫자로 한다.

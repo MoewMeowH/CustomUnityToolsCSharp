@@ -126,23 +126,17 @@
             <input type="hidden" name="stamp" value="@snap.Stamp" />
             <input type="hidden" name="settingsStamp" value="@snap.SettingsStamp" />
             <input type="hidden" name="rowCount" value="@(snap.Agents.Count + 1)" />
-            <div class="rate">
-                <span>환율 1$ =</span>
-                <input name="krwPerUsd" inputmode="decimal" value="@PricingService.Number(snap.Pricing.KrwPerUsd)" placeholder="비우면 $만" />
-                <span>원 · 단가는 모두 USD / 1M 토큰 · 대시보드 비용은 $와 ₩를 함께 표시</span>
-            </div>
             <section class="panel">
                 <div class="table-scroll">
                     <table class="agents edit">
                         <thead>
-                        <tr><th>이름</th><th>제공사</th><th>모델 ID</th><th>출력 상한</th><th class="price">입력 $</th><th class="price">캐시 입력 $</th><th class="price">출력 $</th><th>사용</th><th>삭제</th><th>쓰는 모드</th></tr>
+                        <tr><th>이름</th><th>제공사</th><th>모델 ID</th><th>출력 상한</th><th>사용</th><th>삭제</th><th>쓰는 모드</th></tr>
                         </thead>
                         <tbody>
                         @for (var i = 0; i <= snap.Agents.Count; i++)
                         {
                             var a = i < snap.Agents.Count ? snap.Agents[i] : null;
                             var used = a is null ? new List<string>() : Model.UsedBy(a.Name).ToList();
-                            var price = Model.PriceOf(a?.Model);
                             <tr class="@(a is null ? "newrow" : null)">
                                 <td>
                                     <input type="hidden" name="@("ag.orig." + i)" value="@(a?.Name)" />
@@ -158,9 +152,6 @@
                                 </td>
                                 <td><input class="mono wide" name="@("ag.model." + i)" value="@(a?.Model)" placeholder="모델 ID" /></td>
                                 <td><input type="number" min="1" name="@("ag.max." + i)" value="@(a?.MaxOutputTokens)" placeholder="없음" /></td>
-                                <td><input class="price mono" inputmode="decimal" name="@("ag.pin." + i)" value="@PricingService.Number(price?.InputPerMillion)" placeholder="-" /></td>
-                                <td><input class="price mono" inputmode="decimal" name="@("ag.pcache." + i)" value="@PricingService.Number(price?.CachedInputPerMillion)" placeholder="=입력" /></td>
-                                <td><input class="price mono" inputmode="decimal" name="@("ag.pout." + i)" value="@PricingService.Number(price?.OutputPerMillion)" placeholder="-" /></td>
                                 <td><input type="checkbox" name="@("ag.enabled." + i)" value="true" checked="@(a?.Enabled ?? true)" /></td>
                                 <td>
                                     @if (a is not null)
@@ -178,7 +169,60 @@
             </section>
             <div class="actions">
                 <button type="submit" class="btn primary">에이전트 저장</button>
-                <span class="muted">마지막 빈 줄 = 새 에이전트 · 이름을 바꾸면 그 이름을 쓰는 모드도 같이 바뀝니다 · 단가는 모델 단위(같은 모델을 쓰는 줄은 같은 값), 셋 다 비우면 삭제 · 백업: <span class="mono">settings-backup/</span></span>
+                <span class="muted">마지막 빈 줄 = 새 에이전트 · 이름을 바꾸면 그 이름을 쓰는 모드도 같이 바뀝니다 · 백업: <span class="mono">settings-backup/</span></span>
+            </div>
+        </form>
+    }
+
+    <h2 class="section">모델 단가 (appsettings.json · Orchestration:Pricing)</h2>
+    if (snap.McpSettingsPath is not null)
+    {
+        var priceRows = Model.PriceRows();
+        <form method="post" asp-page-handler="Prices">
+            <input type="hidden" name="settingsStamp" value="@snap.SettingsStamp" />
+            <input type="hidden" name="rowCount" value="@(priceRows.Count + 1)" />
+            <div class="rate">
+                <span>환율 1$ =</span>
+                <input name="krwPerUsd" inputmode="decimal" value="@PricingService.Number(snap.Pricing.KrwPerUsd)" placeholder="비우면 $만" />
+                <span>원 · 단가는 USD / 1M 토큰 · 호출 기록 화면의 비용은 $와 ₩를 함께 표시</span>
+            </div>
+            <section class="panel">
+                <div class="table-scroll">
+                    <table class="agents edit">
+                        <thead>
+                        <tr><th>모델 ID</th><th class="price">입력 $</th><th class="price">캐시 입력 $</th><th class="price">출력 $</th><th>쓰는 에이전트</th><th>기록</th></tr>
+                        </thead>
+                        <tbody>
+                        @for (var i = 0; i <= priceRows.Count; i++)
+                        {
+                            var r = i < priceRows.Count ? priceRows[i] : null;
+                            <tr class="@(r is null ? "newrow" : null)">
+                                <td>
+                                    @if (r is null)
+                                    {
+                                        <input class="mono wide" name="@("pr.model." + i)" placeholder="새 모델 ID" />
+                                    }
+                                    else
+                                    {
+                                        <input type="hidden" name="@("pr.model." + i)" value="@r.Model" />
+                                        <span class="mono">@r.Model</span>
+                                        @if (r.Price is null) { <span class="err"> · 단가 없음</span> }
+                                    }
+                                </td>
+                                <td><input class="price mono" inputmode="decimal" name="@("pr.in." + i)" value="@PricingService.Number(r?.Price?.InputPerMillion)" placeholder="-" /></td>
+                                <td><input class="price mono" inputmode="decimal" name="@("pr.cache." + i)" value="@PricingService.Number(r?.Price?.CachedInputPerMillion)" placeholder="=입력" /></td>
+                                <td><input class="price mono" inputmode="decimal" name="@("pr.out." + i)" value="@PricingService.Number(r?.Price?.OutputPerMillion)" placeholder="-" /></td>
+                                <td class="muted">@(r is { Agents.Count: > 0 } ? string.Join(", ", r.Agents) : "-")</td>
+                                <td class="muted">@(r is { Calls: > 0 } ? $"{r.Calls}회 · 마지막 {r.LastUsed!.Value.LocalDateTime:MM-dd}" : "-")</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+            <div class="actions">
+                <button type="submit" class="btn primary">단가 저장</button>
+                <span class="muted">설정 · 에이전트 · 호출 기록에 나온 모델을 모두 보여줍니다 · 캐시를 비우면 입력 단가와 같음 · 세 칸을 다 비우면 그 모델의 단가 삭제 · 마지막 빈 줄 = 새 모델</span>
             </div>
         </form>
     }
