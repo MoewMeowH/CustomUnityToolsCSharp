@@ -1,0 +1,9 @@
+<Project>
+  <!-- 모든 프로젝트 공통 설정. .NET 10 SDK가 없으면 여기만 net9.0으로 바꾸면 된다. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+</Project>

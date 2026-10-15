@@ -1,0 +1,6 @@
+# EString, UnityTestFrameWorkChecker는 Unity에서 쓸 dll을 bin/에 일부러 커밋하므로 Orchestration에만 적용
+Orchestration/**/bin/
+Orchestration/**/obj/
+Orchestration/**/.idea/
+Orchestration/Publish_Output/
+*.user

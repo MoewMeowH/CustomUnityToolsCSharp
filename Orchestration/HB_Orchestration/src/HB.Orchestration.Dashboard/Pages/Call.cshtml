@@ -1,0 +1,98 @@
+@page "{id}"
+@model CallModel
+@{
+    var c = Model.Call;
+    ViewData["Title"] = $"{c.Tool} · {c.Timestamp.LocalDateTime:MM-dd HH:mm}";
+}
+
+<style>
+    .back { display: inline-block; margin-bottom: 12px; }
+    .meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1px;
+            background: var(--line); border-radius: 10px; overflow: hidden; margin-bottom: 16px; border: 1px solid var(--line); }
+    .meta div { background: var(--panel); padding: 10px 14px; }
+    .meta .label { color: var(--muted); font-size: 12px; }
+    .meta .value { font-weight: 600; font-variant-numeric: tabular-nums; word-break: break-all; }
+    .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @@media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
+    .card { padding: 16px; min-width: 0; }
+    .card h2 { font-size: 13px; color: var(--muted); font-weight: 600; margin: 0 0 10px; }
+    .files { padding: 12px 16px; margin-bottom: 16px; }
+    .files ul, .files ol { margin: 6px 0 0; padding-left: 18px; }
+    .md { overflow-wrap: anywhere; }
+    .md pre { margin: 8px 0; }
+    .md code { font-family: var(--mono); font-size: 12.5px; background: var(--code); padding: 1px 4px; border-radius: 4px; }
+    .md pre code { padding: 0; background: none; }
+    .md table { margin: 8px 0; } .md th, .md td { padding: 6px 8px; }
+</style>
+
+<a class="back" href="/">← 목록</a>
+
+<section class="meta">
+    <div><div class="label">모드</div><div class="value">@c.Tool</div></div>
+    <div><div class="label">역할</div><div class="value">@(c.Step is { } st ? $"{st}. " : "")@(c.Role ?? "-")</div></div>
+    <div><div class="label">에이전트</div><div class="value">@(c.Agent ?? c.Tool)</div></div>
+    <div><div class="label">제공사 / 모델</div><div class="value mono">@IndexModel.ProviderOf(c) / @c.Model</div></div>
+    <div><div class="label">시간</div><div class="value">@c.Timestamp.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss")</div></div>
+    <div><div class="label">응답 시간</div><div class="value">@((c.ElapsedMs / 1000.0).ToString("0.0"))s</div></div>
+    <div><div class="label">입력 / 출력 토큰</div><div class="value">@(c.InputTokens?.ToString("N0") ?? "-") / @(c.OutputTokens?.ToString("N0") ?? "-")</div></div>
+    <div><div class="label">예상 비용</div><div class="value">@(Model.Cost is { } v ? "$" + v.ToString("0.0000") : "-")</div></div>
+    <div><div class="label">상태</div><div class="value @(c.Success ? "ok" : "err")">@(c.Success ? "성공" : "실패")</div></div>
+    <div><div class="label">프로젝트</div><div class="value mono" title="@c.ProjectDir">@IndexModel.ProjectName(c.ProjectDir)</div></div>
+</section>
+
+@if (Model.RunSteps.Count > 1)
+{
+    var runIn = Model.RunSteps.Sum(r => r.InputTokens ?? 0);
+    var runOut = Model.RunSteps.Sum(r => r.OutputTokens ?? 0);
+    var runCost = Model.RunSteps.Select(Model.Opt.CostOf).Where(x => x.HasValue).Sum(x => x!.Value);
+    <section class="panel files">
+        <span class="muted" style="font-size:12.5px">
+            이 실행의 단계 — 합계 입력 @runIn.ToString("N0") / 출력 @runOut.ToString("N0") 토큰@(runCost > 0 ? $" · ${runCost:0.0000}" : "")
+        </span>
+        <ol class="steps">
+            @foreach (var s in Model.RunSteps)
+            {
+                <li>
+                    @if (s.Id == c.Id) { <strong>@s.Role · @s.Agent</strong> }
+                    else { <a href="/Call/@s.Id">@s.Role · @s.Agent</a> }
+                    <span class="muted"> — @(s.InputTokens?.ToString("N0") ?? "-") / @(s.OutputTokens?.ToString("N0") ?? "-") 토큰, @((s.ElapsedMs / 1000.0).ToString("0.0"))s</span>
+                    @if (!s.Success) { <span class="err"> 실패</span> }
+                </li>
+            }
+        </ol>
+    </section>
+}
+
+@if (Model.Links.Count > 0)
+{
+    <section class="panel files">
+        <span class="muted" style="font-size:12.5px">관련 파일 — 클릭하면 Rider에서 열림</span>
+        <ul>
+            @foreach (var l in Model.Links)
+            {
+                <li>
+                    <a class="mono" href="@l.Url" target="_blank" rel="noopener" title="@l.FullPath">@l.Display</a>
+                    @if (!l.Exists) { <span class="muted"> (이 PC에서 찾을 수 없음)</span> }
+                </li>
+            }
+        </ul>
+    </section>
+}
+
+<div class="cols">
+    <section class="panel card">
+        <h2>요청 (Claude → 에이전트)</h2>
+        <pre>@c.Prompt</pre>
+    </section>
+    <section class="panel card">
+        <h2>응답 (@(c.Agent ?? c.Tool))</h2>
+        @if (c.Success)
+        {
+            <div class="md">@Html.Raw(Model.ResponseHtml)</div>
+        }
+        else
+        {
+            <pre class="err">@c.Error</pre>
+        }
+    </section>
+</div>

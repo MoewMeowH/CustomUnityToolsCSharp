@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    @await RenderSectionAsync("Head", required: false)
+    <title>@(ViewData["Title"] ?? "HB Orchestration")</title>
+    <style>
+        :root {
+            --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #6b7385; --line: #e3e6ec;
+            --accent: #3b6ef5; --ok: #1f9d55; --err: #d64545; --code: #f1f3f6;
+            --mono: ui-monospace, "JetBrains Mono", Consolas, monospace;
+        }
+        @@media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #16181d; --panel: #1e2128; --text: #e4e7ee; --muted: #8b93a5; --line: #2d313b;
+                --accent: #6b93ff; --ok: #4ccb84; --err: #ff6b6b; --code: #262a33;
+            }
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; background: var(--bg); color: var(--text);
+               font: 14px/1.55 system-ui, -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; }
+        header { border-bottom: 1px solid var(--line); background: var(--panel); }
+        header .wrap { display: flex; align-items: center; gap: 16px; height: 52px; }
+        header a.brand { font-weight: 650; color: var(--text); text-decoration: none; }
+        .wrap { max-width: 1200px; margin: 0 auto; padding: 0 16px; }
+        main.wrap { padding-top: 20px; padding-bottom: 40px; }
+        a { color: var(--accent); }
+        .muted { color: var(--muted); }
+        .mono { font-family: var(--mono); font-size: 12.5px; }
+        .num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+        .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+        .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px;
+                 border: 1px solid var(--line); background: var(--code); }
+        .ok { color: var(--ok); } .err { color: var(--err); }
+        pre { background: var(--code); padding: 12px 14px; border-radius: 8px; overflow-x: auto;
+              font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; word-break: break-word; margin: 0; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 9px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+        th { font-weight: 600; color: var(--muted); font-size: 12.5px; }
+        tr:last-child td { border-bottom: 0; }
+        tbody tr:hover { background: var(--code); }
+        .table-scroll { overflow-x: auto; }
+    </style>
+</head>
+<body>
+<header>
+    <div class="wrap">
+        <a class="brand" href="/">HB Orchestration</a>
+        <span class="muted">에이전트 호출 기록</span>
+    </div>
+</header>
+<main class="wrap">
+    @RenderBody()
+</main>
+</body>
+</html>

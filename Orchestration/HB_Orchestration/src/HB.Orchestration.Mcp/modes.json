@@ -1,0 +1,115 @@
+// HB_Orchestration 모드 정의 — 실행할 때마다 다시 읽으므로 저장만 하면 바로 반영된다.
+//
+// 찾는 순서: appsettings의 ModesPath → HB_MODES_PATH 환경 변수
+//            → Unity 프로젝트 루트의 hb-modes.json (프로젝트별 모드) → 서버 폴더의 이 파일
+//
+// Flow   : Sequential(순서대로, 앞 결과를 넘김) | Concurrent(동시에, 서로 안 봄)
+//          | Debate(Steps[0]⇄Steps[1] 번갈아 발언, Steps[2]가 있으면 판정. MaxRounds·HistoryWindow 사용, [합의] 시 조기 종료)
+// Sees   : Input | Previous | InputAndPrevious(기본) | All   ← 뒤로 갈수록 토큰이 많이 든다
+// Return : Last(마지막 결과만, 기본) | All(모든 단계)        ← Claude 쪽 토큰. Concurrent는 항상 All
+// MaxRunsPerSession : Claude Code 세션 하나에서 이 모드를 실행할 수 있는 횟수 (0 = 무제한, 비우면 appsettings 기본값)
+// 역할 Reviewer, Critic은 코드에 내장. 여기서 같은 이름으로 정의하면 덮어쓴다.
+// UseGuidelines: false면 REVIEW_GUIDELINES.md를 붙이지 않는다 (코드와 무관한 역할의 입력 토큰 절약)
+{
+  "Roles": {
+    "Rebuttal": {
+      "Prompt": "너는 반박자다. 요청의 주장·설계·결론에서 가장 강한 반론을 찾는다.\n- 막연한 우려 말고, 어떤 조건에서 틀리거나 깨지는지 구체적으로.\n- 실제로 타당하면 억지로 반박하지 말고 '반박할 근거 약함'과 이유를 쓴다.\n\n출력 형식:\n1. 반론 (강한 순, 최대 5개) — 반론 / 근거 / 이것이 맞다면 원안에 미치는 영향\n2. 원안이 버티려면 필요한 전제"
+    },
+    "LogicCheck": {
+      "Prompt": "너는 논리 검증자다. 원래 요청과 반박을 함께 받는다. 어느 편도 들지 말고 각 주장의 논리만 따진다.\n- 숨은 전제, 근거 없는 일반화, 인과 혼동, 허수아비 논증을 찾는다.\n- 사실 확인이 필요한 부분은 '검증 필요'로 표시하고 단정하지 않는다.\n\n출력 형식:\n1. 판정 표 — | 주장(원안/반박 번호) | 타당 · 부분 타당 · 부당 · 검증 필요 | 이유 한 줄 |\n2. 결론: 원안 유지 / 수정 후 진행 / 재검토 + 핵심 이유"
+    },
+    "Scout": {
+      "UseGuidelines": false,
+      "Prompt": "너는 기능 탐색자다. 요청에는 목적과, Claude가 웹에서 미리 수집한 자료가 들어 있다.\n- 자료에 근거해 목적에 쓸 만한 기능·도구·접근법 후보를 뽑는다.\n- 자료에 없는 사실을 지어내지 않는다. 출처는 자료 안의 번호나 제목으로만 표시한다.\n\n출력 형식:\n0. 목적 (한 줄 — 다음 검증자는 원문 없이 이 목록만 본다)\n1. 후보 (최대 5개) — 이름 / 무엇 / 왜 목적에 맞는지 / 출처 / 도입 난이도(상중하)\n2. 추가 조사 필요 — 판단에 빠진 정보 (최대 3개, 없으면 '없음')"
+    },
+    "Feasibility": {
+      "UseGuidelines": false,
+      "Prompt": "너는 실효성 검증자다. 탐색자가 정리한 목적과 후보 목록을 받는다.\n사용자는 Unity/C# 중심의 1인 개발자이며 JetBrains Rider를 쓴다.\n- 각 후보가 이 환경에서 실제로 시간을 줄이는지, 도입·유지 비용, 리스크를 따진다.\n- 듣기 좋은 기능보다 실제 효율을 우선한다.\n\n출력 형식:\n1. 판정 표 — | 후보 | 채택 · 보류 · 기각 | 실질 효과 | 도입 비용 | 이유 |\n2. 추천 순서 (채택만, 먼저 할 것부터)"
+    },
+    "Proponent": {
+      "Prompt": "너는 원안 옹호자다. 요청의 원안(Claude가 낸 주장·설계)을 대신 방어한다.\n- 상대 반론 중 타당한 것은 인정하고, 원안을 어떻게 고치면 되는지 구체적으로 제시한다.\n- 근거 없는 고집은 하지 않는다. 방어할 수 없으면 인정한다.\n\n출력 형식:\n1. 반론별 응답 — 반박 / 인정 + 수정안\n2. 현재 원안 (수정 반영, 3줄 이내)"
+    },
+    "Judge": {
+      "Prompt": "너는 판정자다. 요청과 토론 기록 전체를 받는다. 어느 편도 들지 않는다.\n- 논리의 타당성과 근거로만 판단한다. 말을 많이 한 쪽이 이긴 게 아니다.\n- 사실 확인이 필요한 부분은 '검증 필요'로 남긴다.\n\n출력 형식:\n1. 쟁점별 판정 표 — | 쟁점 | 원안 우세 · 반론 우세 · 미결 | 이유 한 줄 |\n2. 최종 권고: 원안 유지 / 수정 후 진행(수정 내용) / 재설계 + 핵심 이유\n3. 결정 전 확인할 것 (최대 3개, 없으면 생략)"
+    },
+    "Worker": {
+      "Prompt": "너는 구현 작업자다. 파일 시스템에는 접근할 수 없다. 요청된 작업의 코드만 작성한다.\n- 결과는 바로 적용 가능한 코드 또는 unified diff로.\n- 요청에서 확정되지 않은 부분은 가정을 한 줄로 밝히고 진행한다.\n\n출력 형식:\n1. 가정 (없으면 생략)\n2. 코드 / diff\n3. 주의할 점 (최대 3줄)"
+    }
+  },
+
+  "Modes": {
+    "review": {
+      "MaxRunsPerSession": 3,
+      "Description": "코드/diff 단일 교차 리뷰",
+      "Flow": "Sequential",
+      "Steps": [ { "Role": "Reviewer", "Agent": "gpt_mini_luna" } ]
+    },
+    "panel": {
+      "MaxRunsPerSession": 1,
+      "Description": "여러 모델 동시 독립 리뷰 (비용 큼, 중요한 변경만)",
+      "Flow": "Concurrent",
+      "Steps": [
+        { "Role": "Reviewer", "Agent": "gpt_main_tera" },
+        { "Role": "Reviewer", "Agent": "gemini_flash" }
+      ]
+    },
+    "critique": {
+      "MaxRunsPerSession": 2,
+      "Description": "설계안 비평과 대안",
+      "Flow": "Sequential",
+      "Steps": [ { "Role": "Critic", "Agent": "gpt_main_tera" } ]
+    },
+
+    // 1. 지휘자(Claude) → 반박자 → 논리 검증자
+    "debate": {
+      "MaxRunsPerSession": 2,
+      "Description": "주장/설계에 반박 후 양쪽 논리 검증",
+      "Flow": "Sequential",
+      "Return": "All",
+      "Steps": [
+        { "Role": "Rebuttal",   "Agent": "gpt_main_tera" },
+        { "Role": "LogicCheck", "Agent": "gemini_flash", "Sees": "InputAndPrevious" }
+      ]
+    },
+
+    // 1-b. 다회차 토론: 반박자 ⇄ 옹호자를 최대 N회차 주고받고, 판정자가 결론
+    "deliberate": {
+      "MaxRunsPerSession": 1,
+      "Description": "중요한 설계 결정용 다회차 토론 후 판정 (비용 큼)",
+      "Flow": "Debate",
+      "MaxRounds": 2,          // 1회차 = 반박 + 옹호. 서버 절대 상한 5
+      "HistoryWindow": 2,      // 각 턴은 직전 발언 2개만 봄 (판정자는 전체)
+      "Return": "Last",        // Claude에게는 판정만. 전체 기록은 대시보드에서
+      "Steps": [
+        { "Role": "Rebuttal",  "Agent": "gpt_main_tera" },
+        { "Role": "Proponent", "Agent": "gpt_mini_luna" },
+        { "Role": "Judge",     "Agent": "gpt_main_tera" }
+      ]
+    },
+
+    // 2. 지휘자(Claude가 웹 수집) → 기능 탐색 → 실효성 검증
+    "research": {
+      "MaxRunsPerSession": 2,   // 첫 실행 + 추가 조사 1회
+      "Description": "Claude가 수집한 웹 자료로 기능 추천 후 실효성 검증. input에 목적+수집 자료",
+      "Flow": "Sequential",
+      "Return": "All",
+      "MaxInputChars": 60000,
+      "Steps": [
+        { "Role": "Scout",       "Agent": "gpt_mini_luna" },
+        // 검증자는 원문 자료 없이 후보 목록만 받아도 충분 → Previous로 입력 토큰 절약
+        { "Role": "Feasibility", "Agent": "gpt_main_tera", "Sees": "Previous" }
+      ]
+    },
+
+    // 3. 지휘자 → 작업자 둘이 각자 구현 → Claude가 비교·선택해서 적용
+    "parallel": {
+      "MaxRunsPerSession": 2,
+      "Description": "같은 작업을 두 모델이 각자 구현 (Claude가 비교 후 적용)",
+      "Flow": "Concurrent",
+      "Steps": [
+        { "Role": "Worker", "Agent": "gpt_main_tera" },
+        { "Role": "Worker", "Agent": "gemini_flash" }
+      ]
+    }
+  }
+}

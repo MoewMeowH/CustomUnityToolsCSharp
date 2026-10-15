@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "hb-orchestration": {
+      "command": "dotnet",
+      "args": ["<publish 폴더>/HB.Orchestration.Mcp.dll"],
+      "env": {
+        "OPENAI_API_KEY": "${OPENAI_API_KEY:-}",
+        "GEMINI_API_KEY": "${GEMINI_API_KEY:-}"
+      }
+    }
+  }
+}

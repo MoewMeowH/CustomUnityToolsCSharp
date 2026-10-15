@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(unity status:*)",
+      "Bash(unity list:*)",
+      "Bash(unity pipeline list:*)",
+      "Bash(unity test:*)",
+      "Bash(unity logs:*)",
+      "Bash(unity --version)",
+      "mcp__hb-orchestration__list_modes"
+    ]
+  }
+}

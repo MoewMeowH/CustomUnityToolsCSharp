@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol" Version="2.2.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.13" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HB.Orchestration.Agents\HB.Orchestration.Agents.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 에이전트 정의. publish 폴더에 같이 복사되고, 거기서 수정하면 재빌드 없이 반영된다. -->
+    <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="modes.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Prompts\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

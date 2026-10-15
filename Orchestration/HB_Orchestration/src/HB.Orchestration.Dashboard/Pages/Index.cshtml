@@ -1,0 +1,121 @@
+@page
+@model IndexModel
+@{
+    ViewData["Title"] = "HB Orchestration · 호출 기록";
+    var maxDaily = Model.Daily.Count == 0 ? 1 : Math.Max(1, Model.Daily.Max(d => d.Tokens));
+}
+@section Head {
+    @if (Model.Live) { <meta http-equiv="refresh" content="10" /> }
+}
+
+<style>
+    .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 16px; }
+    .toolbar select, .toolbar button { font: inherit; padding: 5px 10px; border-radius: 6px;
+        border: 1px solid var(--line); background: var(--panel); color: var(--text); }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .stat { padding: 14px 16px; }
+    .stat .label { color: var(--muted); font-size: 12.5px; }
+    .stat .value { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; margin-top: 2px; }
+    .daily { padding: 14px 16px; margin-bottom: 16px; }
+    .bars { display: flex; align-items: flex-end; gap: 6px; height: 80px; margin-top: 10px; }
+    .bar { flex: 1; min-width: 8px; background: var(--accent); opacity: .8; border-radius: 3px 3px 0 0; }
+    .bar-labels { display: flex; gap: 6px; margin-top: 4px; }
+    .bar-labels span { flex: 1; min-width: 8px; text-align: center; font-size: 11px; color: var(--muted); overflow: hidden; }
+    td a.row-link { color: var(--text); text-decoration: none; }
+    .empty { padding: 40px; text-align: center; }
+</style>
+
+<form method="get" class="toolbar">
+    <select name="Days" onchange="this.form.submit()">
+        @foreach (var (v, label) in new[] { (1, "오늘·어제"), (7, "최근 7일"), (30, "최근 30일"), (0, "전체") })
+        {
+            <option value="@v" selected="@(Model.Days == v)">@label</option>
+        }
+    </select>
+    <select name="Tool" onchange="this.form.submit()">
+        <option value="">모든 모드</option>
+        @foreach (var t in Model.ToolNames)
+        {
+            <option value="@t" selected="@(Model.Tool == t)">@t</option>
+        }
+    </select>
+    <select name="Provider" onchange="this.form.submit()">
+        <option value="">모든 제공사</option>
+        @foreach (var p in Model.ProviderNames)
+        {
+            <option value="@p" selected="@(Model.Provider == p)">@p</option>
+        }
+    </select>
+    <label class="muted"><input type="checkbox" name="Live" value="true" checked="@Model.Live" onchange="this.form.submit()" /> 자동 새로고침</label>
+    <span class="muted mono" style="margin-left:auto">@Model.Opt.ResolvedLogPath</span>
+</form>
+
+<section class="stats">
+    <div class="panel stat"><div class="label">호출</div><div class="value">@Model.Calls.Count.ToString("N0")</div></div>
+    <div class="panel stat"><div class="label">입력 토큰</div><div class="value">@Model.TotalIn.ToString("N0")</div></div>
+    <div class="panel stat"><div class="label">출력 토큰</div><div class="value">@Model.TotalOut.ToString("N0")</div></div>
+    <div class="panel stat"><div class="label">평균 응답</div><div class="value">@Model.AvgSeconds.ToString("0.0")s</div></div>
+    <div class="panel stat"><div class="label">예상 비용</div><div class="value">@(Model.TotalCost is { } @decimal ? "$" + @decimal.ToString("0.000") : "-")</div></div>
+    <div class="panel stat"><div class="label">실패</div><div class="value @(Model.Failures > 0 ? "err" : "")">@Model.Failures</div></div>
+</section>
+
+@if (Model.Daily.Count > 1)
+{
+    <section class="panel daily">
+        <div class="muted" style="font-size:12.5px">일별 토큰</div>
+        <div class="bars">
+            @foreach (var d in Model.Daily)
+            {
+                <div class="bar" style="height:@((int)(d.Tokens * 100 / maxDaily))%"
+                     title="@d.Day.ToString("MM-dd") · @d.Tokens.ToString("N0") 토큰 · @d.Count 회"></div>
+            }
+        </div>
+        <div class="bar-labels">
+            @foreach (var d in Model.Daily) { <span>@d.Day.ToString("MM/dd")</span> }
+        </div>
+    </section>
+}
+
+<section class="panel">
+    @if (Model.Calls.Count == 0)
+    {
+        <div class="empty muted">기록이 없습니다. Claude Code에서 에이전트 도구가 호출되면 여기에 쌓입니다.</div>
+    }
+    else
+    {
+        <div class="table-scroll">
+        <table>
+            <thead>
+            <tr>
+                <th>시간</th><th>모드</th><th>역할 · 에이전트</th><th>제공사 / 모델</th><th>프로젝트</th><th>응답 미리보기</th>
+                <th class="num">입력</th><th class="num">출력</th><th class="num">시간</th><th class="num">비용</th>
+            </tr>
+            </thead>
+            <tbody>
+            @foreach (var c in Model.Calls)
+            {
+                var cost = Model.Opt.CostOf(c);
+                <tr>
+                    <td class="num"><a class="row-link" href="/Call/@c.Id">@c.Timestamp.LocalDateTime.ToString("MM-dd HH:mm:ss")</a></td>
+                    <td><span class="badge">@c.Tool</span></td>
+                    <td>@(c.Step is { } st ? $"{st}. " : "")@(c.Role ?? "-") · @(c.Agent ?? c.Tool)</td>
+                    <td><span class="badge">@IndexModel.ProviderOf(c)</span> <span class="mono">@c.Model</span></td>
+                    <td>@IndexModel.ProjectName(c.ProjectDir)</td>
+                    <td>
+                        <a class="row-link" href="/Call/@c.Id">
+                            @if (c.Success) { @IndexModel.Preview(c.Response) }
+                            else { <span class="err">@IndexModel.Preview(c.Error)</span> }
+                        </a>
+                        @if (c.Files.Count > 0) { <span class="muted"> · 파일 @c.Files.Count</span> }
+                    </td>
+                    <td class="num">@(c.InputTokens?.ToString("N0") ?? "-")</td>
+                    <td class="num">@(c.OutputTokens?.ToString("N0") ?? "-")</td>
+                    <td class="num">@((c.ElapsedMs / 1000.0).ToString("0.0"))s</td>
+                    <td class="num">@(cost is { } v ? "$" + v.ToString("0.0000") : "-")</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+        </div>
+    }
+</section>
