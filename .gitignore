@@ -1,6 +1,19 @@
-# EString, UnityTestFrameWorkChecker는 Unity에서 쓸 dll을 bin/에 일부러 커밋하므로 Orchestration에만 적용
-Orchestration/**/bin/
-Orchestration/**/obj/
-Orchestration/**/.idea/
-Orchestration/Publish_Output/
+# IDE · 사용자 설정
+.idea/
+.vs/
 *.user
+*.suo
+
+# 빌드 중간 산출물
+obj/
+
+# 빌드 산출물은 기본 제외
+**/bin/**
+!**/bin/**/
+
+# 예외: Unity에 복사해 쓰는 Release dll만 커밋
+!EString/Script/bin/Release/netstandard2.0/EString.dll
+!UnityTestFrameWorkChecker/HB_TestFrameworkHelper/bin/Release/netstandard2.0/HB_TestFrameworkHelper.dll
+
+# Orchestration publish 결과 (배치가 매번 다시 만듦)
+Orchestration/Publish_Output/

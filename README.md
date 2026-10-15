@@ -15,8 +15,7 @@ ToolWithCS/
 ├─ .gitignore
 ├─ EString/
 │  ├─ Script/                    ← 생성기 소스 (EString.csproj, E2StringGenerator.cs)
-│  │  └─ bin/Release/netstandard2.0/EString.Script.Generator.dll   ← Unity에 넣는 dll
-│  └─ bin/Release/netstandard2.0/EString.dll                       ← 예전 어셈블리 이름의 산출물
+│     └─ bin/Release/netstandard2.0/EString.dll                    ← Unity에 넣는 dll
 ├─ UnityTestFrameWorkChecker/
 │  └─ HB_TestFrameworkHelper/    ← 분석기 · 코드 수정 소스 (.sln, .csproj)
 │     └─ bin/Release/netstandard2.0/HB_TestFrameworkHelper.dll     ← Unity에 넣는 dll
@@ -50,15 +49,15 @@ Rider에서는 각 폴더의 솔루션을 따로 엽니다.
 ## Git 정책 (`.gitignore`)
 
 ```
-Orchestration/**/bin/
-Orchestration/**/obj/
-Orchestration/**/.idea/
+.idea/  .vs/  *.user  *.suo  obj/          ← IDE 설정 · 빌드 중간 산출물
+**/bin/**                                   ← 빌드 산출물은 기본 제외
+!EString/Script/bin/Release/netstandard2.0/EString.dll
+!UnityTestFrameWorkChecker/HB_TestFrameworkHelper/bin/Release/netstandard2.0/HB_TestFrameworkHelper.dll
 Orchestration/Publish_Output/
-*.user
 ```
 
-- **EString, UnityTestFrameWorkChecker는 `bin/`을 일부러 커밋합니다.** Unity 프로젝트에 바로 복사해 쓸 수 있게 빌드된 dll을 저장소에 같이 둡니다.
+- **Unity에 넣는 Release dll 두 개만 일부러 커밋합니다.** Unity 프로젝트에 바로 복사해 쓸 수 있게 하려는 것입니다. 같은 폴더의 `.pdb` · `.deps.json`, `bin/Debug/`, 언어별 리소스 폴더는 커밋하지 않습니다.
   소스를 고치면 **Release로 다시 빌드한 뒤 dll도 같이 커밋**해야 합니다. 그렇지 않으면 소스와 dll이 어긋납니다.
-- 두 프로젝트의 `obj/`는 제외 규칙에 없으므로 커밋할 때 걸러 주세요. 필요하면 `.gitignore`에 `EString/**/obj/`와 `UnityTestFrameWorkChecker/**/obj/`를 추가하면 됩니다.
+- 커밋할 dll을 새로 추가하거나 이름을 바꾸면 `.gitignore`의 `!` 예외 줄도 같이 고쳐야 합니다.
 - Orchestration은 빌드 산출물을 커밋하지 않습니다. `Publish_Output/`은 배치가 매번 다시 만듭니다.
 - API 키는 어떤 파일에도 넣지 않습니다. 시스템 환경 변수로만 둡니다 (HB_Orchestration README 2장).
