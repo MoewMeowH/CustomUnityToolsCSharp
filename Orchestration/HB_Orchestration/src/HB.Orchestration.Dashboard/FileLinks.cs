@@ -20,11 +20,15 @@ public static class FileLinks
         return new Link(raw, url, full, File.Exists(full));
     }
 
-    // "C:/x/a.cs:12" → ("C:/x/a.cs", 12). 드라이브 문자 콜론(인덱스 1)은 건드리지 않는다.
+    // "C:/x/a.cs:12" → ("C:/x/a.cs", 12), "a.cs:12-40" → ("a.cs", 12). 드라이브 문자 콜론(인덱스 1)은 건드리지 않는다.
     private static (string Path, int? Line) Split(string raw)
     {
         var idx = raw.LastIndexOf(':');
-        if (idx > 1 && int.TryParse(raw[(idx + 1)..], out var n)) return (raw[..idx], n);
+        if (idx <= 1) return (raw, null);
+
+        var tail = raw[(idx + 1)..];
+        var dash = tail.IndexOf('-');
+        if (int.TryParse(dash < 0 ? tail : tail[..dash], out var n)) return (raw[..idx], n);
         return (raw, null);
     }
 }

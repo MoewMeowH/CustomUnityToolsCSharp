@@ -17,8 +17,10 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     /// 이번 실행에서만 에이전트를 바꾼다. "원래이름=새이름" 또는 "*=새이름"(모든 단계).
     /// modes.json은 그대로 두고, 같은 모드를 다른 모델로 한 번 돌려볼 때 쓴다.
     /// </param>
+    /// <param name="context">서버가 디스크에서 읽어 input 뒤에 붙일 코드 범위. Claude가 코드를 input에 다시 쓰지 않게 한다.</param>
     public async Task<string> RunAsync(
-        string modeName, string input, IReadOnlyList<string>? files, IReadOnlyList<string>? agentOverrides, CancellationToken ct)
+        string modeName, string input, IReadOnlyList<string>? files, IReadOnlyList<string>? agentOverrides,
+        IReadOnlyList<ContextRange>? context, CancellationToken ct)
     {
         // ── 1. 실행 전 검증: 여기서 걸리면 토큰을 한 개도 쓰지 않는다 ──────────────
         sessions.ApplyResets();
@@ -39,7 +41,18 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         var maxChars = mode.MaxInputChars ?? Options.Budget.MaxInputChars;
         if (maxChars > 0 && input.Length > maxChars)
             return $"[입력이 너무 깁니다] {input.Length:N0}자 / 상한 {maxChars:N0}자. " +
-                   "변경된 부분과 꼭 필요한 주변 코드만 남겨 다시 호출하세요.";
+                   "코드는 input 대신 context(경로·줄 범위)로 넘기고, 꼭 필요한 범위만 남겨 다시 호출하세요.";
+
+        var (attached, contextError) = ContextLoader.Load(context, Options.Context, Environment.CurrentDirectory, maxChars, ct);
+        if (contextError is not null) return $"[첨부 코드 오류] {contextError}";
+
+        // 상한은 에이전트가 실제로 받는 양(input + 첨부) 기준이다.
+        if (maxChars > 0 && input.Length + attached!.Text.Length > maxChars)
+            return $"[입력이 너무 깁니다] input {input.Length:N0}자 + 첨부 코드 {attached.Text.Length:N0}자 / 상한 {maxChars:N0}자. " +
+                   "context 범위를 줄여 다시 호출하세요.";
+
+        input += attached!.Text;
+        var meta = new CallMeta(files, attached.Sources);
 
         var budgetMessage = CheckBudget();
         if (budgetMessage is not null) return budgetMessage;
@@ -82,13 +95,13 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         switch (mode.Flow)
         {
             case ModeFlow.Concurrent:
-                results = await RunConcurrentAsync(runId, modeName, plan, input, files, ct);
+                results = await RunConcurrentAsync(runId, modeName, plan, input, meta, ct);
                 break;
             case ModeFlow.Debate:
-                (results, note) = await RunDebateAsync(runId, modeName, mode, plan, input, files, ct);
+                (results, note) = await RunDebateAsync(runId, modeName, mode, plan, input, meta, ct);
                 break;
             default:
-                results = await RunSequentialAsync(runId, modeName, plan, input, files, ct);
+                results = await RunSequentialAsync(runId, modeName, plan, input, meta, ct);
                 if (results.Count < plan.Count)
                     note = $"(단계 {results.Count}에서 실패해 이후 {plan.Count - results.Count}단계는 실행하지 않음)";
                 break;
@@ -119,7 +132,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
 
     private async Task<List<StepResult>> RunSequentialAsync(
         string runId, string mode, List<(StepDefinition Def, AgentEntry Agent, string Instructions)> plan,
-        string input, IReadOnlyList<string>? files, CancellationToken ct)
+        string input, CallMeta meta, CancellationToken ct)
     {
         var results = new List<StepResult>();
         for (var i = 0; i < plan.Count; i++)
@@ -128,7 +141,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             var prompt = BuildPrompt(input, results, i == 0 ? StepSees.Input : def.Sees);
 
             var result = await runner.RunStepAsync(
-                new StepCall(runId, mode, i + 1, def.Role, agent, instructions, prompt, files), ct);
+                new StepCall(runId, mode, i + 1, def.Role, agent, instructions, prompt, meta), ct);
             results.Add(result);
 
             // 앞 단계가 실패하면 뒤 단계는 의미가 없으므로 토큰을 쓰지 않고 멈춘다.
@@ -139,18 +152,18 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
 
     private async Task<List<StepResult>> RunConcurrentAsync(
         string runId, string mode, List<(StepDefinition Def, AgentEntry Agent, string Instructions)> plan,
-        string input, IReadOnlyList<string>? files, CancellationToken ct)
+        string input, CallMeta meta, CancellationToken ct)
     {
         var prompt = BuildPrompt(input, [], StepSees.Input);
         var tasks = plan.Select((p, i) => runner.RunStepAsync(
-            new StepCall(runId, mode, i + 1, p.Def.Role, p.Agent, p.Instructions, prompt, files), ct));
+            new StepCall(runId, mode, i + 1, p.Def.Role, p.Agent, p.Instructions, prompt, meta), ct));
         return [.. await Task.WhenAll(tasks)];
     }
 
     private async Task<(List<StepResult> Results, string? Note)> RunDebateAsync(
         string runId, string mode, ModeDefinition def,
         List<(StepDefinition Def, AgentEntry Agent, string Instructions)> plan,
-        string input, IReadOnlyList<string>? files, CancellationToken ct)
+        string input, CallMeta meta, CancellationToken ct)
     {
         var rounds = Math.Clamp(def.MaxRounds ?? 2, 1, ModeDefinition.MaxRoundsHardCap);
         var window = Math.Max(1, def.HistoryWindow);
@@ -165,7 +178,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             {
                 var prompt = BuildDebatePrompt(input, turns.TakeLast(window), round, rounds);
                 var result = await runner.RunStepAsync(
-                    new StepCall(runId, mode, ++step, stepDef.Role, agent, instructions + Prompts.DebateRules, prompt, files), ct);
+                    new StepCall(runId, mode, ++step, stepDef.Role, agent, instructions + Prompts.DebateRules, prompt, meta), ct);
                 turns.Add(result);
 
                 if (!result.Success) return (turns, $"(턴 {step}에서 실패해 토론 중단)");
@@ -183,7 +196,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             var (judgeDef, judgeAgent, judgeInstructions) = plan[2];
             var judgePrompt = BuildDebatePrompt(input, turns, round: 0, rounds: rounds);
             var verdict = await runner.RunStepAsync(
-                new StepCall(runId, mode, ++step, judgeDef.Role, judgeAgent, judgeInstructions, judgePrompt, files), ct);
+                new StepCall(runId, mode, ++step, judgeDef.Role, judgeAgent, judgeInstructions, judgePrompt, meta), ct);
             turns.Add(verdict);
         }
 

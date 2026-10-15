@@ -20,6 +20,33 @@ public sealed class OrchestrationOptions
     public string? GuidelinesPath { get; set; }
 
     public BudgetOptions Budget { get; set; } = new();
+
+    public ContextOptions Context { get; set; } = new();
+}
+
+/// <summary>run_mode의 context(서버가 읽어 붙이는 코드 범위) 제한.</summary>
+public sealed class ContextOptions
+{
+    /// <summary>한 번에 받을 범위 개수 상한. 0이면 무제한.</summary>
+    public int MaxRanges { get; set; } = 30;
+
+    /// <summary>읽기 전에 확인하는 파일 크기 상한(바이트). 0이면 무제한.</summary>
+    public long MaxFileBytes { get; set; } = 2_000_000;
+
+    /// <summary>
+    /// 외부 모델에 보내지 않을 파일을 추가한다 (프로젝트 루트 기준 glob). '/'가 없으면 어느 폴더든 파일 이름으로 매칭.
+    /// <see cref="BuiltInDenyPatterns"/>는 항상 적용된다 (설정 바인더는 기본값이 든 List에 덧붙이므로 대체 방식은 쓰지 않음).
+    /// </summary>
+    public List<string> DenyPatterns { get; set; } = [];
+
+    public static readonly IReadOnlyList<string> BuiltInDenyPatterns =
+    [
+        ".env", ".env.*", "*.pem", "*.key", "*.p8", "*.p12", "*.pfx", "*.keystore", "*.jks",
+        "*.mobileprovision", "*.provisionprofile", "credentials*", "secrets*",
+        ".git/**", "**/.git/**",
+    ];
+
+    public IEnumerable<string> AllDenyPatterns => BuiltInDenyPatterns.Concat(DenyPatterns);
 }
 
 public sealed class ProviderOptions
@@ -54,8 +81,11 @@ public sealed class BudgetOptions
     /// <summary>하루(로컬 날짜 기준) 입력+출력 토큰 합계 상한. 0이면 끔. 로컬 제공사는 집계에서 제외.</summary>
     public long DailyTokenLimit { get; set; }
 
-    /// <summary>run_mode 입력 최대 글자 수. 넘으면 실행하지 않고 줄여달라고 돌려준다. 모드별로 덮어쓸 수 있음.</summary>
-    public int MaxInputChars { get; set; } = 40_000;
+    /// <summary>
+    /// run_mode 입력 최대 글자 수 (input + context로 붙인 코드 합계). 넘으면 실행하지 않고 줄여달라고 돌려준다.
+    /// 모드별로 덮어쓸 수 있음. Debate는 토론자가 매 턴 요청 전체를 다시 받으므로 실제 비용은 턴 수만큼 곱해진다.
+    /// </summary>
+    public int MaxInputChars { get; set; } = 100_000;
 
     /// <summary>MaxRunsPerSession을 정하지 않은 모드의 세션당 실행 한도. 0이면 무제한.</summary>
     public int DefaultMaxRunsPerSession { get; set; } = 5;

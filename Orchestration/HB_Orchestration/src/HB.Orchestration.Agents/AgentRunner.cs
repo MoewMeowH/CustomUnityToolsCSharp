@@ -5,11 +5,14 @@ using Microsoft.Extensions.Logging;
 
 namespace HB.Orchestration.Agents;
 
+/// <summary>기록용 정보. Files는 에이전트에 안 보내는 링크, Context는 실제로 첨부한 코드 범위.</summary>
+public sealed record CallMeta(IReadOnlyList<string>? Files, IReadOnlyList<string> Context);
+
 /// <summary>모드의 한 단계 실행 정보.</summary>
 public sealed record StepCall(
     string RunId, string Mode, int Step, string Role,
     AgentEntry Agent, string Instructions, string Prompt,
-    IReadOnlyList<string>? Files);
+    CallMeta Meta);
 
 public sealed record StepResult(int Step, string Role, string Agent, bool Success, string Text);
 
@@ -95,7 +98,8 @@ public sealed class AgentRunner(ILogger<AgentRunner> logger)
             Model = call.Agent.Model,
             ProjectDir = Environment.CurrentDirectory,
             Prompt = call.Prompt,
-            Files = call.Files ?? [],
+            Files = call.Meta.Files ?? [],
+            Context = call.Meta.Context,
         };
     }
 }

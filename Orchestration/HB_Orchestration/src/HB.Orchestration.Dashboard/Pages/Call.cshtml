@@ -63,6 +63,22 @@
     </section>
 }
 
+@if (Model.ContextLinks.Count > 0)
+{
+    <section class="panel files">
+        <span class="muted" style="font-size:12.5px">첨부 코드 — 서버가 읽어 에이전트에게 보낸 범위 (내용은 아래 요청에 있음)</span>
+        <ul>
+            @foreach (var l in Model.ContextLinks)
+            {
+                <li>
+                    <a class="mono" href="@l.Url" target="_blank" rel="noopener" title="@l.FullPath">@l.Display</a>
+                    @if (!l.Exists) { <span class="muted"> (이 PC에서 찾을 수 없음)</span> }
+                </li>
+            }
+        </ul>
+    </section>
+}
+
 @if (Model.Links.Count > 0)
 {
     <section class="panel files">

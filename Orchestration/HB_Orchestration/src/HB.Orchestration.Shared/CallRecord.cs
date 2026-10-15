@@ -44,4 +44,7 @@ public sealed record CallRecord
 
     /// <summary>관련 파일. "Assets/Scripts/Player.cs" 또는 "Assets/Scripts/Player.cs:42" 형식.</summary>
     public IReadOnlyList<string> Files { get; init; } = [];
+
+    /// <summary>서버가 읽어 프롬프트에 첨부한 코드 범위. "Assets/Scripts/Player.cs:40-80" 형식. 내용은 Prompt에 있다.</summary>
+    public IReadOnlyList<string> Context { get; init; } = [];
 }

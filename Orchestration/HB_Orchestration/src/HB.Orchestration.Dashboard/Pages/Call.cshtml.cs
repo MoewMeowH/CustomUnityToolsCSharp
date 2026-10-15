@@ -16,6 +16,9 @@ public sealed class CallModel(IOptions<DashboardOptions> options) : PageModel
     public CallRecord Call { get; private set; } = null!;
     public string ResponseHtml { get; private set; } = "";
     public List<FileLinks.Link> Links { get; private set; } = [];
+
+    /// <summary>서버가 프롬프트에 첨부한 코드 범위 (에이전트가 실제로 본 코드).</summary>
+    public List<FileLinks.Link> ContextLinks { get; private set; } = [];
     public decimal? Cost { get; private set; }
 
     /// <summary>같은 모드 실행(RunId)에 속한 단계들. 단계 순서대로.</summary>
@@ -30,6 +33,7 @@ public sealed class CallModel(IOptions<DashboardOptions> options) : PageModel
         Call = call;
         ResponseHtml = Markdown.ToHtml(call.Response ?? "", Pipeline);
         Links = call.Files.Select(f => FileLinks.Build(f, call.ProjectDir, Opt.FileLinkTemplate)).ToList();
+        ContextLinks = call.Context.Select(f => FileLinks.Build(f, call.ProjectDir, Opt.FileLinkTemplate)).ToList();
         Cost = Opt.CostOf(call);
         if (call.RunId is { } runId)
             RunSteps = all.Where(c => c.RunId == runId).OrderBy(c => c.Step).ToList();

@@ -86,7 +86,10 @@ dotnet build HB_Orchestration.slnx
 | `Agents[].MaxOutputTokens` | 응답 상한 (생략 = 제한 없음) |
 | `Agents[].Enabled` | `false`면 끔 (생략 = 켬) |
 | `Budget.DailyTokenLimit` | 하루 입력+출력 토큰 상한 (0 = 끔). `FreeProviders`는 집계 제외 |
-| `Budget.MaxInputChars` | `run_mode` 입력 최대 글자 수 |
+| `Budget.MaxInputChars` | `run_mode` 입력 최대 글자 수 (input + `context` 첨부 합계, 기본 100,000). Debate는 토론자가 매 턴 요청 전체를 받으므로 비용이 턴 수만큼 곱해짐 |
+| `Context.MaxRanges` | `context` 범위 개수 상한 (기본 30) |
+| `Context.MaxFileBytes` | 읽기 전에 확인하는 파일 크기 상한 (기본 2,000,000바이트) |
+| `Context.DenyPatterns` | 외부로 보내지 않을 파일 glob **추가분**. 내장 목록(`.env`, `*.pem`, `*.key`, `*.keystore`, `*.jks`, `*.p12`, `*.pfx`, `*.mobileprovision`, `credentials*`, `secrets*`, `.git/**` 등)은 항상 적용 |
 | `Budget.DefaultMaxRunsPerSession` | `MaxRunsPerSession`이 없는 모드의 세션당 실행 한도 |
 | `Budget.FreeProviders` | 비용 집계에서 뺄 제공사 (기본 `local`) |
 
@@ -190,6 +193,7 @@ dotnet build HB_Orchestration.slnx
 | `MaxRounds` · `HistoryWindow` · `[합의]` 조기 종료 | modes.json | 다회차 토론의 누적 비용 제한 |
 | `MaxRunsPerSession` | modes.json | 리뷰→수정→재리뷰, 추가 조사 반복 같은 루프를 세션 단위로 차단. 기본값은 `Budget.DefaultMaxRunsPerSession` |
 | `files`는 에이전트에 안 보냄 | 서버 | 경로 목록은 기록·링크 전용 |
+| `context`로 코드 첨부 | 서버 | Claude가 이미 읽은 코드를 input에 다시 쓰지 않음 → **Claude 출력 토큰 절약**. 서버가 `{path, startLine, endLine}`을 디스크에서 읽어 줄 번호와 함께 붙임. 루트 밖·링크(심볼릭·junction)·전송 금지 파일·범위 오류·크기 초과는 호출 전에 거절. 첨부한 범위는 기록의 `Context`, 내용은 `Prompt`에 남음. 8.3 짧은 이름도 긴 이름으로 바꿔 금지 패턴을 검사. 한계: 검사와 읽기 사이에 링크로 바꿔치기하는 경쟁은 막지 않음(단일 사용자 PC 전제) |
 | CLAUDE.md의 input 규칙 | Unity 쪽 | diff·최소 자료만, 기본은 호출하지 않기 |
 
 ## 5. Unity 프로젝트 쪽
