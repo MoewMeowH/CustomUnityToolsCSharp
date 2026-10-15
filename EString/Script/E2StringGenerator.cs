@@ -14,6 +14,10 @@ namespace EString.Script
     {
         private const string Category = "E2String";
 
+        // E2StringOptions 비트 (어트리뷰트 쪽 enum과 값이 같아야 함). ParseExact(0)은 항상 생성.
+        internal const int OptionIntConversion = 1 << 1;
+        internal const int OptionCollections = 1 << 2;
+
         private static readonly DiagnosticDescriptor GenericContainerRule = new DiagnosticDescriptor(
             "E2S001",
             "제네릭 타입 안의 enum은 지원하지 않습니다",
@@ -29,7 +33,7 @@ namespace EString.Script
         private static readonly DiagnosticDescriptor OutOfIntRangeRule = new DiagnosticDescriptor(
             "E2S003",
             "int 범위를 벗어난 멤버가 있습니다",
-            "'{0}'의 멤버 '{1}' 값이 int 범위를 벗어납니다. ToInt는 값을 잘라내고 IsDefined(int)/To{2}(int)는 이 멤버를 인식하지 않습니다.",
+            "'{0}'의 멤버 '{1}' 값이 int 범위를 벗어납니다. ToIntFast는 값을 잘라내고 IsDefinedFast(int)/To{2}Fast(int)는 이 멤버를 인식하지 않습니다.",
             Category, DiagnosticSeverity.Warning, isEnabledByDefault: true);
 
         private static readonly DiagnosticDescriptor ClassNameCollisionRule = new DiagnosticDescriptor(
@@ -56,7 +60,7 @@ namespace EString.Script
                 if (!(model.GetDeclaredSymbol(enumDeclaration, context.CancellationToken) is INamedTypeSymbol symbol))
                     continue;
 
-                if (!HasTargetAttribute(symbol))
+                if (!TryGetTargetAttribute(symbol, out var options))
                     continue;
 
                 var location = enumDeclaration.Identifier.GetLocation();
@@ -73,7 +77,7 @@ namespace EString.Script
                     continue;
                 }
 
-                var info = EnumInfo.Create(symbol);
+                var info = EnumInfo.Create(symbol, options);
 
                 var classKey = $"{info.Namespace}.{info.ClassName}";
                 if (!generatedClasses.Add(classKey))
@@ -82,9 +86,12 @@ namespace EString.Script
                     continue;
                 }
 
-                foreach (var member in info.Members.Where(m => !m.FitsInt))
+                if (info.HasIntConversion)
                 {
-                    context.ReportDiagnostic(Diagnostic.Create(OutOfIntRangeRule, location, symbol.Name, member.Name, info.EnumName));
+                    foreach (var member in info.Members.Where(m => !m.FitsInt))
+                    {
+                        context.ReportDiagnostic(Diagnostic.Create(OutOfIntRangeRule, location, symbol.Name, member.Name, info.EnumName));
+                    }
                 }
 
                 var hintName = string.IsNullOrEmpty(info.HintNamespace)
@@ -95,7 +102,8 @@ namespace EString.Script
             }
         }
 
-        private static bool HasTargetAttribute(INamedTypeSymbol symbol)
+        /// <summary>[E2String] 어트리뷰트를 찾고 옵션을 읽습니다. 옵션 인자가 없으면 ParseExact(0).</summary>
+        private static bool TryGetTargetAttribute(INamedTypeSymbol symbol, out int options)
         {
             foreach (var attribute in symbol.GetAttributes())
             {
@@ -103,10 +111,42 @@ namespace EString.Script
                 if (attributeClass == null || attributeClass.TypeKind == TypeKind.Error)
                     continue;
 
-                if (attributeClass.Name == "E2StringAttribute" || attributeClass.Name == "E2String")
-                    return true;
+                if (attributeClass.Name != "E2StringAttribute" && attributeClass.Name != "E2String")
+                    continue;
+
+                options = 0;
+                if (attribute.ConstructorArguments.Length > 0 && TryReadOptions(attribute.ConstructorArguments[0], out var fromConstructor))
+                    options = fromConstructor;
+
+                foreach (var named in attribute.NamedArguments)
+                {
+                    if (named.Key == "Options" && TryReadOptions(named.Value, out var fromNamed))
+                        options = fromNamed;
+                }
+                return true;
             }
+
+            options = 0;
             return false;
+        }
+
+        private static bool TryReadOptions(TypedConstant constant, out int options)
+        {
+            options = 0;
+            if (constant.Kind != TypedConstantKind.Enum && constant.Kind != TypedConstantKind.Primitive)
+                return false;
+            if (constant.Value == null)
+                return false;
+
+            try
+            {
+                options = unchecked((int)Convert.ToInt64(constant.Value, CultureInfo.InvariantCulture));
+                return true;
+            }
+            catch (Exception e) when (e is FormatException || e is InvalidCastException || e is OverflowException)
+            {
+                return false;
+            }
         }
 
         private static bool HasGenericContainingType(INamedTypeSymbol symbol)
@@ -167,47 +207,32 @@ namespace EString.Script
             w.Line($"{accessibility} static class {info.ClassName}");
             w.Open();
 
-            // 1. Count
-            w.Line("/// <summary>전체 Enum 항목 개수 (별칭 포함)</summary>");
-            w.Line($"public const int Count = {info.Members.Count};");
-            w.Line();
+            // 1. Collections
+            if (info.HasCollections)
+            {
+                w.Line("#region Collections");
+                w.Line("/// <summary>모든 Enum 값 배열 (선언 순서, 별칭 포함)</summary>");
+                w.Line($"public static readonly {t}[] Values = new {t}[]");
+                w.Open();
+                foreach (var member in info.Members)
+                    w.Line($"{info.Cast(member)},");
+                w.Close("};");
+                w.Line("#endregion");
+                w.Line();
+            }
 
-            // 2. Names
-            w.Line("/// <summary>모든 Enum 식별자 이름 배열 (선언 순서)</summary>");
-            w.Line("public static readonly string[] Names = new string[]");
-            w.Open();
-            foreach (var member in info.Members)
-                w.Line($"\"{member.Name}\",");
-            w.Close("};");
-            w.Line();
-            w.Line("/// <summary>모든 Enum 식별자 이름 읽기 전용 컬렉션</summary>");
-            w.Line("public static System.Collections.Generic.IReadOnlyList<string> AllNames => Names;");
-            w.Line();
-
-            // 3. Values
-            w.Line("/// <summary>모든 Enum 값 배열 (선언 순서)</summary>");
-            w.Line($"public static readonly {t}[] Values = new {t}[]");
-            w.Open();
-            foreach (var member in info.Members)
-                w.Line($"{info.Cast(member)},");
-            w.Close("};");
-            w.Line();
-            w.Line("/// <summary>모든 Enum 값 읽기 전용 컬렉션</summary>");
-            w.Line($"public static System.Collections.Generic.IReadOnlyList<{t}> AllValues => Values;");
-            w.Line();
-
-            // 4. Enum -> String
+            // 2. Enum -> String (ParseExact)
             w.Line("#region Enum -> String");
-            w.Line("/// <summary>Enum 값을 무할당(Zero-Allocation) 문자열로 고속 변환합니다. 같은 값의 별칭은 먼저 선언된 이름을 반환합니다.</summary>");
+            w.Line("/// <summary>Enum 값을 무할당(Zero-Allocation) 문자열로 고속 변환합니다. 같은 값의 별칭은 먼저 선언된 이름을 반환합니다. 정의 밖 값이면 fallback을 반환합니다.</summary>");
             w.Line("[MethodImpl(MethodImplOptions.AggressiveInlining)]");
-            w.Line($"public static string ToStringFast(this {t} value, string? fallback = null)");
+            w.Line($"public static string ToStringFast(this {t} value, string fallback = \"{info.DefaultFallback}\")");
             w.Open();
             w.Line($"switch (({u})value)");
             w.Open();
             foreach (var member in distinct)
                 w.Line($"case {member.Literal}: return \"{member.Name}\";");
             w.Close();
-            w.Line(info.IsFlags ? "return FormatFlags(value, fallback);" : "return fallback ?? value.ToString();");
+            w.Line(info.IsFlags ? "return FormatFlags(value, fallback);" : "return fallback;");
             w.Close();
 
             if (info.IsFlags)
@@ -216,114 +241,85 @@ namespace EString.Script
             w.Line("#endregion");
             w.Line();
 
-            // 5. String -> Enum
+            // 3. String -> Enum (ParseExact)
             w.Line("#region String -> Enum");
-            w.Line("/// <summary>문자열을 Enum으로 고속 변환합니다 (대소문자 구분, 정확히 일치). 일치하지 않으면 fallback을 반환합니다.</summary>");
-            w.Line("[MethodImpl(MethodImplOptions.AggressiveInlining)]");
-            w.Line($"public static {t} To{info.EnumName}(this string? value, {t} fallback = default)");
+            w.Line("/// <summary>문자열을 Enum으로 고속 변환합니다. 이름이 정확히 일치해야 하며(공백 · 숫자 문자열 불허), ignoreCase로 대소문자 무시를 고릅니다"
+                   + (info.IsFlags ? ". \"A, B\" 형식의 플래그 조합을 받습니다" : "")
+                   + ". 실패하면 fallback을 반환합니다.</summary>");
+            w.Line($"public static {t} To{info.EnumName}Fast(this string? value, bool ignoreCase = false, {t} fallback = default)");
             w.Open();
-            w.Line("TryParseFast(value, out var result, fallback);");
-            w.Line("return result;");
-            w.Close();
-            w.Line();
-
-            w.Line("/// <summary>문자열을 Enum으로 안전하게 파싱합니다 (대소문자 구분, 정확히 일치).</summary>");
-            w.Line($"public static bool TryParseFast(string? value, out {t} result, {t} fallback = default)");
+            w.Line("if (value == null) return fallback;");
+            w.Line("if (!ignoreCase)");
             w.Open();
             w.Line("switch (value)");
             w.Open();
             foreach (var member in info.Members)
-            {
-                w.Line($"case \"{member.Name}\":");
-                w.Line($"    result = {info.Cast(member)};");
-                w.Line("    return true;");
-            }
+                w.Line($"case \"{member.Name}\": return {info.Cast(member)};");
+            w.Close();
+            w.Close();
+            w.Line("else if (TryMatchName(value, 0, value.Length, true, out var match))");
+            w.Open();
+            w.Line("return match;");
             w.Close();
             if (info.IsFlags)
             {
-                w.Line("if (value != null && value.IndexOf(',') >= 0 && TryParseFlagList(value, 0, value.Length, false, out result))");
-                w.Line("    return true;");
+                w.Line("if (value.IndexOf(',') >= 0 && TryParseFlagList(value, 0, value.Length, ignoreCase, out var combined))");
+                w.Line("    return combined;");
             }
-            w.Line("result = fallback;");
-            w.Line("return false;");
+            w.Line("return fallback;");
             w.Close();
             w.Line();
 
-            w.Line("/// <summary>문자열을 Enum으로 변환합니다. 앞뒤 공백을 무시하고, ignoreCase와 숫자 문자열을 지원합니다. 실패하면 fallback을 반환합니다.</summary>");
-            w.Line($"public static {t} To{info.EnumName}(this string? value, bool ignoreCase, {t} fallback = default)");
-            w.Open();
-            w.Line("return TryParse(value, ignoreCase, out var result) ? result : fallback;");
-            w.Close();
-            w.Line();
-
-            w.Line("/// <summary>문자열을 Enum으로 파싱합니다. 앞뒤 공백 무시, ignoreCase, 정의된 값의 숫자 문자열" + (info.IsFlags ? ", \"A, B\" 형식의 플래그 조합" : "") + "을 지원합니다.</summary>");
-            w.Line($"public static bool TryParse(string? value, bool ignoreCase, out {t} result)");
-            w.Open();
-            w.Line("result = default;");
-            w.Line("if (value == null) return false;");
-            w.Line("int start = 0, end = value.Length;");
-            w.Line("while (start < end && char.IsWhiteSpace(value[start])) start++;");
-            w.Line("while (end > start && char.IsWhiteSpace(value[end - 1])) end--;");
-            w.Line("if (start == end) return false;");
-            w.Line("char first = value[start];");
-            w.Line("if ((first >= '0' && first <= '9') || first == '-' || first == '+')");
-            w.Line("    return TryParseNumber(value, out result);");
-            w.Line(info.IsFlags
-                ? "return TryParseFlagList(value, start, end, ignoreCase, out result);"
-                : "return TryMatchName(value, start, end - start, ignoreCase, out result);");
-            w.Close();
-            w.Line();
-
-            WriteTryParseNumber(w, info);
             WriteTryMatchName(w, info);
             if (info.IsFlags)
                 WriteTryParseFlagList(w, info);
 
             w.Line("#endregion");
-            w.Line();
 
-            // 6. Enum <-> Int
-            var intCheck = info.IsFlags ? "IsValidFlags" : "IsDefined";
-            w.Line("#region Enum <-> Int");
-            w.Line("/// <summary>명시적 캐스트로 박싱 없이 int로 변환합니다. int 범위를 벗어난 값은 잘립니다.</summary>");
-            w.Line("[MethodImpl(MethodImplOptions.AggressiveInlining)]");
-            w.Line($"public static int ToInt(this {t} value) => unchecked((int)value);");
-            w.Line();
-            w.Line("/// <summary>ToInt와 동일합니다.</summary>");
-            w.Line("[MethodImpl(MethodImplOptions.AggressiveInlining)]");
-            w.Line($"public static int ToIntFast(this {t} value) => unchecked((int)value);");
-            w.Line();
-            w.Line($"/// <summary>int 값을 {intCheck} 검사 후 Enum으로 변환합니다. 유효하지 않으면 fallback을 반환합니다.</summary>");
-            w.Line("[MethodImpl(MethodImplOptions.AggressiveInlining)]");
-            w.Line($"public static {t} To{info.EnumName}(this int value, {t} fallback = default)");
-            w.Line($"    => {intCheck}(value) ? unchecked(({t})value) : fallback;");
-            w.Line();
-            w.Line("/// <summary>검사 없이 명시적 캐스트로 int를 Enum으로 변환합니다.</summary>");
-            w.Line("[MethodImpl(MethodImplOptions.AggressiveInlining)]");
-            w.Line($"public static {t} To{info.EnumName}Fast(this int value) => unchecked(({t})value);");
-            w.Line("#endregion");
-            w.Line();
+            // 4. Enum <-> Int, IsDefined (IntConversion)
+            if (info.HasIntConversion)
+            {
+                var intCheck = info.IsFlags ? "IsValidFlagsFast" : "IsDefinedFast";
+                w.Line();
+                w.Line("#region Enum <-> Int");
+                w.Line("/// <summary>명시적 캐스트로 박싱 없이 int로 변환합니다. int 범위를 벗어난 값은 잘립니다.</summary>");
+                w.Line("[MethodImpl(MethodImplOptions.AggressiveInlining)]");
+                w.Line($"public static int ToIntFast(this {t} value) => unchecked((int)value);");
+                w.Line();
+                w.Line($"/// <summary>int 값을 {intCheck} 검사 후 Enum으로 변환합니다. 유효하지 않으면 fallback을 반환합니다.</summary>");
+                w.Line("[MethodImpl(MethodImplOptions.AggressiveInlining)]");
+                w.Line($"public static {t} To{info.EnumName}Fast(this int value, {t} fallback = default)");
+                w.Line($"    => {intCheck}(value) ? unchecked(({t})value) : fallback;");
+                w.Line("#endregion");
+                w.Line();
 
-            // 7. IsDefined
-            w.Line("#region IsDefined Fast");
-            w.Line("/// <summary>Enum 값이 이름이 정의된 값인지 고속 검사합니다. [Flags] 조합 값은 IsValidFlags를 사용하세요.</summary>");
-            w.Line("[MethodImpl(MethodImplOptions.AggressiveInlining)]");
-            w.Line($"public static bool IsDefined({t} value)");
-            w.Open();
-            WriteCaseCheck(w, $"({u})value", distinct.Select(m => m.Literal));
-            w.Close();
-            w.Line();
-            w.Line("/// <summary>정수 값이 이름이 정의된 Enum 값인지 고속 검사합니다 (잘림 없이 값 그대로 비교).</summary>");
-            w.Line("[MethodImpl(MethodImplOptions.AggressiveInlining)]");
-            w.Line("public static bool IsDefined(int value)");
-            w.Open();
-            WriteCaseCheck(w, "value", distinct.Where(m => m.FitsInt).Select(m => m.IntLiteral));
-            w.Close();
+                w.Line("#region IsDefined");
+                w.Line("/// <summary>Enum 값이 이름이 정의된 값인지 고속 검사합니다." + (info.IsFlags ? " 조합 값은 IsValidFlagsFast를 사용하세요." : "") + "</summary>");
+                w.Line("[MethodImpl(MethodImplOptions.AggressiveInlining)]");
+                w.Line($"public static bool IsDefinedFast({t} value)");
+                w.Open();
+                WriteCaseCheck(w, $"({u})value", distinct.Select(m => m.Literal));
+                w.Close();
+                w.Line();
+                w.Line("/// <summary>정수 값이 이름이 정의된 Enum 값인지 고속 검사합니다 (잘림 없이 값 그대로 비교).</summary>");
+                w.Line("[MethodImpl(MethodImplOptions.AggressiveInlining)]");
+                w.Line("public static bool IsDefinedFast(int value)");
+                w.Open();
+                WriteCaseCheck(w, "value", distinct.Where(m => m.FitsInt).Select(m => m.IntLiteral));
+                w.Close();
+
+                if (info.IsFlags)
+                    WriteFlagsValidation(w, info);
+
+                w.Line("#endregion");
+            }
 
             if (info.IsFlags)
-                WriteFlagsValidation(w, info);
-
-            w.Line("#endregion");
+            {
+                w.Line();
+                w.Line("[MethodImpl(MethodImplOptions.AggressiveInlining)]");
+                w.Line($"private static ulong ToBits({t} value) => unchecked((ulong)({u})value);");
+            }
 
             w.Close();
             if (hasNamespace)
@@ -356,7 +352,7 @@ namespace EString.Script
             w.Line("private static readonly System.Collections.Generic.Dictionary<ulong, string> s_flagNameCache = new System.Collections.Generic.Dictionary<ulong, string>();");
             w.Line();
             w.Line("/// <summary>[Flags] 조합 값을 Enum.ToString()과 같은 \"A, B\" 형식으로 만듭니다. 처음 한 번만 할당하고 캐시합니다.</summary>");
-            w.Line($"private static string FormatFlags({t} value, string? fallback)");
+            w.Line($"private static string FormatFlags({t} value, string fallback)");
             w.Open();
             w.Line("ulong bits = ToBits(value);");
             w.Line("lock (s_flagNameCache)");
@@ -364,7 +360,7 @@ namespace EString.Script
             w.Line("if (s_flagNameCache.TryGetValue(bits, out var cached)) return cached;");
             w.Close();
             w.Line("var composed = ComposeFlags(bits);");
-            w.Line("if (composed == null) return fallback ?? value.ToString();");
+            w.Line("if (composed == null) return fallback;");
             w.Line("lock (s_flagNameCache)");
             w.Open();
             w.Line("s_flagNameCache[bits] = composed;");
@@ -399,32 +395,6 @@ namespace EString.Script
             w.Close();
         }
 
-        private static void WriteTryParseNumber(CodeWriter w, EnumInfo info)
-        {
-            var t = info.FullTypeName;
-            var u = info.UnderlyingKeyword;
-
-            w.Line($"private static bool TryParseNumber(string value, out {t} result)");
-            w.Open();
-            w.Line("result = default;");
-            if (info.UnderlyingType == SpecialType.System_UInt64)
-            {
-                w.Line("if (!ulong.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var number)) return false;");
-            }
-            else
-            {
-                w.Line("if (!long.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var number)) return false;");
-                if (info.UnderlyingType != SpecialType.System_Int64)
-                    w.Line($"if (number < {u}.MinValue || number > {u}.MaxValue) return false;");
-            }
-            w.Line($"var candidate = unchecked(({t})({u})number);");
-            w.Line($"if (!{(info.IsFlags ? "IsValidFlags" : "IsDefined")}(candidate)) return false;");
-            w.Line("result = candidate;");
-            w.Line("return true;");
-            w.Close();
-            w.Line();
-        }
-
         private static void WriteTryMatchName(CodeWriter w, EnumInfo info)
         {
             var t = info.FullTypeName;
@@ -450,7 +420,6 @@ namespace EString.Script
             w.Line("result = default;");
             w.Line("return false;");
             w.Close();
-            w.Line();
         }
 
         private static void WriteTryParseFlagList(CodeWriter w, EnumInfo info)
@@ -458,6 +427,7 @@ namespace EString.Script
             var t = info.FullTypeName;
             var u = info.UnderlyingKeyword;
 
+            w.Line();
             w.Line("/// <summary>\"A, B\" 형식의 이름 목록을 OR로 합칩니다. 각 이름 앞뒤 공백은 무시합니다.</summary>");
             w.Line($"private static bool TryParseFlagList(string s, int start, int end, bool ignoreCase, out {t} result)");
             w.Open();
@@ -479,7 +449,6 @@ namespace EString.Script
             w.Line($"result = unchecked(({t})({u})bits);");
             w.Line("return true;");
             w.Close();
-            w.Line();
         }
 
         private static void WriteFlagsValidation(CodeWriter w, EnumInfo info)
@@ -491,16 +460,13 @@ namespace EString.Script
             w.Line("/// <summary>정의된 모든 플래그의 비트 OR</summary>");
             w.Line($"private const ulong FlagMask = {info.FlagMaskLiteral};");
             w.Line();
-            w.Line("[MethodImpl(MethodImplOptions.AggressiveInlining)]");
-            w.Line($"private static ulong ToBits({t} value) => unchecked((ulong)({u})value);");
-            w.Line();
             w.Line("/// <summary>[Flags] 값이 정의된 플래그들의 조합으로만 이루어져 있는지 검사합니다 (0 포함).</summary>");
             w.Line("[MethodImpl(MethodImplOptions.AggressiveInlining)]");
-            w.Line($"public static bool IsValidFlags({t} value) => (ToBits(value) & ~FlagMask) == 0UL;");
+            w.Line($"public static bool IsValidFlagsFast({t} value) => (ToBits(value) & ~FlagMask) == 0UL;");
             w.Line();
             w.Line("/// <summary>정수 값이 정의된 플래그들의 조합인지 검사합니다 (기본 형식 범위 밖이면 false).</summary>");
             w.Line("[MethodImpl(MethodImplOptions.AggressiveInlining)]");
-            w.Line("public static bool IsValidFlags(int value)");
+            w.Line("public static bool IsValidFlagsFast(int value)");
             w.Open();
             switch (info.UnderlyingType)
             {
@@ -515,7 +481,7 @@ namespace EString.Script
                     w.Line("if (value < 0) return false;");
                     break;
             }
-            w.Line($"return IsValidFlags(unchecked(({t})value));");
+            w.Line($"return IsValidFlagsFast(unchecked(({t})value));");
             w.Close();
         }
     }
@@ -540,6 +506,8 @@ namespace EString.Script
         public string UnderlyingKeyword = "int";
         public SpecialType UnderlyingType;
         public bool IsFlags;
+        public bool HasIntConversion;
+        public bool HasCollections;
         public string FlagMaskLiteral = "0x0UL";
         public List<EnumMemberInfo> Members = new List<EnumMemberInfo>();
 
@@ -549,9 +517,12 @@ namespace EString.Script
         /// <summary>0이 아닌 고유 값 멤버, 비트 값 오름차순</summary>
         public List<EnumMemberInfo> FlagMembers = new List<EnumMemberInfo>();
 
+        /// <summary>ToStringFast의 fallback 기본값</summary>
+        public string DefaultFallback => $"not defined {EnumName}";
+
         public string Cast(EnumMemberInfo member) => $"({FullTypeName})({member.Literal})";
 
-        public static EnumInfo Create(INamedTypeSymbol symbol)
+        public static EnumInfo Create(INamedTypeSymbol symbol, int options)
         {
             var underlying = symbol.EnumUnderlyingType!;
             var info = new EnumInfo
@@ -561,6 +532,8 @@ namespace EString.Script
                 UnderlyingType = underlying.SpecialType,
                 UnderlyingKeyword = underlying.ToDisplayString(),
                 IsFlags = symbol.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == "System.FlagsAttribute"),
+                HasIntConversion = (options & E2StringGenerator.OptionIntConversion) != 0,
+                HasCollections = (options & E2StringGenerator.OptionCollections) != 0,
             };
 
             if (!symbol.ContainingNamespace.IsGlobalNamespace)
