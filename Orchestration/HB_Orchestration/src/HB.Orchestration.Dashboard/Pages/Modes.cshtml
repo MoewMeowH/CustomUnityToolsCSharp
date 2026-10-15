@@ -1,0 +1,221 @@
+@page
+@model ModesModel
+@using HB.Orchestration.Agents
+@{
+    ViewData["Title"] = "HB Orchestration · 모드";
+    var snap = Model.Snapshot;
+}
+
+<style>
+    .notice { padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; border: 1px solid var(--line); background: var(--panel); }
+    .notice.ok { border-color: var(--ok); }
+    .notice.err { border-color: var(--err); }
+    .notice.warn { border-color: #d9a400; }
+    .notice ul { margin: 4px 0 0; padding-left: 18px; }
+    .filebar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-bottom: 16px; }
+    .filebar .grow { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+    .btn { font: inherit; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--line);
+           background: var(--panel); color: var(--text); text-decoration: none; cursor: pointer; }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    h2.section { font-size: 14px; color: var(--muted); font-weight: 600; margin: 24px 0 8px; }
+    .agents td { white-space: nowrap; }
+    .mode { padding: 14px 16px; margin-bottom: 12px; }
+    .mode-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; margin-bottom: 12px; }
+    .mode-head .name { font-weight: 650; font-size: 15px; }
+    .pipe { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .node { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--bg); min-width: 150px; }
+    .node .role { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+    .node .meta { font-size: 11.5px; color: var(--muted); margin-top: 4px; }
+    .node select { width: 100%; font: inherit; font-size: 12.5px; padding: 3px 4px; border-radius: 5px;
+                   border: 1px solid var(--line); background: var(--panel); color: var(--text); }
+    .node.claude { min-width: 0; background: var(--code); text-align: center; font-weight: 600; font-size: 13px; }
+    .node.claude small { display: block; font-weight: 400; color: var(--muted); font-size: 11.5px; }
+    .arrow { color: var(--muted); font-size: 18px; }
+    .stack { display: flex; flex-direction: column; gap: 6px; padding: 6px; border: 1px dashed var(--line); border-radius: 10px; }
+    .stack-label, .loop-label { font-size: 11.5px; color: var(--muted); text-align: center; }
+    .loop { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px; border: 1px dashed var(--line); border-radius: 10px; }
+    .settings { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 12px; font-size: 12.5px; color: var(--muted); }
+    .settings input, .settings select { font: inherit; width: 90px; padding: 3px 6px; border-radius: 5px;
+                                        border: 1px solid var(--line); background: var(--panel); color: var(--text); }
+    .savebar { position: sticky; bottom: 0; padding: 12px 0; background: var(--bg); display: flex; gap: 10px; align-items: center; }
+</style>
+
+@if (Model.Saved && Model.Errors.Count == 0)
+{
+    <div class="notice ok">저장했습니다. MCP 서버는 다음 <span class="mono">run_mode</span> 실행부터 새 설정을 씁니다 (재시작 불필요).</div>
+}
+@if (Model.LoadError is not null)
+{
+    <div class="notice err">@Model.LoadError</div>
+}
+@if (Model.Errors.Count > 0)
+{
+    <div class="notice err">저장하지 않았습니다.<ul>@foreach (var e in Model.Errors) { <li>@e</li> }</ul></div>
+}
+@if (Model.Warnings.Count > 0)
+{
+    <div class="notice warn">확인 필요<ul>@foreach (var w in Model.Warnings) { <li>@w</li> }</ul></div>
+}
+
+@if (snap is not null)
+{
+    <div class="filebar">
+        <span class="grow muted mono" title="편집 중인 파일">@snap.ModesPath</span>
+        <span class="muted">수정 @snap.LastWriteLocal.ToString("MM-dd HH:mm:ss")</span>
+        <a class="btn" href="/Modes">다시 불러오기</a>
+    </div>
+
+    if (snap.HasComments)
+    {
+        <div class="notice warn">이 파일에는 주석(<span class="mono">//</span>)이 있습니다. 여기서 저장하면 주석은 사라집니다. 설명은 README에 정리돼 있습니다.</div>
+    }
+    <div class="notice muted">
+        Unity 프로젝트 루트에 <span class="mono">hb-modes.json</span>이 있으면 그 프로젝트에서는 그쪽이 우선합니다. 이 화면은 위 경로의 파일만 고칩니다.
+    </div>
+
+    <h2 class="section">에이전트 (appsettings.json · 읽기 전용)</h2>
+    <section class="panel">
+        @if (snap.Agents.Count == 0)
+        {
+            <div class="notice muted" style="margin:0;border:0">MCP appsettings.json을 찾지 못했습니다. Dashboard:McpConfigDir를 확인하세요.</div>
+        }
+        else
+        {
+            <div class="table-scroll">
+                <table class="agents">
+                    <thead><tr><th>이름</th><th>제공사</th><th>모델</th><th class="num">출력 상한</th><th>상태</th></tr></thead>
+                    <tbody>
+                    @foreach (var a in snap.Agents)
+                    {
+                        <tr>
+                            <td class="mono">@a.Name</td>
+                            <td>@a.Provider</td>
+                            <td class="mono">@a.Model</td>
+                            <td class="num">@(a.MaxOutputTokens?.ToString("N0") ?? "-")</td>
+                            <td class="@(a.Enabled ? "ok" : "muted")">@(a.Enabled ? "사용" : "꺼짐")</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+    <p class="muted" style="font-size:12.5px">모델 ID·출력 상한 변경은 appsettings.json에서 하고 Claude Code를 재시작해야 반영됩니다. 아래 모드의 에이전트 배치는 저장 즉시 반영됩니다.</p>
+
+    <h2 class="section">모드</h2>
+    <form method="post">
+        <input type="hidden" name="stamp" value="@snap.Stamp" />
+
+        @foreach (var (name, mode) in snap.Typed.Modes)
+        {
+            var steps = mode.Steps;
+            var returnRaw = Model.Raw(name, "Return");
+            var returnLabel = mode.Flow == ModeFlow.Concurrent || mode.Return == ModeReturn.All ? "모든 결과" : "마지막 결과만";
+
+            <section class="panel mode">
+                <div class="mode-head">
+                    <span class="name mono">@name</span>
+                    <span class="badge">@ModesModel.FlowLabel(mode.Flow)</span>
+                    <span class="muted">@mode.Description</span>
+                </div>
+
+                <div class="pipe">
+                    <div class="node claude">Claude<small>요청</small></div>
+                    <span class="arrow">→</span>
+
+                    @if (mode.Flow == ModeFlow.Concurrent)
+                    {
+                        <div class="stack">
+                            <div class="stack-label">동시 실행 · 서로 결과를 보지 않음</div>
+                            @for (var i = 0; i < steps.Count; i++) { RenderNode(name, i, steps[i], showSees: false); }
+                        </div>
+                    }
+                    else if (mode.Flow == ModeFlow.Debate && steps.Count >= 2)
+                    {
+                        <div class="loop">
+                            @{ RenderNode(name, 0, steps[0], showSees: false); }
+                            <span class="arrow">⇄</span>
+                            @{ RenderNode(name, 1, steps[1], showSees: false); }
+                            <div class="loop-label" style="width:100%">
+                                최대 @(Math.Clamp(mode.MaxRounds ?? 2, 1, ModeDefinition.MaxRoundsHardCap))회차 · 직전 발언 @(mode.HistoryWindow)개만 봄 · [합의] 시 조기 종료
+                            </div>
+                        </div>
+                        if (steps.Count >= 3)
+                        {
+                            <span class="arrow">→</span>
+                            RenderNode(name, 2, steps[2], showSees: false);
+                        }
+                    }
+                    else
+                    {
+                        for (var i = 0; i < steps.Count; i++)
+                        {
+                            if (i > 0) { <span class="arrow">→</span> }
+                            RenderNode(name, i, steps[i], showSees: i > 0);
+                        }
+                    }
+
+                    <span class="arrow">→</span>
+                    <div class="node claude">Claude<small>@returnLabel</small></div>
+                </div>
+
+                <div class="settings">
+                    <label>세션당 실행 한도
+                        <input type="number" min="0" name="@ModesModel.SettingField(name, "MaxRunsPerSession")"
+                               value="@Model.Raw(name, "MaxRunsPerSession")" placeholder="기본값" />
+                    </label>
+                    @if (mode.Flow == ModeFlow.Debate)
+                    {
+                        <label>최대 회차
+                            <input type="number" min="1" max="@ModeDefinition.MaxRoundsHardCap" name="@ModesModel.SettingField(name, "MaxRounds")"
+                                   value="@Model.Raw(name, "MaxRounds")" placeholder="2" />
+                        </label>
+                    }
+                    @if (mode.Flow != ModeFlow.Concurrent)
+                    {
+                        <label>Claude에게 반환
+                            <select name="@ModesModel.SettingField(name, "Return")">
+                                <option value="" selected="@(returnRaw is null)">기본 (마지막만)</option>
+                                <option value="Last" selected="@(returnRaw == "Last")">마지막만</option>
+                                <option value="All" selected="@(returnRaw == "All")">모든 단계</option>
+                            </select>
+                        </label>
+                    }
+                </div>
+            </section>
+        }
+
+        <div class="savebar">
+            <button type="submit" class="btn primary">저장</button>
+            <span class="muted">저장 전 자동 백업: <span class="mono">modes-backup/</span> (최근 10개)</span>
+        </div>
+    </form>
+}
+
+@functions {
+    // 단계 하나를 그린다: 역할 + 에이전트 선택.
+    void RenderNode(string mode, int index, StepDefinition step, bool showSees)
+    {
+        var current = Model.FindAgent(step.Agent);
+        <div class="node">
+            <div class="role">@step.Role</div>
+            <select name="@ModesModel.AgentField(mode, index)">
+                @if (current is null)
+                {
+                    <option value="@step.Agent" selected>@step.Agent (appsettings에 없음)</option>
+                }
+                @foreach (var a in Model.Snapshot!.Agents)
+                {
+                    var isCurrent = string.Equals(a.Name, step.Agent, StringComparison.OrdinalIgnoreCase);
+                    <option value="@a.Name" selected="@isCurrent" disabled="@(!a.Enabled && !isCurrent)">
+                        @a.Name · @(a.Model + (a.Enabled ? "" : " (꺼짐)"))
+                    </option>
+                }
+            </select>
+            @if (showSees)
+            {
+                <div class="meta">보는 내용: @ModesModel.SeesLabel(step.Sees)</div>
+            }
+        </div>
+    }
+}

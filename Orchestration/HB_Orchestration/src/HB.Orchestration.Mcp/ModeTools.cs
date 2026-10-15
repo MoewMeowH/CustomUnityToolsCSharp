@@ -21,6 +21,7 @@ public sealed class ModeTools(ModeRunner modes)
         [Description("모드 이름 (list_modes 참고)")] string mode,
         [Description("요청 본문: 목적/의도 + diff나 설계안 등 필요한 최소 자료")] string input,
         [Description("관련 파일 경로 (프로젝트 루트 기준, 'path:line' 가능). 기록·대시보드 링크용이며 에이전트에게는 전달되지 않음.")] string[]? files = null,
+        [Description("이번 실행만 에이전트 교체 (선택). 'from=to' 또는 '*=to'. 사용자가 다른 모델을 요청했을 때만 사용. 이름은 list_modes 참고.")] string[]? agents = null,
         CancellationToken cancellationToken = default)
-        => modes.RunAsync(mode, input, files, cancellationToken);
+        => modes.RunAsync(mode, input, files, agents, cancellationToken);
 }

@@ -9,6 +9,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\HB.Orchestration.Shared\HB.Orchestration.Shared.csproj" />
+    <!-- 모드 화면: modes.json 타입과 검증 규칙을 MCP 서버와 공유 -->
+    <ProjectReference Include="..\HB.Orchestration.Agents\HB.Orchestration.Agents.csproj" />
   </ItemGroup>
 
 </Project>

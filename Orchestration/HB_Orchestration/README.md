@@ -19,12 +19,14 @@ Claude Code ──MCP──▶ HB.Orchestration.Mcp
 ```
 HB_Orchestration/
 ├─ HB_Orchestration.slnx          ← Rider는 이걸로 열 것
+├─ HB_Tools.bat                   ← publish / 대시보드 실행 메뉴
+├─ HB_Tools.config                ← 위 배치의 경로 설정 (메모장으로 편집)
 ├─ Directory.Build.props          ← 공통 설정
 ├─ src/
 │  ├─ HB.Orchestration.Shared/    ← 호출 기록 모델 + JSONL 저장
 │  ├─ HB.Orchestration.Agents/    ← 제공사·에이전트·모드 실행기 (호스트와 무관한 핵심)
 │  ├─ HB.Orchestration.Mcp/       ← MCP 서버, appsettings.json, modes.json
-│  └─ HB.Orchestration.Dashboard/ ← 호출 기록 UI
+│  └─ HB.Orchestration.Dashboard/ ← 호출 기록 + 모드 편집 UI
 └─ project-files/                 ← Unity 프로젝트 루트에 복사할 파일
 ```
 
@@ -44,68 +46,100 @@ dotnet add package Markdig
 cd ../..
 
 dotnet build HB_Orchestration.slnx
-dotnet publish src/HB.Orchestration.Mcp -c Release -o <publish 폴더>
 ```
 
+평소 publish와 대시보드 실행은 **`HB_Tools.bat`** 으로 한다 (아래 8절).
+
 - publish 출력은 **솔루션 폴더 밖**으로. `dotnet run`으로 MCP 등록하지 말 것.
+- publish는 `appsettings.json` / `modes.json`을 **복사하지 않는다** (publish 폴더에서 고친 설정을 덮어쓰지 않도록). 처음 publish할 때만 배치가 기본 파일을 넣어준다.
 - .NET 10 SDK가 없으면 `Directory.Build.props`의 `net10.0` → `net9.0`.
 
 ## 2. 에이전트 — `appsettings.json` ("누가")
 
-| 에이전트 | 제공사 | 용도 |
-|---|---|---|
-| `gpt` | openai (상위 모델) | 검증·판정처럼 정확도가 중요한 단계 |
-| `gpt_mini` | openai (저가 모델) | 정리·탐색처럼 분량이 많은 단계 |
-| `gemini` | gemini (OpenAI 호환 엔드포인트) | 다른 관점의 검증, 기본 꺼짐 |
-| `local` | Ollama / LM Studio | 무료 초안·병렬 작업, 기본 꺼짐 |
+에이전트 하나 = 제공사 + 모델 + 출력 상한. 이름은 자유 (영문·숫자·`_`·`-`). 등급별로 나눠두면 모드에서 고르기 쉽다.
 
-- `MaxOutputTokens`: 응답 상한. 추론 모델은 생각 토큰도 포함되니 너무 낮게 잡지 말 것.
+| 예시 이름 | 제공사 | 용도 |
+|---|---|---|
+| `gpt_high_sol` | openai (상) | 판정·검증처럼 정확도가 중요한 단계 |
+| `gpt_main_tera` | openai (중) | 일반 리뷰·반박 |
+| `gpt_mini_luna` | openai (하) | 정리·탐색처럼 분량이 많은 단계 |
+| `gemini_argon` / `gemini_flash` | gemini (OpenAI 호환 엔드포인트) | 다른 관점의 검증 |
+| `local` | Ollama / LM Studio | 무료 초안·병렬 작업 |
+
+- `MaxOutputTokens`: 응답 상한. **추론 모델은 생각 토큰도 포함**되므로 낮게 잡으면 답변 없이 끝난다 (서버가 `[빈 응답]` 실패로 기록). 폭주 방지용으로 넉넉하게 (1만 이상 권장).
 - 키가 없거나 설정이 틀린 에이전트는 그것만 건너뛰고 서버는 정상 시작. `list_modes`에 `(사용불가)`로 표시.
 - 바꾸면 Claude Code 재시작 필요.
 
 ## 3. 모드 — `modes.json` ("무엇을 어떤 순서로")
 
-**실행할 때마다 다시 읽으므로 저장만 하면 바로 반영**. 찾는 순서:
-`ModesPath`(appsettings) → `HB_MODES_PATH` 환경 변수 → **Unity 프로젝트 루트의 `hb-modes.json`** → 서버 폴더의 `modes.json`
+**실행할 때마다 다시 읽으므로 저장만 하면 바로 반영**된다. 대시보드의 **모드** 화면에서 흐름을 보고 에이전트를 바꿔 저장할 수도 있다 (7절).
 
-> publish를 다시 하면 서버 폴더의 `modes.json`이 덮어써질 수 있다. 직접 고친 모드는 `HB_MODES_PATH`로 솔루션 밖 파일을 가리키거나, 프로젝트별로 `hb-modes.json`에 두는 걸 권장.
+찾는 순서: `ModesPath`(appsettings) → `HB_MODES_PATH` 환경 변수 → **Unity 프로젝트 루트의 `hb-modes.json`** (프로젝트별 모드) → 서버 폴더의 `modes.json`
 
-```jsonc
-"Roles": {
-  "Rebuttal": { "Prompt": "너는 반박자다 ...", "UseGuidelines": true }
-},
-"Modes": {
-  "debate": {
-    "Description": "주장/설계에 반박 후 양쪽 논리 검증",
-    "Flow": "Sequential",            // Sequential | Concurrent
-    "Return": "All",                 // Last(기본) | All
-    "Steps": [
-      { "Role": "Rebuttal",   "Agent": "gpt" },
-      { "Role": "LogicCheck", "Agent": "gemini", "Sees": "InputAndPrevious" }
-    ]
+> modes.json은 **주석 없는 순수 JSON**으로 둔다. 설명은 이 README에 있다. (서버는 주석이 있어도 읽지만, 대시보드에서 저장하면 주석이 사라진다.)
+
+```json
+{
+  "Roles": {
+    "Rebuttal": { "Prompt": "너는 반박자다 ...", "UseGuidelines": true }
+  },
+  "Modes": {
+    "debate": {
+      "MaxRunsPerSession": 2,
+      "Description": "주장/설계에 반박 후 양쪽 논리 검증",
+      "Flow": "Sequential",
+      "Return": "All",
+      "Steps": [
+        { "Role": "Rebuttal",   "Agent": "gpt_main_tera" },
+        { "Role": "LogicCheck", "Agent": "gemini_flash", "Sees": "InputAndPrevious" }
+      ]
+    }
   }
 }
 ```
 
+### 역할 (`Roles.<이름>`)
 | 키 | 값 | 의미 |
 |---|---|---|
+| `Prompt` | 문자열 | 시스템 프롬프트 본문 |
+| `PromptFile` | 경로 | 프롬프트가 길면 파일로 분리 (modes.json 기준 상대 경로). `Prompt`와 둘 중 하나 |
+| `UseGuidelines` | `true`(기본) / `false` | REVIEW_GUIDELINES.md를 붙일지. 코드와 무관한 역할(탐색·실효성)은 `false`로 입력 토큰 절약 |
+
+내장 역할 `Reviewer`, `Critic`은 코드에 들어 있고, 같은 이름으로 정의하면 덮어쓴다.
+
+### 모드 (`Modes.<이름>`)
+| 키 | 값 | 의미 |
+|---|---|---|
+| `Description` | 문자열 | `list_modes`에서 Claude에게 보이는 한 줄 설명. 짧을수록 토큰 절약 |
 | `Flow` | `Sequential` / `Concurrent` / `Debate` | 순서대로 넘기기 / 동시에 독립 실행 / 다회차 토론 |
-| `Sees` (단계별) | `Input` / `Previous` / `InputAndPrevious` / `All` | 이 단계가 볼 내용. 뒤로 갈수록 비쌈 |
-| `Return` | `Last` / `All` | Claude에게 돌려줄 범위 (Concurrent는 항상 All) |
-| `MaxInputChars` | 숫자 | 이 모드의 입력 길이 상한 |
-| `MaxRunsPerSession` | 숫자 | Claude Code 세션 하나에서 이 모드를 실행할 수 있는 횟수 (0 = 무제한) |
-| `MaxRounds` (Debate) | 1~5 | 최대 회차. 1회차 = 두 토론자가 한 번씩. 서버 절대 상한 5 |
+| `Steps` | 배열 | 단계 목록 (아래 표) |
+| `Return` | `Last`(기본) / `All` | Claude에게 돌려줄 범위. Concurrent는 항상 All |
+| `MaxInputChars` | 숫자 | 이 모드의 입력 길이 상한. 없으면 `Budget.MaxInputChars` |
+| `MaxRunsPerSession` | 숫자 | Claude Code 세션 하나에서 실행할 수 있는 횟수 (0 = 무제한). 없으면 `Budget.DefaultMaxRunsPerSession` |
+| `MaxRounds` (Debate) | 1~5 | 최대 회차. 1회차 = 두 토론자가 한 번씩. 기본 2, 서버 절대 상한 5 |
 | `HistoryWindow` (Debate) | 숫자 | 각 턴이 볼 직전 발언 수 (기본 2). 판정자는 항상 전체 |
+
+### 단계 (`Steps[]`)
+| 키 | 값 | 의미 |
+|---|---|---|
+| `Role` | 역할 이름 | 이 단계가 맡을 역할 |
+| `Agent` | 에이전트 이름 | appsettings.json `Agents`의 `Name` |
+| `Sees` (Sequential) | `Input` / `Previous` / `InputAndPrevious`(기본) / `All` | 이 단계가 볼 내용: 요청만 / 앞 단계만 / 요청+앞 단계 / 요청+앞 단계 전부. 뒤로 갈수록 비쌈. 첫 단계는 항상 요청만 |
 
 ### Debate 흐름
 `Steps[0]`과 `Steps[1]`이 `Steps[0]`부터 번갈아 발언하고, `Steps[2]`가 있으면 마지막에 판정한다.
 토론자는 매 발언 마지막 줄에 `[계속]` 또는 `[합의]`를 쓰고, `[합의]`가 나오면 남은 회차를 건너뛰고 바로 판정으로 간다.
 토큰은 회차가 늘수록 빠르게 늘어나므로 `MaxRounds`는 2, 많아야 3을 권장. 실행 중 실패하면 판정 없이 중단.
-| `UseGuidelines` (역할별) | `true` / `false` | REVIEW_GUIDELINES.md를 붙일지 |
 
+### 실행 한도
 세션당 실행 한도는 MCP 서버 프로세스 메모리에서 센다. Claude Code 세션마다 서버가 새로 뜨므로 새 세션을 열면 0부터 다시 센다. 검증 단계에서 거절된 호출(설정 오류, 입력 초과 등)은 횟수에 포함되지 않는다.
 
-기본 모드: `review`, `panel`, `critique`, `debate`, `research`, `parallel`. 내장 역할 `Reviewer`, `Critic`은 같은 이름으로 정의하면 덮어쓴다. 역할 프롬프트가 길어지면 `PromptFile`로 분리 가능 (modes.json 기준 상대 경로).
+### 실행할 때만 에이전트 바꾸기
+`run_mode`의 `agents` 인자로 modes.json을 고치지 않고 이번 실행만 바꿀 수 있다. Claude Code에서는 "panel을 gpt_high_sol이랑 gemini_argon으로 돌려줘"처럼 말하면 된다.
+- `"gpt_main_tera=gpt_high_sol"` — 그 에이전트만 교체
+- `"*=gpt_high_sol"` — 모든 단계를 교체 (panel처럼 모델 비교가 목적인 모드에는 쓰지 말 것)
+- 교체 대상은 appsettings에 등록·활성화된 에이전트여야 하고, 잘못되면 토큰 없이 거절된다. 결과 끝에 `(에이전트 교체: a→b)`가 붙고 대시보드에는 실제 실행한 에이전트로 기록된다.
+- 교체 실행도 세션당 실행 횟수에 포함된다.
 
 ## 4. 토큰 절약 장치
 
@@ -134,7 +168,7 @@ dotnet publish src/HB.Orchestration.Mcp -c Release -o <publish 폴더>
 - `.claude/commands/mode.md` — `/mode debate ...`, `/mode deliberate ...`, `/mode research ...`, `/mode parallel ...`
 - `.claude/commands/unity-test.md` — `/unity-test`, `/unity-test PlayMode MyGame.Combat`
 - `.claude/settings.json` — Unity CLI 조회·테스트 명령은 매번 승인 없이 실행 (기존 파일이 있으면 `allow` 항목만 합치기)
-- `.mcp.json` — `<publish 폴더>`를 위 publish `-o` 경로로 바꾸면 됨
+- `.mcp.json` — dll 경로를 publish 폴더로 (JSON 안에서는 경로를 `/`로 쓸 것. `\`는 JSON에서 특수 문자)
 
 API 키는 시스템 환경 변수로만. 각 제공사 대시보드에서도 월 한도 설정.
 
@@ -158,13 +192,48 @@ unity skill install --help
 
 ## 7. 대시보드
 
-```powershell
-dotnet run --project src/HB.Orchestration.Dashboard    # → http://localhost:5280
-```
+`HB_Tools.bat` → 2번 (또는 `dotnet run --project src/HB.Orchestration.Dashboard`) → http://localhost:5280
 
+**호출 기록** (`/`)
 - 기간 · 모드 · 제공사 필터, 호출 수 · 토큰 · 평균 응답 · 예상 비용 · 실패, 일별 토큰
 - 상세: 요청/응답, **같은 실행의 다른 단계와 실행 전체 토큰 합계**, 관련 파일 → Rider로 열기
-- 비용: `appsettings.json`의 `Prices`에 모델별 1M 토큰 단가
+- 비용: 대시보드 `appsettings.json`의 `Prices`에 모델별 1M 토큰 단가
+
+**모드** (`/Modes`)
+- MCP publish 폴더의 `modes.json`을 읽어 모드마다 흐름을 그림으로 보여준다 (순차 → / 동시 묶음 / 토론 ⇄ → 판정).
+- 단계별 에이전트(드롭다운), 세션당 실행 한도, 최대 회차, 반환 범위를 바꿔 **저장**하면 다음 `run_mode`부터 바로 반영된다 (재시작 불필요).
+- 저장 전 검증: 없는 에이전트·역할, Debate 단계 수, 회차 범위. 꺼진 에이전트는 경고만.
+- 저장 방식: `modes-backup/`에 백업(최근 10개) → 임시 파일에 쓰고 한 번에 교체. 화면을 연 뒤 파일이 다른 곳에서 바뀌었으면 저장을 거부하니 **다시 불러오기** 후 수정.
+- 에이전트 목록(모델 ID·출력 상한)은 읽기 전용. 바꾸려면 publish 폴더의 `appsettings.json`을 고치고 Claude Code 재시작.
+- 어느 폴더를 볼지는 대시보드 `appsettings.json`의 `Dashboard:McpConfigDir` (배치로 실행하면 `HB_Tools.config`의 `PUBLISH_DIR`가 우선). 편집할 파일을 직접 지정하려면 `Dashboard:ModesPath`.
+- Unity 프로젝트에 `hb-modes.json`이 있으면 그 프로젝트에서는 그쪽이 우선이다. 이 화면은 publish 폴더 쪽만 고친다.
+
+## 8. HB_Tools.bat (publish · 대시보드 실행)
+
+솔루션 폴더의 `HB_Tools.bat`을 더블클릭하면 메뉴가 뜬다.
+
+| 메뉴 | 동작 |
+|---|---|
+| 1 | MCP 서버 publish → `PUBLISH_DIR`. 설정 파일은 덮어쓰지 않고, 없을 때만 기본값을 넣는다 |
+| 2 | 대시보드 빌드 후 별도 창에서 실행 + 브라우저 열기. 이미 떠 있으면 브라우저만 연다 |
+| 3 | 1 + 2 |
+| 4 | `HB_Tools.config`를 메모장으로 열기. 메모장을 닫으면 바로 다시 읽는다 |
+
+명령줄로도 쓸 수 있다: `HB_Tools.bat publish` / `dashboard` / `all`
+
+**설정 (`HB_Tools.config`)** — `KEY=VALUE`, `#`은 주석, 상대 경로는 배치 폴더 기준.
+
+| 키 | 기본값 | 의미 |
+|---|---|---|
+| `SOLUTION_DIR` | `.` | `HB_Orchestration.slnx`가 있는 폴더 |
+| `PUBLISH_DIR` | `..\Publish_Output` | MCP publish 폴더 (`.mcp.json`이 가리키는 곳). 대시보드 모드 화면도 여기를 편집 |
+| `CONFIGURATION` | `Release` | 빌드 구성 |
+| `DASHBOARD_PORT` | `5280` | 대시보드 포트 |
+
+**알아둘 점**
+- Claude Code가 켜져 있으면 MCP 서버가 dll을 잡고 있어 publish가 실패한다. 배치가 먼저 확인하고 알려주니 Claude Code를 닫고 다시 실행.
+- publish 후에는 Claude Code를 재시작해야 새 서버가 뜬다.
+- 대시보드 창을 닫으면 대시보드가 꺼진다.
 
 ## 빌드 에러가 나면
 - `AsIChatClient` / `AsBuilder` / `ConfigureOptions` 없음 → `Microsoft.Extensions.AI`, `Microsoft.Extensions.AI.OpenAI`를 `--prerelease`로 다시 추가

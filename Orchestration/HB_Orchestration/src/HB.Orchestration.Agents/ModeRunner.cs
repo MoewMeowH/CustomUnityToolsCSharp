@@ -14,7 +14,12 @@ public sealed class ModeRunner(OrchestrationOptions options, ModeStore store, Ag
     // MCP 서버 프로세스는 Claude Code 세션마다 하나라서, 메모리 카운터 = 세션당 실행 횟수.
     private readonly ConcurrentDictionary<string, int> _runsThisSession = new(StringComparer.OrdinalIgnoreCase);
 
-    public async Task<string> RunAsync(string modeName, string input, IReadOnlyList<string>? files, CancellationToken ct)
+    /// <param name="agentOverrides">
+    /// 이번 실행에서만 에이전트를 바꾼다. "원래이름=새이름" 또는 "*=새이름"(모든 단계).
+    /// modes.json은 그대로 두고, 같은 모드를 다른 모델로 한 번 돌려볼 때 쓴다.
+    /// </param>
+    public async Task<string> RunAsync(
+        string modeName, string input, IReadOnlyList<string>? files, IReadOnlyList<string>? agentOverrides, CancellationToken ct)
     {
         // ── 1. 실행 전 검증: 여기서 걸리면 토큰을 한 개도 쓰지 않는다 ──────────────
         ModeStore.Loaded loaded;
@@ -38,12 +43,19 @@ public sealed class ModeRunner(OrchestrationOptions options, ModeStore store, Ag
         var budgetMessage = CheckBudget();
         if (budgetMessage is not null) return budgetMessage;
 
+        var (swap, swapError) = ParseOverrides(agentOverrides, mode);
+        if (swapError is not null) return $"[모드 '{modeName}'] {swapError}";
+
         var guidelines = GuidelinesLoader.Load(options);
         var plan = new List<(StepDefinition Def, AgentEntry Agent, string Instructions)>();
         foreach (var step in mode.Steps)
         {
-            if (!catalog.TryGet(step.Agent, out var agent))
-                return $"[모드 '{modeName}'] 에이전트 '{step.Agent}' 사용 불가: {catalog.WhyUnavailable(step.Agent)}";
+            var agentName = swap.TryGetValue(step.Agent, out var to) ? to
+                          : swap.TryGetValue("*", out var all) ? all
+                          : step.Agent;
+
+            if (!catalog.TryGet(agentName, out var agent))
+                return $"[모드 '{modeName}'] 에이전트 '{agentName}' 사용 불가: {catalog.WhyUnavailable(agentName)}";
 
             (string Prompt, bool UseGuidelines) role;
             try { role = ModeStore.ResolveRole(loaded, step.Role); }
@@ -86,6 +98,12 @@ public sealed class ModeRunner(OrchestrationOptions options, ModeStore store, Ag
         // ── 3. 반환: Last면 마지막 결과만 (Claude 쪽 토큰 절약) ─────────────────
         var returnAll = mode.Return == ModeReturn.All || mode.Flow == ModeFlow.Concurrent;
         var failed = results.FirstOrDefault(r => !r.Success);
+
+        if (swap.Count > 0)
+        {
+            var swapNote = "(에이전트 교체: " + string.Join(", ", swap.Select(kv => $"{kv.Key}→{kv.Value}")) + ")";
+            note = note is null ? swapNote : $"{note}\n{swapNote}";
+        }
 
         if (!returnAll && failed is null)
             return note is null ? results[^1].Text : $"{results[^1].Text}\n\n{note}";
@@ -223,6 +241,27 @@ public sealed class ModeRunner(OrchestrationOptions options, ModeStore store, Ag
         return sb.ToString().TrimEnd();
     }
 
+    /// <summary>"from=to" 목록을 검증된 사전으로. 오류면 메시지 (실행 전이라 토큰 0).</summary>
+    private (Dictionary<string, string> Map, string? Error) ParseOverrides(IReadOnlyList<string>? overrides, ModeDefinition mode)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (overrides is null) return (map, null);
+
+        var used = mode.Steps.Select(s => s.Agent).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var raw in overrides.Where(o => !string.IsNullOrWhiteSpace(o)))
+        {
+            var parts = raw.Split('=', 2, StringSplitOptions.TrimEntries);
+            if (parts.Length != 2 || parts[0].Length == 0 || parts[1].Length == 0)
+                return (map, $"에이전트 교체 형식 오류 '{raw}' — 'from=to' 또는 '*=to'");
+            if (parts[0] != "*" && !used.Contains(parts[0]))
+                return (map, $"이 모드는 '{parts[0]}'을(를) 쓰지 않습니다. 사용 중: {string.Join(", ", used)}");
+            if (!catalog.TryGet(parts[1], out _))
+                return (map, $"교체 대상 '{parts[1]}' 사용 불가: {catalog.WhyUnavailable(parts[1])}");
+            map[parts[0]] = parts[1];
+        }
+        return (map, null);
+    }
+
     private int RunLimit(ModeDefinition mode) => mode.MaxRunsPerSession ?? options.Budget.DefaultMaxRunsPerSession;
 
     /// <summary>오늘 쓴 토큰이 상한을 넘었으면 메시지, 아니면 null.</summary>
@@ -262,6 +301,10 @@ public sealed class ModeRunner(OrchestrationOptions options, ModeStore store, Ag
             var rounds = mode.Flow == ModeFlow.Debate ? $" 최대 {Math.Clamp(mode.MaxRounds ?? 2, 1, ModeDefinition.MaxRoundsHardCap)}회차" : "";
             sb.AppendLine($"- {name}: {mode.Description} [{steps}]{rounds}{quota}");
         }
-        return sb.Length == 0 ? "정의된 모드가 없습니다." : sb.ToString().TrimEnd();
+        if (sb.Length == 0) return "정의된 모드가 없습니다.";
+
+        // run_mode의 agents 교체에 쓸 수 있는 이름 목록 (짧게)
+        sb.AppendLine("에이전트: " + string.Join(", ", catalog.Agents.Select(a => $"{a.Name}({a.Model})")));
+        return sb.ToString().TrimEnd();
     }
 }

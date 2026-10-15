@@ -41,13 +41,19 @@
         tr:last-child td { border-bottom: 0; }
         tbody tr:hover { background: var(--code); }
         .table-scroll { overflow-x: auto; }
+        .nav { display: flex; gap: 14px; }
+        .nav a { color: var(--muted); text-decoration: none; }
+        .nav a:hover { color: var(--text); }
     </style>
 </head>
 <body>
 <header>
     <div class="wrap">
         <a class="brand" href="/">HB Orchestration</a>
-        <span class="muted">에이전트 호출 기록</span>
+        <nav class="nav">
+            <a href="/">호출 기록</a>
+            <a href="/Modes">모드</a>
+        </nav>
     </div>
 </header>
 <main class="wrap">
