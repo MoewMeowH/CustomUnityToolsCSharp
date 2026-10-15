@@ -243,36 +243,31 @@ namespace EString.Script
 
             // 3. String -> Enum (ParseExact)
             w.Line("#region String -> Enum");
-            w.Line("/// <summary>문자열을 Enum으로 고속 변환합니다. 이름이 정확히 일치해야 하며(공백 · 숫자 문자열 불허), ignoreCase로 대소문자 무시를 고릅니다"
-                   + (info.IsFlags ? ". \"A, B\" 형식의 플래그 조합을 받습니다" : "")
+            w.Line("/// <summary>문자열을 Enum으로 고속 변환합니다. 이름이 대소문자까지 정확히 일치해야 하며(공백 · 숫자 문자열 불허)"
+                   + (info.IsFlags ? ", \"A, B\" 형식의 플래그 조합을 받습니다" : "")
                    + ". 실패하면 fallback을 반환합니다.</summary>");
-            w.Line($"public static {t} To{info.EnumName}Fast(this string? value, bool ignoreCase = false, {t} fallback = default)");
+            w.Line($"public static {t} To{info.EnumName}Fast(this string? value, {t} fallback = default)");
             w.Open();
             w.Line("if (value == null) return fallback;");
-            w.Line("if (!ignoreCase)");
-            w.Open();
             w.Line("switch (value)");
             w.Open();
             foreach (var member in info.Members)
                 w.Line($"case \"{member.Name}\": return {info.Cast(member)};");
             w.Close();
-            w.Close();
-            w.Line("else if (TryMatchName(value, 0, value.Length, true, out var match))");
-            w.Open();
-            w.Line("return match;");
-            w.Close();
             if (info.IsFlags)
             {
-                w.Line("if (value.IndexOf(',') >= 0 && TryParseFlagList(value, 0, value.Length, ignoreCase, out var combined))");
+                w.Line("if (value.IndexOf(',') >= 0 && TryParseFlagList(value, 0, value.Length, out var combined))");
                 w.Line("    return combined;");
             }
             w.Line("return fallback;");
             w.Close();
-            w.Line();
 
-            WriteTryMatchName(w, info);
             if (info.IsFlags)
+            {
+                w.Line();
+                WriteTryMatchName(w, info);
                 WriteTryParseFlagList(w, info);
+            }
 
             w.Line("#endregion");
 
@@ -399,11 +394,10 @@ namespace EString.Script
         {
             var t = info.FullTypeName;
 
-            w.Line($"private static bool TryMatchName(string s, int start, int length, bool ignoreCase, out {t} result)");
+            w.Line($"private static bool TryMatchName(string s, int start, int length, out {t} result)");
             w.Open();
             if (info.Members.Count > 0)
             {
-                w.Line("var comparison = ignoreCase ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;");
                 w.Line("switch (length)");
                 w.Open();
                 foreach (var group in info.Members.GroupBy(m => m.Name.Length).OrderBy(g => g.Key))
@@ -411,7 +405,7 @@ namespace EString.Script
                     w.Line($"case {group.Key}:");
                     foreach (var member in group)
                     {
-                        w.Line($"    if (string.Compare(s, start, \"{member.Name}\", 0, {group.Key}, comparison) == 0) {{ result = {info.Cast(member)}; return true; }}");
+                        w.Line($"    if (string.Compare(s, start, \"{member.Name}\", 0, {group.Key}, StringComparison.Ordinal) == 0) {{ result = {info.Cast(member)}; return true; }}");
                     }
                     w.Line("    break;");
                 }
@@ -429,7 +423,7 @@ namespace EString.Script
 
             w.Line();
             w.Line("/// <summary>\"A, B\" 형식의 이름 목록을 OR로 합칩니다. 각 이름 앞뒤 공백은 무시합니다.</summary>");
-            w.Line($"private static bool TryParseFlagList(string s, int start, int end, bool ignoreCase, out {t} result)");
+            w.Line($"private static bool TryParseFlagList(string s, int start, int end, out {t} result)");
             w.Open();
             w.Line("result = default;");
             w.Line("ulong bits = 0UL;");
@@ -441,7 +435,7 @@ namespace EString.Script
             w.Line("while (tokenStart < tokenEnd && char.IsWhiteSpace(s[tokenStart])) tokenStart++;");
             w.Line("while (tokenEnd > tokenStart && char.IsWhiteSpace(s[tokenEnd - 1])) tokenEnd--;");
             w.Line("if (tokenStart == tokenEnd) return false;");
-            w.Line("if (!TryMatchName(s, tokenStart, tokenEnd - tokenStart, ignoreCase, out var part)) return false;");
+            w.Line("if (!TryMatchName(s, tokenStart, tokenEnd - tokenStart, out var part)) return false;");
             w.Line("bits |= ToBits(part);");
             w.Line("if (comma < 0) break;");
             w.Line("i = comma + 1;");

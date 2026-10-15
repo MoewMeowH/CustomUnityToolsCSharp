@@ -14,7 +14,7 @@
 ```csharp
 [Flags] public enum E2StringOptions
 {
-    ParseExact    = 0,       // ToStringFast, To{Enum}Fast(string, ignoreCase) — 항상 생성
+    ParseExact    = 0,       // ToStringFast, To{Enum}Fast(string) — 항상 생성
     IntConversion = 1 << 1,  // ToIntFast, To{Enum}Fast(int), IsDefinedFast (+ [Flags]면 IsValidFlagsFast)
     Collections   = 1 << 2,  // Values
     All           = ~0,
@@ -23,7 +23,7 @@
 
 - 옵션을 생략하면(`[E2String]`) **`ParseExact`**로 처리합니다. 문자열 변환만 생성되며 가장 흔한 용도입니다.
 - 생성자 인자(`[E2String(E2StringOptions.Collections)]`)와 이름 있는 인자(`Options = ...`) 둘 다 읽습니다. 값만 같으면 되므로 옵션 enum의 namespace는 상관없습니다.
-- `ParseExact`는 0이라 항상 포함됩니다. 유연한 파싱은 `To{Enum}Fast(string, ignoreCase: true)`의 대소문자 무시이며, 공백 무시나 숫자 문자열은 받지 않습니다.
+- `ParseExact`는 0이라 항상 포함됩니다. 문자열 파싱은 대소문자까지 정확히 일치해야 하며, 대소문자 무시 · 공백 무시 · 숫자 문자열은 받지 않습니다.
 
 ## 사용 예
 
@@ -44,7 +44,6 @@ namespace Game
 string s    = ItemGrade.Rare.ToStringFast();             // "Rare" (할당 없음)
 string n    = ((ItemGrade)9).ToStringFast();             // "not defined ItemGrade"
 ItemGrade g = "Epic".ToItemGradeFast();                  // 정확히 일치. 실패하면 fallback(기본 default)
-ItemGrade h = "epic".ToItemGradeFast(ignoreCase: true);  // 대소문자 무시
 int  i      = ItemGrade.Epic.ToIntFast();                // 2           (IntConversion)
 ItemGrade k = 1.ToItemGradeFast();                       // 정의 검사 후 변환 (IntConversion)
 bool def    = ItemGradeExtensions.IsDefinedFast(5);      // false       (IntConversion)
@@ -66,7 +65,7 @@ Perm   w  = 5.ToPermFast();                              // Read | Exec (IntConv
 | 옵션 | 멤버 | 설명 |
 |---|---|---|
 | ParseExact | `string ToStringFast(this T, string fallback = "not defined {Enum}")` | switch로 문자열 반환. 정의 밖 값이면 `fallback` |
-| ParseExact | `T To{Enum}Fast(this string?, bool ignoreCase = false, T fallback = default)` | 문자열 → enum. 이름이 정확히 일치해야 함(공백 · 숫자 문자열 불허). `ignoreCase`로 대소문자 무시 |
+| ParseExact | `T To{Enum}Fast(this string?, T fallback = default)` | 문자열 → enum. 이름이 대소문자까지 정확히 일치해야 함(공백 · 숫자 문자열 불허) |
 | IntConversion | `int ToIntFast(this T)` | enum → int (명시적 캐스트) |
 | IntConversion | `T To{Enum}Fast(this int, T fallback = default)` | 정의 검사 후 변환 (`[Flags]`는 `IsValidFlagsFast` 검사) |
 | IntConversion | `static bool IsDefinedFast(T)` / `static bool IsDefinedFast(int)` | 이름이 정의된 값인지 검사 |
@@ -78,7 +77,7 @@ Perm   w  = 5.ToPermFast();                              // Read | Exec (IntConv
 - **기본 형식**: `byte` · `sbyte` · `short` · `ushort` · `int` · `uint` · `long` · `ulong` 모두 지원합니다. switch는 기본 형식의 값으로 비교하므로 잘림이나 잘못된 메모리 읽기가 없습니다. `IsDefinedFast(int)`는 값을 enum으로 자르지 않고 그대로 비교합니다(예: `byte` enum에 256은 false).
 - **같은 값의 별칭**(`A = 1, B = 1`): 컴파일 에러 없이 생성됩니다. `ToStringFast`는 먼저 선언된 이름(`"A"`)을 반환하고, 문자열 파싱은 두 이름 모두 받습니다.
 - **`[Flags]`**: 조합 값은 `ToStringFast`에서 `Enum.ToString()`과 같은 `"A, B"` 형식이 됩니다. 값마다 첫 호출에서 한 번 할당한 뒤 캐시하고, 정의된 플래그로 표현할 수 없는 값만 `fallback`으로 떨어집니다. `To{Enum}Fast(string)`은 `"A, B"`를 받으며, 쉼표 주변 공백은 무시합니다. `IsDefinedFast`는 여전히 이름이 있는 값만 true이며, 조합 검사는 `IsValidFlagsFast`를 씁니다.
-- **문자열**: `ignoreCase: false`(기본)는 string switch로 가장 빠른 경로입니다. `ignoreCase: true`는 길이별 `OrdinalIgnoreCase` 비교이며 할당이 없습니다.
+- **문자열**: string switch로 비교하며 할당이 없습니다. 대소문자 무시 옵션은 Unity 벤치마크에서 오히려 느려 제거했습니다.
 - **어트리뷰트**: 의미 분석으로 판별합니다. 어트리뷰트 타입 이름이 정확히 `E2StringAttribute`(또는 `E2String`)인 것만 대상이며, namespace는 상관없습니다. `using X = E2StringAttribute;` 같은 별칭도 인식합니다.
 - **중첩 enum**: class · struct · record · interface 안의 enum을 지원합니다. `@class` 같은 키워드 멤버와 `[Obsolete]` 멤버도 지원합니다(생성 코드는 멤버 이름 대신 상수 값을 씁니다).
 
@@ -88,7 +87,8 @@ Perm   w  = 5.ToPermFast();                              // Read | Exec (IntConv
 |---|---|
 | 옵션 없음 (모든 멤버 생성) | `E2StringOptions`로 선택. 생략하면 `ParseExact` (문자열 변환만) |
 | `ToStringFast(fallback = null)` → `fallback ?? value.ToString()` | `ToStringFast(fallback = "not defined {Enum}")` → `fallback` |
-| `To{Enum}(string, T fallback)` / `To{Enum}(string, bool ignoreCase, T fallback)` | `To{Enum}Fast(string, bool ignoreCase = false, T fallback = default)` 하나로 통합 |
+| `To{Enum}(string, T fallback)` / `To{Enum}(string, bool ignoreCase, T fallback)` | `To{Enum}Fast(string, T fallback = default)` 하나로 통합 |
+| `To{Enum}Fast(string, ignoreCase: true)`의 대소문자 무시 | 제거 (Unity 벤치마크에서 더 느림) |
 | `To{Enum}(string, ignoreCase)`의 앞뒤 공백 무시 · 숫자 문자열 허용 | 제거 (정확히 일치만) |
 | `TryParseFast` / `TryParse` | 제거 |
 | `ToInt` / `ToIntFast` | `ToIntFast`만 유지 |
