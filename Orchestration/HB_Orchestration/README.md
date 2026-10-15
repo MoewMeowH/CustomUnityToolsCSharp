@@ -19,8 +19,8 @@ Claude Code ──MCP──▶ HB.Orchestration.Mcp
 ```
 HB_Orchestration/
 ├─ HB_Orchestration.slnx          ← Rider는 이걸로 열 것
-├─ HB_Tools.bat                   ← publish / 대시보드 실행 메뉴
-├─ HB_Tools.config                ← 위 배치의 경로 설정 (메모장으로 편집)
+├─ HB_Orchestration.bat                   ← publish / 대시보드 실행 메뉴
+├─ HB_Orchestration.config                ← 위 배치의 경로 설정 (메모장으로 편집)
 ├─ Directory.Build.props          ← 공통 설정
 ├─ src/
 │  ├─ HB.Orchestration.Shared/    ← 호출 기록 모델 + JSONL 저장
@@ -48,7 +48,7 @@ cd ../..
 dotnet build HB_Orchestration.slnx
 ```
 
-평소 publish와 대시보드 실행은 **`HB_Tools.bat`** 으로 한다 (아래 8절).
+평소 publish와 대시보드 실행은 **`HB_Orchestration.bat`** 으로 한다 (아래 8절).
 
 - publish 출력은 **솔루션 폴더 밖**으로. `dotnet run`으로 MCP 등록하지 말 것.
 - publish는 `appsettings.json` / `modes.json`을 **복사하지 않는다** (publish 폴더에서 고친 설정을 덮어쓰지 않도록). 처음 publish할 때만 배치가 기본 파일을 넣어준다.
@@ -192,7 +192,7 @@ unity skill install --help
 
 ## 7. 대시보드
 
-`HB_Tools.bat` → 2번 (또는 `dotnet run --project src/HB.Orchestration.Dashboard`) → http://localhost:5280
+`HB_Orchestration.bat` → 2번 (또는 `dotnet run --project src/HB.Orchestration.Dashboard`) → http://localhost:5280
 
 **호출 기록** (`/`)
 - 기간 · 모드 · 제공사 필터, 호출 수 · 토큰 · 평균 응답 · 예상 비용 · 실패, 일별 토큰
@@ -205,23 +205,23 @@ unity skill install --help
 - 저장 전 검증: 없는 에이전트·역할, Debate 단계 수, 회차 범위. 꺼진 에이전트는 경고만.
 - 저장 방식: `modes-backup/`에 백업(최근 10개) → 임시 파일에 쓰고 한 번에 교체. 화면을 연 뒤 파일이 다른 곳에서 바뀌었으면 저장을 거부하니 **다시 불러오기** 후 수정.
 - 에이전트 목록(모델 ID·출력 상한)은 읽기 전용. 바꾸려면 publish 폴더의 `appsettings.json`을 고치고 Claude Code 재시작.
-- 어느 폴더를 볼지는 대시보드 `appsettings.json`의 `Dashboard:McpConfigDir` (배치로 실행하면 `HB_Tools.config`의 `PUBLISH_DIR`가 우선). 편집할 파일을 직접 지정하려면 `Dashboard:ModesPath`.
+- 어느 폴더를 볼지는 대시보드 `appsettings.json`의 `Dashboard:McpConfigDir` (배치로 실행하면 `HB_Orchestration.config`의 `PUBLISH_DIR`가 우선). 편집할 파일을 직접 지정하려면 `Dashboard:ModesPath`.
 - Unity 프로젝트에 `hb-modes.json`이 있으면 그 프로젝트에서는 그쪽이 우선이다. 이 화면은 publish 폴더 쪽만 고친다.
 
-## 8. HB_Tools.bat (publish · 대시보드 실행)
+## 8. HB_Orchestration.bat (publish · 대시보드 실행)
 
-솔루션 폴더의 `HB_Tools.bat`을 더블클릭하면 메뉴가 뜬다.
+솔루션 폴더의 `HB_Orchestration.bat`을 더블클릭하면 메뉴가 뜬다.
 
 | 메뉴 | 동작 |
 |---|---|
 | 1 | MCP 서버 publish → `PUBLISH_DIR`. 설정 파일은 덮어쓰지 않고, 없을 때만 기본값을 넣는다 |
 | 2 | 대시보드 빌드 후 별도 창에서 실행 + 브라우저 열기. 이미 떠 있으면 브라우저만 연다 |
 | 3 | 1 + 2 |
-| 4 | `HB_Tools.config`를 메모장으로 열기. 메모장을 닫으면 바로 다시 읽는다 |
+| 4 | `HB_Orchestration.config`를 메모장으로 열기. 메모장을 닫으면 바로 다시 읽는다 |
 
-명령줄로도 쓸 수 있다: `HB_Tools.bat publish` / `dashboard` / `all`
+명령줄로도 쓸 수 있다: `HB_Orchestration.bat publish` / `dashboard` / `all`
 
-**설정 (`HB_Tools.config`)** — `KEY=VALUE`, `#`은 주석, 상대 경로는 배치 폴더 기준.
+**설정 (`HB_Orchestration.config`)** — `KEY=VALUE`, `#`은 주석, 상대 경로는 배치 폴더 기준. 배치는 **자기와 같은 이름의 `.config`** 를 읽으므로 이름을 바꿀 땐 둘을 같이 바꾼다.
 
 | 키 | 기본값 | 의미 |
 |---|---|---|

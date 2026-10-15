@@ -127,15 +127,15 @@
                     {
                         <div class="stack">
                             <div class="stack-label">동시 실행 · 서로 결과를 보지 않음</div>
-                            @for (var i = 0; i < steps.Count; i++) { RenderNode(name, i, steps[i], showSees: false); }
+                            @for (var i = 0; i < steps.Count; i++) { await RenderNode(name, i, steps[i], showSees: false); }
                         </div>
                     }
                     else if (mode.Flow == ModeFlow.Debate && steps.Count >= 2)
                     {
                         <div class="loop">
-                            @{ RenderNode(name, 0, steps[0], showSees: false); }
+                            @{ await RenderNode(name, 0, steps[0], showSees: false); }
                             <span class="arrow">⇄</span>
-                            @{ RenderNode(name, 1, steps[1], showSees: false); }
+                            @{ await RenderNode(name, 1, steps[1], showSees: false); }
                             <div class="loop-label" style="width:100%">
                                 최대 @(Math.Clamp(mode.MaxRounds ?? 2, 1, ModeDefinition.MaxRoundsHardCap))회차 · 직전 발언 @(mode.HistoryWindow)개만 봄 · [합의] 시 조기 종료
                             </div>
@@ -143,7 +143,7 @@
                         if (steps.Count >= 3)
                         {
                             <span class="arrow">→</span>
-                            RenderNode(name, 2, steps[2], showSees: false);
+                            await RenderNode(name, 2, steps[2], showSees: false);
                         }
                     }
                     else
@@ -151,7 +151,7 @@
                         for (var i = 0; i < steps.Count; i++)
                         {
                             if (i > 0) { <span class="arrow">→</span> }
-                            RenderNode(name, i, steps[i], showSees: i > 0);
+                            await RenderNode(name, i, steps[i], showSees: i > 0);
                         }
                     }
 
@@ -194,7 +194,8 @@
 
 @functions {
     // 단계 하나를 그린다: 역할 + 에이전트 선택.
-    void RenderNode(string mode, int index, StepDefinition step, bool showSees)
+    // <option>이 태그 헬퍼로 처리되므로 이 메서드는 async Task여야 한다 (MVC1006).
+    async Task RenderNode(string mode, int index, StepDefinition step, bool showSees)
     {
         var current = Model.FindAgent(step.Agent);
         <div class="node">

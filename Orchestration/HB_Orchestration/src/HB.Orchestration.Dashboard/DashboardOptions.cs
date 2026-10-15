@@ -9,7 +9,7 @@ public sealed class DashboardOptions
 
     /// <summary>
     /// MCP 서버의 publish 폴더 (appsettings.json, modes.json이 있는 곳).
-    /// 모드 화면이 이 폴더의 설정을 읽고 고친다. HB_Tools.bat으로 실행하면 HB_Tools.config의 PUBLISH_DIR로 덮어쓴다.
+    /// 모드 화면이 이 폴더의 설정을 읽고 고친다. HB_Orchestration.bat으로 실행하면 HB_Orchestration.config의 PUBLISH_DIR로 덮어쓴다.
     /// </summary>
     public string? McpConfigDir { get; set; }
 

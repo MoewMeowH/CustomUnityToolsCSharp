@@ -1,16 +1,18 @@
 @echo off
 rem ============================================================================
 rem  HB Orchestration tools
-rem    HB_Tools.bat             : menu
-rem    HB_Tools.bat publish     : publish MCP server only
-rem    HB_Tools.bat dashboard   : build + run dashboard only
-rem    HB_Tools.bat all         : publish, then dashboard
-rem  Paths and options are read from HB_Tools.config (edit with Notepad).
+rem    <this>.bat             : menu
+rem    <this>.bat publish     : publish MCP server only
+rem    <this>.bat dashboard   : build + run dashboard only
+rem    <this>.bat all         : publish, then dashboard
+rem  Settings are read from the .config file with the SAME NAME as this batch file
+rem  (HB_Orchestration.bat -> HB_Orchestration.config). Rename both together.
 rem ============================================================================
 setlocal EnableExtensions
 chcp 65001 >nul
 cd /d "%~dp0"
-set "CONFIG_FILE=%~dp0HB_Tools.config"
+set "CONFIG_FILE=%~dpn0.config"
+set "CONFIG_NAME=%~n0.config"
 
 where dotnet >nul 2>nul
 if errorlevel 1 (
@@ -42,7 +44,7 @@ echo -----------------------------------------------------------
 echo   1. Publish MCP server
 echo   2. Run dashboard
 echo   3. Publish MCP server + Run dashboard
-echo   4. Edit settings  - HB_Tools.config
+echo   4. Edit settings  - %CONFIG_NAME%
 echo   0. Exit
 echo ===========================================================
 set "CHOICE="
@@ -70,10 +72,10 @@ goto :menu
 
 :do_config
 if not exist "%CONFIG_FILE%" (
-    echo [ERROR] HB_Tools.config not found next to this batch file.
+    echo [ERROR] %CONFIG_NAME% not found next to this batch file.
     goto :menu
 )
-echo [Info] Opening HB_Tools.config. Save and close Notepad to apply.
+echo [Info] Opening %CONFIG_NAME%. Save and close Notepad to apply.
 start "" /wait notepad "%CONFIG_FILE%"
 call :load_config
 echo [Info] Settings reloaded.
@@ -97,7 +99,7 @@ rem ============================================================================
 rem  Settings
 rem ============================================================================
 :load_config
-rem defaults - any key missing or empty in HB_Tools.config falls back to these
+rem defaults - any key missing or empty in the config falls back to these
 set "SOLUTION_DIR=."
 set "PUBLISH_DIR=..\Publish_Output"
 set "CONFIGURATION=Release"
@@ -108,7 +110,7 @@ if exist "%CONFIG_FILE%" (
         if not "%%B"=="" set "%%A=%%B"
     )
 ) else (
-    echo [WARN] HB_Tools.config not found. Using defaults.
+    echo [WARN] %CONFIG_NAME% not found. Using defaults.
 )
 
 call :resolve SOLUTION_DIR
@@ -141,7 +143,7 @@ echo [Publish] %MCP_PROJ%
 echo           to %PUBLISH_DIR%
 
 if not exist "%MCP_PROJ%" (
-    echo [ERROR] MCP project not found. Check SOLUTION_DIR in HB_Tools.config.
+    echo [ERROR] MCP project not found. Check SOLUTION_DIR in %CONFIG_NAME%.
     exit /b 1
 )
 
@@ -158,20 +160,35 @@ if defined LOCKED (
 
 if not exist "%PUBLISH_DIR%" mkdir "%PUBLISH_DIR%"
 
-dotnet publish "%MCP_PROJ%" -c %CONFIGURATION% -o "%PUBLISH_DIR%" --nologo
-if errorlevel 1 (
-    echo [ERROR] Publish failed. See the messages above.
-    exit /b 1
+rem Back up the live config first. The SDK can delete files it published last time but not this time
+rem (incremental publish clean), so the config files are restored from this backup after publish.
+set "CFG_BACKUP=%TEMP%\HB_Orchestration_cfg_backup"
+if exist "%CFG_BACKUP%" rmdir /s /q "%CFG_BACKUP%"
+mkdir "%CFG_BACKUP%"
+for %%F in (appsettings.json modes.json) do (
+    if exist "%PUBLISH_DIR%\%%F" copy /y "%PUBLISH_DIR%\%%F" "%CFG_BACKUP%\%%F" >nul
 )
 
-rem Config files are never overwritten by publish - copy defaults only when missing.
+dotnet publish "%MCP_PROJ%" -c %CONFIGURATION% -o "%PUBLISH_DIR%" --nologo
+set "PUBLISH_RESULT=%errorlevel%"
+
+rem Restore config: your backup first, the source default only on a fresh publish folder.
 for %%F in (appsettings.json modes.json) do (
-    if not exist "%PUBLISH_DIR%\%%F" (
+    if exist "%CFG_BACKUP%\%%F" (
+        fc /b "%CFG_BACKUP%\%%F" "%PUBLISH_DIR%\%%F" >nul 2>nul || (
+            copy /y "%CFG_BACKUP%\%%F" "%PUBLISH_DIR%\%%F" >nul
+            echo [Info] Restored your %%F from backup.
+        )
+    ) else if not exist "%PUBLISH_DIR%\%%F" (
         copy /y "%MCP_SRC%\%%F" "%PUBLISH_DIR%\%%F" >nul
-        echo [Info] %%F was missing - copied the default from source.
-    ) else (
-        echo [Info] Kept your existing %%F
+        echo [Info] %%F did not exist - copied the default from source.
     )
+)
+echo [Info] Config kept in place. Backup of this run: %CFG_BACKUP%
+
+if not "%PUBLISH_RESULT%"=="0" (
+    echo [ERROR] Publish failed. See the messages above.
+    exit /b 1
 )
 
 echo [OK] Publish complete. Restart Claude Code to load the new server.
@@ -194,7 +211,7 @@ if not errorlevel 1 (
 )
 
 if not exist "%DASH_PROJ%" (
-    echo [ERROR] Dashboard project not found. Check SOLUTION_DIR in HB_Tools.config.
+    echo [ERROR] Dashboard project not found. Check SOLUTION_DIR in %CONFIG_NAME%.
     exit /b 1
 )
 

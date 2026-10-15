@@ -16,7 +16,7 @@
   <ItemGroup>
     <!--
       설정 파일은 publish 때 복사하지 않는다 (publish 폴더에서 직접 고친 설정을 덮어쓰지 않도록).
-      publish 폴더에 아직 없을 때만 HB_Tools.bat이 처음 한 번 복사해 넣는다.
+      publish 폴더에 아직 없을 때만 HB_Orchestration.bat이 처음 한 번 복사해 넣는다.
     -->
     <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
     <None Update="modes.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
