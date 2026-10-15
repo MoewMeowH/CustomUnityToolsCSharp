@@ -7,6 +7,7 @@
       "Bash(unity test:*)",
       "Bash(unity logs:*)",
       "Bash(unity --version)",
+      "WebFetch(domain:docs.unity.com)",
       "mcp__hb-orchestration__list_modes"
     ]
   }
