@@ -1,0 +1,104 @@
+@page
+@model SessionsModel
+@{
+    ViewData["Title"] = "HB Orchestration · 세션";
+}
+
+<style>
+    .notice { padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; border: 1px solid var(--line); background: var(--panel); }
+    .notice.ok { border-color: var(--ok); }
+    .notice.err { border-color: var(--err); }
+    .notice.warn { border-color: #d9a400; }
+    .btn { font: inherit; font-size: 12.5px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--line);
+           background: var(--panel); color: var(--text); text-decoration: none; cursor: pointer; }
+    .session { padding: 14px 16px; margin-bottom: 12px; }
+    .session-head { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; margin-bottom: 10px; }
+    .session-head .name { font-weight: 650; font-size: 15px; }
+    .usage td form { display: inline; }
+    .bar { display: inline-block; width: 80px; height: 6px; border-radius: 3px; background: var(--code); vertical-align: middle; overflow: hidden; }
+    .bar > span { display: block; height: 100%; background: var(--accent); }
+    .bar.full > span { background: var(--err); }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }
+</style>
+
+<div class="toolbar">
+    <span class="muted">Claude Code 세션마다 MCP 서버가 하나씩 뜹니다. 실행 한도는 세션별로 따로 셉니다.</span>
+    <a class="btn" href="/Sessions" style="margin-left:auto">새로고침</a>
+</div>
+
+@if (Model.Requested)
+{
+    <div class="notice ok">초기화를 요청했습니다. 그 세션의 다음 호출(<span class="mono">run_mode</span> · <span class="mono">list_modes</span>) 때 적용됩니다 — 서버 재시작 불필요.</div>
+}
+@if (Model.ModesError is not null)
+{
+    <div class="notice err">modes.json을 읽지 못해 한도를 기본값으로 표시합니다: @Model.ModesError</div>
+}
+@if (Model.Cleaned > 0)
+{
+    <div class="notice muted">종료된 세션 기록 @(Model.Cleaned)개를 정리했습니다.</div>
+}
+
+@if (Model.Sessions.Count == 0)
+{
+    <section class="panel" style="padding:40px;text-align:center">
+        <span class="muted">실행 중인 MCP 서버가 없습니다. Claude Code를 Unity 프로젝트에서 실행하면 여기에 나타납니다.</span>
+    </section>
+}
+
+@foreach (var s in Model.Sessions)
+{
+    var st = s.State;
+    <section class="panel session">
+        <div class="session-head">
+            <span class="name">@SessionsModel.ProjectName(st.ProjectDir)</span>
+            <span class="muted mono">PID @st.Pid</span>
+            <span class="muted">시작 @st.StartedAt.LocalDateTime.ToString("MM-dd HH:mm:ss")</span>
+            <span class="muted">마지막 활동 @st.UpdatedAt.LocalDateTime.ToString("HH:mm:ss")</span>
+            <span class="muted">서버 빌드 @(st.ServerBuild?.LocalDateTime.ToString("MM-dd HH:mm:ss") ?? "-")</span>
+            @if (s.OldBuild)
+            {
+                <span class="badge err" title="publish 폴더의 서버가 더 최신입니다. Claude Code에서 /mcp로 재연결하면 새 서버가 뜹니다.">이전 빌드</span>
+            }
+            @if (s.ResetPending)
+            {
+                <span class="badge">초기화 대기 중</span>
+            }
+            <form method="post" asp-page-handler="Reset" style="margin-left:auto">
+                <input type="hidden" name="pid" value="@st.Pid" />
+                <button type="submit" class="btn">전체 초기화</button>
+            </form>
+        </div>
+
+        <div class="table-scroll">
+            <table class="usage">
+                <thead><tr><th>모드</th><th class="num">사용</th><th class="num">한도</th><th></th><th></th></tr></thead>
+                <tbody>
+                @foreach (var u in s.Usage)
+                {
+                    var full = u.Limit > 0 && u.Used >= u.Limit;
+                    var pct = u.Limit > 0 ? Math.Min(100, u.Used * 100 / u.Limit) : 0;
+                    <tr>
+                        <td class="mono">@u.Mode</td>
+                        <td class="num @(full ? "err" : null)">@u.Used</td>
+                        <td class="num">@(u.Limit > 0 ? u.Limit.ToString() : "무제한")</td>
+                        <td><span class="bar @(full ? "full" : null)"><span style="width:@(pct)%"></span></span></td>
+                        <td>
+                            @if (u.Used > 0)
+                            {
+                                <form method="post" asp-page-handler="Reset">
+                                    <input type="hidden" name="pid" value="@st.Pid" />
+                                    <input type="hidden" name="mode" value="@u.Mode" />
+                                    <button type="submit" class="btn">초기화</button>
+                                </form>
+                            }
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    </section>
+}
+
+<p class="muted mono" style="font-size:12px">@Model.Folder</p>

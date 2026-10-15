@@ -148,13 +148,30 @@ if not exist "%MCP_PROJ%" (
 )
 
 rem Claude Code keeps the MCP server running, which locks the dll and makes publish fail half-way.
+rem Only the MCP server processes are stopped - Claude Code and its conversation keep running.
+set "STOPPED="
+powershell -NoProfile -Command "exit @(Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'dotnet.exe' -and $_.CommandLine -like '*HB.Orchestration.Mcp.dll*' }).Count" >nul 2>nul
+set "MCP_COUNT=%errorlevel%"
+if not "%MCP_COUNT%"=="0" (
+    echo [Info] Running MCP server processes: %MCP_COUNT%
+    echo        They must be stopped to publish. Claude Code itself keeps running.
+    choice /c YN /m "Stop the MCP server now and publish"
+    if errorlevel 2 (
+        echo [Info] Publish cancelled.
+        exit /b 1
+    )
+    powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'dotnet.exe' -and $_.CommandLine -like '*HB.Orchestration.Mcp.dll*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>nul
+    timeout /t 2 /nobreak >nul
+    set "STOPPED=1"
+)
+
 set "LOCKED="
 if exist "%MCP_DLL%" (
     2>nul ( >>"%MCP_DLL%" (call ) ) || set "LOCKED=1"
 )
 if defined LOCKED (
-    echo [ERROR] HB.Orchestration.Mcp.dll is in use.
-    echo         Close every Claude Code session that uses the hb-orchestration server, then try again.
+    echo [ERROR] HB.Orchestration.Mcp.dll is still in use.
+    echo         Close the Claude Code sessions that use the hb-orchestration server, then try again.
     exit /b 1
 )
 
@@ -191,7 +208,17 @@ if not "%PUBLISH_RESULT%"=="0" (
     exit /b 1
 )
 
-echo [OK] Publish complete. Restart Claude Code to load the new server.
+echo [OK] Publish complete.
+if defined STOPPED (
+    echo.
+    echo [Next] The MCP server was stopped in your running Claude Code sessions.
+    echo        Claude Code does not reconnect by itself. In each session:
+    echo          1. Run /mcp and reconnect hb-orchestration.
+    echo          2. Optional check: ask Claude to run server_info - it shows the new build time.
+    echo        The dashboard Sessions page also shows each session's server build time.
+) else (
+    echo        Start Claude Code, or run /mcp and reconnect hb-orchestration, to load the new server.
+)
 exit /b 0
 
 

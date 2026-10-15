@@ -4,7 +4,7 @@ using System.Text.Json.Serialization;
 namespace HB.Orchestration.Agents;
 
 /// <summary>modes.json을 호출할 때마다 읽는다. 파일만 고치면 재시작 없이 반영된다.</summary>
-public sealed class ModeStore(OrchestrationOptions options)
+public sealed class ModeStore(AgentCatalog catalog)
 {
     private static readonly JsonSerializerOptions Json = new()
     {
@@ -20,7 +20,7 @@ public sealed class ModeStore(OrchestrationOptions options)
     {
         var candidates = new[]
         {
-            options.ModesPath,
+            catalog.Options.ModesPath,
             Environment.GetEnvironmentVariable("HB_MODES_PATH"),
             System.IO.Path.Combine(Environment.CurrentDirectory, "hb-modes.json"),   // 프로젝트별 모드
             System.IO.Path.Combine(AppContext.BaseDirectory, "modes.json"),         // 기본 모드

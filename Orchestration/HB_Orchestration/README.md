@@ -68,7 +68,36 @@ dotnet build HB_Orchestration.slnx
 
 - `MaxOutputTokens`: 응답 상한. **추론 모델은 생각 토큰도 포함**되므로 낮게 잡으면 답변 없이 끝난다 (서버가 `[빈 응답]` 실패로 기록). 폭주 방지용으로 넉넉하게 (1만 이상 권장).
 - 키가 없거나 설정이 틀린 에이전트는 그것만 건너뛰고 서버는 정상 시작. `list_modes`에 `(사용불가)`로 표시.
-- 바꾸면 Claude Code 재시작 필요.
+- **저장하면 바로 반영된다.** 서버가 호출 때마다 파일 수정 시각을 보고, 바뀌었으면 설정·에이전트를 다시 읽는다 (재시작 불필요). JSON이 깨졌으면 이전 설정으로 계속 동작하고 `list_modes`·`server_info`에 경고가 뜬다.
+- 대시보드 **모드** 화면에서 추가·수정·삭제할 수 있고, **이름을 바꾸면 그 이름을 쓰는 modes.json 단계도 같이 바뀐다** (7절).
+- appsettings.json도 주석 없는 순수 JSON으로 둔다. 필드 설명은 아래 표.
+
+### appsettings.json 필드 (`Orchestration` 섹션)
+| 키 | 의미 |
+|---|---|
+| `ModesPath` | modes.json 위치를 직접 지정 (비우면 3절의 찾는 순서) |
+| `GuidelinesPath` | 리뷰 지침 파일 (비우면 `REVIEW_GUIDELINES_PATH` 환경 변수 → Unity 프로젝트 루트의 `REVIEW_GUIDELINES.md`) |
+| `Providers.<이름>.Type` | `openai-compatible` (현재 유일) |
+| `Providers.<이름>.Endpoint` | API 주소. OpenAI는 비움, Gemini `https://generativelanguage.googleapis.com/v1beta/openai/`, Ollama `http://localhost:11434/v1`, LM Studio `http://localhost:1234/v1` |
+| `Providers.<이름>.ApiKeyEnv` | API 키를 담은 **환경 변수 이름**. 로컬처럼 키가 필요 없으면 생략 |
+| `Agents[].Name` | 에이전트 이름 (영문·숫자·`_`·`-`, 64자 이내). modes.json의 `Agent`가 이 이름을 가리킨다 |
+| `Agents[].Provider` | 위 `Providers`의 이름 |
+| `Agents[].Model` | 제공사의 모델 ID |
+| `Agents[].MaxOutputTokens` | 응답 상한 (생략 = 제한 없음) |
+| `Agents[].Enabled` | `false`면 끔 (생략 = 켬) |
+| `Budget.DailyTokenLimit` | 하루 입력+출력 토큰 상한 (0 = 끔). `FreeProviders`는 집계 제외 |
+| `Budget.MaxInputChars` | `run_mode` 입력 최대 글자 수 |
+| `Budget.DefaultMaxRunsPerSession` | `MaxRunsPerSession`이 없는 모드의 세션당 실행 한도 |
+| `Budget.FreeProviders` | 비용 집계에서 뺄 제공사 (기본 `local`) |
+
+### 재시작이 필요한 경우
+| 바꾼 것 | 필요한 동작 |
+|---|---|
+| modes.json (모드·역할·에이전트 배치) | 없음 — 다음 호출부터 반영 |
+| appsettings.json (에이전트·모델·제공사·예산) | 없음 — 다음 호출부터 반영 |
+| 세션 실행 횟수 | 없음 — 대시보드 **세션** 화면에서 초기화 |
+| 서버 코드 (publish) | 배치가 MCP 서버만 종료 → Claude Code에서 `/mcp`로 재연결 (8절). Claude Code·대화는 그대로 |
+| **API 키 환경 변수** | **PC 재시작** (직접). 환경 변수는 프로그램이 시작될 때 물려받는 값이라, Unity Hub·Toolbox 같은 트레이 프로그램까지 새로 떠야 확실하다 |
 
 ## 3. 모드 — `modes.json` ("무엇을 어떤 순서로")
 
@@ -132,7 +161,10 @@ dotnet build HB_Orchestration.slnx
 토큰은 회차가 늘수록 빠르게 늘어나므로 `MaxRounds`는 2, 많아야 3을 권장. 실행 중 실패하면 판정 없이 중단.
 
 ### 실행 한도
-세션당 실행 한도는 MCP 서버 프로세스 메모리에서 센다. Claude Code 세션마다 서버가 새로 뜨므로 새 세션을 열면 0부터 다시 센다. 검증 단계에서 거절된 호출(설정 오류, 입력 초과 등)은 횟수에 포함되지 않는다.
+세션당 실행 한도는 MCP 서버 프로세스(= Claude Code 세션 하나)별로 센다. 새 세션을 열면 0부터 다시 센다. 검증 단계에서 거절된 호출(설정 오류, 입력 초과 등)은 횟수에 포함되지 않는다.
+
+한도에 걸렸는데 더 필요하면 **서버를 재시작하지 말고** 대시보드 **세션** 화면에서 그 세션의 횟수를 초기화한다. 서버를 다시 띄우려면 Claude Code 세션을 새로 열어야 해서 진행 중이던 대화 맥락까지 잃는다.
+- 서버는 세션 상태를 `%LOCALAPPDATA%/HB_Orchestration/sessions/{PID}.json`에 남기고, 대시보드는 초기화 요청을 `{PID}.reset`으로 남긴다. 서버가 다음 `run_mode`·`list_modes` 때 그걸 읽고 적용한다.
 
 ### 실행할 때만 에이전트 바꾸기
 `run_mode`의 `agents` 인자로 modes.json을 고치지 않고 이번 실행만 바꿀 수 있다. Claude Code에서는 "panel을 gpt_high_sol이랑 gemini_argon으로 돌려줘"처럼 말하면 된다.
@@ -145,7 +177,7 @@ dotnet build HB_Orchestration.slnx
 
 | 장치 | 어디서 | 효과 |
 |---|---|---|
-| 도구 2개(`list_modes`, `run_mode`)만 노출 | MCP | 모드가 늘어도 Claude 컨텍스트의 도구 설명이 그대로 |
+| 도구 3개(`list_modes`, `run_mode`, 확인용 `server_info`)만 노출 | MCP | 모드가 늘어도 Claude 컨텍스트의 도구 설명이 그대로 |
 | 실행 전 검증 | 서버 | 모드·에이전트·역할 오류, 입력 초과, 예산 초과면 **토큰 0으로** 즉시 반환 |
 | 단계별 `Sees` | modes.json | 다음 단계에 필요한 것만 전달 (예: research 검증자는 후보 목록만) |
 | `Return: Last` | modes.json | 최종 판정만 필요하면 Claude가 읽는 양 감소 |
@@ -204,7 +236,21 @@ unity skill install --help
 - 단계별 에이전트(드롭다운), 세션당 실행 한도, 최대 회차, 반환 범위를 바꿔 **저장**하면 다음 `run_mode`부터 바로 반영된다 (재시작 불필요).
 - 저장 전 검증: 없는 에이전트·역할, Debate 단계 수, 회차 범위. 꺼진 에이전트는 경고만.
 - 저장 방식: `modes-backup/`에 백업(최근 10개) → 임시 파일에 쓰고 한 번에 교체. 화면을 연 뒤 파일이 다른 곳에서 바뀌었으면 저장을 거부하니 **다시 불러오기** 후 수정.
-- 에이전트 목록(모델 ID·출력 상한)은 읽기 전용. 바꾸려면 publish 폴더의 `appsettings.json`을 고치고 Claude Code 재시작.
+
+**모드 화면 — 에이전트 편집** (appsettings.json)
+- 표에서 이름 · 제공사 · 모델 ID · 출력 상한 · 사용 여부를 바꾸고 **에이전트 저장**. 마지막 빈 줄에 입력하면 새 에이전트가 추가된다. 저장 즉시 반영 (재시작 불필요).
+- **이름 변경 동기화**: 이름을 바꾸면 그 이름을 쓰던 modes.json의 모든 단계도 새 이름으로 바뀐다.
+- 모드가 쓰고 있는 에이전트는 삭제할 수 없다 (삭제 칸이 잠김). 먼저 모드의 에이전트를 바꾼다.
+- 백업: `settings-backup/` (최근 10개). appsettings.json의 다른 섹션(Logging, Providers, Budget)과 표에 없는 필드는 그대로 둔다.
+
+**모드 화면 — 없는 에이전트 일괄 교체**
+- appsettings.json을 메모장으로 직접 고쳐서 modes.json이 없는 이름을 가리키게 되면, 화면 위에 경고와 함께 `없는 이름 → 바꿀 에이전트` 선택이 뜬다. **일괄 교체**를 누르면 그 이름을 쓰는 모든 단계가 바뀐다.
+
+**세션** (`/Sessions`)
+- 실행 중인 Claude Code 세션(= MCP 서버)마다 프로젝트, PID, 시작 시각, 서버 빌드 시각, 모드별 사용 횟수 / 한도를 보여준다.
+- 모드별 **초기화** 또는 **전체 초기화** → 그 세션의 다음 호출 때 적용 (서버 재시작 불필요). 적용 전에는 "초기화 대기 중"으로 표시.
+- 서버 빌드가 publish 폴더의 dll보다 오래됐으면 **이전 빌드** 표시 → 그 세션에서 `/mcp`로 재연결하면 새 서버가 뜬다.
+- 강제 종료된 서버가 남긴 기록은 화면을 열 때 자동 정리.
 - 어느 폴더를 볼지는 대시보드 `appsettings.json`의 `Dashboard:McpConfigDir` (배치로 실행하면 `HB_Orchestration.config`의 `PUBLISH_DIR`가 우선). 편집할 파일을 직접 지정하려면 `Dashboard:ModesPath`.
 - Unity 프로젝트에 `hb-modes.json`이 있으면 그 프로젝트에서는 그쪽이 우선이다. 이 화면은 publish 폴더 쪽만 고친다.
 
@@ -214,7 +260,7 @@ unity skill install --help
 
 | 메뉴 | 동작 |
 |---|---|
-| 1 | MCP 서버 publish → `PUBLISH_DIR`. 설정 파일은 덮어쓰지 않고, 없을 때만 기본값을 넣는다 |
+| 1 | MCP 서버 publish → `PUBLISH_DIR`. 실행 중인 MCP 서버가 있으면 **서버만 종료할지 묻고** 진행. 설정 파일은 백업 후 그대로 유지 |
 | 2 | 대시보드 빌드 후 별도 창에서 실행 + 브라우저 열기. 이미 떠 있으면 브라우저만 연다 |
 | 3 | 1 + 2 |
 | 4 | `HB_Orchestration.config`를 메모장으로 열기. 메모장을 닫으면 바로 다시 읽는다 |
@@ -230,9 +276,15 @@ unity skill install --help
 | `CONFIGURATION` | `Release` | 빌드 구성 |
 | `DASHBOARD_PORT` | `5280` | 대시보드 포트 |
 
-**알아둘 점**
-- Claude Code가 켜져 있으면 MCP 서버가 dll을 잡고 있어 publish가 실패한다. 배치가 먼저 확인하고 알려주니 Claude Code를 닫고 다시 실행.
-- publish 후에는 Claude Code를 재시작해야 새 서버가 뜬다.
+**publish와 실행 중인 Claude Code**
+- 실행 중인 MCP 서버는 dll을 잡고 있어 그대로는 publish가 실패한다. 배치가 서버 프로세스를 찾아 **서버만 종료할지(Y/N)** 묻는다. Claude Code와 대화는 그대로 남는다.
+- 서버를 종료한 순간 그 세션에서 진행 중이던 `run_mode`가 있었다면 그 호출은 실패한다. 에이전트 호출 중이 아닐 때 publish할 것.
+- **재연결은 수동이다** (테스트로 확인함). publish가 끝나면 각 Claude Code 세션에서 `/mcp` → `hb-orchestration` 재연결.
+  - 확인하고 싶으면 "server_info 실행해줘" → 새 빌드 시각이 나오면 새 서버.
+  - 대시보드 **세션** 화면에서도 세션별 서버 빌드 시각으로 확인할 수 있다.
+- 실행 중인 서버가 없으면 그냥 publish하고, 다음에 Claude Code를 열 때 새 서버가 뜬다.
+
+**기타**
 - 대시보드 창을 닫으면 대시보드가 꺼진다.
 
 ## 빌드 에러가 나면

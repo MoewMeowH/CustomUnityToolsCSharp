@@ -3,6 +3,7 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using HB.Orchestration.Agents;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
@@ -11,20 +12,33 @@ namespace HB.Orchestration.Dashboard;
 
 public sealed record AgentInfo(string Name, string Provider, string Model, int? MaxOutputTokens, bool Enabled);
 
-/// <summary>디스크에서 읽은 modes.json 한 시점의 상태.</summary>
+/// <summary>디스크에서 읽은 MCP 설정(modes.json + appsettings.json) 한 시점의 상태.</summary>
 public sealed class ModesSnapshot
 {
     public required string ModesPath { get; init; }
-    public required string? McpSettingsPath { get; init; }
     public required DateTime LastWriteLocal { get; init; }
 
-    /// <summary>동시 수정 감지용. 읽은 뒤 파일이 바뀌었으면 저장을 거부한다.</summary>
+    /// <summary>modes.json 동시 수정 감지용. 읽은 뒤 파일이 바뀌었으면 저장을 거부한다.</summary>
     public required string Stamp { get; init; }
 
     public required JsonObject Root { get; init; }
     public required ModesFile Typed { get; init; }
-    public required List<AgentInfo> Agents { get; init; }
     public required bool HasComments { get; init; }
+
+    // ── MCP appsettings.json ──
+    public required string? McpSettingsPath { get; init; }
+    public required string SettingsStamp { get; init; }
+    public required JsonObject? SettingsRoot { get; init; }
+    public required bool SettingsHasComments { get; init; }
+    public required List<AgentInfo> Agents { get; init; }
+    public required List<string> ProviderNames { get; init; }
+    public required int DefaultMaxRunsPerSession { get; init; }
+
+    /// <summary>modes.json이 참조하지만 appsettings에 없는 에이전트 이름.</summary>
+    public IEnumerable<string> MissingAgents =>
+        Typed.Modes.Values.SelectMany(m => m.Steps).Select(s => s.Agent)
+            .Where(a => !Agents.Any(x => string.Equals(x.Name, a, StringComparison.OrdinalIgnoreCase)))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
 }
 
 /// <summary>
@@ -33,18 +47,27 @@ public sealed class ModesSnapshot
 /// </summary>
 public sealed record ModeEdit(string Mode, IReadOnlyList<string> StepAgents, IReadOnlyDictionary<string, string> Settings);
 
+/// <summary>에이전트 표의 한 줄. OriginalName이 비어 있으면 새 에이전트.</summary>
+public sealed record AgentEdit(string? OriginalName, string Name, string Provider, string Model, string MaxOutputTokens, bool Enabled, bool Delete);
+
 public sealed record SaveResult(List<string> Errors, List<string> Warnings)
 {
     public bool Ok => Errors.Count == 0;
+
+    /// <summary>저장 결과 안내 (예: 이름 변경을 모드에 반영한 개수).</summary>
+    public List<string> Notes { get; init; } = [];
+
+    public static SaveResult Fail(string error) => new([error], []);
 }
 
 public sealed class ModesConfigException(string message) : Exception(message);
 
 /// <summary>
-/// 대시보드의 모드 화면용: MCP 서버의 modes.json을 읽고, 검증하고, 안전하게 저장한다.
-/// 알지 못하는 필드(Roles 프롬프트, Sees, Description 등)를 잃지 않도록 JsonNode를 직접 고친다.
+/// 대시보드 설정 화면용: MCP 서버의 modes.json · appsettings.json을 읽고, 검증하고, 안전하게 저장한다.
+/// 알지 못하는 필드(Roles 프롬프트, Sees, Providers 등)를 잃지 않도록 JsonNode를 직접 고친다.
+/// MCP 서버는 두 파일이 바뀌면 다음 호출 때 스스로 다시 읽으므로 재시작이 필요 없다.
 /// </summary>
-public sealed class ModesConfigService(IOptions<DashboardOptions> options)
+public sealed partial class ModesConfigService(IOptions<DashboardOptions> options)
 {
     private const int BackupKeep = 10;
 
@@ -69,10 +92,25 @@ public sealed class ModesConfigService(IOptions<DashboardOptions> options)
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
+    [GeneratedRegex("^[A-Za-z0-9_-]{1,64}$")]
+    private static partial Regex AgentNameRegex();
+
     // ── 경로 ────────────────────────────────────────────────────────────────
 
     public string? McpConfigDir =>
         string.IsNullOrWhiteSpace(options.Value.McpConfigDir) ? null : Path.GetFullPath(options.Value.McpConfigDir);
+
+    /// <summary>publish 폴더의 서버 dll 수정 시각. 세션의 서버가 최신 빌드인지 비교할 때 쓴다.</summary>
+    public DateTimeOffset? CurrentServerBuild
+    {
+        get
+        {
+            var dir = McpConfigDir;
+            if (dir is null) return null;
+            var dll = Path.Combine(dir, "HB.Orchestration.Mcp.dll");
+            return File.Exists(dll) ? new DateTimeOffset(File.GetLastWriteTime(dll)) : null;
+        }
+    }
 
     private (string ModesPath, string? SettingsPath) ResolvePaths()
     {
@@ -113,6 +151,12 @@ public sealed class ModesConfigService(IOptions<DashboardOptions> options)
         return config.GetSection("Orchestration").Get<OrchestrationOptions>();
     }
 
+    private static string StampOf(string path)
+    {
+        var info = new FileInfo(path);
+        return $"{info.LastWriteTimeUtc.Ticks}:{info.Length}";
+    }
+
     // ── 읽기 ────────────────────────────────────────────────────────────────
 
     public ModesSnapshot Load()
@@ -134,23 +178,51 @@ public sealed class ModesConfigService(IOptions<DashboardOptions> options)
         }
 
         var agents = new List<AgentInfo>();
+        var providers = new List<string>();
+        var defaultRuns = new BudgetOptions().DefaultMaxRunsPerSession;
+        JsonObject? settingsRoot = null;
+        var settingsStamp = "";
+        var settingsHasComments = false;
+
         if (settingsPath is not null)
         {
-            foreach (var a in ReadMcpOptions(settingsPath)?.Agents ?? new List<AgentOptions>())
-                agents.Add(new AgentInfo(a.Name, a.Provider, a.Model, a.MaxOutputTokens, a.Enabled));
+            var settingsText = File.ReadAllText(settingsPath);
+            try
+            {
+                settingsRoot = JsonNode.Parse(settingsText, nodeOptions: null, documentOptions: DocOptions) as JsonObject;
+            }
+            catch (JsonException ex)
+            {
+                throw new ModesConfigException($"MCP appsettings.json 파싱 실패 (줄 {(ex.LineNumber ?? 0) + 1}): {ex.Message}");
+            }
+
+            settingsStamp = StampOf(settingsPath);
+            settingsHasComments = ContainsComments(settingsText);
+
+            if (ReadMcpOptions(settingsPath) is { } mcp)
+            {
+                foreach (var a in mcp.Agents)
+                    agents.Add(new AgentInfo(a.Name, a.Provider, a.Model, a.MaxOutputTokens, a.Enabled));
+                providers.AddRange(mcp.Providers.Keys.Order(StringComparer.OrdinalIgnoreCase));
+                defaultRuns = mcp.Budget.DefaultMaxRunsPerSession;
+            }
         }
 
-        var info = new FileInfo(modesPath);
         return new ModesSnapshot
         {
             ModesPath = modesPath,
-            McpSettingsPath = settingsPath,
-            LastWriteLocal = info.LastWriteTime,
-            Stamp = $"{info.LastWriteTimeUtc.Ticks}:{info.Length}",
+            LastWriteLocal = new FileInfo(modesPath).LastWriteTime,
+            Stamp = StampOf(modesPath),
             Root = root,
             Typed = typed,
-            Agents = agents,
             HasComments = ContainsComments(text),
+            McpSettingsPath = settingsPath,
+            SettingsStamp = settingsStamp,
+            SettingsRoot = settingsRoot,
+            SettingsHasComments = settingsHasComments,
+            Agents = agents,
+            ProviderNames = providers,
+            DefaultMaxRunsPerSession = defaultRuns,
         };
     }
 
@@ -173,13 +245,12 @@ public sealed class ModesConfigService(IOptions<DashboardOptions> options)
         return false;
     }
 
-    // ── 저장 ────────────────────────────────────────────────────────────────
+    // ── 모드 저장 ────────────────────────────────────────────────────────────
 
     public SaveResult Save(string expectedStamp, IReadOnlyList<ModeEdit> edits)
     {
         var snap = Load();
-        if (snap.Stamp != expectedStamp)
-            return new SaveResult(["이 화면을 연 뒤에 modes.json이 다른 곳에서 바뀌었습니다. '다시 불러오기' 후 다시 수정하세요."], []);
+        if (snap.Stamp != expectedStamp) return SaveResult.Fail(ChangedElsewhere);
 
         var modesObj = Child(snap.Root, "Modes") as JsonObject
                        ?? throw new ModesConfigException("modes.json에 Modes가 없습니다.");
@@ -211,13 +282,173 @@ public sealed class ModesConfigService(IOptions<DashboardOptions> options)
 
         if (inputErrors.Count > 0) return new SaveResult(inputErrors, []);
 
-        var json = snap.Root.ToJsonString(WriteOptions) + Environment.NewLine;
+        var json = Serialize(snap.Root);
         var result = Validate(json, snap.Agents);
         if (!result.Ok) return result;
 
-        WriteSafely(snap.ModesPath, json);
+        WriteSafely(snap.ModesPath, json, "modes-backup");
         return result;
     }
+
+    /// <summary>modes.json에서 from 에이전트를 쓰는 모든 단계를 to로 바꾼다.</summary>
+    public SaveResult ReplaceAgent(string expectedStamp, string from, string to)
+    {
+        var snap = Load();
+        if (snap.Stamp != expectedStamp) return SaveResult.Fail(ChangedElsewhere);
+        if (string.IsNullOrWhiteSpace(from) || string.IsNullOrWhiteSpace(to)) return SaveResult.Fail("바꿀 이름을 고르세요.");
+        if (!snap.Agents.Any(a => string.Equals(a.Name, to, StringComparison.OrdinalIgnoreCase)))
+            return SaveResult.Fail($"'{to}'은(는) appsettings.json에 없는 에이전트입니다.");
+
+        var count = RenameInModes(snap.Root, new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { [from] = to });
+        if (count == 0) return SaveResult.Fail($"'{from}'을(를) 쓰는 단계가 없습니다.");
+
+        var json = Serialize(snap.Root);
+        var result = Validate(json, snap.Agents);
+        if (!result.Ok) return result;
+
+        WriteSafely(snap.ModesPath, json, "modes-backup");
+        return result with { Notes = [$"'{from}' → '{to}' : {count}개 단계를 바꿨습니다."] };
+    }
+
+    // ── 에이전트 저장 (appsettings.json) ────────────────────────────────────────
+
+    /// <summary>
+    /// appsettings.json의 Agents를 표 내용으로 바꾼다. 이름을 바꾼 에이전트는 modes.json의 단계도 같이 바꾼다.
+    /// 모드가 쓰고 있는 에이전트는 삭제할 수 없다.
+    /// </summary>
+    public SaveResult SaveAgents(string expectedSettingsStamp, string expectedModesStamp, IReadOnlyList<AgentEdit> rows)
+    {
+        var snap = Load();
+        if (snap.McpSettingsPath is null || snap.SettingsRoot is null)
+            return SaveResult.Fail("MCP appsettings.json을 찾지 못했습니다. Dashboard:McpConfigDir를 확인하세요.");
+        if (snap.SettingsStamp != expectedSettingsStamp || snap.Stamp != expectedModesStamp)
+            return SaveResult.Fail(ChangedElsewhere);
+
+        var orch = Child(snap.SettingsRoot, "Orchestration") as JsonObject;
+        if (orch is null) return SaveResult.Fail("appsettings.json에 Orchestration 섹션이 없습니다.");
+
+        // 원래 항목을 이름으로 찾아 두면, 표에 없는 필드도 그대로 보존할 수 있다.
+        var originals = new Dictionary<string, JsonObject>(StringComparer.OrdinalIgnoreCase);
+        if (Child(orch, "Agents") is JsonArray oldArray)
+        {
+            foreach (var node in oldArray)
+                if (node is JsonObject o && Child(o, "Name")?.ToString() is { Length: > 0 } n)
+                    originals.TryAdd(n, o);
+        }
+
+        var errors = new List<string>();
+        var newArray = new JsonArray();
+        var finalAgents = new List<AgentInfo>();
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var renames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var deleted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var row in rows)
+        {
+            var original = row.OriginalName?.Trim() ?? "";
+            var name = row.Name.Trim();
+            var label = original.Length > 0 ? original : (name.Length > 0 ? name : "새 에이전트");
+
+            if (original.Length == 0 && name.Length == 0) continue; // 비워 둔 새 줄
+            if (row.Delete)
+            {
+                if (original.Length > 0) deleted.Add(original);
+                continue;
+            }
+
+            if (!AgentNameRegex().IsMatch(name))
+                errors.Add($"[{label}] 이름은 영문·숫자·_·- 만, 64자 이내로 쓸 수 있습니다.");
+            else if (!names.Add(name))
+                errors.Add($"[{label}] 이름 '{name}'이(가) 중복됩니다.");
+
+            if (!snap.ProviderNames.Contains(row.Provider, StringComparer.OrdinalIgnoreCase))
+                errors.Add($"[{label}] 제공사 '{row.Provider}'이(가) Providers에 없습니다.");
+
+            var model = row.Model.Trim();
+            if (model.Length == 0)
+                errors.Add($"[{label}] 모델 ID를 입력하세요.");
+
+            int? max = null;
+            if (!string.IsNullOrWhiteSpace(row.MaxOutputTokens))
+            {
+                if (int.TryParse(row.MaxOutputTokens.Trim(), out var m) && m > 0) max = m;
+                else errors.Add($"[{label}] 출력 상한은 1 이상의 숫자이거나 비워야 합니다.");
+            }
+
+            var obj = original.Length > 0 && originals.TryGetValue(original, out var source)
+                ? (JsonObject)source.DeepClone()
+                : new JsonObject();
+
+            obj[KeyOf(obj, "Name")] = JsonValue.Create(name);
+            obj[KeyOf(obj, "Provider")] = JsonValue.Create(row.Provider);
+            obj[KeyOf(obj, "Model")] = JsonValue.Create(model);
+            if (max is { } maxValue) obj[KeyOf(obj, "MaxOutputTokens")] = JsonValue.Create(maxValue);
+            else obj.Remove(KeyOf(obj, "MaxOutputTokens"));
+            if (row.Enabled) obj.Remove(KeyOf(obj, "Enabled"));      // 기본값 true는 적지 않는다
+            else obj[KeyOf(obj, "Enabled")] = JsonValue.Create(false);
+
+            newArray.Add(obj);
+            finalAgents.Add(new AgentInfo(name, row.Provider, model, max, row.Enabled));
+
+            if (original.Length > 0 && !string.Equals(original, name, StringComparison.Ordinal))
+                renames[original] = name;
+        }
+
+        // 삭제하려는 에이전트를 모드가 쓰고 있으면 막는다 (먼저 다른 에이전트로 바꾸게).
+        foreach (var (modeName, mode) in snap.Typed.Modes)
+            foreach (var step in mode.Steps.Where(s => deleted.Contains(s.Agent)))
+                errors.Add($"[{modeName}] '{step.Agent}'을(를) 쓰고 있어 삭제할 수 없습니다. 모드의 에이전트를 먼저 바꾸세요.");
+
+        if (errors.Count > 0) return new SaveResult(errors.Distinct().ToList(), []);
+
+        // 이름 변경을 modes.json에 반영
+        var renamedSteps = renames.Count > 0 ? RenameInModes(snap.Root, renames) : 0;
+        var modesJson = Serialize(snap.Root);
+        var result = Validate(modesJson, finalAgents);
+        if (!result.Ok) return result;
+
+        orch[KeyOf(orch, "Agents")] = newArray;
+        var settingsJson = Serialize(snap.SettingsRoot);
+
+        // appsettings를 먼저 쓴다. 이름 변경이 있으면 modes.json도 바로 이어서 쓴다.
+        WriteSafely(snap.McpSettingsPath, settingsJson, "settings-backup");
+        if (renamedSteps > 0) WriteSafely(snap.ModesPath, modesJson, "modes-backup");
+
+        var notes = new List<string>();
+        foreach (var (from, to) in renames)
+            notes.Add($"이름 변경 '{from}' → '{to}'");
+        if (renamedSteps > 0) notes.Add($"modes.json의 {renamedSteps}개 단계에도 새 이름을 반영했습니다.");
+        return result with { Notes = notes };
+    }
+
+    /// <summary>모든 모드의 단계에서 에이전트 이름을 바꾼다. 바꾼 단계 수를 돌려준다.</summary>
+    private static int RenameInModes(JsonObject root, IReadOnlyDictionary<string, string> renames)
+    {
+        if (Child(root, "Modes") is not JsonObject modes) return 0;
+
+        var count = 0;
+        foreach (var (_, modeNode) in modes)
+        {
+            if (modeNode is not JsonObject mode || Child(mode, "Steps") is not JsonArray steps) continue;
+            foreach (var stepNode in steps)
+            {
+                if (stepNode is not JsonObject step) continue;
+                var key = KeyOf(step, "Agent");
+                var current = step[key]?.ToString();
+                if (current is not null && renames.TryGetValue(current, out var to))
+                {
+                    step[key] = JsonValue.Create(to);
+                    count++;
+                }
+            }
+        }
+        return count;
+    }
+
+    // ── 검증 ────────────────────────────────────────────────────────────────
+
+    private const string ChangedElsewhere =
+        "이 화면을 연 뒤에 설정 파일이 다른 곳에서 바뀌었습니다. '다시 불러오기' 후 다시 수정하세요.";
 
     /// <summary>MCP 서버가 실행 시 거부할 설정을 저장 전에 걸러낸다.</summary>
     public static SaveResult Validate(string json, IReadOnlyList<AgentInfo> agents)
@@ -232,10 +463,12 @@ public sealed class ModesConfigService(IOptions<DashboardOptions> options)
         }
         catch (JsonException ex)
         {
-            return new SaveResult([$"JSON 형식 오류: {ex.Message}"], []);
+            return SaveResult.Fail($"JSON 형식 오류: {ex.Message}");
         }
 
-        var known = agents.ToDictionary(a => a.Name, StringComparer.OrdinalIgnoreCase);
+        var known = new Dictionary<string, AgentInfo>(StringComparer.OrdinalIgnoreCase);
+        foreach (var a in agents) known.TryAdd(a.Name, a);
+
         var roles = new HashSet<string>(file.Roles.Keys, StringComparer.OrdinalIgnoreCase);
         roles.UnionWith(Prompts.BuiltInRoles.Keys);
 
@@ -273,11 +506,15 @@ public sealed class ModesConfigService(IOptions<DashboardOptions> options)
         return new SaveResult(errors, warnings);
     }
 
+    // ── 파일 쓰기 ────────────────────────────────────────────────────────────
+
+    private static string Serialize(JsonObject root) => root.ToJsonString(WriteOptions) + Environment.NewLine;
+
     /// <summary>백업을 남기고, 임시 파일에 쓴 뒤 한 번에 교체한다 (MCP 서버가 읽는 도중이어도 반쯤 쓴 파일을 보지 않게).</summary>
-    private static void WriteSafely(string path, string json)
+    private static void WriteSafely(string path, string json, string backupFolderName)
     {
         var dir = Path.GetDirectoryName(path)!;
-        var backupDir = Path.Combine(dir, "modes-backup");
+        var backupDir = Path.Combine(dir, backupFolderName);
         Directory.CreateDirectory(backupDir);
         File.Copy(path, Path.Combine(backupDir, $"{Path.GetFileNameWithoutExtension(path)}-{DateTime.Now:yyyyMMdd-HHmmss}.json"), overwrite: true);
 

@@ -5,7 +5,7 @@ using ModelContextProtocol.Server;
 namespace HB.Orchestration.Mcp;
 
 /// <summary>
-/// MCP 도구는 이 두 개뿐이다. 모드를 추가·수정해도 도구 목록이 바뀌지 않으므로
+/// MCP 도구는 list_modes, run_mode와 확인용 server_info 셋뿐이다. 모드를 추가·수정해도 도구 목록이 바뀌지 않으므로
 /// modes.json만 고치면 재시작 없이 반영되고, Claude 컨텍스트에 올라가는 도구 설명도 최소로 유지된다.
 /// </summary>
 [McpServerToolType]
@@ -24,4 +24,8 @@ public sealed class ModeTools(ModeRunner modes)
         [Description("이번 실행만 에이전트 교체 (선택). 'from=to' 또는 '*=to'. 사용자가 다른 모델을 요청했을 때만 사용. 이름은 list_modes 참고.")] string[]? agents = null,
         CancellationToken cancellationToken = default)
         => modes.RunAsync(mode, input, files, agents, cancellationToken);
+
+    [McpServerTool(Name = "server_info")]
+    [Description("이 MCP 서버의 빌드 시각·PID·설정 로드 시각을 본다. 사용자가 서버 상태나 publish 반영 여부를 물을 때만 호출.")]
+    public string ServerInfo() => modes.ServerInfo();
 }

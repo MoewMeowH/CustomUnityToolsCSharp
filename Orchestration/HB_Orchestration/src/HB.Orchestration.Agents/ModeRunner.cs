@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Text;
 using HB.Orchestration.Shared;
 
@@ -9,10 +8,10 @@ namespace HB.Orchestration.Agents;
 /// MAF 내장 순차 워크플로는 대화 전체를 다음 에이전트에 넘기므로, 토큰을 아끼려고
 /// 단계마다 무엇을 넘길지(Sees)를 직접 제어하는 얇은 실행기를 둔다. 각 단계 자체는 MAF 에이전트다.
 /// </summary>
-public sealed class ModeRunner(OrchestrationOptions options, ModeStore store, AgentCatalog catalog, AgentRunner runner)
+public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunner runner, SessionTracker sessions)
 {
-    // MCP 서버 프로세스는 Claude Code 세션마다 하나라서, 메모리 카운터 = 세션당 실행 횟수.
-    private readonly ConcurrentDictionary<string, int> _runsThisSession = new(StringComparer.OrdinalIgnoreCase);
+    // 설정은 appsettings.json이 바뀌면 자동으로 다시 읽힌다 (AgentCatalog). 항상 최신 값을 쓰도록 매번 가져온다.
+    private OrchestrationOptions Options => catalog.Options;
 
     /// <param name="agentOverrides">
     /// 이번 실행에서만 에이전트를 바꾼다. "원래이름=새이름" 또는 "*=새이름"(모든 단계).
@@ -22,6 +21,8 @@ public sealed class ModeRunner(OrchestrationOptions options, ModeStore store, Ag
         string modeName, string input, IReadOnlyList<string>? files, IReadOnlyList<string>? agentOverrides, CancellationToken ct)
     {
         // ── 1. 실행 전 검증: 여기서 걸리면 토큰을 한 개도 쓰지 않는다 ──────────────
+        sessions.ApplyResets();
+
         ModeStore.Loaded loaded;
         try { loaded = store.Load(); }
         catch (ModeConfigException ex) { return $"[모드 설정 오류] {ex.Message}"; }
@@ -35,7 +36,7 @@ public sealed class ModeRunner(OrchestrationOptions options, ModeStore store, Ag
         if (mode.Flow == ModeFlow.Debate && mode.Steps.Count is not (2 or 3))
             return $"[모드 '{modeName}'] Debate는 Steps가 2개(토론자 둘) 또는 3개(+판정자)여야 합니다.";
 
-        var maxChars = mode.MaxInputChars ?? options.Budget.MaxInputChars;
+        var maxChars = mode.MaxInputChars ?? Options.Budget.MaxInputChars;
         if (maxChars > 0 && input.Length > maxChars)
             return $"[입력이 너무 깁니다] {input.Length:N0}자 / 상한 {maxChars:N0}자. " +
                    "변경된 부분과 꼭 필요한 주변 코드만 남겨 다시 호출하세요.";
@@ -46,7 +47,7 @@ public sealed class ModeRunner(OrchestrationOptions options, ModeStore store, Ag
         var (swap, swapError) = ParseOverrides(agentOverrides, mode);
         if (swapError is not null) return $"[모드 '{modeName}'] {swapError}";
 
-        var guidelines = GuidelinesLoader.Load(options);
+        var guidelines = GuidelinesLoader.Load(Options);
         var plan = new List<(StepDefinition Def, AgentEntry Agent, string Instructions)>();
         foreach (var step in mode.Steps)
         {
@@ -67,12 +68,10 @@ public sealed class ModeRunner(OrchestrationOptions options, ModeStore store, Ag
 
         // 세션당 실행 한도: 검증을 다 통과한 실행만 센다 (설정 오류로 거절된 호출은 횟수에 안 들어감).
         var limit = RunLimit(mode);
-        var count = _runsThisSession.AddOrUpdate(modeName, 1, (_, n) => n + 1);
-        if (limit > 0 && count > limit)
+        if (!sessions.TryReserve(modeName, limit))
         {
-            _runsThisSession.AddOrUpdate(modeName, 0, (_, n) => n - 1);
             return $"[이 세션의 '{modeName}' 실행 한도 도달] {limit}회. 외부 에이전트 없이 진행하세요. " +
-                   "더 필요하면 사용자가 modes.json의 MaxRunsPerSession을 올리거나 Claude Code를 새 세션으로 시작할 수 있습니다.";
+                   "더 필요하면 사용자가 대시보드 '세션' 화면에서 이 세션의 횟수를 초기화하거나 modes.json의 MaxRunsPerSession을 올릴 수 있습니다.";
         }
 
         // ── 2. 실행 ──────────────────────────────────────────────────────────
@@ -262,16 +261,16 @@ public sealed class ModeRunner(OrchestrationOptions options, ModeStore store, Ag
         return (map, null);
     }
 
-    private int RunLimit(ModeDefinition mode) => mode.MaxRunsPerSession ?? options.Budget.DefaultMaxRunsPerSession;
+    private int RunLimit(ModeDefinition mode) => mode.MaxRunsPerSession ?? Options.Budget.DefaultMaxRunsPerSession;
 
     /// <summary>오늘 쓴 토큰이 상한을 넘었으면 메시지, 아니면 null.</summary>
     private string? CheckBudget()
     {
-        var limit = options.Budget.DailyTokenLimit;
+        var limit = Options.Budget.DailyTokenLimit;
         if (limit <= 0) return null;
 
         var today = DateOnly.FromDateTime(DateTime.Now);
-        var free = new HashSet<string>(options.Budget.FreeProviders, StringComparer.OrdinalIgnoreCase);
+        var free = new HashSet<string>(Options.Budget.FreeProviders, StringComparer.OrdinalIgnoreCase);
         var used = CallLog.ReadAll()
             .Where(c => DateOnly.FromDateTime(c.Timestamp.LocalDateTime) == today)
             .Where(c => c.Provider is null || !free.Contains(c.Provider))
@@ -285,18 +284,22 @@ public sealed class ModeRunner(OrchestrationOptions options, ModeStore store, Ag
     /// <summary>list_modes용 요약. 짧게 유지할수록 Claude 쪽 토큰 절약.</summary>
     public string Describe()
     {
+        sessions.ApplyResets();
+
         ModeStore.Loaded loaded;
         try { loaded = store.Load(); }
         catch (ModeConfigException ex) { return $"[모드 설정 오류] {ex.Message}"; }
 
         var sb = new StringBuilder();
+        if (catalog.ReloadError is { } reloadError)
+            sb.AppendLine($"[주의] appsettings.json 다시 읽기 실패, 이전 설정으로 동작 중: {reloadError}");
         foreach (var (name, mode) in loaded.File.Modes)
         {
             var arrow = mode.Flow switch { ModeFlow.Concurrent => " | ", ModeFlow.Debate => " ⇄ ", _ => " → " };
             var steps = string.Join(arrow, mode.Steps.Select(s =>
                 catalog.TryGet(s.Agent, out _) ? $"{s.Role}@{s.Agent}" : $"{s.Role}@{s.Agent}(사용불가)"));
             var limit = RunLimit(mode);
-            var used = _runsThisSession.TryGetValue(name, out var n) ? n : 0;
+            var used = sessions.Get(name);
             var quota = limit > 0 ? $" (남은 실행 {Math.Max(0, limit - used)}/{limit})" : "";
             var rounds = mode.Flow == ModeFlow.Debate ? $" 최대 {Math.Clamp(mode.MaxRounds ?? 2, 1, ModeDefinition.MaxRoundsHardCap)}회차" : "";
             sb.AppendLine($"- {name}: {mode.Description} [{steps}]{rounds}{quota}");
@@ -305,6 +308,19 @@ public sealed class ModeRunner(OrchestrationOptions options, ModeStore store, Ag
 
         // run_mode의 agents 교체에 쓸 수 있는 이름 목록 (짧게)
         sb.AppendLine("에이전트: " + string.Join(", ", catalog.Agents.Select(a => $"{a.Name}({a.Model})")));
+        return sb.ToString().TrimEnd();
+    }
+
+    /// <summary>server_info용: publish 후 새 서버가 떴는지, 설정이 언제 읽혔는지 확인.</summary>
+    public string ServerInfo()
+    {
+        sessions.ApplyResets();
+        var sb = new StringBuilder();
+        sb.AppendLine($"서버 빌드: {(sessions.ServerBuild?.ToString("yyyy-MM-dd HH:mm:ss") ?? "알 수 없음")}");
+        sb.AppendLine($"PID: {sessions.Pid} (시작 {sessions.StartedAt:yyyy-MM-dd HH:mm:ss})");
+        sb.AppendLine($"설정 읽은 시각: {catalog.LoadedAt:yyyy-MM-dd HH:mm:ss} · 사용 가능 에이전트 {catalog.Agents.Count}개");
+        if (catalog.ReloadError is { } err) sb.AppendLine($"설정 재로드 실패: {err}");
+        sb.AppendLine($"modes.json: {(store.ResolvePath() ?? "없음")}");
         return sb.ToString().TrimEnd();
     }
 }

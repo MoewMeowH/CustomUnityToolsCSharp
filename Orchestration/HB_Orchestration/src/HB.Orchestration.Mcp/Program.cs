@@ -18,8 +18,15 @@ var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
 
-var options = builder.Configuration.GetSection("Orchestration").Get<OrchestrationOptions>() ?? new();
-builder.Services.AddSingleton(options);
+// 설정은 고정값으로 넣지 않고 "읽는 방법"을 넘긴다. appsettings.json이 바뀌면 AgentCatalog가 다시 읽는다.
+var configuration = builder.Configuration;
+builder.Services.AddSingleton(new OrchestrationSource(
+    Load: () =>
+    {
+        ((IConfigurationRoot)configuration).Reload();
+        return configuration.GetSection("Orchestration").Get<OrchestrationOptions>() ?? new();
+    },
+    SettingsPath: Path.Combine(AppContext.BaseDirectory, "appsettings.json")));
 
 // 제공사 구현. 전용 SDK가 필요한 제공사가 생기면 여기에 추가.
 builder.Services.AddSingleton<IChatClientProvider, OpenAICompatibleProvider>();
@@ -27,6 +34,7 @@ builder.Services.AddSingleton<IChatClientProvider, OpenAICompatibleProvider>();
 builder.Services.AddSingleton<AgentCatalog>();
 builder.Services.AddSingleton<AgentRunner>();
 builder.Services.AddSingleton<ModeStore>();
+builder.Services.AddSingleton<SessionTracker>();
 builder.Services.AddSingleton<ModeRunner>();
 
 builder.Services
@@ -38,5 +46,9 @@ var app = builder.Build();
 
 // 에이전트 설정 오류를 첫 호출이 아니라 시작 시점 로그에서 바로 보이도록 미리 만든다.
 app.Services.GetRequiredService<AgentCatalog>();
+
+// 세션 상태 파일을 시작하자마자 남기고(대시보드 '세션' 화면), 정상 종료 때 지운다.
+var sessions = app.Services.GetRequiredService<SessionTracker>();
+app.Services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping.Register(sessions.Remove);
 
 await app.RunAsync();
