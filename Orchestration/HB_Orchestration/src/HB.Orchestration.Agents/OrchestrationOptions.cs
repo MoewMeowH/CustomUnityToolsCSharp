@@ -110,6 +110,31 @@ public sealed class ContextOptions
     ];
 
     public IEnumerable<string> AllDenyPatterns => BuiltInDenyPatterns.Concat(DenyPatterns);
+
+    /// <summary>
+    /// 프로젝트 루트 밖에서 context로 읽을 수 있는 추가 루트 (이름 → 절대 경로). 기본은 비어 있음 = 기존 동작.
+    /// context에서 "@이름/상대경로"로 지정한다. 루트마다 같은 검사(루트 밖·링크·DenyPatterns)를 적용하고, 읽기 전용이다
+    /// (save_result는 추가 루트에 쓰지 않음). 이름은 대소문자를 구분하지 않는다 — 설정 시스템이 키를 대소문자 무시로 다루므로.
+    /// 잘못된 항목은 list_modes에 경고로만 보이고, 그 루트를 참조한 호출만 거절된다.
+    /// </summary>
+    public Dictionary<string, string> ExtraRoots { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public static bool IsValidExtraRootName(string name) =>
+        name.Length is >= 2 and <= 32 && name.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-');
+
+    /// <summary>이름으로 추가 루트를 찾는다 (대소문자 무시). key는 설정에 적힌 이름.</summary>
+    public bool TryGetExtraRoot(string name, out string key, out string path)
+    {
+        foreach (var (k, v) in ExtraRoots)
+        {
+            if (!string.Equals(k, name, StringComparison.OrdinalIgnoreCase)) continue;
+            key = k;
+            path = v;
+            return true;
+        }
+        key = path = "";
+        return false;
+    }
 }
 
 public sealed class ProviderOptions

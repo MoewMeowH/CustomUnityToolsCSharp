@@ -24,6 +24,11 @@ public static class ResultSaver
         if (step < 1) return "[저장 불가] step은 1부터입니다.";
         if (codeBlock is < 1) return "[저장 불가] codeBlock은 1부터입니다.";
 
+        // 추가 루트(ExtraRoots)는 context 읽기 전용이다. 쓰기는 기록의 프로젝트 폴더로만 (등록 여부와 관계없이 거절:
+        // 메인 루트에 "@이름" 폴더를 실수로 만들지 않도록).
+        if (path?.TrimStart().StartsWith('@') == true)
+            return $"[저장 불가] '{path}': 추가 루트(@이름)에는 쓸 수 없습니다. 프로젝트 루트 기준 경로를 쓰세요.";
+
         // ── 기록 찾기: 같은 단계의 시도가 여럿이면 성공한 시도 ─────────────────
         List<CallRecord> attempts;
         try

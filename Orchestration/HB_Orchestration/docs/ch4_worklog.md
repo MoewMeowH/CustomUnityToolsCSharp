@@ -503,3 +503,131 @@ R2(ModeRunner 결과 조립)는 단위 테스트가 없다. ModeRunner가 설정
 | 2-2 | `00b061adf8` | $0.0312 |
 | 2-3 | `1133a77981` | $0.0369 |
 | **합계** | | **$0.0681 (약 ₩94)** |
+
+---
+
+## 4장 마무리
+
+### 1. 허용 루트 추가 (`Context.ExtraRoots`) — 작업 로그 2-2의 근본 해결 후보 B
+
+**배경:** 2-2·2-3에서 오케스트레이션 저장소의 코드를 리뷰받으려다 `context` 루트 제한에 막혀, Unity 프로젝트 안으로 복사해 우회했다. 복사본은 원본과 어긋날 위험이 있고, 그래서 매번 해시를 확인하는 비용이 들었다.
+
+#### 바꾼 것
+
+| 파일 | 내용 |
+|---|---|
+| `OrchestrationOptions.cs` (`ContextOptions`) | `ExtraRoots` (이름 → 절대 경로, 기본 비어 있음, 대소문자 무시 사전), `IsValidExtraRootName`, `TryGetExtraRoot`(설정에 적힌 이름을 돌려줌) |
+| `ContextLoader.cs` | `@이름/상대경로`이고 등록된 이름이면 그 루트 기준으로 `SafePath.Resolve`. 등록 값 검사는 참조할 때만(`ExtraRootProblem`). 첨부 제목과 출처는 `@이름/…`. `Result.Roots`에 실제로 쓴 루트 |
+| `AgentRunner.cs` / `Shared/CallRecord.cs` | `CallMeta.ContextRoots` → `CallRecord.ContextRoots`. `[JsonIgnore(WhenWritingNull)]`로 쓰지 않은 호출은 필드 생략 |
+| `ModeRunner.cs` | `list_modes` 마지막 줄 `추가 루트(context 읽기 전용): @이름` (등록이 있을 때만, 이름만). 잘못된 항목은 `[주의]` 줄 |
+| `ResultSaver.cs` | `@`로 시작하는 경로는 등록 여부와 관계없이 `[저장 불가] … 추가 루트(@이름)에는 쓸 수 없습니다` |
+| 대시보드 `FileLinks.cs`, `Call.cshtml.cs` | 기록의 `ContextRoots`로 `@이름/…` 링크를 실제 파일로 연결 |
+| README | 설정 표 행, "추가 루트" 절, save_result 절에 쓰기 금지 |
+
+#### 결정과 이유
+
+| 결정 | 이유 | 버린 대안 |
+|---|---|---|
+| **경로 지정은 `@이름/상대경로`** | 기존 `path:line`·`path:start-end` 표기, Windows 드라이브 표기(`C:`)와 겹치지 않는다. 도구 스키마를 늘리지 않는다 | `이름:경로` (콜론 표기와 충돌), `ContextRange.root` 필드 (도구 설명이 지휘자 컨텍스트에 늘 올라감) |
+| **등록되지 않은 `@이름`은 메인 루트 기준 상대 경로** | ExtraRoots가 비어 있으면 모든 입력이 기존과 똑같이 처리된다 ("비어 있으면 지금과 똑같이") | `@`로 시작하면 무조건 오류 (기존 동작이 바뀜) |
+| **루트별 검사는 기존 `SafePath.Resolve`를 그대로** | 메인 루트와 같은 규칙(루트 밖·절대 경로·링크·DenyPatterns)을 코드 하나로 보장한다 | — |
+| **등록 값은 참조할 때만 검사, 잘못된 항목은 `list_modes`에 경고만** (사용자 지시) | 쓰지도 않는 항목 하나가 깨졌다고 모든 호출이 막히면, 부가 기능의 실패가 주 기능을 막게 된다 (2장 원칙) | 설정을 읽을 때 전체 검증 후 거절 |
+| **이름은 대소문자 무시, 표시는 설정에 적힌 이름** (사용자 지시로 결정) | .NET 설정 시스템이 키를 대소문자 무시로 다룬다 (`"orch"`와 `"ORCH"`는 같은 키). 구분하게 만들 수 없으니 그 동작을 명시하고 테스트로 고정했다 | 대소문자 구분 (설정 계층에서 불가능) |
+| **에이전트에게는 `@이름/…`만** | 로컬 절대 경로(사용자 이름, 폴더 구조)를 외부 제공사로 보내지 않는다 | 절대 경로 표시 |
+| **기록에는 `ContextRoots`(이름 → 절대 경로)를 쓴 호출에만** (사용자 지시: 안 쓰면 생략) | 나중에 설정을 비우거나 바꿔도 그 기록이 어디서 읽었는지 알 수 있다. 쓰지 않은 호출의 기록은 기존과 같은 모양이다 | 매 기록에 빈 객체 (기록 모양이 바뀜) |
+| **읽기 전용 — `save_result`는 `@` 경로를 거절** (사용자 의견과 일치) | 쓰기는 다른 저장소를 바꿀 수 있어 실수의 피해가 크다. save_result의 "저장 위치를 세션 프로젝트로 고정"이라는 목적과도 맞지 않는다. 등록되지 않은 `@이름`도 거절해, 메인 루트에 `@orch` 폴더를 실수로 만드는 일을 막는다 | 쓰기 허용 |
+| **루트 자체가 junction이면 허용** | 2-3 review R2 기각과 같은 근거다. 루트는 사용자가 등록한 폴더라서, 그것이 링크면 그 대상이 곧 의도한 저장소다 | — |
+
+#### 테스트 (`ExtraRootsTests` 15건 추가, 전체 82건 통과)
+
+| 사용자 요구 | 테스트 |
+|---|---|
+| 비어 있을 때 기존 동작 유지 | `Empty_KeepsExistingOutput`: 첨부 텍스트가 기존 형식 문자열과 정확히 같음, Roots null. `Empty_AtPrefix_IsPlainPathAsBefore` |
+| 등록은 있으나 기존 경로만 쓰는 경우 바이트 동일 | `Registered_ButOnlyMainPaths_IsByteIdentical`: 빈 설정 결과와 UTF-8 바이트 비교 |
+| 쓰지 않는 등록 항목이 깨져 있어도 정상 실행 | `BrokenUnusedEntries_DoNotBlockOtherCalls`: 없는 폴더·상대 경로·이름 규칙 위반을 등록해 두고 메인 경로 → 정상, 텍스트 동일 |
+| 등록한 루트 안 정상 경로 성공 | `RegisteredRoot_ReadsFile_AndHidesAbsolutePath`: 출처 `@orch/src/B.cs:1-2`, 텍스트에 절대 경로 없음, Roots 기록 |
+| 등록한 루트 밖 거절 | `RegisteredRoot_OutsideIsRejected` (`@orch/../…`) |
+| 링크 경유 거절 | `RegisteredRoot_LinkIsRejected`: `mklink /J`로 실제 junction을 만들어 확인 |
+| (추가) DenyPatterns | `@orch/.env` 거절 |
+| (추가) 참조한 깨진 루트 | 상대 경로 / 없는 폴더 → `ExtraRoots 'orch' — …` |
+| 대소문자 처리 | `RootName_IsCaseInsensitive_AndShownAsRegistered` (`@ORCH/` → `@Orch/`), `Binding_KeepsCaseInsensitiveLookup` (실제 `ConfigurationBuilder` 바인딩) |
+| `@` 안 쓰면 ContextRoots 생략 | `ContextRoots_IsOmitted_WhenNotUsed`: 기록 줄에 `contextRoots` 문자열 자체가 없음 |
+| 읽기 전용 | `SaveResult_RejectsExtraRootPaths` (등록·미등록 모두), 폴더도 생성되지 않음 |
+
+#### review (gpt_main_sol, run `315c6d6108`) — 복사 없이 `@orch/…`로 넘긴 첫 리뷰
+
+- 사용량: 입력 5,414(캐시 1,093) / 출력 643, 23.1초, **$0.0152**
+- context 4개 범위(ContextLoader 전체, ContextOptions, ResultSaver 거절부, list_modes 표시부) 229줄
+
+**먼저 완성한 Claude의 자체 검토**
+
+| ID | 내용 | 처리 |
+|---|---|---|
+| C1 | 이름이 등록되면 메인 루트의 실제 `@이름` 폴더에는 닿을 수 없음 | 유지. `@`로 시작하는 폴더 이름은 드물다. README에 "등록되지 않은 이름만 기존 동작"으로 명시 |
+| C2 | calls.jsonl에 추가 루트 절대 경로가 남음 | 유지. 로컬 기록이고 외부로 보내지 않는다. 출처를 추적하려면 필요하다 |
+| C3 | list_modes에 이름 규칙을 위반한 항목도 `@x`로 표시됨 | 유지. 바로 아래 `[주의]` 줄이 원인을 알려준다 |
+
+**에이전트 지적**
+
+| # | 지적 | 판정 | 이유 |
+|---|---|---|---|
+| R1 (major) | 읽기 실패 시 `ex.Message`(예: FileNotFoundException의 전체 경로)가 `[첨부 코드 오류]` 응답에 들어가 로컬 경로가 노출됨 | **기각** | 이 오류는 외부 에이전트를 부르기 **전에** 지휘자(로컬 Claude)에게만 반환된다 (`ModeRunner`: context 오류면 즉시 반환). 요구사항은 "**에이전트에게 보내는** 텍스트에 절대 경로를 넣지 않는다"였다. 메인 루트도 같은 메시지 형식을 쓴다. 지적이 "응답"의 대상을 외부 에이전트로 오해한 것으로 판단했다 |
+
+공통 지적과 의견 충돌은 없었다.
+
+#### 실제 확인
+
+| 항목 | 결과 | 판정 |
+|---|---|---|
+| publish | 빌드 20:04:34. 이번에는 이 세션의 서버(PID 3548) 하나만 떠 있어 다른 세션 영향 없음. 실제 설정 두 파일은 publish 전후 해시 동일 | — |
+| 설정 추가 | 실제 설정에 `Context` 절을 새로 넣음 (원래 없었음, 기본값으로 동작 중이었음). 재시작 없이 다음 `list_modes`부터 `추가 루트(context 읽기 전용): @orch` 표시, 경로는 표시하지 않음 | 통과 |
+| 복사 없이 review | `@orch/…` 4개 범위로 review 1회 성공 | 통과 |
+| 첨부 = 원본 | calls.jsonl Prompt의 첨부 229줄을 오케스트레이션 저장소 원본과 줄 단위 비교 → 불일치 0 | 통과 |
+| **에이전트 입력에 로컬 절대 경로 없음** (사용자 추가 요구) | Prompt에서 `ToolWithCS`, `F:/AI`, `F:\AI`, `C:/Users`, `C:\Users`, `:\`, `:/` 모두 없음 | 통과 |
+| ContextRoots 기록 | 해당 기록에 `{"orch": "F:\AI\ToolWithCS\Orchestration\HB_Orchestration"}`. calls.jsonl 41줄 중 이 필드가 있는 줄은 이 1줄뿐 | 통과 |
+| **설정을 비운 뒤 list_modes가 이전과 같음** (사용자 추가 요구) | 설정을 백업으로 되돌린 뒤(`ExtraRoots` 0건) 출력을 두 기준과 diff. ① 이전 빌드(ExtraRoots 기능 없음)의 출력 ② 새 빌드에서 설정을 넣기 전 출력. 두 경우 모두 **남은 실행 횟수만 다르고 나머지는 동일** (`추가 루트` 줄 없음). 횟수 차이는 그 사이에 실행한 review와 서버 재시작 때문이다 | 통과 |
+
+**예상과 달랐던 것**
+- 실제 설정(`Publish_Output/appsettings.json`)에 `Context` 절이 아예 없었다. 지금까지 `MaxRanges` 등이 모두 코드 기본값으로 동작하고 있었다. ExtraRoots를 넣으려고 절을 새로 만들었고, 비울 때는 절째 원래 파일로 되돌렸다.
+- 테스트의 설정 JSON을 C# 원시 문자열 보간으로 쓰다가 중괄호 개수 규칙(CS9007)에 두 번 막혔다. 직렬화로 만드는 방식으로 바꿨다.
+
+### 2. 규칙서 하나로 맞추기
+
+#### 결정
+
+**`project-files/CLAUDE.md`를 원본으로 하고, Unity 프로젝트의 `CLAUDE.md`는 복사본으로 둔다 (사용자 결정).** 이번 통일의 기준은 실제로 MCP를 연결해 쓰는 Unity 쪽 내용이었고, 통일한 뒤에는 원본 방향을 배포용으로 정했다. 규칙을 고칠 때는 원본을 고친 뒤 복사한다. README 5절에도 같은 내용을 적었다.
+
+#### 통일 전 차이 (diff)
+
+| 차이 | 내용 |
+|---|---|
+| Unity에만 있던 절 | "에이전트(모델) 교체", "프로젝트 루트 밖의 코드를 리뷰할 때" |
+| 표기 | 배포용은 번호 목록이 `1\.` |
+| 줄바꿈 | 배포용 CRLF, Unity LF |
+
+나머지 본문은 같았다.
+
+#### 기준 파일에서 고친 것 (사용자 승인)
+
+1. **절 위치:** 위 두 절이 `## Unity 공식 문서 참조` 아래 `###`로 붙어 있었다. 둘 다 외부 에이전트 규칙이라 `## 외부 에이전트` 아래로 옮겼다. "루트 밖 리뷰"는 context 규칙 바로 뒤, "에이전트 교체"는 "결과 저장" 뒤에 두었다.
+2. **이스케이프 잔재:** `` `run\\_mode` ``, `` `list\\_modes` ``, `` `\\[...]` ``, research 예시의 `\\n\\[1]` 등을 지웠다. 코드 스팬 안에서는 백슬래시가 그대로 보이기 때문이다.
+   - **첫 줄의 `@REVIEW\_GUIDELINES.md`도 같은 잔재였다.** 이 세션 시작 때 Claude Code가 불러온 지침에 그 줄은 있었지만, REVIEW_GUIDELINES.md의 내용은 없었다. 그래서 **리뷰 지침이 지휘자 컨텍스트에 들어오지 않고 있었던 것으로 추정**한다. `@REVIEW_GUIDELINES.md`로 고쳤다. 다음 세션에서 지침 내용이 실제로 불러와지는지 확인이 필요하다.
+3. 번호 목록은 `1.`, 줄바꿈은 LF (사용자 지시). 들여쓰기가 어긋나 목록 밖으로 빠지던 줄(Unity 테스트 순서 1·2번의 이어지는 줄)도 맞췄다.
+4. "에이전트(모델) 교체"의 "이름은 `list_modes` **마지막 줄** 참고"를 "**`에이전트:` 줄** 참고"로 바꿨다. ExtraRoots가 등록되면 마지막 줄이 `추가 루트:`가 되기 때문이다.
+5. "루트 밖 리뷰" 절을 ExtraRoots 사용법 중심으로 고쳤다. 복사 절차는 "ExtraRoots를 쓸 수 없을 때"의 대안으로 남기고, `review_tmp/`를 "프로젝트마다 `.gitignore`에 등록"하라는 문구를 더했다.
+
+#### Unity 프로젝트에만 해당하는 내용 (사용자에게 보고)
+
+`project-files/`는 Unity 프로젝트에 복사해 쓰는 템플릿이라 "Unity 테스트"와 "Unity 공식 문서" 절은 원래 양쪽에 다 있다. "이 Unity 프로젝트(ToolCreate)에만 해당"하는 것은 복사 절차가 전제하는 `review_tmp/`의 `.gitignore` 등록 하나다. 이 프로젝트에만 등록돼 있어서, 원본 문구를 "프로젝트마다 등록"으로 바꿔 일반화했다.
+
+#### 결과
+
+- 두 파일의 SHA-256이 같다 (`e9208966…`). CR 0개 (LF).
+- 저장소의 `core.autocrlf=true`가 체크아웃 때 CRLF로 바꾸지 않도록 `.gitattributes`에 `project-files/CLAUDE.md text eol=lf`를 추가했다 (`git ls-files --eol`: `i/lf w/lf`).
+- Unity 쪽 `CLAUDE.md`는 Unity 저장소에서 미추적(`??`) 파일이라 커밋할 대상이 없다.
+
+### 4장 마무리 비용
+
+| 항목 | 비용 |
+|---|---|
+| ExtraRoots review (`315c6d6108`) | $0.0152 |

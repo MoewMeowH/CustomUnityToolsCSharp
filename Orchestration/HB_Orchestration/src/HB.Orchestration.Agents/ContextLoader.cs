@@ -2,7 +2,10 @@ using System.Text;
 
 namespace HB.Orchestration.Agents;
 
-/// <summary>run_mode의 context 항목 하나: 프로젝트 루트 기준 파일의 줄 범위 (1부터, 끝 줄 포함).</summary>
+/// <summary>
+/// run_mode의 context 항목 하나: 프로젝트 루트 기준 파일의 줄 범위 (1부터, 끝 줄 포함).
+/// Path가 "@이름/상대경로"이고 이름이 Context.ExtraRoots에 등록돼 있으면 그 추가 루트 기준이다.
+/// </summary>
 public sealed record ContextRange(string Path, int StartLine, int EndLine)
 {
     public override string ToString() => $"{Path}:{StartLine}-{EndLine}";
@@ -15,7 +18,8 @@ public sealed record ContextRange(string Path, int StartLine, int EndLine)
 /// </summary>
 public static class ContextLoader
 {
-    public sealed record Result(string Text, IReadOnlyList<string> Sources);
+    /// <param name="Roots">이번 호출에서 실제로 쓴 추가 루트 (설정의 이름 → 절대 경로). '@'를 쓰지 않았으면 null.</param>
+    public sealed record Result(string Text, IReadOnlyList<string> Sources, IReadOnlyDictionary<string, string>? Roots = null);
 
     /// <returns>붙일 텍스트와 출처 목록, 또는 오류 메시지. context가 비었으면 빈 결과.</returns>
     public static (Result? Result, string? Error) Load(
@@ -30,6 +34,7 @@ public static class ContextLoader
         var sb = new StringBuilder();
         sb.AppendLine().AppendLine("## 첨부 코드 (서버가 디스크에서 읽음, 줄 번호 포함)");
         var sources = new List<string>(ranges.Count);
+        Dictionary<string, string>? usedRoots = null;
 
         foreach (var range in ranges)
         {
@@ -39,24 +44,62 @@ public static class ContextLoader
             if (range.StartLine < 1 || range.EndLine < range.StartLine)
                 return (null, $"'{range}': 줄 범위가 잘못됐습니다 (1 ≤ startLine ≤ endLine).");
 
+            // "@이름/…"이고 등록된 이름이면 그 추가 루트, 아니면 메인 루트 (ExtraRoots가 비어 있으면 항상 기존 동작).
+            // 등록 값 검사는 여기서, 이번 호출이 참조한 루트만 한다 (안 쓰는 항목이 깨져 있어도 다른 호출을 막지 않음).
+            var shown = range;
+            var relative = range.Path;
+            var rangeRoot = root;
+            if (TrySplitRootPrefix(range.Path, out var name, out var rest) && options.TryGetExtraRoot(name, out var key, out var rootPath))
+            {
+                if (ExtraRootProblem(key, rootPath) is { } problem) return (null, $"'{range.Path}': ExtraRoots '{key}' — {problem}");
+                rangeRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath));
+                relative = rest;
+                // 에이전트에게는 이름만 보낸다 (로컬 절대 경로는 외부로 보내지 않음).
+                shown = range with { Path = $"@{key}/{rest.Replace('\\', '/')}" };
+                (usedRoots ??= new(StringComparer.OrdinalIgnoreCase))[key] = rangeRoot;
+            }
+
             // 편집·빌드 중 잠김, 권한, 삭제 같은 파일 시스템 오류도 예외가 아니라 첨부 오류로 돌려준다.
             string? error;
-            try { error = AppendRange(sb, range, root, options, maxChars, ct); }
+            try { error = AppendRange(sb, shown, relative, rangeRoot, options, maxChars, ct); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            { error = $"'{range.Path}': 읽기 실패 ({ex.GetType().Name}: {ex.Message})"; }
+            { error = $"'{shown.Path}': 읽기 실패 ({ex.GetType().Name}: {ex.Message})"; }
 
             if (error is not null) return (null, error);
-            sources.Add(range.ToString());
+            sources.Add(shown.ToString());
         }
 
-        return (new Result(sb.ToString(), sources), null);
+        return (new Result(sb.ToString(), sources, usedRoots), null);
+    }
+
+    /// <summary>"@이름/나머지"를 나눈다. '@' 뒤에 이름과 구분자('/' 또는 '\')가 있어야 한다.</summary>
+    public static bool TrySplitRootPrefix(string? path, out string name, out string rest)
+    {
+        name = rest = "";
+        if (path is null || path.Length < 3 || path[0] != '@') return false;
+        var sep = path.IndexOfAny(['/', '\\']);
+        if (sep < 2) return false;
+        name = path[1..sep];
+        rest = path[(sep + 1)..];
+        return true;
+    }
+
+    /// <summary>추가 루트 등록 값의 문제. 없으면 null. list_modes 경고와 참조 시점 검사에 같이 쓴다.</summary>
+    public static string? ExtraRootProblem(string name, string? rootPath)
+    {
+        if (!ContextOptions.IsValidExtraRootName(name)) return "이름은 영문·숫자·_·- 2~32자만 쓸 수 있습니다.";
+        if (string.IsNullOrWhiteSpace(rootPath) || !Path.IsPathFullyQualified(rootPath)) return "절대 경로가 아닙니다.";
+        if (!Directory.Exists(rootPath)) return "폴더가 없습니다.";
+        return null;
     }
 
     /// <returns>오류 메시지, 성공이면 null.</returns>
+    /// <param name="range">표시용 (제목·오류 메시지). 추가 루트면 Path가 "@이름/…".</param>
+    /// <param name="relative">root 기준 상대 경로.</param>
     private static string? AppendRange(
-        StringBuilder sb, ContextRange range, string root, ContextOptions options, int maxChars, CancellationToken ct)
+        StringBuilder sb, ContextRange range, string relative, string root, ContextOptions options, int maxChars, CancellationToken ct)
     {
-        var (full, pathError) = SafePath.Resolve(range.Path, root, options.AllDenyPatterns, SafePath.Access.Read);
+        var (full, pathError) = SafePath.Resolve(relative, root, options.AllDenyPatterns, SafePath.Access.Read);
         if (pathError is not null) return $"'{range.Path}': {pathError}";
 
         // Unity·IDE가 연 파일도 읽도록 공유 모드를 넓힌다. 크기는 연 핸들 기준으로 본다.

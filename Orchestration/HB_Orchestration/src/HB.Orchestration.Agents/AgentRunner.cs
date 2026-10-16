@@ -6,7 +6,11 @@ using Microsoft.Extensions.Logging;
 namespace HB.Orchestration.Agents;
 
 /// <summary>기록용 정보. Files는 에이전트에 안 보내는 링크, Context는 실제로 첨부한 코드 범위.</summary>
-public sealed record CallMeta(IReadOnlyList<string>? Files, IReadOnlyList<string> Context);
+public sealed record CallMeta(IReadOnlyList<string>? Files, IReadOnlyList<string> Context)
+{
+    /// <summary>context가 실제로 읽은 추가 루트. 쓰지 않았으면 null (기록에서 필드 생략).</summary>
+    public IReadOnlyDictionary<string, string>? ContextRoots { get; init; }
+}
 
 /// <summary>모드의 한 단계 실행 정보.</summary>
 public sealed record StepCall(
@@ -218,6 +222,7 @@ public sealed class AgentRunner
             Prompt = call.Prompt,
             Files = call.Meta.Files ?? [],
             Context = call.Meta.Context,
+            ContextRoots = call.Meta.ContextRoots,
         };
     }
 

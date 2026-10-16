@@ -38,7 +38,7 @@ public sealed class CallModel(IOptions<DashboardOptions> options, PricingService
         Call = call;
         ResponseHtml = Markdown.ToHtml(call.Response ?? "", Pipeline);
         Links = call.Files.Select(f => FileLinks.Build(f, call.ProjectDir, Opt.FileLinkTemplate)).ToList();
-        ContextLinks = call.Context.Select(f => FileLinks.Build(f, call.ProjectDir, Opt.FileLinkTemplate)).ToList();
+        ContextLinks = call.Context.Select(f => FileLinks.Build(f, call.ProjectDir, Opt.FileLinkTemplate, call.ContextRoots)).ToList();
         Cost = pricing.CostOf(call);
         if (call.RunId is { } runId)
         {

@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace HB.Orchestration.Shared;
 
 /// <summary>에이전트 호출 1건의 기록. MCP 서버가 쓰고 대시보드가 읽는다.</summary>
@@ -61,4 +63,11 @@ public sealed record CallRecord
 
     /// <summary>서버가 읽어 프롬프트에 첨부한 코드 범위. "Assets/Scripts/Player.cs:40-80" 형식. 내용은 Prompt에 있다.</summary>
     public IReadOnlyList<string> Context { get; init; } = [];
+
+    /// <summary>
+    /// Context 중 "@이름/…" 항목이 읽은 추가 루트 (설정의 이름 → 그때의 절대 경로). 나중에 설정을 비워도 출처를 알 수 있다.
+    /// 추가 루트를 쓰지 않은 호출에는 필드 자체를 남기지 않는다.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyDictionary<string, string>? ContextRoots { get; init; }
 }

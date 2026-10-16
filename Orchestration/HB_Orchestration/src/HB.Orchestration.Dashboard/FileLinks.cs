@@ -5,13 +5,22 @@ public static class FileLinks
     public sealed record Link(string Display, string Url, string FullPath, bool Exists);
 
     /// <summary>"Assets/A.cs:42" 같은 기록을 IDE에서 여는 링크로 바꾼다.</summary>
-    public static Link Build(string raw, string? projectDir, string template)
+    /// <param name="roots">기록의 ContextRoots. "@이름/…"은 그 루트 기준으로 연다.</param>
+    public static Link Build(string raw, string? projectDir, string template, IReadOnlyDictionary<string, string>? roots = null)
     {
         var (path, line) = Split(raw.Trim());
 
-        var full = Path.IsPathRooted(path) || string.IsNullOrEmpty(projectDir)
+        var baseDir = projectDir;
+        if (roots is not null && HB.Orchestration.Agents.ContextLoader.TrySplitRootPrefix(path, out var name, out var rest)
+            && roots.FirstOrDefault(kv => string.Equals(kv.Key, name, StringComparison.OrdinalIgnoreCase)) is { Value: { } rootDir })
+        {
+            baseDir = rootDir;
+            path = rest;
+        }
+
+        var full = Path.IsPathRooted(path) || string.IsNullOrEmpty(baseDir)
             ? path
-            : Path.GetFullPath(Path.Combine(projectDir, path));
+            : Path.GetFullPath(Path.Combine(baseDir, path));
 
         var url = template
             .Replace("{path}", Uri.EscapeDataString(full.Replace('\\', '/')))

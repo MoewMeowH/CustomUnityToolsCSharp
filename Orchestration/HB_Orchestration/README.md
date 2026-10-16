@@ -95,6 +95,7 @@ dotnet build HB_Orchestration.slnx
 | `Context.MaxRanges` | `context` 범위 개수 상한 (기본 30) |
 | `Context.MaxFileBytes` | 읽기 전에 확인하는 파일 크기 상한 (기본 2,000,000바이트) |
 | `Context.DenyPatterns` | 외부로 보내지 않을 파일 glob **추가분**. 내장 목록(`.env`, `*.pem`, `*.key`, `*.keystore`, `*.jks`, `*.p12`, `*.pfx`, `*.mobileprovision`, `credentials*`, `secrets*`, `.git/**` 등)은 항상 적용 |
+| `Context.ExtraRoots` | 프로젝트 루트 밖에서 `context`로 **읽을** 수 있는 추가 루트 (`이름 → 절대 경로`, 기본 비어 있음). 아래 "추가 루트" 참고 |
 | `Budget.DefaultMaxRunsPerSession` | `MaxRunsPerSession`이 없는 모드의 세션당 실행 한도 |
 | `Budget.FreeProviders` | 비용 집계에서 뺄 제공사 (기본 `local`) |
 | `ResponseChecks.ExpectedLanguage` | 기대하는 응답 언어. 지금은 `ko`만 지원. **키가 없으면 `ko`(검사 켬), `""`이면 끔** (아래 "응답 검사기") |
@@ -219,6 +220,20 @@ SDK 자동 재시도(기본 3회, 기록에 안 남음)는 끄고 서버가 직�
 - 교체 대상은 appsettings에 등록·활성화된 에이전트여야 하고, 잘못되면 토큰 없이 거절된다. 결과 끝에 `(에이전트 교체: a→b)`가 붙고 대시보드에는 실제 실행한 에이전트로 기록된다.
 - 교체 실행도 세션당 실행 횟수에 포함된다.
 
+### 추가 루트 (`Context.ExtraRoots`) — 프로젝트 밖 코드를 복사 없이 읽기
+```json
+"Context": { "ExtraRoots": { "orch": "F:/AI/ToolWithCS/Orchestration/HB_Orchestration" } }
+```
+- `context`에서 `"path": "@orch/src/Foo.cs"`처럼 `@이름/상대경로`로 지정한다. 등록된 이름은 `list_modes` 마지막 줄 `추가 루트(context 읽기 전용): @orch`에 보인다 (경로는 표시하지 않음).
+- 루트마다 메인 루트와 같은 검사(루트 밖·절대 경로·링크 경유·`DenyPatterns`)를 한다.
+- **읽기 전용**이다. `save_result`는 추가 루트에 쓰지 않는다.
+- 에이전트에게는 `### @orch/src/Foo.cs:1-80`처럼 이름만 보낸다. 로컬 절대 경로는 외부로 보내지 않는다.
+- 기록(`calls.jsonl`)의 `ContextRoots`에는 그 호출이 실제로 읽은 루트의 이름과 절대 경로가 남는다. 나중에 설정을 비워도 출처를 알 수 있고, 대시보드는 이 값으로 파일 링크를 연다. `@`를 쓰지 않은 호출에는 이 필드가 없다.
+- 이름은 영문·숫자·`_`·`-` 2~32자이고 **대소문자를 구분하지 않는다** (.NET 설정 시스템이 키를 대소문자 무시로 다룸). 표시는 설정에 적힌 이름으로 한다.
+- 비어 있으면 기존과 똑같이 동작한다. 등록되지 않은 `@이름/…`은 기존처럼 메인 루트 기준 상대 경로다.
+- 잘못된 항목(상대 경로, 없는 폴더, 이름 규칙 위반)은 `list_modes`에 `[주의]`로만 표시된다. 그 루트를 참조한 호출만 `[첨부 코드 오류]`로 거절되고, 다른 호출은 영향을 받지 않는다.
+- appsettings는 호출마다 다시 읽으므로 넣고 빼는 데 재시작이 필요 없다.
+
 ### run_mode 결과 형식
 ```
 runId: dfa393514b
@@ -238,6 +253,7 @@ runId: dfa393514b
 calls.jsonl의 응답 원문을 그대로 저장한다. Claude가 응답을 다시 출력해 옮겨 적지 않으므로 출력 토큰이 들지 않고, 옮겨 적기 오류가 없으며, 저장 위치가 고정된다.
 - 같은 단계에 시도가 여럿이면 성공한 시도를 쓴다.
 - `path`는 그 기록의 프로젝트 폴더(`ProjectDir`) 기준 상대 경로다. `context`와 같은 규칙으로 절대 경로·루트 밖·링크 경유·`DenyPatterns`를 거절한다. 없는 하위 폴더는 만든다.
+- 추가 루트(`@이름/…`)에는 쓰지 않는다. `@`로 시작하는 경로는 등록 여부와 관계없이 `[저장 불가]`.
 - `codeBlock: N`이면 응답 안 N번째 코드 블록(```` ``` ```` · `~~~`)의 내용만 저장한다.
 - 이미 있는 파일은 `overwrite: true`일 때만 덮어쓴다.
 - UTF-8(BOM 없음)으로 저장하고 `저장: <경로> (n바이트, SHA-256 …)`을 돌려준다. 실패는 `[저장 불가] …`.
@@ -266,6 +282,8 @@ calls.jsonl의 응답 원문을 그대로 저장한다. Claude가 응답을 다�
 
 ## 5. Unity 프로젝트 쪽
 `project-files/` 내용을 Unity 프로젝트 루트로 복사:
+
+> **`project-files/CLAUDE.md`가 원본이다.** Unity 프로젝트의 `CLAUDE.md`는 이 파일의 복사본으로 둔다. 규칙을 고칠 때는 원본을 고친 뒤 복사한다 (Unity 쪽에서 직접 고치면 두 벌이 갈라진다). 줄바꿈은 LF.
 - `CLAUDE.md` — 언제 어떤 모드를 쓰고, input을 어떻게 줄이고, 결과를 어떻게 종합할지
 - `REVIEW_GUIDELINES.md` — 공통 리뷰 기준 (서버가 자동으로 찾아 주입)
 - `.claude/commands/cross-review.md` — `/cross-review`, `/cross-review panel`

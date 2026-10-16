@@ -52,7 +52,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
                    "context 범위를 줄여 다시 호출하세요.";
 
         input += attached!.Text;
-        var meta = new CallMeta(files, attached.Sources);
+        var meta = new CallMeta(files, attached.Sources) { ContextRoots = attached.Roots };
 
         var budgetMessage = CheckBudget();
         if (budgetMessage is not null) return budgetMessage;
@@ -337,6 +337,17 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
 
         // run_mode의 agents 교체에 쓸 수 있는 이름 목록 (짧게)
         sb.AppendLine("에이전트: " + string.Join(", ", catalog.Agents.Select(a => $"{a.Name}({a.Model})")));
+
+        // context의 "@이름/…"에 쓸 추가 루트. 등록이 있을 때만, 경로 없이 이름만 (비어 있으면 출력이 이전과 같다).
+        // 잘못된 항목은 경고로만 알리고, 그 루트를 참조한 호출만 거절된다.
+        var roots = Options.Context.ExtraRoots;
+        if (roots.Count > 0)
+        {
+            sb.AppendLine("추가 루트(context 읽기 전용): " + string.Join(", ", roots.Keys.Select(k => "@" + k)));
+            foreach (var (name, path) in roots)
+                if (ContextLoader.ExtraRootProblem(name, path) is { } problem)
+                    sb.AppendLine($"[주의] ExtraRoots '{name}': {problem} 이 루트를 쓰는 context만 거절됩니다.");
+        }
         return sb.ToString().TrimEnd();
     }
 
