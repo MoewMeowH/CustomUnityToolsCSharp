@@ -137,7 +137,7 @@ public sealed partial class AgentCatalog
                 if (!_providers.TryGetValue(providerOptions.Type, out var provider))
                     throw new ProviderConfigurationException($"지원하지 않는 제공사 Type '{providerOptions.Type}'.");
 
-                var client = provider.Create(a.Provider, providerOptions, a.Model);
+                var client = provider.Create(a.Provider, providerOptions, a);
 
                 // 출력 상한: 모든 호출에 MaxOutputTokens를 기본값으로 건다.
                 if (a.MaxOutputTokens is { } max)

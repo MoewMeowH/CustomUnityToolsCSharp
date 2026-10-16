@@ -11,7 +11,7 @@ using Microsoft.Extensions.Options;
 
 namespace HB.Orchestration.Dashboard;
 
-public sealed record AgentInfo(string Name, string Provider, string Model, int? MaxOutputTokens, bool Enabled);
+public sealed record AgentInfo(string Name, string Provider, string Model, int? MaxOutputTokens, bool Enabled, int? TimeoutSeconds = null);
 
 /// <summary>디스크에서 읽은 MCP 설정(modes.json + appsettings.json) 한 시점의 상태.</summary>
 public sealed class ModesSnapshot
@@ -33,6 +33,9 @@ public sealed class ModesSnapshot
     public required bool SettingsHasComments { get; init; }
     public required List<AgentInfo> Agents { get; init; }
     public required List<string> ProviderNames { get; init; }
+
+    /// <summary>제공사별 TimeoutSeconds. 에이전트 칸이 비었을 때 실제로 적용되는 값을 안내하는 데 쓴다.</summary>
+    public Dictionary<string, int?> ProviderTimeouts { get; init; } = new(StringComparer.OrdinalIgnoreCase);
     public required int DefaultMaxRunsPerSession { get; init; }
 
     /// <summary>Orchestration:Pricing (모델 단가 USD + 원화 환율).</summary>
@@ -52,7 +55,7 @@ public sealed class ModesSnapshot
 public sealed record ModeEdit(string Mode, IReadOnlyList<string> StepAgents, IReadOnlyDictionary<string, string> Settings);
 
 /// <summary>에이전트 표의 한 줄. OriginalName이 비어 있으면 새 에이전트.</summary>
-public sealed record AgentEdit(string? OriginalName, string Name, string Provider, string Model, string MaxOutputTokens, bool Enabled, bool Delete);
+public sealed record AgentEdit(string? OriginalName, string Name, string Provider, string Model, string MaxOutputTokens, bool Enabled, bool Delete, string TimeoutSeconds = "");
 
 /// <summary>모델 단가 표의 한 줄 (USD / 1M 토큰). 셋 다 비우면 그 모델의 단가를 지운다.</summary>
 public sealed record PriceEdit(string Model, string InputPrice, string CachedInputPrice, string OutputPrice);
@@ -186,6 +189,7 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
 
         var agents = new List<AgentInfo>();
         var providers = new List<string>();
+        var providerTimeouts = new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase);
         var defaultRuns = new BudgetOptions().DefaultMaxRunsPerSession;
         var pricing = new PricingOptions();
         JsonObject? settingsRoot = null;
@@ -210,8 +214,9 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
             if (ReadMcpOptions(settingsPath) is { } mcp)
             {
                 foreach (var a in mcp.Agents)
-                    agents.Add(new AgentInfo(a.Name, a.Provider, a.Model, a.MaxOutputTokens, a.Enabled));
+                    agents.Add(new AgentInfo(a.Name, a.Provider, a.Model, a.MaxOutputTokens, a.Enabled, a.TimeoutSeconds));
                 providers.AddRange(mcp.Providers.Keys.Order(StringComparer.OrdinalIgnoreCase));
+                foreach (var (name, p) in mcp.Providers) providerTimeouts[name] = p.TimeoutSeconds;
                 defaultRuns = mcp.Budget.DefaultMaxRunsPerSession;
                 pricing = mcp.Pricing;
             }
@@ -231,6 +236,7 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
             SettingsHasComments = settingsHasComments,
             Agents = agents,
             ProviderNames = providers,
+            ProviderTimeouts = providerTimeouts,
             DefaultMaxRunsPerSession = defaultRuns,
             Pricing = pricing,
         };
@@ -385,6 +391,13 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
                 else errors.Add($"[{label}] 출력 상한은 1 이상의 숫자이거나 비워야 합니다.");
             }
 
+            int? timeout = null;
+            if (!string.IsNullOrWhiteSpace(row.TimeoutSeconds))
+            {
+                if (int.TryParse(row.TimeoutSeconds.Trim(), out var t) && t > 0) timeout = t;
+                else errors.Add($"[{label}] 타임아웃은 1 이상의 초이거나 비워야 합니다.");
+            }
+
             var obj = original.Length > 0 && originals.TryGetValue(original, out var source)
                 ? (JsonObject)source.DeepClone()
                 : new JsonObject();
@@ -394,11 +407,13 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
             obj[KeyOf(obj, "Model")] = JsonValue.Create(model);
             if (max is { } maxValue) obj[KeyOf(obj, "MaxOutputTokens")] = JsonValue.Create(maxValue);
             else obj.Remove(KeyOf(obj, "MaxOutputTokens"));
+            if (timeout is { } timeoutValue) obj[KeyOf(obj, "TimeoutSeconds")] = JsonValue.Create(timeoutValue);
+            else obj.Remove(KeyOf(obj, "TimeoutSeconds"));    // 비우면 제공사 값 → SDK 기본값
             if (row.Enabled) obj.Remove(KeyOf(obj, "Enabled"));      // 기본값 true는 적지 않는다
             else obj[KeyOf(obj, "Enabled")] = JsonValue.Create(false);
 
             newArray.Add(obj);
-            finalAgents.Add(new AgentInfo(name, row.Provider, model, max, row.Enabled));
+            finalAgents.Add(new AgentInfo(name, row.Provider, model, max, row.Enabled, timeout));
 
             if (original.Length > 0 && !string.Equals(original, name, StringComparison.Ordinal))
                 renames[original] = name;

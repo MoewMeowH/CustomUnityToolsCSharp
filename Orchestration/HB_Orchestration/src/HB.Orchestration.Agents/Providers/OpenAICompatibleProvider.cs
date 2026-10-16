@@ -15,7 +15,7 @@ public sealed class OpenAICompatibleProvider : IChatClientProvider
 {
     public string Type => "openai-compatible";
 
-    public IChatClient Create(string providerName, ProviderOptions options, string model)
+    public IChatClient Create(string providerName, ProviderOptions options, AgentOptions agent)
     {
         string apiKey;
         if (string.IsNullOrWhiteSpace(options.ApiKeyEnv))
@@ -35,8 +35,11 @@ public sealed class OpenAICompatibleProvider : IChatClientProvider
         if (!string.IsNullOrWhiteSpace(options.Endpoint))
             clientOptions.Endpoint = new Uri(options.Endpoint);
 
+        // 에이전트 → 제공사 → SDK 기본값(100초). 기본값과 같아도 명시해 두면 실제 적용 값이 코드에서 보인다.
+        clientOptions.NetworkTimeout = AgentSettings.ResolveTimeout(agent, options);
+
         return new OpenAIClient(new ApiKeyCredential(apiKey), clientOptions)
-            .GetChatClient(model)
+            .GetChatClient(agent.Model)
             .AsIChatClient();
     }
 }

@@ -11,7 +11,8 @@ public interface IChatClientProvider
     /// <summary>ProviderOptions.Type과 매칭되는 이름.</summary>
     string Type { get; }
 
-    IChatClient Create(string providerName, ProviderOptions options, string model);
+    /// <param name="agent">모델·타임아웃 등 에이전트 단위 값. 제공사 값보다 우선한다.</param>
+    IChatClient Create(string providerName, ProviderOptions options, AgentOptions agent);
 }
 
 public sealed class ProviderConfigurationException(string message) : Exception(message);

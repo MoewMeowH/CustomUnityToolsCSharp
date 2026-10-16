@@ -5,6 +5,9 @@
     <Project Path="src/HB.Orchestration.Mcp/HB.Orchestration.Mcp.csproj" />
     <Project Path="src/HB.Orchestration.Dashboard/HB.Orchestration.Dashboard.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/HB.Orchestration.Tests/HB.Orchestration.Tests.csproj" />
+  </Folder>
   <Folder Name="/project-files/">
     <File Path="project-files/CLAUDE.md" />
     <File Path="project-files/REVIEW_GUIDELINES.md" />

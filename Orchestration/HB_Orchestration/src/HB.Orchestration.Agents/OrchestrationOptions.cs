@@ -87,6 +87,9 @@ public sealed class ProviderOptions
 
     /// <summary>API 키를 담은 환경 변수 이름. 로컬 모델처럼 키가 필요 없으면 비운다.</summary>
     public string? ApiKeyEnv { get; set; }
+
+    /// <summary>요청 하나의 네트워크 타임아웃(초). 에이전트에 값이 없을 때 쓴다. 비우면 SDK 기본값 100초.</summary>
+    public int? TimeoutSeconds { get; set; }
 }
 
 public sealed class AgentOptions
@@ -102,6 +105,12 @@ public sealed class AgentOptions
     /// 추론(reasoning) 모델은 생각하는 토큰도 여기에 포함되므로 너무 낮게 잡으면 빈 응답이 올 수 있다.
     /// </summary>
     public int? MaxOutputTokens { get; set; }
+
+    /// <summary>
+    /// 요청 하나의 네트워크 타임아웃(초). 비우면 제공사 값 → SDK 기본값 100초 순.
+    /// 같은 제공사라도 빠른 모델과 긴 응답을 쓰는 모델의 필요 시간이 달라 에이전트 단위로 둔다.
+    /// </summary>
+    public int? TimeoutSeconds { get; set; }
 }
 
 public sealed class BudgetOptions

@@ -68,7 +68,8 @@ public sealed class ModesModel(ModesConfigService service, IOptions<DashboardOpt
                 Model: F("model"),
                 MaxOutputTokens: F("max"),
                 Enabled: F("enabled") == "true",
-                Delete: F("del") == "true"));
+                Delete: F("del") == "true",
+                TimeoutSeconds: F("timeout")));
         }
 
         return Finish(() => service.SaveAgents(settingsStamp ?? "", stamp ?? "", rows), "agents");
@@ -194,6 +195,14 @@ public sealed class ModesModel(ModesConfigService service, IOptions<DashboardOpt
         Snapshot?.Typed.Modes
             .Where(m => m.Value.Steps.Any(s => string.Equals(s.Agent, agent, StringComparison.OrdinalIgnoreCase)))
             .Select(m => m.Key) ?? [];
+
+    /// <summary>타임아웃 칸이 비었을 때 실제로 적용되는 값 (제공사 값 → SDK 기본값).</summary>
+    public string TimeoutPlaceholder(AgentInfo? agent)
+    {
+        if (agent is not null && Snapshot?.ProviderTimeouts.GetValueOrDefault(agent.Provider) is > 0 and var p)
+            return $"제공사 {p}";
+        return $"기본 {AgentSettings.SdkDefaultTimeout.TotalSeconds:0}";
+    }
 
     public string SavedMessage => Saved switch
     {

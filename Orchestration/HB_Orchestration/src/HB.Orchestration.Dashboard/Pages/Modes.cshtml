@@ -130,7 +130,7 @@
                 <div class="table-scroll">
                     <table class="agents edit">
                         <thead>
-                        <tr><th>이름</th><th>제공사</th><th>모델 ID</th><th>출력 상한</th><th>사용</th><th>삭제</th><th>쓰는 모드</th></tr>
+                        <tr><th>이름</th><th>제공사</th><th>모델 ID</th><th>출력 상한</th><th title="요청 하나의 네트워크 타임아웃. 비우면 제공사 값 → 100초">타임아웃(초)</th><th>사용</th><th>삭제</th><th>쓰는 모드</th></tr>
                         </thead>
                         <tbody>
                         @for (var i = 0; i <= snap.Agents.Count; i++)
@@ -152,6 +152,7 @@
                                 </td>
                                 <td><input class="mono wide" name="@("ag.model." + i)" value="@(a?.Model)" placeholder="모델 ID" /></td>
                                 <td><input type="number" min="1" name="@("ag.max." + i)" value="@(a?.MaxOutputTokens)" placeholder="없음" /></td>
+                                <td><input type="number" min="1" name="@("ag.timeout." + i)" value="@(a?.TimeoutSeconds)" placeholder="@Model.TimeoutPlaceholder(a)" /></td>
                                 <td><input type="checkbox" name="@("ag.enabled." + i)" value="true" checked="@(a?.Enabled ?? true)" /></td>
                                 <td>
                                     @if (a is not null)
