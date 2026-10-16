@@ -105,6 +105,7 @@ dotnet build HB_Orchestration.slnx
 | `Records.BlobFolder` | 지침·설정 원문 저장 폴더. 비우면 `calls.jsonl` 옆 `blobs/`, 상대 경로면 `calls.jsonl` 폴더 기준 (아래 "호출 기록의 지침·설정 해시") |
 | `Records.MaxReasonChars` · `Records.MaxOwnReviewChars` | `run_mode`의 `reason` · `ownReview` 글자 수 상한 (기본 500 · 30,000, 0 = 무제한). 넘으면 잘라 쓰지 않고 거절 (실행 횟수 차감 없음) |
 | `Records.StoreSettingsText` | 서버 설정(`appsettings.json`) 원문도 저장할지 (기본 `false` = 해시와 키 패턴 검사 결과만). `true`여도 키 패턴이 보이면 저장하지 않음 |
+| `WorkOrders.Folder` | `/work-order`가 지시서를 남길 폴더 (프로젝트 루트 기준 상대 경로). 값이 있으면 `list_modes` 끝에 `지시서 폴더: …` 줄이 붙고, 비우면 줄이 없고 명령은 `docs/work-orders/`를 쓴다. 절대 경로·`..`·`@이름`은 `[주의]`로만 표시. **서버는 이 폴더에 쓰지 않는다** (지휘자가 직접 씀) |
 | `Pricing.KrwPerUsd` | 1달러당 원. 비우면 대시보드는 달러만 표시 |
 | `Pricing.Models.<모델 ID>` | `InputPerMillion`, `CachedInputPerMillion`(비우면 입력과 같음), `OutputPerMillion` — USD / 1M 토큰. 키는 에이전트 이름이 아니라 **모델 ID**(기록에 남는 값). 지금 안 쓰는 예전 모델도 남겨 두면 예전 기록의 비용이 계속 계산됨. 서버는 쓰지 않고 대시보드만 읽음 |
 
@@ -214,7 +215,7 @@ SDK 자동 재시도(기본 3회, 기록에 안 남음)는 끄고 서버가 직�
 | `Return` | `Last`(기본) / `All` | Claude에게 돌려줄 범위. Concurrent는 항상 All |
 | `MaxInputChars` | 숫자 | 이 모드의 입력 길이 상한. 없으면 `Budget.MaxInputChars` |
 | `MaxRunsPerSession` | 숫자 | Claude Code 세션 하나에서 실행할 수 있는 횟수 (0 = 무제한). 없으면 `Budget.DefaultMaxRunsPerSession` |
-| `RequireOwnReview` | `true` / 없음 | `true`면 `run_mode`의 `ownReview`가 필수 (review 계열). 없으면 필수 아님. `list_modes`에 `[ownReview 필수]` 표시. 기본 modes.json은 `review` · `panel` · `cross_p1` · `cross_p1_guided` |
+| `RequireOwnReview` | `true` / 없음 | `true`면 `run_mode`의 `ownReview`가 필수 (review 계열). 없으면 필수 아님. `list_modes`에 `[ownReview 필수]` 표시. 기본 modes.json은 `review` · `panel` · `cross_p1` · `cross_p1_guided` · `work_order` |
 | `MaxRounds` (Debate) | 1~5 | 최대 회차. 1회차 = 두 토론자가 한 번씩. 기본 2, 서버 절대 상한 5 |
 | `HistoryWindow` (Debate) | 숫자 | 각 턴이 볼 직전 발언 수 (기본 2). 판정자는 항상 전체 |
 
@@ -327,7 +328,7 @@ powershell -ExecutionPolicy Bypass -File tools\Sync-ProjectFiles.ps1 -UnityProje
 powershell -ExecutionPolicy Bypass -File tools\Sync-ProjectFiles.ps1 -UnityProject F:\MyGame -Apply
 ```
 
-- 동기화 대상: `CLAUDE.md`, `REVIEW_GUIDELINES.md`, `.claude/commands/*.md`. 바이트가 같아야 한다. `.claude/settings.json`은 비교만 하고 덮지 않는다. `.mcp.json`은 기기마다 경로가 달라 대상이 아니다.
+- 동기화 대상: `CLAUDE.md`, `REVIEW_GUIDELINES.md`, `.claude/commands/*.md`, `.claude/scripts/*.py`. 바이트가 같아야 한다. `.claude/settings.json`은 비교만 하고 덮지 않는다. `.mcp.json`은 기기마다 경로가 달라 대상이 아니다.
 - **`-Apply`는 Unity 쪽 파일이 원본과 다르면 아무것도 복사하지 않고 멈춘다.** Unity에서 고친 내용이 있으면 원본에 먼저 합친다. 버려도 되면 `-Force`로 덮는다. 덮기 전 파일은 `<Unity>/review_tmp/sync-backup/<시각>/`에 백업된다.
 - 줄 맨 앞 `\---`, `\_`, `\[`, `1\.` 같은 이스케이프 잔재가 보이면 경고만 한다 (종료 코드와 무관). 규칙서에 이런 이스케이프가 섞여 지침 불러오기가 깨진 적이 있다 (`@REVIEW\_GUIDELINES.md`, 원인 미확인).
 - `CLAUDE.md` — 언제 어떤 모드를 쓰고, input을 어떻게 줄이고, 결과를 어떻게 종합할지
@@ -335,6 +336,8 @@ powershell -ExecutionPolicy Bypass -File tools\Sync-ProjectFiles.ps1 -UnityProje
 - `.claude/commands/cross-review.md` — `/cross-review`, `/cross-review panel`
 - `.claude/commands/mode.md` — `/mode debate ...`, `/mode deliberate ...`, `/mode research ...`, `/mode parallel ...`
 - `.claude/commands/unity-test.md` — `/unity-test`, `/unity-test PlayMode MyGame.Combat`
+- `.claude/commands/work-order.md` — `/work-order <요청> [첨부]`: 오케스트레이션에 맡길 작업 지시서를 만든다. 조사 → 초안 → `work_order` 모드(luna | flash 동시 검토) → `그외 이상사항` 정리 → `WorkOrders.Folder`(없으면 `docs/work-orders/`)에 저장 + 대화에 출력. 코드는 고치지 않는다. 모드별 지침은 CLAUDE.md가 아니라 이 명령 파일에 둔다 (CLAUDE.md는 세션마다 컨텍스트에 올라감)
+- `.claude/scripts/xlsx_dump.py` — `/work-order`의 첨부 읽기 도우미. 기획서 xlsx·csv를 Markdown 표로 뽑고(병합 셀·메모·텍스트 상자 글 포함) 이미지는 `review_tmp/work-order/<파일>/`에 붙은 셀 이름으로 저장. 필요: Python 3.9+, `openpyxl` (`python -m pip install openpyxl`). `.xls`는 지원하지 않음
 - `.claude/settings.json` — Unity CLI 조회·테스트 명령은 매번 승인 없이 실행 (기존 파일이 있으면 `allow` 항목만 합치기)
 - `.mcp.json` — dll 경로를 publish 폴더로 (JSON 안에서는 경로를 `/`로 쓸 것. `\`는 JSON에서 특수 문자)
 

@@ -34,6 +34,42 @@ public sealed class OrchestrationOptions
 
     /// <summary>호출 기록 보강(지침·설정 해시, 원문 저장) 설정.</summary>
     public RecordsOptions Records { get; set; } = new();
+
+    /// <summary>/work-order 명령이 작업 지시서를 남길 폴더. 비우면 list_modes 출력이 이전과 같다.</summary>
+    public WorkOrdersOptions WorkOrders { get; set; } = new();
+}
+
+/// <summary>
+/// appsettings.json의 "Orchestration:WorkOrders". 서버는 파일을 쓰지 않는다 — list_modes에 폴더를 보여 줄 뿐이고,
+/// 지시서는 지휘자(Claude)가 직접 쓴다 (save_result는 에이전트 응답 전용).
+/// </summary>
+public sealed class WorkOrdersOptions
+{
+    /// <summary>
+    /// 프로젝트 루트 기준 상대 경로. 비우면 list_modes에 줄이 없고 명령은 기본 폴더(docs/work-orders)를 쓴다.
+    /// 잘못된 값(절대 경로·루트 밖·'@')은 list_modes에 [주의]로만 보이고, 명령은 기본 폴더를 쓴다.
+    /// </summary>
+    public string? Folder { get; set; }
+
+    // Split('/', '\\', options)로 쓰면 '\\'가 int(count)로 바뀌어 '/'로만 나뉜다. 배열로 넘긴다.
+    private static readonly char[] PathSeparators = ['/', '\\'];
+
+    /// <summary>폴더 값의 문제. 정상이면 null. 비어 있는 값은 호출하지 않는다 (비어 있으면 기존 동작).</summary>
+    public static string? FolderProblem(string folder)
+    {
+        var value = folder.Trim();
+        if (value.StartsWith('@')) return "추가 루트(@이름)는 읽기 전용이라 쓸 수 없습니다.";
+        if (Path.IsPathRooted(value) || value.Contains(':')) return "프로젝트 루트 기준 상대 경로여야 합니다.";
+        if (value.IndexOfAny(Path.GetInvalidPathChars()) >= 0) return "경로에 쓸 수 없는 문자가 있습니다.";
+        var segments = value.Split(PathSeparators, StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length == 0 || segments.All(s => s == ".")) return "폴더 이름이 없습니다.";
+        if (segments.Any(s => s == "..")) return "프로젝트 루트 밖입니다 ('..' 사용 불가).";
+        return null;
+    }
+
+    /// <summary>표시용: 구분자를 '/'로, '.' 구간과 끝 구분자를 뺀다.</summary>
+    public static string Normalize(string folder) =>
+        string.Join('/', folder.Trim().Split(PathSeparators, StringSplitOptions.RemoveEmptyEntries).Where(s => s != "."));
 }
 
 /// <summary>appsettings.json의 "Orchestration:Records".</summary>

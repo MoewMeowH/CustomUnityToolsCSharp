@@ -6,14 +6,14 @@
     원본 방향: project-files가 원본이고 Unity 프로젝트 쪽은 복사본이다. 규칙을 고칠 때는 원본을 고친 뒤 이 스크립트로 복사한다.
 
     파일 구분
-      동기화   CLAUDE.md, REVIEW_GUIDELINES.md, .claude/commands/*.md (원본 폴더에 있는 것)  바이트 동일해야 한다
+      동기화   CLAUDE.md, REVIEW_GUIDELINES.md, .claude/commands/*.md, .claude/scripts/*.py (원본 폴더에 있는 것)  바이트 동일해야 한다
       확인만   .claude/settings.json   덮지 않는다 (기존 파일이 있으면 allow 항목만 손으로 합친다)
       제외     .mcp.json               기기마다 경로가 다른 템플릿이다
 
     -Apply는 Unity 쪽 파일이 원본과 '다름'이면 아무것도 복사하지 않고 멈춘다 (Unity에서 직접 고친 내용을 지우지 않도록).
     그 내용을 원본에 먼저 합치거나, 버려도 되면 -Force로 덮는다. -Force는 덮기 전에 <Unity>/review_tmp/sync-backup/<시각>/에 백업한다.
 
-    이스케이프 잔재(줄 맨 앞 \---, \_, \[, 1\. 등)가 보이면 경고만 한다. 종료 코드에는 영향이 없다.
+    이스케이프 잔재(줄 맨 앞 \---, \_, \[, 1\. 등)가 보이면 경고만 한다 (.md 파일만). 종료 코드에는 영향이 없다.
 
     종료 코드: 0 동기화 대상이 모두 같음 / 1 다른 것이 있음(또는 -Apply가 멈춤) / 2 실행 오류
 
@@ -96,12 +96,21 @@ $syncFiles = @('CLAUDE.md', 'REVIEW_GUIDELINES.md')
 foreach ($f in $syncFiles) {
     if (-not (Test-Path -LiteralPath (Join-Path $Source $f) -PathType Leaf)) { Fail "원본에 $f 가 없습니다: $Source" }
 }
-$srcCommands = Join-Path $Source '.claude\commands'
-$commandNames = @()
-if (Test-Path -LiteralPath $srcCommands -PathType Container) {
-    $commandNames = @(Get-ChildItem -LiteralPath $srcCommands -Filter '*.md' -File -Force | Sort-Object Name | ForEach-Object { $_.Name })
+# 폴더 단위 대상: 원본 폴더에 있는 파일 전부. Unity 쪽에만 있는 파일은 '추가분'으로 보여 주기만 한다.
+$syncDirs = @(
+    @{ Dir = '.claude/commands'; Filter = '*.md' },   # 슬래시 명령
+    @{ Dir = '.claude/scripts';  Filter = '*.py' }    # 명령이 부르는 도우미 (예: /work-order의 xlsx_dump.py)
+)
+$dirNames = @{}
+foreach ($d in $syncDirs) {
+    $src = Join-Path $Source ($d.Dir -replace '/', '\')
+    $names = @()
+    if (Test-Path -LiteralPath $src -PathType Container) {
+        $names = @(Get-ChildItem -LiteralPath $src -Filter $d.Filter -File -Force | Sort-Object Name | ForEach-Object { $_.Name })
+    }
+    $dirNames[$d.Dir] = $names
+    $syncFiles += $names | ForEach-Object { "$($d.Dir)/$_" }
 }
-$syncFiles += $commandNames | ForEach-Object { ".claude/commands/$_" }
 $checkOnlyFiles = @('.claude/settings.json')
 
 function Compare-All {
@@ -120,11 +129,12 @@ function Compare-All {
         $state = if ($null -eq $u) { '확인만-Unity에 없음' } elseif ($s -eq $u) { '같음' } else { '확인만-다름' }
         $rows += [pscustomobject]@{ Kind = 'check'; Path = $rel; State = $state; Src = $s; Unity = $u }
     }
-    $unityCommands = Join-Path $UnityProject '.claude\commands'
-    if (Test-Path -LiteralPath $unityCommands -PathType Container) {
-        foreach ($f in (Get-ChildItem -LiteralPath $unityCommands -Filter '*.md' -File -Force | Sort-Object Name)) {
-            if ($commandNames -notcontains $f.Name) {
-                $rows += [pscustomobject]@{ Kind = 'extra'; Path = ".claude/commands/$($f.Name)"; State = 'Unity에만 있음'; Src = $null; Unity = (Get-Hash $f.FullName) }
+    foreach ($d in $syncDirs) {
+        $unityDir = Join-Path $UnityProject ($d.Dir -replace '/', '\')
+        if (-not (Test-Path -LiteralPath $unityDir -PathType Container)) { continue }
+        foreach ($f in (Get-ChildItem -LiteralPath $unityDir -Filter $d.Filter -File -Force | Sort-Object Name)) {
+            if ($dirNames[$d.Dir] -notcontains $f.Name) {
+                $rows += [pscustomobject]@{ Kind = 'extra'; Path = "$($d.Dir)/$($f.Name)"; State = 'Unity에만 있음'; Src = $null; Unity = (Get-Hash $f.FullName) }
             }
         }
     }
@@ -152,11 +162,11 @@ $rows = Compare-All
 Write-Rows $rows
 
 $warnings = @()
-foreach ($rel in $syncFiles) {
+foreach ($rel in ($syncFiles | Where-Object { $_ -like '*.md' })) {
     $warnings += @(Find-EscapeRemnants (Join-Path $Source $rel) "원본/$rel")
     $warnings += @(Find-EscapeRemnants (Join-Path $UnityProject $rel) "Unity/$rel")
 }
-foreach ($r in ($rows | Where-Object { $_.Kind -eq 'extra' })) {
+foreach ($r in ($rows | Where-Object { $_.Kind -eq 'extra' -and $_.Path -like '*.md' })) {
     $warnings += @(Find-EscapeRemnants (Join-Path $UnityProject $r.Path) "Unity/$($r.Path)")
 }
 if ($warnings.Count -gt 0) {

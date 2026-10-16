@@ -405,6 +405,16 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
                 if (ContextLoader.ExtraRootProblem(name, path) is { } problem)
                     sb.AppendLine($"[주의] ExtraRoots '{name}': {problem} 이 루트를 쓰는 context만 거절됩니다.");
         }
+
+        // /work-order가 지시서를 남길 폴더. 값이 있을 때만 (비어 있으면 출력이 이전과 같다).
+        // 서버는 이 폴더에 쓰지 않는다 — 지휘자가 직접 쓴다.
+        var workOrders = Options.WorkOrders.Folder;
+        if (!string.IsNullOrWhiteSpace(workOrders))
+        {
+            sb.AppendLine(WorkOrdersOptions.FolderProblem(workOrders) is { } folderProblem
+                ? $"[주의] WorkOrders.Folder '{workOrders}': {folderProblem} /work-order는 기본 폴더를 씁니다."
+                : $"지시서 폴더: {WorkOrdersOptions.Normalize(workOrders)}");
+        }
         return sb.ToString().TrimEnd();
     }
 
