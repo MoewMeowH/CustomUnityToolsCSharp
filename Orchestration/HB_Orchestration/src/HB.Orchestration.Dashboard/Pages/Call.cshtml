@@ -23,6 +23,12 @@
     .md code { font-family: var(--mono); font-size: 12.5px; background: var(--code); padding: 1px 4px; border-radius: 4px; }
     .md pre code { padding: 0; background: none; }
     .md table { margin: 8px 0; } .md th, .md td { padding: 6px 8px; }
+    .side { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr) minmax(0, 1.4fr); gap: 16px; margin-bottom: 16px; }
+    @@media (max-width: 1100px) { .side { grid-template-columns: 1fr; } }
+    .side .card { max-height: 70vh; overflow: auto; }
+    .none { color: var(--muted); font-style: italic; }
+    .prov td { font-size: 13px; }
+    .sha { font-family: var(--mono); font-size: 12px; }
 </style>
 
 <a class="back" href="/">← 목록</a>
@@ -42,6 +48,85 @@
         <div><div class="label">시도</div><div class="value"><span class="badge warn">@(c.Attempt ?? 1) / @Model.StepAttempts</span></div></div>
     }
     <div><div class="label">프로젝트</div><div class="value mono" title="@c.ProjectDir">@IndexModel.ProjectName(c.ProjectDir)</div></div>
+    <div>
+        <div class="label">Claude 세션</div>
+        <div class="value">
+            @if (Model.Session is { } ses)
+            {
+                <a class="mono" href="/ClaudeSession?id=@ses.SessionId">@ClaudeSessionsModel.Short(ses.SessionId)</a>
+                <span class="badge @(ses.Kind == HB.Orchestration.Shared.RunLinkKind.Estimated ? "warn" : null)">@(ses.Kind == HB.Orchestration.Shared.RunLinkKind.Confirmed ? "확정" : "추정")</span>
+            }
+            else
+            {
+                <span class="muted">연결된 세션 없음</span>
+            }
+        </div>
+    </div>
+</section>
+
+<div class="side">
+    <section class="panel card">
+        <h2>지휘자 — 부른 이유 (reason)</h2>
+        @if (Model.IsLegacy) { <p class="none">기록 없음 (5장 이전 기록)</p> }
+        else if (string.IsNullOrEmpty(c.Reason)) { <p class="none">기록 없음</p> }
+        else { <pre>@c.Reason</pre> }
+    </section>
+    <section class="panel card">
+        <h2>지휘자 — 결과를 보기 전 자체 검토 (ownReview)</h2>
+        @if (Model.IsLegacy) { <p class="none">기록 없음 (5장 이전 기록)</p> }
+        else if (string.IsNullOrEmpty(c.OwnReview)) { <p class="none">넣지 않음 (이 모드는 필수가 아님)</p> }
+        else { <div class="md">@Html.Raw(Model.OwnReviewHtml)</div> }
+    </section>
+    <section class="panel card">
+        <h2>에이전트 응답 (@(c.Agent ?? c.Tool))</h2>
+        @if (c.Success)
+        {
+            <div class="md">@Html.Raw(Model.ResponseHtml)</div>
+        }
+        else
+        {
+            <pre class="err">@c.Error</pre>
+        }
+    </section>
+</div>
+
+<section class="panel files">
+    <span class="muted" style="font-size:12.5px">에이전트가 받은 지침·설정 — SHA-256 (원문이 저장돼 있으면 열 수 있음)</span>
+    @if (c.Provenance is null)
+    {
+        <p class="none" style="margin:8px 0 0">기록 없음 (5장 이전 기록)</p>
+    }
+    else
+    {
+        <div class="table-scroll">
+            <table class="prov">
+                <thead><tr><th>항목</th><th>경로</th><th>SHA-256</th><th class="num">크기(B)</th><th>비고</th><th></th></tr></thead>
+                <tbody>
+                @foreach (var r in Model.ProvenanceRows)
+                {
+                    <tr>
+                        <td>@r.Label</td>
+                        <td class="mono" style="word-break:break-all">@(r.Path ?? "")</td>
+                        <td class="sha" title="@r.Sha256">@(r.Sha256 is { Length: >= 12 } s12 ? s12[..12] + "…" : "-")</td>
+                        <td class="num">@(r.Bytes?.ToString("N0") ?? "-")</td>
+                        <td class="muted">@(r.Note ?? "")</td>
+                        <td>
+                            @if (r.BlobAvailable)
+                            {
+                                <a href="/Call/@c.Id?handler=Blob&sha=@r.Sha256" target="_blank" rel="noopener">원문</a>
+                            }
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+        @if (c.Provenance.StoreErrors is { Count: > 0 } errors)
+        {
+            <span class="badge warn">원문 저장 오류</span>
+            <ul>@foreach (var e in errors) { <li class="mono">@e</li> }</ul>
+        }
+    }
 </section>
 
 @if (c.Warnings.Count > 0)
@@ -74,6 +159,7 @@
                     <span class="muted"> — @(s.InputTokens?.ToString("N0") ?? "-") / @(s.OutputTokens?.ToString("N0") ?? "-") 토큰, @((s.ElapsedMs / 1000.0).ToString("0.0"))s</span>
                     @if (!s.Success) { <span class="err"> 실패@(s.ErrorKind is { } sk ? $" {sk}" : "")</span> }
                     @if (s.Warnings.Count > 0) { <span class="badge warn" title="@string.Join("\n", s.Warnings)">경고 @s.Warnings.Count</span> }
+                    @if (s.Provenance?.InstructionsSha256 is { } ish) { <span class="sha muted" title="시스템 프롬프트 SHA-256 @ish"> · 지침 @ish[..8]</span> }
                 </li>
             }
         </ol>
@@ -112,20 +198,7 @@
     </section>
 }
 
-<div class="cols">
-    <section class="panel card">
-        <h2>요청 (Claude → 에이전트)</h2>
-        <pre>@c.Prompt</pre>
-    </section>
-    <section class="panel card">
-        <h2>응답 (@(c.Agent ?? c.Tool))</h2>
-        @if (c.Success)
-        {
-            <div class="md">@Html.Raw(Model.ResponseHtml)</div>
-        }
-        else
-        {
-            <pre class="err">@c.Error</pre>
-        }
-    </section>
-</div>
+<section class="panel card">
+    <h2>요청 (Claude → 에이전트) — 에이전트가 받은 입력 그대로</h2>
+    <pre>@c.Prompt</pre>
+</section>

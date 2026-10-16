@@ -87,7 +87,7 @@ else
                     <td class="mono">
                         @if (l.RunId is { } run && Model.FirstCallOfRun.TryGetValue(run, out var callId))
                         {
-                            <a href="/Call?id=@callId">@run</a>
+                            <a href="/Call/@callId">@run</a>
                         }
                         else
                         {

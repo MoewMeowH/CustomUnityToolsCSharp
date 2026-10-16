@@ -6,7 +6,7 @@ using Microsoft.Extensions.Options;
 
 namespace HB.Orchestration.Dashboard.Pages;
 
-public sealed class CallModel(IOptions<DashboardOptions> options, PricingService pricing) : PageModel
+public sealed class CallModel(IOptions<DashboardOptions> options, PricingService pricing, ClaudeSessionsService sessions) : PageModel
 {
     public PricingService Pricing => pricing;
 
@@ -29,6 +29,17 @@ public sealed class CallModel(IOptions<DashboardOptions> options, PricingService
     /// <summary>이 기록과 같은 단계(RunId·Step)의 시도 수. 2 이상이면 재시도가 있었다.</summary>
     public int StepAttempts { get; private set; } = 1;
 
+    /// <summary>지휘자의 자체 검토(ownReview)를 응답과 같은 방식(원시 HTML 금지)으로 렌더링한 것.</summary>
+    public string OwnReviewHtml { get; private set; } = "";
+
+    /// <summary>5장 이전 기록 (Provenance · Reason이 없음) → "기록 없음".</summary>
+    public bool IsLegacy => Call.Provenance is null && Call.Reason is null;
+
+    public List<ProvenanceRow> ProvenanceRows { get; private set; } = [];
+
+    /// <summary>이 호출이 속한 Claude Code 세션 (세션 기록 화면의 연결 결과). 없으면 null.</summary>
+    public (string SessionId, RunLinkKind Kind)? Session { get; private set; }
+
     public IActionResult OnGet(string id)
     {
         var all = CallLog.ReadAll(Opt.ResolvedLogPath);
@@ -44,7 +55,42 @@ public sealed class CallModel(IOptions<DashboardOptions> options, PricingService
         {
             RunSteps = all.Where(c => c.RunId == runId).OrderBy(c => c.Step).ThenBy(c => c.Attempt ?? 1).ToList();
             StepAttempts = Math.Max(1, RunSteps.Count(c => c.Step == call.Step));
+            Session = FindSession(runId, all);
         }
+
+        OwnReviewHtml = Markdown.ToHtml(call.OwnReview ?? "", Pipeline);
+        if (call.Provenance is { } p) ProvenanceRows = ProvenanceView.Rows(p);
         return Page();
+    }
+
+    /// <summary>
+    /// 지침·설정 원문 보기. 이 기록이 가리키는 해시만 연다 (64자리 소문자 hex, 저장 폴더는 기록의 값).
+    /// 그 밖은 모두 404. 원문 바이트 그대로 text/plain으로 돌려준다.
+    /// </summary>
+    public IActionResult OnGetBlob(string id, string sha)
+    {
+        if (!BlobStore.IsValidSha(sha)) return NotFound();
+        var call = CallLog.ReadAll(Opt.ResolvedLogPath).FirstOrDefault(c => c.Id == id);
+        if (call?.Provenance is not { BlobFolder: { } folder } p || !ProvenanceView.AllowedShas(p).Contains(sha)) return NotFound();
+
+        var path = BlobStore.PathFor(folder, sha);
+        if (!System.IO.File.Exists(path)) return NotFound();
+        Response.Headers["X-Content-Type-Options"] = "nosniff";
+        return File(System.IO.File.ReadAllBytes(path), "text/plain; charset=utf-8");
+    }
+
+    private (string, RunLinkKind)? FindSession(string runId, List<CallRecord> all)
+    {
+        try
+        {
+            foreach (var (summary, links) in sessions.Load(all).Links)
+                if (links.FirstOrDefault(l => l.RunId == runId && l.Kind is RunLinkKind.Confirmed or RunLinkKind.Estimated) is { } link)
+                    return (summary.FileSessionId, link.Kind);
+        }
+        catch (Exception)
+        {
+            // 세션 기록은 부가 정보다. 읽지 못해도 호출 상세는 보여 준다.
+        }
+        return null;
     }
 }

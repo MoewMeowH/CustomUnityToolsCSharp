@@ -17,6 +17,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\HB.Orchestration.Agents\HB.Orchestration.Agents.csproj" />
+    <!-- 호출 상세 화면의 지침·설정 표 · 원문 열기 허용 범위 (ProvenanceView) -->
+    <ProjectReference Include="..\..\src\HB.Orchestration.Dashboard\HB.Orchestration.Dashboard.csproj" />
   </ItemGroup>
 
   <ItemGroup>
