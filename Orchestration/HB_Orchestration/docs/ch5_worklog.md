@@ -254,6 +254,14 @@
   - 그래도 스키마에 없는 인자를 넣어 부르자 서버까지 전달됐다. `reason`만 넣은 호출이 `[reason 필요]`가 아니라 `[ownReview 필요]`로 거절됐고, 3단계 기록에 두 값이 원문 그대로 남았다.
   - 새 세션에서는 새 스키마가 보일 것으로 예상한다 (추정). 다음 세션 시작 때 확인할 항목이다.
 
+### 다음 세션 확인 (2026-10-16, Unity 프로젝트 `F:\AI\ToolCreate`의 새 세션, run_mode 호출 없음)
+
+| 항목 | 결과 |
+|---|---|
+| 새 세션에서 ToolSearch로 불러온 `run_mode` 스키마에 `reason` · `ownReview` | 통과. 인자는 `agents` · `context` · `files` · `input` · `mode` · `ownReview` · `reason`. 설명 문구가 서버 정의와 같다 (`reason`: "이 모드를 부른 이유 한 줄. 필수. 기록용이며 에이전트에게 전달되지 않음.", `ownReview`: "… [ownReview 필수] 모드에서 필수. 기록용이며 에이전트에게 전달되지 않음."). 이전 세션에서 이전 스키마가 보인 것은 클라이언트 캐시라는 추정과 맞는다 (원인은 여전히 확인하지 않음) |
+| 두 인자의 필수 여부 | 스키마 `required`는 `mode` · `input`뿐이고 두 인자는 기본값 `null`이다. "필수"는 설명 문구와 서버 검사(`[reason 필요]` · `[ownReview 필요]`)로만 걸린다 |
+| 세션에 주입된 CLAUDE.md에 "판단 근거는 기록 인자로" 항목 | 통과. 지침 블록 머리글 `Contents of F:\AI\ToolCreate\CLAUDE.md`, 디스크 `CLAUDE.md:27`과 같은 문구. 세션 기록 JSON의 `files[].path` 값은 Claude가 세션 안에서 볼 수 없어 확인하지 않았다 |
+
 ### review (gpt_main_sol, run `40e64499d8`) — 실제 확인용 호출의 결과지만 실제 지적이라 처리
 
 | # | 지적 | 출처 | 판정 |
