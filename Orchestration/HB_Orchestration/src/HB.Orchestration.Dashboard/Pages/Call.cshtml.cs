@@ -73,10 +73,21 @@ public sealed class CallModel(IOptions<DashboardOptions> options, PricingService
         var call = CallLog.ReadAll(Opt.ResolvedLogPath).FirstOrDefault(c => c.Id == id);
         if (call?.Provenance is not { BlobFolder: { } folder } p || !ProvenanceView.AllowedShas(p).Contains(sha)) return NotFound();
 
-        var path = BlobStore.PathFor(folder, sha);
-        if (!System.IO.File.Exists(path)) return NotFound();
+        // 링크(폴더 밖을 가리킬 수 있음)는 열지 않는다. 검사와 읽기 사이의 바꿔치기는 ContextLoader와 같은 한계로 막지 않는다.
+        // 검사 뒤 지워지거나 잠기면 500이 아니라 404 (review 40e64499d8).
+        byte[] bytes;
+        try
+        {
+            var info = new FileInfo(BlobStore.PathFor(folder, sha));
+            if (!info.Exists || info.LinkTarget is not null) return NotFound();
+            bytes = System.IO.File.ReadAllBytes(info.FullName);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return NotFound();
+        }
         Response.Headers["X-Content-Type-Options"] = "nosniff";
-        return File(System.IO.File.ReadAllBytes(path), "text/plain; charset=utf-8");
+        return File(bytes, "text/plain; charset=utf-8");
     }
 
     private (string, RunLinkKind)? FindSession(string runId, List<CallRecord> all)

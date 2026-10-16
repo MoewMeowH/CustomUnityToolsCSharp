@@ -226,6 +226,48 @@
 
 ---
 
+## 마지막 실제 확인
+
+### 서버 교체
+
+- 종료 전 확인: `HB.Orchestration.Mcp.dll`을 실행 중인 프로세스는 PID 29920 하나였다. 부모가 `claude.exe`(21:01:47 시작)이고, review 실행 횟수 2가 이 세션의 review 2건과 맞아 이 세션의 서버로 판단했다. 세션 상태 파일 2124 · 3528은 프로세스가 없는 남은 파일이었다 (다른 세션 서버 없음).
+- 사용자 승인 후 29920을 종료하고 `HB_Orchestration.bat publish`를 실행했다 (종료 코드 0, 사용 중인 설정 유지).
+- publish 폴더 `modes.json`의 `review` · `panel` · `cross_p1` · `cross_p1_guided`에 `"RequireOwnReview": true`를 넣었다. src와 내용이 같음을 확인했고, 수정 전 파일은 scratchpad에 백업했다.
+- 사용자가 `/mcp`로 다시 연결했다. `server_info`: 빌드 22:26:17, PID 30252.
+
+### 결과
+
+| 단계 | 결과 |
+|---|---|
+| `list_modes`에 네 모드 `[ownReview 필수]` (사용자 추가) | 통과. 그 밖의 모드에는 없다 |
+| `ownReview` 없이 review → 거절, 횟수 그대로 (사용자 추가) | 통과. `[ownReview 필요] … (실행 횟수 차감 없음)`. review 남은 실행은 호출 전후 모두 3/3 |
+| `reason` · `ownReview` 넣어 review 1회 | run `40e64499d8`, 기록 `d6fbcaed03fe` (gpt_main_sol, 입력 4,168 / 출력 938, 22.7초) |
+| 에이전트 입력에 두 값 없음 | 통과. 기록 `Prompt`에 `reason` 문구와 ownReview 표지(`OWNREVIEW-5CH-CHECK`)가 없다. 시스템 프롬프트 원문(blob)에도 없다. 기록의 `reason`은 보낸 문자열과 같다 |
+| A: `Guidelines.Attached=true`, 지침 해시 = `sha256sum` (사용자 추가) | 통과. `attached: true`, `F:\AI\ToolCreate\REVIEW_GUIDELINES.md` 2,779B, `533d045eb8f1…` = `sha256sum` 결과 |
+| A: 원문 · 설정 | 시스템 프롬프트(3,954B, 지침 본문 포함) · 지침 · modes.json blob이 있고, 다시 계산한 해시가 같다. modes · 설정 해시는 publish 폴더 디스크 파일과 같다. 설정은 `stored: false`, `secretScan: 통과`, blob 없음. `storeErrors` 없음 |
+| D: 호출 상세 (사용자가 새 빌드로 띄운 5280) | reason · ownReview · 응답 3열, 지침·설정 표 4줄. 원문 링크 3개가 200이고 받은 바이트 SHA-256 = 기록 해시, `text/plain; charset=utf-8`. 서버 설정 해시로 열면 404. Claude 세션 칸은 `90430e3d` 확정 |
+| C: 세션 화면 | `90430e3d`에 run_mode 4건: `8f0fe57a52` 확정, `4942156eb5` 확정, 22:27:44 거절 호출 → "실행 전 거절"(rejected, 연결 없음), `40e64499d8` 확정 |
+
+### 예상과 달랐던 것
+
+- **Claude Code 쪽 `run_mode` 스키마에 `reason` · `ownReview`가 보이지 않았다.** `/mcp` 재연결 뒤 ToolSearch로 불러온 스키마가 이전 모양이었다. 클라이언트가 도구 목록을 캐시한 것으로 보인다 (추정, 원인은 확인하지 않음).
+  - 그래도 스키마에 없는 인자를 넣어 부르자 서버까지 전달됐다. `reason`만 넣은 호출이 `[reason 필요]`가 아니라 `[ownReview 필요]`로 거절됐고, 3단계 기록에 두 값이 원문 그대로 남았다.
+  - 새 세션에서는 새 스키마가 보일 것으로 예상한다 (추정). 다음 세션 시작 때 확인할 항목이다.
+
+### review (gpt_main_sol, run `40e64499d8`) — 실제 확인용 호출의 결과지만 실제 지적이라 처리
+
+| # | 지적 | 출처 | 판정 |
+|---|---|---|---|
+| 1 [minor] | 원문 보기에서 존재 확인과 읽기 사이에 파일이 지워지거나 잠기면 500 | 지휘자(ownReview 1번)와 에이전트 모두 | **채택**. 읽기 예외를 404로 처리 |
+| 2 [major] | `<sha>.txt`가 폴더 밖을 가리키는 심볼릭 링크면 따라가 읽음 | 에이전트만 | **채택 (보조 방어)**. blobs 폴더에 링크를 심을 수 있는 것은 같은 사용자뿐이라 영향은 작다. 프로젝트의 다른 경로 검사(SafePath · ContextLoader)와 기준을 맞춰 `LinkTarget`이 있으면 404로 하고 링크도 달지 않는다. 남는 한계: 검사와 읽기 사이의 바꿔치기(ContextLoader와 같은 한계), 하드 링크(일반 파일로 보임). **테스트하지 못함**: 이 PC는 파일 심볼릭 링크 생성에 관리자 권한이 필요하다. 처음에 권한이 없으면 그냥 통과하는 테스트를 넣었다가, 검사 없이 통과로 세어지는 테스트는 오해를 부른다고 보고 지웠다 |
+| 3 [major, 확신도 low] | 동시 append 중 calls.jsonl 읽기가 안전한지 확인 필요 | 에이전트만 | **기각**. `CallLog.ReadAll`은 `FileShare.ReadWrite`로 열고 깨진 줄(쓰는 중인 마지막 줄)은 `JsonException`을 잡아 건너뛴다. 에이전트가 "자료 부족"으로 밝힌 항목이다 |
+| — | 원문 하나를 열 때마다 calls.jsonl 전체를 읽음 / 상세 화면마다 세션 기록 Load | 지휘자만 | 유지. 로컬 · 수 MB · 캐시가 있어 지금은 문제없다 |
+
+- 수정 뒤 테스트 155건 통과.
+- 5280 대시보드는 이 수정 **전** 빌드로 떠 있다. 다시 띄워야 반영된다.
+
+---
+
 ## 이번에 하지 않는 것 (TODO)
 
 | 항목 | 이유 | 다시 볼 때 |

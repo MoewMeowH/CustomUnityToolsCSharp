@@ -47,9 +47,14 @@ public static class ProvenanceView
         if (p.Settings is { Stored: true, Sha256: { } s }) yield return s;
     }
 
+    /// <summary>일반 파일로 있을 때만 (링크는 원문 보기에서도 열지 않으므로 링크를 달지 않는다).</summary>
     private static bool SafeExists(string path)
     {
-        try { return File.Exists(path); }
+        try
+        {
+            var info = new FileInfo(path);
+            return info.Exists && info.LinkTarget is null;
+        }
         catch (Exception) { return false; }
     }
 }
