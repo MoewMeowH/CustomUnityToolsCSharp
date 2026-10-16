@@ -7,8 +7,11 @@
 
     파일 구분
       동기화   CLAUDE.md, REVIEW_GUIDELINES.md, .claude/commands/*.md, .claude/scripts/*.py (원본 폴더에 있는 것)  바이트 동일해야 한다
-      확인만   .claude/settings.json   덮지 않는다 (기존 파일이 있으면 allow 항목만 손으로 합친다)
-      제외     .mcp.json               기기마다 경로가 다른 템플릿이다
+      확인만   .claude/settings.example.json → .claude/settings.json   덮지 않는다. 해시만 비교 (기존 파일이 있으면 allow 항목만 손으로 합친다)
+      확인만   .mcp.example.json → .mcp.json                         덮지 않는다. 기기마다 경로가 달라 해시는 비교하지 않고 없음 · 자리표시 남음만 알린다
+
+    템플릿은 실제 설정과 이름이 다르다. project-files를 폴더째 붙여넣어도 Unity 쪽 설정이 덮이지 않게 하기 위해서다.
+    Unity 쪽에 템플릿 이름 파일이 있으면 'Unity에 템플릿 사본'으로 보여 주기만 한다. 확인만 행은 종료 코드에 영향이 없다.
 
     -Apply는 Unity 쪽 파일이 원본과 '다름'이면 아무것도 복사하지 않고 멈춘다 (Unity에서 직접 고친 내용을 지우지 않도록).
     그 내용을 원본에 먼저 합치거나, 버려도 되면 -Force로 덮는다. -Force는 덮기 전에 <Unity>/review_tmp/sync-backup/<시각>/에 백업한다.
@@ -111,7 +114,27 @@ foreach ($d in $syncDirs) {
     $dirNames[$d.Dir] = $names
     $syncFiles += $names | ForEach-Object { "$($d.Dir)/$_" }
 }
-$checkOnlyFiles = @('.claude/settings.json')
+# 확인만 대상: 원본의 템플릿 이름 → Unity의 실제 이름. 복사하지 않는다.
+#   Hash  true  = 템플릿과 해시 비교 (settings.json)
+#         false = 기기마다 내용이 달라 비교하지 않고 없음 · 자리표시만 본다 (.mcp.json)
+$checkOnlyFiles = @(
+    @{ Template = '.claude/settings.example.json'; Target = '.claude/settings.json'; Hash = $true },
+    @{ Template = '.mcp.example.json';             Target = '.mcp.json';             Hash = $false }
+)
+# 템플릿에 들어 있는 자리표시. Unity 쪽 파일에 남아 있으면 경로를 고치지 않은 것이다.
+$Placeholder = '<publish 폴더>'
+
+function Get-CheckOnlyState($c, [string]$targetHash) {
+    # [string] 매개변수는 $null을 ''로 받는다
+    if ([string]::IsNullOrEmpty($targetHash)) { return '확인만-Unity에 없음' }
+    if ($c.Hash) {
+        $s = Get-Hash (Join-Path $Source $c.Template)
+        if ($s -eq $targetHash) { return '같음' } else { return '확인만-다름' }
+    }
+    $text = [System.IO.File]::ReadAllText((Join-Path $UnityProject $c.Target), [System.Text.UTF8Encoding]::new($false))
+    if ($text.Contains($Placeholder)) { return '확인만-자리표시 남음' }
+    return '확인만-있음'
+}
 
 function Compare-All {
     $rows = @()
@@ -122,12 +145,17 @@ function Compare-All {
                  elseif ($null -eq $u) { 'Unity에 없음' } elseif ($s -eq $u) { '같음' } else { '다름' }
         $rows += [pscustomobject]@{ Kind = 'sync'; Path = $rel; State = $state; Src = $s; Unity = $u }
     }
-    foreach ($rel in $checkOnlyFiles) {
-        $s = Get-Hash (Join-Path $Source $rel)
+    foreach ($c in $checkOnlyFiles) {
+        $s = Get-Hash (Join-Path $Source $c.Template)
         if ($null -eq $s) { continue }
-        $u = Get-Hash (Join-Path $UnityProject $rel)
-        $state = if ($null -eq $u) { '확인만-Unity에 없음' } elseif ($s -eq $u) { '같음' } else { '확인만-다름' }
-        $rows += [pscustomobject]@{ Kind = 'check'; Path = $rel; State = $state; Src = $s; Unity = $u }
+        $u = Get-Hash (Join-Path $UnityProject $c.Target)
+        $state = Get-CheckOnlyState $c $u
+        $rows += [pscustomobject]@{ Kind = 'check'; Path = $c.Target; State = $state; Src = $(if ($c.Hash) { $s } else { $null }); Unity = $u; Template = $c.Template }
+        # 폴더째 붙여넣은 흔적. 지워도 된다.
+        $copy = Join-Path $UnityProject $c.Template
+        if (Test-Path -LiteralPath $copy -PathType Leaf) {
+            $rows += [pscustomobject]@{ Kind = 'extra'; Path = $c.Template; State = 'Unity에 템플릿 사본'; Src = $s; Unity = (Get-Hash $copy) }
+        }
     }
     foreach ($d in $syncDirs) {
         $unityDir = Join-Path $UnityProject ($d.Dir -replace '/', '\')
@@ -172,6 +200,23 @@ foreach ($r in ($rows | Where-Object { $_.Kind -eq 'extra' -and $_.Path -like '*
 if ($warnings.Count -gt 0) {
     Write-Host ''
     $warnings | ForEach-Object { Write-Host $_ }
+}
+
+# 확인만 행의 할 일. 스크립트는 이 파일들을 만들거나 고치지 않는다.
+$todo = @()
+foreach ($r in ($rows | Where-Object { $_.Kind -eq 'check' })) {
+    switch ($r.State) {
+        '확인만-Unity에 없음'   { $todo += "[할 일] $($r.Path) 없음: 원본의 $($r.Template)을(를) Unity에 $($r.Path)(으)로 복사한 뒤 고치세요." }
+        '확인만-자리표시 남음' { $todo += "[할 일] $($r.Path)에 '$Placeholder'가 남아 있습니다: dll 경로를 publish 폴더로 고치세요 (JSON 안에서는 '/')." }
+        '확인만-다름'           { $todo += "[참고] $($r.Path)이(가) $($r.Template)과(와) 다릅니다. 새 allow 항목이 있으면 손으로 합치세요." }
+    }
+}
+if (@($rows | Where-Object { $_.State -eq 'Unity에 템플릿 사본' }).Count -gt 0) {
+    $todo += '[참고] Unity에 템플릿 사본이 있습니다 (project-files를 폴더째 붙여넣은 흔적). 지워도 됩니다.'
+}
+if ($todo.Count -gt 0) {
+    Write-Host ''
+    $todo | ForEach-Object { Write-Host $_ }
 }
 
 $pending = @($rows | Where-Object { $_.Kind -eq 'sync' -and $_.State -ne '같음' })

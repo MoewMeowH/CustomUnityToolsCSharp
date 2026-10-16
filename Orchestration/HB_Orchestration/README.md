@@ -28,7 +28,7 @@ HB_Orchestration/
 │  ├─ HB.Orchestration.Agents/    ← 제공사·에이전트·모드 실행기 (호스트와 무관한 핵심)
 │  ├─ HB.Orchestration.Mcp/       ← MCP 서버, appsettings.json, modes.json
 │  └─ HB.Orchestration.Dashboard/ ← 호출 기록 + 모드 편집 UI
-├─ project-files/                 ← Unity 프로젝트 루트에 복사할 파일 (원본)
+├─ project-files/                 ← Unity 프로젝트 쪽 규칙서·명령의 원본 + 설정 템플릿 (*.example.json). 폴더째 붙여넣지 않는다 (5절)
 └─ tools/Sync-ProjectFiles.ps1    ← project-files → Unity 프로젝트 비교·복사
 ```
 
@@ -317,9 +317,15 @@ calls.jsonl의 응답 원문을 그대로 저장한다. Claude가 응답을 다�
 | CLAUDE.md의 input 규칙 | Unity 쪽 | diff·최소 자료만, 기본은 호출하지 않기 |
 
 ## 5. Unity 프로젝트 쪽
-`project-files/` 내용을 Unity 프로젝트 루트로 복사:
+> **`project-files/`가 원본이다.** Unity 프로젝트의 `CLAUDE.md`, `REVIEW_GUIDELINES.md`, `.claude/commands/*.md`, `.claude/scripts/*.py`는 복사본으로 둔다. 규칙을 고칠 때는 원본을 고친 뒤 아래 스크립트로 복사한다 (Unity 쪽에서 직접 고치면 두 벌이 갈라진다). 줄바꿈은 LF (`.gitattributes`로 고정).
 
-> **`project-files/`가 원본이다.** Unity 프로젝트의 `CLAUDE.md`, `REVIEW_GUIDELINES.md`, `.claude/commands/*.md`는 복사본으로 둔다. 규칙을 고칠 때는 원본을 고친 뒤 아래 스크립트로 복사한다 (Unity 쪽에서 직접 고치면 두 벌이 갈라진다). 줄바꿈은 LF (`.gitattributes`로 고정).
+**처음 설치 (폴더째 붙여넣지 않는다)**
+1. 스크립트 `-Apply`로 규칙서·명령을 복사한다 (아래).
+2. `project-files/.mcp.example.json`을 Unity 프로젝트 루트에 **`.mcp.json`으로** 복사하고, `<publish 폴더>`를 실제 publish 폴더로 고친다.
+3. `project-files/.claude/settings.example.json`을 `.claude/settings.json`으로 복사한다. 이미 있으면 `allow` 항목만 합친다.
+4. Unity 프로젝트 `.gitignore`에 `.mcp.json`을 넣는다 (기기별 절대 경로가 들어 있다).
+
+설정 템플릿은 실제 설정과 이름이 다르다(`*.example.json`). 폴더째 붙여넣어도 Unity 쪽 `.mcp.json` · `.claude/settings.json`이 덮이지 않게 하기 위해서다. 예전에 같은 이름이던 때 폴더째 붙여넣었다가 `.mcp.json`이 `<publish 폴더>` 자리표시로 덮여 MCP 연결이 끊긴 적이 있다.
 
 ```powershell
 # 비교만 (기본). 종료 코드 0 = 모두 같음, 1 = 다른 것이 있음, 2 = 실행 오류
@@ -328,7 +334,8 @@ powershell -ExecutionPolicy Bypass -File tools\Sync-ProjectFiles.ps1 -UnityProje
 powershell -ExecutionPolicy Bypass -File tools\Sync-ProjectFiles.ps1 -UnityProject F:\MyGame -Apply
 ```
 
-- 동기화 대상: `CLAUDE.md`, `REVIEW_GUIDELINES.md`, `.claude/commands/*.md`, `.claude/scripts/*.py`. 바이트가 같아야 한다. `.claude/settings.json`은 비교만 하고 덮지 않는다. `.mcp.json`은 기기마다 경로가 달라 대상이 아니다.
+- 동기화 대상: `CLAUDE.md`, `REVIEW_GUIDELINES.md`, `.claude/commands/*.md`, `.claude/scripts/*.py`. 바이트가 같아야 한다.
+- 확인만 (만들거나 덮지 않음, 종료 코드와 무관): `.claude/settings.json`은 `settings.example.json`과 해시를 비교한다. `.mcp.json`은 기기마다 경로가 달라 해시는 비교하지 않고, 없거나 `<publish 폴더>`가 남아 있으면 `[할 일]`로 알린다. Unity 쪽에 템플릿 이름 파일이 있으면 `Unity에 템플릿 사본`으로 보여 준다 (지워도 됨).
 - **`-Apply`는 Unity 쪽 파일이 원본과 다르면 아무것도 복사하지 않고 멈춘다.** Unity에서 고친 내용이 있으면 원본에 먼저 합친다. 버려도 되면 `-Force`로 덮는다. 덮기 전 파일은 `<Unity>/review_tmp/sync-backup/<시각>/`에 백업된다.
 - 줄 맨 앞 `\---`, `\_`, `\[`, `1\.` 같은 이스케이프 잔재가 보이면 경고만 한다 (종료 코드와 무관). 규칙서에 이런 이스케이프가 섞여 지침 불러오기가 깨진 적이 있다 (`@REVIEW\_GUIDELINES.md`, 원인 미확인).
 - `CLAUDE.md` — 언제 어떤 모드를 쓰고, input을 어떻게 줄이고, 결과를 어떻게 종합할지
@@ -338,8 +345,8 @@ powershell -ExecutionPolicy Bypass -File tools\Sync-ProjectFiles.ps1 -UnityProje
 - `.claude/commands/unity-test.md` — `/unity-test`, `/unity-test PlayMode MyGame.Combat`
 - `.claude/commands/work-order.md` — `/work-order <요청> [첨부]`: 오케스트레이션에 맡길 작업 지시서를 만든다. 조사 → 초안 → `work_order` 모드(luna | flash 동시 검토) → `그외 이상사항` 정리 → `WorkOrders.Folder`(없으면 `docs/work-orders/`)에 저장 + 대화에 출력. 코드는 고치지 않는다. 모드별 지침은 CLAUDE.md가 아니라 이 명령 파일에 둔다 (CLAUDE.md는 세션마다 컨텍스트에 올라감)
 - `.claude/scripts/xlsx_dump.py` — `/work-order`의 첨부 읽기 도우미. 기획서 xlsx·csv를 Markdown 표로 뽑고(병합 셀·메모·텍스트 상자 글 포함) 이미지는 `review_tmp/work-order/<파일>/`에 붙은 셀 이름으로 저장. 필요: Python 3.9+, `openpyxl` (`python -m pip install openpyxl`). `.xls`는 지원하지 않음
-- `.claude/settings.json` — Unity CLI 조회·테스트 명령은 매번 승인 없이 실행 (기존 파일이 있으면 `allow` 항목만 합치기)
-- `.mcp.json` — dll 경로를 publish 폴더로 (JSON 안에서는 경로를 `/`로 쓸 것. `\`는 JSON에서 특수 문자)
+- `.claude/settings.example.json` → Unity의 `.claude/settings.json` — Unity CLI 조회·테스트 명령은 매번 승인 없이 실행 (기존 파일이 있으면 `allow` 항목만 합치기)
+- `.mcp.example.json` → Unity의 `.mcp.json` — dll 경로를 publish 폴더로 (JSON 안에서는 경로를 `/`로 쓸 것. `\`는 JSON에서 특수 문자)
 
 API 키는 시스템 환경 변수로만. 각 제공사 대시보드에서도 월 한도 설정.
 
