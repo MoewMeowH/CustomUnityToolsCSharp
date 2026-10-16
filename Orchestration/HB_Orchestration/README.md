@@ -5,6 +5,7 @@ Claude Code(구독)를 지휘자로, 외부 모델(GPT · Gemini · 로컬)을 *
 ```
 Claude Code ──MCP──▶ HB.Orchestration.Mcp
   list_modes          │
+  save_result         │  (기록의 응답 원문 → 파일)
   run_mode(mode, …)   ├─ modes.json   "무엇을 어떤 순서로"  (실행마다 다시 읽음 → 수정 즉시 반영)
                       │    debate   : Rebuttal@gpt → LogicCheck@gemini
                       │    deliberate: Rebuttal@gpt ⇄ Proponent@gpt_mini (최대 N회차) → Judge@gpt
@@ -217,11 +218,36 @@ SDK 자동 재시도(기본 3회, 기록에 안 남음)는 끄고 서버가 직�
 - 교체 대상은 appsettings에 등록·활성화된 에이전트여야 하고, 잘못되면 토큰 없이 거절된다. 결과 끝에 `(에이전트 교체: a→b)`가 붙고 대시보드에는 실제 실행한 에이전트로 기록된다.
 - 교체 실행도 세션당 실행 횟수에 포함된다.
 
+### run_mode 결과 형식
+```
+runId: dfa393514b
+### 1. Cross_P3_A · gpt_main_sol (입력 15,551 / 출력 7,502, 144.0초)
+(재시도 1회 후 성공 · 1회차 Timeout)          ← 재시도가 있었을 때만
+[경고] 응답 언어 이탈 감지 (가나 비율 10.7%, 308자)  ← 검사기 경고가 있을 때만
+<에이전트 응답>
+```
+- `runId`는 `save_result`에 넘기는 값이다. 대시보드와 calls.jsonl에서도 같은 값으로 찾을 수 있다.
+- 토큰은 성공한 시도의 값, 시간은 재시도와 대기를 포함한 단계 전체 시간이다.
+- `Return: Last`도 runId와 마지막 단계 제목 줄을 붙인다. 출력에서 빠지는 단계의 재시도·경고는 결과 끝에 `단계 N …`으로 모은다.
+- 실행 전에 거절된 경우(`[모드 설정 오류]`, `[입력이 너무 깁니다]` 등)는 아직 runId가 없으므로 기존처럼 `[`로 시작하는 한 줄이다.
+
+### save_result — 응답 원문을 파일로
+`save_result(runId, step, path, codeBlock?, overwrite?)`
+
+calls.jsonl의 응답 원문을 그대로 저장한다. Claude가 응답을 다시 출력해 옮겨 적지 않으므로 출력 토큰이 들지 않고, 옮겨 적기 오류가 없으며, 저장 위치가 고정된다.
+- 같은 단계에 시도가 여럿이면 성공한 시도를 쓴다.
+- `path`는 그 기록의 프로젝트 폴더(`ProjectDir`) 기준 상대 경로다. `context`와 같은 규칙으로 절대 경로·루트 밖·링크 경유·`DenyPatterns`를 거절한다. 없는 하위 폴더는 만든다.
+- `codeBlock: N`이면 응답 안 N번째 코드 블록(```` ``` ```` · `~~~`)의 내용만 저장한다.
+- 이미 있는 파일은 `overwrite: true`일 때만 덮어쓴다.
+- UTF-8(BOM 없음)으로 저장하고 `저장: <경로> (n바이트, SHA-256 …)`을 돌려준다. 실패는 `[저장 불가] …`.
+- 이 도구로 MCP 도구는 4개가 된다. 도구 설명이 컨텍스트에 늘 올라가므로 설명은 한 문장으로 짧게 두었다.
+
 ## 4. 토큰 절약 장치
 
 | 장치 | 어디서 | 효과 |
 |---|---|---|
-| 도구 3개(`list_modes`, `run_mode`, 확인용 `server_info`)만 노출 | MCP | 모드가 늘어도 Claude 컨텍스트의 도구 설명이 그대로 |
+| 도구 4개(`list_modes`, `run_mode`, `save_result`, 확인용 `server_info`)만 노출 | MCP | 모드가 늘어도 Claude 컨텍스트의 도구 설명이 그대로 |
+| `save_result` | MCP | 응답을 파일로 남길 때 Claude가 다시 출력하지 않음 (출력 토큰 0) |
 | 실행 전 검증 | 서버 | 모드·에이전트·역할 오류, 입력 초과, 예산 초과면 **토큰 0으로** 즉시 반환 |
 | 단계별 `Sees` | modes.json | 다음 단계에 필요한 것만 전달 (예: research 검증자는 후보 목록만) |
 | `Return: Last` | modes.json | 최종 판정만 필요하면 Claude가 읽는 양 감소 |

@@ -1,5 +1,4 @@
 using System.Text;
-using System.Text.RegularExpressions;
 
 namespace HB.Orchestration.Agents;
 
@@ -12,7 +11,7 @@ public sealed record ContextRange(string Path, int StartLine, int EndLine)
 /// <summary>
 /// Claude가 이미 읽은 코드를 input에 다시 쓰지 않도록, 경로·줄 범위만 받아 서버가 디스크에서 읽어 붙인다.
 /// 외부 호출 전에 모두 검증하고, 하나라도 문제가 있으면 전체를 거절한다 (조용히 자르거나 건너뛰지 않음).
-/// 한계: 검사와 읽기 사이에 경로를 링크로 바꿔치기하는 경쟁(TOCTOU)은 막지 않는다 (단일 사용자 PC 전제).
+/// 경로 규칙은 <see cref="SafePath"/> (save_result와 공용).
 /// </summary>
 public static class ContextLoader
 {
@@ -57,7 +56,7 @@ public static class ContextLoader
     private static string? AppendRange(
         StringBuilder sb, ContextRange range, string root, ContextOptions options, int maxChars, CancellationToken ct)
     {
-        var (full, pathError) = ResolveSafePath(range.Path, root, options);
+        var (full, pathError) = SafePath.Resolve(range.Path, root, options.AllDenyPatterns, SafePath.Access.Read);
         if (pathError is not null) return $"'{range.Path}': {pathError}";
 
         // Unity·IDE가 연 파일도 읽도록 공유 모드를 넓힌다. 크기는 연 핸들 기준으로 본다.
@@ -88,88 +87,6 @@ public static class ContextLoader
 
         sb.AppendLine("```");
         return null;
-    }
-
-    /// <summary>루트 밖, 링크(심볼릭·junction)를 거치는 경로, 전송 금지 파일을 거절한다.</summary>
-    private static (string? FullPath, string? Error) ResolveSafePath(string raw, string root, ContextOptions options)
-    {
-        if (string.IsNullOrWhiteSpace(raw)) return (null, "경로가 비어 있습니다.");
-        if (Path.IsPathRooted(raw)) return (null, "프로젝트 루트 기준 상대 경로만 받습니다.");
-
-        string full;
-        try { full = Path.GetFullPath(Path.Combine(root, raw)); }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
-        { return (null, $"경로 형식 오류: {ex.Message}"); }
-
-        // 접두사 비교는 구분자까지 포함해야 "F:/Proj2"가 "F:/Proj" 안으로 통과하지 않는다.
-        if (!full.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
-            return (null, "프로젝트 루트 밖입니다.");
-
-        if (!File.Exists(full)) return (null, "파일이 없습니다.");
-
-        // 루트부터 파일까지 모든 단계에서 링크를 거절한다 (정규화된 경로 문자열만으로는 링크 이탈을 못 막음).
-        for (FileSystemInfo? node = new FileInfo(full); node is not null; node = Parent(node))
-        {
-            if (string.Equals(Path.TrimEndingDirectorySeparator(node.FullName), root, StringComparison.OrdinalIgnoreCase)) break;
-            if (node.LinkTarget is not null) return (null, "심볼릭 링크·junction을 거치는 경로는 받지 않습니다.");
-        }
-
-        // 금지 패턴은 실제 긴 이름으로 비교한다. 8.3 짧은 이름(CREDEN~1.JSON)으로 요청해도 같은 파일이기 때문.
-        var relative = LongRelativePath(root, full);
-        var denied = options.AllDenyPatterns.FirstOrDefault(p => GlobToRegex(p).IsMatch(relative));
-        if (denied is not null) return (null, $"외부 전송 금지 파일입니다 (DenyPatterns '{denied}').");
-
-        return (full, null);
-
-        static FileSystemInfo? Parent(FileSystemInfo n) => n switch
-        {
-            FileInfo f => f.Directory,
-            DirectoryInfo d => d.Parent,
-            _ => null,
-        };
-    }
-
-    /// <summary>
-    /// 경로 구성 요소마다 디렉터리 항목을 조회해 실제 긴 이름으로 바꾼다.
-    /// 운영체제는 짧은 이름으로 조회해도 긴 이름 항목을 돌려준다. 항목을 못 찾으면 요청한 이름을 그대로 쓴다.
-    /// </summary>
-    private static string LongRelativePath(string root, string full)
-    {
-        var current = root;
-        var parts = new List<string>();
-        foreach (var part in Path.GetRelativePath(root, full).Split(Path.DirectorySeparatorChar))
-        {
-            var entries = new DirectoryInfo(current).GetFileSystemInfos(part);
-            var name = (entries.FirstOrDefault(e => e.Name.Equals(part, StringComparison.OrdinalIgnoreCase))
-                        ?? entries.FirstOrDefault())?.Name ?? part;
-            parts.Add(name);
-            current = Path.Combine(current, name);
-        }
-        return string.Join('/', parts);
-    }
-
-    /// <summary>
-    /// 간단한 glob: '*'는 '/'를 넘지 않고 '**'는 넘는다. '/'가 없는 패턴은 어느 폴더의 파일 이름이든 매칭한다.
-    /// </summary>
-    private static Regex GlobToRegex(string pattern)
-    {
-        var p = pattern.Replace('\\', '/');
-        if (!p.Contains('/')) p = "**/" + p;
-
-        var sb = new StringBuilder("^");
-        for (var i = 0; i < p.Length; i++)
-        {
-            if (p[i] == '*' && i + 1 < p.Length && p[i + 1] == '*')
-            {
-                // "**/"는 0개 이상의 폴더
-                if (i + 2 < p.Length && p[i + 2] == '/') { sb.Append("(?:.*/)?"); i += 2; }
-                else { sb.Append(".*"); i++; }
-            }
-            else if (p[i] == '*') sb.Append("[^/]*");
-            else if (p[i] == '?') sb.Append("[^/]");
-            else sb.Append(Regex.Escape(p[i].ToString()));
-        }
-        return new Regex(sb.Append('$').ToString(), RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     }
 
     private static string FenceLanguage(string path) => Path.GetExtension(path).ToLowerInvariant() switch

@@ -108,8 +108,8 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         }
 
         // ── 3. 반환: Last면 마지막 결과만 (Claude 쪽 토큰 절약) ─────────────────
+        // 맨 위 runId와 단계 제목의 토큰·시간은 항상 붙인다 (save_result에 넘길 값, 서버 로그를 뒤지지 않도록).
         var returnAll = mode.Return == ModeReturn.All || mode.Flow == ModeFlow.Concurrent;
-        var failed = results.FirstOrDefault(r => !r.Success);
 
         if (swap.Count > 0)
         {
@@ -117,31 +117,12 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             note = note is null ? swapNote : $"{note}\n{swapNote}";
         }
 
-        // 재시도·검사기 경고가 있었던 단계는 한 줄씩 알린다. 제목과 함께 보이는 단계는 제목 아래에,
-        // 출력에서 빠지는 단계(Last 모드의 앞 단계 등)와 제목 없이 본문만 돌려주는 경우는 끝의 note에.
-        var toShow = returnAll ? results : new List<StepResult> { failed ?? results[^1] };
-        var bodyOnly = !returnAll && failed is null;
-        var retries = (bodyOnly ? results : results.Except(toShow))
-            .SelectMany(r => r.Notices.Select(n => $"단계 {r.Step} {n}"))
-            .ToList();
-        if (retries.Count > 0)
-            note = note is null ? string.Join("\n", retries) : $"{string.Join("\n", retries)}\n{note}";
-
-        if (bodyOnly)
-            return note is null ? results[^1].Text : $"{results[^1].Text}\n\n{note}";
-
-        var sb = new StringBuilder();
-        foreach (var r in toShow)
-        {
-            sb.AppendLine($"### {r.Step}. {r.Role} · {r.Agent}");
-            foreach (var notice in r.Notices) sb.AppendLine(notice);
-            sb.AppendLine(r.Text).AppendLine();
-        }
-
-        if (note is not null) sb.AppendLine(note);
-
-        return sb.ToString().TrimEnd();
+        return ResultFormatter.Format(runId, results, returnAll, note);
     }
+
+    /// <summary>save_result: 기록의 응답 원문을 파일로. 쓰기 금지 패턴은 context 전송 금지 목록과 같다.</summary>
+    public string SaveResult(string runId, int step, string path, int? codeBlock, bool overwrite) =>
+        ResultSaver.Save(runId, step, path, codeBlock, overwrite, Options.Context.AllDenyPatterns);
 
     private async Task<List<StepResult>> RunSequentialAsync(
         string runId, string mode, List<(StepDefinition Def, AgentEntry Agent, string Instructions)> plan,

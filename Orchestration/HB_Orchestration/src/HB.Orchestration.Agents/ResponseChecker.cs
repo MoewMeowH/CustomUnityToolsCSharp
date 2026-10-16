@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
 
@@ -55,29 +54,7 @@ public static partial class ResponseChecker
     /// 코드 블록(``` · ~~~ 펜스, 닫히지 않은 펜스는 끝까지)과 인라인 코드(`…`)를 뺀 본문.
     /// 코드 주석·식별자의 일본어는 응답 언어가 아니다.
     /// </summary>
-    public static string StripCode(string text)
-    {
-        var sb = new StringBuilder(text.Length);
-        string? fence = null;
-        foreach (var rawLine in text.Split('\n'))
-        {
-            var line = rawLine.TrimStart();
-            if (fence is null)
-            {
-                if (line.StartsWith("```", StringComparison.Ordinal) || line.StartsWith("~~~", StringComparison.Ordinal))
-                {
-                    fence = line[..3];
-                    continue;
-                }
-                sb.AppendLine(InlineCode().Replace(rawLine, " "));
-            }
-            else if (line.StartsWith(fence, StringComparison.Ordinal) && line.Trim().Trim(fence[0]).Length == 0)
-            {
-                fence = null; // 닫는 펜스: 펜스 문자만 있는 줄
-            }
-        }
-        return sb.ToString();
-    }
+    public static string StripCode(string text) => InlineCode().Replace(CodeFences.WithoutBlocks(text), " ");
 
     /// <summary>(가나 글자 수, 전체 글자 수). 글자 = char.IsLetter. 가나 블록의 문장 부호(・ 등)는 글자가 아니라 세지 않는다.</summary>
     public static (int Kana, int Letters) CountKana(string text)
