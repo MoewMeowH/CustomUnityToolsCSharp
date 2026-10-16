@@ -140,11 +140,74 @@
 
 공통 지적은 없었다 (에이전트 1개 모드). 의견 충돌도 없었다.
 
-**예상과 달랐던 것: 오케스트레이션 자기 코드는 바로 리뷰를 맡길 수 없었다**
+**예상과 달랐던 것: 자기 코드를 리뷰하려다 context 루트 제한에 막혀 Temp로 복사해 우회했다**
 - `context` 경로의 기준은 MCP 서버의 프로젝트 루트(= Claude Code 세션 폴더 `F:\AI\ToolCreate`)다.
 - 오케스트레이션 저장소(`F:\AI\ToolWithCS`)는 그 바깥이라 "루트 밖"으로 거절된다.
 - 링크로 연결하는 방법은 ContextLoader가 링크 경유를 거절하므로 쓸 수 없다.
 - 그래서 대상 파일을 `F:\AI\ToolCreate\Temp\ch4-review\2-2\`(Unity Temp, git 제외)에 **복사**해서 넘겼다.
+
+#### 복사본 사후 확인 (사용자 요청)
+
+**1. 복사 방법:** 셸 명령 `cp`로 원본 6개 파일을 바이트 그대로 복사했다. 내용을 다시 쓰거나 손대지 않았다.
+- 실행한 명령: `cp $S/HB.Orchestration.Agents/{AgentRunner.cs,RetryClassifier.cs,AgentSettings.cs,ModeRunner.cs} $S/HB.Orchestration.Agents/Providers/OpenAICompatibleProvider.cs $S/HB.Orchestration.Shared/CallRecord.cs $D/`
+- 복사 시각은 19:19, 리뷰 지적 반영(원본 수정)보다 앞이다.
+
+**2. 비교** — Temp 복사본이 남아 있어서 세 가지를 확인했다.
+
+**(a) 복사본과 현재 원본의 SHA-256**
+
+| 파일 | 결과 |
+|---|---|
+| AgentSettings.cs, OpenAICompatibleProvider.cs | **일치**. 리뷰 후 수정하지 않은 파일이다 |
+| AgentRunner.cs, RetryClassifier.cs, ModeRunner.cs, CallRecord.cs | 불일치. 리뷰 후 지적을 반영하며 원본을 고친 파일이라 예상된 결과다 |
+
+리뷰 시점의 원본은 git에 없다 (커밋 `190a4a0`과 `883ac73` 사이). 그래서 불일치한 4개는 줄 단위 diff로 차이가 어디인지 확인했다. 줄바꿈 차이는 무시했다.
+
+| 파일 | 차이 위치 | 해당 반영 |
+|---|---|---|
+| AgentRunner.cs | 161 → 161~175 | R1: 사용자 취소 시도 기록 |
+| RetryClassifier.cs | 114, 119, 129~139 추가 | R3: `SafeSeconds` |
+| ModeRunner.cs | 120~133 | R2: 출력에서 빠지는 단계의 재시도 알림 |
+| CallRecord.cs | 53 | `Canceled` 주석 |
+
+**차이는 모두 반영한 수정 위치뿐**이고, 그 밖의 줄은 같다.
+
+**(b) 리뷰 시점에 실제로 보낸 내용과 복사본** (calls.jsonl run `00b061adf8`의 Prompt)
+- 첨부의 각 범위에서 줄 번호 접두사 `N| `를 떼고 복사본의 같은 줄 범위와 비교했다.
+- 첨부 텍스트는 서버의 `AppendLine` 때문에 CRLF라서, 비교 전에 줄바꿈을 맞췄다.
+
+| 범위 | 줄 수 | 줄 번호 연속 | 불일치 |
+|---|---|---|---|
+| AgentRunner.cs:1-222 | 222/222 | O | 0 |
+| RetryClassifier.cs:1-130 | 130/130 | O | 0 |
+| AgentSettings.cs:1-27 | 27/27 | O | 0 |
+| OpenAICompatibleProvider.cs:17-50 | 34/34 | O | 0 |
+| ModeRunner.cs:90-210 | 121/121 | O | 0 |
+| CallRecord.cs:40-61 | 22/22 | O | 0 |
+
+**556줄 전부 일치.**
+
+**(c) 리뷰 지적의 줄 번호와 복사본의 코드**
+- R1 `AgentRunner.cs:161` = `catch (… when (!RetryClassifier.IsUserCancellation(ex, ct)))`
+- R1 `:69-74` = 시도 기록 부분
+- R2 `ModeRunner.cs:120-` = 재시도 알림 조립
+- R3 `RetryClassifier.cs:118-119` = `TimeSpan.FromSeconds(seconds)`
+
+세 지적 모두 가리킨 위치와 내용이 일치한다.
+
+**3. 결론:** 불일치가 없으므로 리뷰 지적을 다시 확인할 필요는 없다. 에이전트는 리뷰 시점의 원본과 같은 코드를 봤다.
+
+**4. 정리:** 확인 후 `F:\AI\ToolCreate\Temp\ch4-review\`를 삭제했다. Unity 프로젝트 git 상태에도 Temp 흔적이 없다.
+
+#### 근본 해결 후보 (아직 결정하지 않음)
+
+| 후보 | 방법 | 장점 | 단점 |
+|---|---|---|---|
+| A. 저장소별 `.mcp.json` | 오케스트레이션 저장소에도 `.mcp.json`을 두고, 그 저장소에서 Claude Code를 연다. 루트가 그 저장소가 된다 | 코드 변경 없음. 루트 규칙을 그대로 유지 | 작업마다 세션을 옮겨야 한다. Unity와 서버 코드를 함께 다루는 작업(이번처럼)에는 맞지 않는다 |
+| B. 허용 루트 추가 설정 | 예: `Context.ExtraRoots: ["F:/AI/ToolWithCS"]`. 경로를 `<루트 이름>:상대경로`로 지정하고, 루트마다 같은 검사(루트 밖·링크·DenyPatterns)를 적용 | 세션을 옮기지 않는다. 복사가 필요 없어 원본과 다를 위험 자체가 없다 | 외부로 보낼 수 있는 범위가 넓어진다. 설정 실수 한 번에 다른 저장소의 비밀 파일이 나갈 수 있으니 기본은 비움(= 기존 동작)으로 둔다 |
+| (현재) Temp 복사 | `cp`로 복사한 뒤 context로 첨부 | 즉시 가능 | 복사 시점과 원본이 어긋날 수 있다. 이번에는 사후 비교로 확인했지만 매번 확인 비용이 든다 |
+
+2-3 review도 같은 방식(`cp` 복사 → 리뷰 → 해시와 첨부 비교 → 삭제)으로 진행하고, 해결 방식은 사용자가 정한다.
 
 ### 테스트
 
