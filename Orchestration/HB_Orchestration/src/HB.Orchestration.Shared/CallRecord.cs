@@ -70,4 +70,7 @@ public sealed record CallRecord
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyDictionary<string, string>? ContextRoots { get; init; }
+
+    /// <summary>에이전트가 받은 지침·설정의 해시. 모든 호출에 남긴다. 5장 이전 기록은 null(대시보드 "기록 없음").</summary>
+    public CallProvenance? Provenance { get; init; }
 }

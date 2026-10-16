@@ -11,7 +11,7 @@ namespace HB.Orchestration.Agents;
 public sealed class SessionTracker
 {
     private readonly ILogger<SessionTracker> _logger;
-    private readonly string _folder = SessionFiles.DefaultFolder;
+    private readonly string _folder;
     private readonly Dictionary<string, int> _runs = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _gate = new();
 
@@ -19,9 +19,13 @@ public sealed class SessionTracker
     public DateTimeOffset StartedAt { get; } = DateTimeOffset.Now;
     public DateTimeOffset? ServerBuild { get; }
 
-    public SessionTracker(ILogger<SessionTracker> logger)
+    public SessionTracker(ILogger<SessionTracker> logger) : this(logger, SessionFiles.DefaultFolder) { }
+
+    /// <param name="folder">세션 상태 파일 폴더. 테스트에서 실제 폴더를 건드리지 않도록 바꿔 끼운다.</param>
+    internal SessionTracker(ILogger<SessionTracker> logger, string folder)
     {
         _logger = logger;
+        _folder = folder;
 
         var dll = Assembly.GetEntryAssembly()?.Location;
         if (!string.IsNullOrEmpty(dll) && File.Exists(dll))

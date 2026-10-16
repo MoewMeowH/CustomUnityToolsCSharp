@@ -60,8 +60,14 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         var (swap, swapError) = ParseOverrides(agentOverrides, mode);
         if (swapError is not null) return $"[모드 '{modeName}'] {swapError}";
 
-        var guidelines = GuidelinesLoader.Load(Options);
-        var plan = new List<(StepDefinition Def, AgentEntry Agent, string Instructions)>();
+        GuidelinesLoader.Result guidelines;
+        try { guidelines = GuidelinesLoader.Load(Options); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // 지침이 빠진 채 보내면 리뷰 결과가 달라지므로 조용히 넘어가지 않고 거절한다 (실행 횟수 차감 전).
+            return $"[리뷰 지침 읽기 실패] {ex.GetType().Name}: {ex.Message} 파일을 닫거나 확인한 뒤 다시 호출하세요.";
+        }
+        var plan = new List<PlannedStep>();
         foreach (var step in mode.Steps)
         {
             var agentName = swap.TryGetValue(step.Agent, out var to) ? to
@@ -76,7 +82,8 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             catch (ModeConfigException ex) { return $"[모드 '{modeName}'] {ex.Message}"; }
 
             // 시스템 프롬프트 = 역할 + 공통 규칙 (+ 지침). 매번 같은 앞부분이라 제공사 프롬프트 캐시에 걸린다.
-            plan.Add((step, agent, role.Prompt + Prompts.CommonRules + (role.UseGuidelines ? guidelines : "")));
+            plan.Add(new PlannedStep(step, agent, role.Prompt + Prompts.CommonRules + (role.UseGuidelines ? guidelines.Text : ""),
+                ProvenanceBuilder.ForStep(guidelines, role.UseGuidelines)));
         }
 
         // 세션당 실행 한도: 검증을 다 통과한 실행만 센다 (설정 오류로 거절된 호출은 횟수에 안 들어감).
@@ -89,6 +96,20 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
 
         // ── 2. 실행 ──────────────────────────────────────────────────────────
         var runId = Guid.NewGuid().ToString("N")[..10];
+
+        // 이 실행의 modes.json · 서버 설정 · 지침 해시와 원문 저장. 실패는 기록에만 남기고 실행은 계속한다.
+        CallProvenance runProvenance;
+        try
+        {
+            runProvenance = ProvenanceBuilder.ForRun(
+                loaded, guidelines, plan.Any(p => p.Guidelines.Attached),
+                catalog.SettingsPath, catalog.SettingsBytes, catalog.ReloadError, Options.Records, runner.LogPath);
+        }
+        catch (Exception ex)
+        {
+            runProvenance = new CallProvenance { StoreErrors = [$"provenance: {ex.GetType().Name}: {ex.Message}"] };
+        }
+        meta = meta with { Provenance = runProvenance };
 
         string? note = null;
         List<StepResult> results;
@@ -146,18 +167,28 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     public string SaveResult(string runId, int step, string path, int? codeBlock, bool overwrite) =>
         ResultSaver.Save(runId, step, path, codeBlock, overwrite, Options.Context.AllDenyPatterns);
 
+    /// <summary>실행 계획의 한 단계. Guidelines는 이 단계 역할에 지침을 붙였는지 (기록용).</summary>
+    private sealed record PlannedStep(StepDefinition Def, AgentEntry Agent, string Instructions, GuidelinesProvenance Guidelines);
+
+    /// <summary>단계 호출. 실행 단위 Provenance에 이 단계의 지침 표시를 얹는다 (Instructions 해시는 AgentRunner가 보낼 문자열로 계산).</summary>
+    private StepCall NewCall(string runId, string mode, int step, PlannedStep p, string instructions, string prompt, CallMeta meta) =>
+        new(runId, mode, step, p.Def.Role, p.Agent, instructions, prompt,
+            meta with { Provenance = (meta.Provenance ?? new CallProvenance()) with { Guidelines = p.Guidelines } })
+        {
+            Checks = Options.ResponseChecks,
+        };
+
     private async Task<List<StepResult>> RunSequentialAsync(
-        string runId, string mode, List<(StepDefinition Def, AgentEntry Agent, string Instructions)> plan,
+        string runId, string mode, List<PlannedStep> plan,
         string input, CallMeta meta, CancellationToken ct)
     {
         var results = new List<StepResult>();
         for (var i = 0; i < plan.Count; i++)
         {
-            var (def, agent, instructions) = plan[i];
-            var prompt = BuildPrompt(input, results, i == 0 ? StepSees.Input : def.Sees);
+            var p = plan[i];
+            var prompt = BuildPrompt(input, results, i == 0 ? StepSees.Input : p.Def.Sees);
 
-            var result = await runner.RunStepAsync(
-                new StepCall(runId, mode, i + 1, def.Role, agent, instructions, prompt, meta) { Checks = Options.ResponseChecks }, ct);
+            var result = await runner.RunStepAsync(NewCall(runId, mode, i + 1, p, p.Instructions, prompt, meta), ct);
             results.Add(result);
 
             // 앞 단계가 실패하면 뒤 단계는 의미가 없으므로 토큰을 쓰지 않고 멈춘다.
@@ -167,18 +198,17 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     }
 
     private async Task<List<StepResult>> RunConcurrentAsync(
-        string runId, string mode, List<(StepDefinition Def, AgentEntry Agent, string Instructions)> plan,
+        string runId, string mode, List<PlannedStep> plan,
         string input, CallMeta meta, CancellationToken ct)
     {
         var prompt = BuildPrompt(input, [], StepSees.Input);
-        var tasks = plan.Select((p, i) => runner.RunStepAsync(
-            new StepCall(runId, mode, i + 1, p.Def.Role, p.Agent, p.Instructions, prompt, meta) { Checks = Options.ResponseChecks }, ct));
+        var tasks = plan.Select((p, i) => runner.RunStepAsync(NewCall(runId, mode, i + 1, p, p.Instructions, prompt, meta), ct));
         return [.. await Task.WhenAll(tasks)];
     }
 
     private async Task<(List<StepResult> Results, string? Note)> RunDebateAsync(
         string runId, string mode, ModeDefinition def,
-        List<(StepDefinition Def, AgentEntry Agent, string Instructions)> plan,
+        List<PlannedStep> plan,
         string input, CallMeta meta, CancellationToken ct)
     {
         var rounds = Math.Clamp(def.MaxRounds ?? 2, 1, ModeDefinition.MaxRoundsHardCap);
@@ -190,17 +220,16 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
 
         for (var round = 1; round <= rounds && note is null; round++)
         {
-            foreach (var (stepDef, agent, instructions) in debaters)
+            foreach (var p in debaters)
             {
                 var prompt = BuildDebatePrompt(input, turns.TakeLast(window), round, rounds);
-                var result = await runner.RunStepAsync(
-                    new StepCall(runId, mode, ++step, stepDef.Role, agent, instructions + Prompts.DebateRules, prompt, meta) { Checks = Options.ResponseChecks }, ct);
+                var result = await runner.RunStepAsync(NewCall(runId, mode, ++step, p, p.Instructions + Prompts.DebateRules, prompt, meta), ct);
                 turns.Add(result);
 
                 if (!result.Success) return (turns, $"(턴 {step}에서 실패해 토론 중단)");
                 if (EndsWithAgreement(result.Text))
                 {
-                    note = $"({round}/{rounds}회차 {stepDef.Role}의 [합의]로 조기 종료)";
+                    note = $"({round}/{rounds}회차 {p.Def.Role}의 [합의]로 조기 종료)";
                     break;
                 }
             }
@@ -209,10 +238,9 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         if (plan.Count == 3)
         {
             // 판정자는 토론 전체를 본다 (회차 상한이 있으므로 분량도 상한이 있다).
-            var (judgeDef, judgeAgent, judgeInstructions) = plan[2];
+            var judge = plan[2];
             var judgePrompt = BuildDebatePrompt(input, turns, round: 0, rounds: rounds);
-            var verdict = await runner.RunStepAsync(
-                new StepCall(runId, mode, ++step, judgeDef.Role, judgeAgent, judgeInstructions, judgePrompt, meta) { Checks = Options.ResponseChecks }, ct);
+            var verdict = await runner.RunStepAsync(NewCall(runId, mode, ++step, judge, judge.Instructions, judgePrompt, meta), ct);
             turns.Add(verdict);
         }
 

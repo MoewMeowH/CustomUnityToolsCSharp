@@ -102,6 +102,8 @@ dotnet build HB_Orchestration.slnx
 | `ResponseChecks.ExpectedLanguage` | 기대하는 응답 언어. 지금은 `ko`만 지원. **키가 없으면 `ko`(검사 켬), `""`이면 끔** (아래 "응답 검사기") |
 | `ResponseChecks.ForeignScriptRatio` | 코드 블록을 뺀 본문에서 일본어 가나 비율이 이 값 이상이면 경고 (기본 0.02 = 2%) |
 | `Debug.DumpToolResults` | `true`면 `run_mode`가 반환하는 문자열을 그대로 `%LOCALAPPDATA%/HB_Orchestration/dumps/`에 남긴다 (조사용, 기본 `false`). 결과가 Claude에게 가는 동안 바뀌는지 가를 때 쓰고, 끝나면 끈다 |
+| `Records.BlobFolder` | 지침·설정 원문 저장 폴더. 비우면 `calls.jsonl` 옆 `blobs/`, 상대 경로면 `calls.jsonl` 폴더 기준 (아래 "호출 기록의 지침·설정 해시") |
+| `Records.StoreSettingsText` | 서버 설정(`appsettings.json`) 원문도 저장할지 (기본 `false` = 해시와 키 패턴 검사 결과만). `true`여도 키 패턴이 보이면 저장하지 않음 |
 | `Pricing.KrwPerUsd` | 1달러당 원. 비우면 대시보드는 달러만 표시 |
 | `Pricing.Models.<모델 ID>` | `InputPerMillion`, `CachedInputPerMillion`(비우면 입력과 같음), `OutputPerMillion` — USD / 1M 토큰. 키는 에이전트 이름이 아니라 **모델 ID**(기록에 남는 값). 지금 안 쓰는 예전 모델도 남겨 두면 예전 기록의 비용이 계속 계산됨. 서버는 쓰지 않고 대시보드만 읽음 |
 
@@ -137,6 +139,24 @@ SDK 자동 재시도(기본 3회, 기록에 안 남음)는 끄고 서버가 직�
 - 검사기 자체가 오류를 내면 경고 없이 넘어가고 서버 로그만 남긴다.
 - `ExpectedLanguage`는 "비우면 기존 동작" 원칙의 **예외**로, 키가 없어도 검사가 켜진다. 경고는 결과를 바꾸지 않고, 사람이 대시보드를 보기 전에는 모르는 이탈(3장)을 기본으로 잡기 위해서다. 끄려면 `""`.
 - 한자(중국어) 이탈은 잡지 않는다.
+
+### 호출 기록의 지침·설정 해시 (`Provenance`)
+
+호출 기록만으로 "이 에이전트가 어떤 지침과 설정으로 실행됐나"를 확정하기 위해, 모든 기록 줄에 `provenance`를 남긴다 (SHA-256 소문자 hex).
+
+| 필드 | 무엇을 해시하나 | 원문 저장 |
+|---|---|---|
+| `instructionsSha256` · `instructionsBytes` | 에이전트에 넘긴 시스템 프롬프트 문자열 그대로의 UTF-8(BOM 없음) 바이트. 역할 + 공통 규칙 + 지침(+ Debate 토론자는 토론 규칙) | O |
+| `guidelines` | 붙였으면 `attached: true` + 지침 파일 경로·원본 바이트 해시(`sha256sum`과 같음). 안 붙였으면 `attached: false` + `reason` (`역할 UseGuidelines=false` / `지침 파일 없음`) | O |
+| `modes` | 실행 시점 modes.json 원본 바이트 | O |
+| `settings` | 적용 중인 `appsettings.json`을 읽을 때 함께 읽은 원본 바이트 + 키 패턴 검사(`secretScan`: `통과` / `의심 n건`) | **X** (기본, `Records.StoreSettingsText`) |
+
+- 원문은 `blobs/<sha256>.txt`에 **해시별로 한 번만** 저장한다. 같은 지침이면 새 파일이 생기지 않는다. 여러 서버 프로세스가 동시에 써도 내용이 같아 안전하다 (임시 파일 → 덮어쓰지 않는 이동).
+- 저장에 실패해도 호출은 그대로 진행한다. 실패는 서버 로그와 기록의 `storeErrors`에 남는다 (없으면 필드 생략). 해시는 저장 실패와 관계없이 남는다.
+- 해시 범위는 서버가 에이전트(MAF)에 넘긴 문자열까지다. HTTP 요청 본문(JSON 이스케이프)은 해시하지 않는다.
+- `settings`의 해시는 실행 시점에 파일을 다시 읽은 값이 아니라 **지금 적용 중인 설정의 바이트**다. 다시 읽기에 실패해 이전 설정이 적용 중이면 이전 바이트의 해시와 `reloadError`가 남는다. 환경 변수(`Orchestration__…`)로 덮어쓴 값은 잡히지 않는다.
+- 지침·modes.json을 읽다가 실패하면(다른 프로그램이 잠금 등) 실행 횟수 차감 없이 `[리뷰 지침 읽기 실패]` / `[모드 설정 오류]`로 거절한다.
+- 5장 이전 기록에는 `provenance`가 없다 (대시보드 "기록 없음").
 
 ### 재시작이 필요한 경우
 | 바꾼 것 | 필요한 동작 |

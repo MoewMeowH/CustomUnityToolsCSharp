@@ -14,7 +14,11 @@ public sealed class ModeStore(AgentCatalog catalog)
         Converters = { new JsonStringEnumConverter() },
     };
 
-    public sealed record Loaded(ModesFile File, string Path);
+    /// <param name="Bytes">읽은 modes.json 원본 바이트 (호출 기록의 해시·원문 저장용). 역직렬화도 이 바이트로 한다.</param>
+    public sealed record Loaded(ModesFile File, string Path, byte[] Bytes)
+    {
+        public string Sha256 { get; } = HB.Orchestration.Shared.BlobStore.Sha256Hex(Bytes);
+    }
 
     public string? ResolvePath()
     {
@@ -34,15 +38,22 @@ public sealed class ModeStore(AgentCatalog catalog)
         var path = ResolvePath() ?? throw new ModeConfigException("modes.json을 찾을 수 없습니다.");
         try
         {
-            var file = JsonSerializer.Deserialize<ModesFile>(File.ReadAllText(path), Json) ?? new ModesFile();
+            // 해시한 바이트와 해석한 설정이 같은 시점의 파일이 되도록 한 번만 읽는다.
+            var bytes = File.ReadAllBytes(path);
+            var file = JsonSerializer.Deserialize<ModesFile>(GuidelinesLoader.DecodeLikeReadAllText(bytes), Json) ?? new ModesFile();
             // 역직렬화로 만들어진 딕셔너리는 대소문자 구분이라 다시 감싼다.
             file.Roles = new(file.Roles, StringComparer.OrdinalIgnoreCase);
             file.Modes = new(file.Modes, StringComparer.OrdinalIgnoreCase);
-            return new Loaded(file, path);
+            return new Loaded(file, path, bytes);
         }
         catch (JsonException ex)
         {
             throw new ModeConfigException($"{path} 파싱 실패 (줄 {ex.LineNumber + 1}): {ex.Message}");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // 찾은 뒤 지워졌거나 다른 프로그램이 잠갔을 때. run_mode 밖으로 예외를 내보내지 않는다.
+            throw new ModeConfigException($"{path} 읽기 실패: {ex.GetType().Name}: {ex.Message}");
         }
     }
 

@@ -31,11 +31,13 @@ public sealed record OrchestrationSource(Func<OrchestrationOptions> Load, string
 /// </summary>
 public sealed partial class AgentCatalog
 {
+    /// <param name="SettingsBytes">이 스냅샷을 만들 때 읽은 설정 파일 바이트 (호출 기록의 설정 해시용). 못 읽었으면 null.</param>
     private sealed record Snapshot(
         OrchestrationOptions Options,
         Dictionary<string, AgentEntry> Agents,
         Dictionary<string, string> Skipped,
-        DateTimeOffset LoadedAt);
+        DateTimeOffset LoadedAt,
+        byte[]? SettingsBytes);
 
     private readonly OrchestrationSource _source;
     private readonly Dictionary<string, IChatClientProvider> _providers;
@@ -51,7 +53,8 @@ public sealed partial class AgentCatalog
         _providers = providers.ToDictionary(p => p.Type, StringComparer.OrdinalIgnoreCase);
         _logger = logger;
         _settingsWriteUtc = SettingsWriteUtc();
-        _snapshot = Build(_source.Load());
+        var bytes = ReadSettingsBytes();
+        _snapshot = Build(_source.Load(), bytes);
     }
 
     /// <summary>현재 설정. 파일이 바뀌었으면 다시 읽은 값.</summary>
@@ -64,6 +67,15 @@ public sealed partial class AgentCatalog
 
     /// <summary>마지막으로 설정을 읽은 시각.</summary>
     public DateTimeOffset LoadedAt => Current.LoadedAt;
+
+    /// <summary>서버 설정 파일 경로 (호출 기록의 설정 해시용). 없으면 null.</summary>
+    public string? SettingsPath => _source.SettingsPath;
+
+    /// <summary>
+    /// 현재 적용 중인 설정을 읽을 때 함께 읽은 파일 바이트. 실행 시점에 파일을 다시 읽지 않으므로
+    /// 그 사이 파일이 바뀌어도 기록의 해시는 실제 적용 중인 설정을 가리킨다. 다시 읽기에 실패하면 이전 스냅샷의 바이트가 남는다.
+    /// </summary>
+    public byte[]? SettingsBytes => Current.SettingsBytes;
 
     /// <summary>마지막 재로드가 실패했다면 그 이유 (이전 설정으로 계속 동작 중).</summary>
     public string? ReloadError { get; private set; }
@@ -88,7 +100,9 @@ public sealed partial class AgentCatalog
                     _settingsWriteUtc = write;
                     try
                     {
-                        _snapshot = Build(_source.Load());
+                        // 설정 시스템이 같은 파일을 읽기 직전의 바이트. 둘 사이에 또 바뀌면 수정 시각이 달라져 다음 접근 때 다시 읽힌다.
+                        var bytes = ReadSettingsBytes();
+                        _snapshot = Build(_source.Load(), bytes);
                         ReloadError = null;
                         _logger.LogInformation("appsettings.json 변경 감지 → 설정·에이전트 다시 읽음 ({Count}개)", _snapshot.Agents.Count);
                     }
@@ -104,6 +118,19 @@ public sealed partial class AgentCatalog
         }
     }
 
+    private byte[]? ReadSettingsBytes()
+    {
+        try
+        {
+            return _source.SettingsPath is { } p && File.Exists(p) ? File.ReadAllBytes(p) : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "설정 파일 바이트 읽기 실패 (호출 기록의 설정 해시가 비게 됨)");
+            return null;
+        }
+    }
+
     private DateTime SettingsWriteUtc()
     {
         try
@@ -116,7 +143,7 @@ public sealed partial class AgentCatalog
         }
     }
 
-    private Snapshot Build(OrchestrationOptions options)
+    private Snapshot Build(OrchestrationOptions options, byte[]? settingsBytes)
     {
         var agents = new Dictionary<string, AgentEntry>(StringComparer.OrdinalIgnoreCase);
         var skipped = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -159,7 +186,7 @@ public sealed partial class AgentCatalog
         if (agents.Count == 0)
             _logger.LogWarning("사용 가능한 에이전트가 없습니다. appsettings.json과 API 키 환경 변수를 확인하세요.");
 
-        return new Snapshot(options, agents, skipped, DateTimeOffset.Now);
+        return new Snapshot(options, agents, skipped, DateTimeOffset.Now, settingsBytes);
     }
 
     [GeneratedRegex("^[A-Za-z0-9_-]{1,64}$")]

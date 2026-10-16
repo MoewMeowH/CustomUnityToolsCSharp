@@ -31,6 +31,25 @@ public sealed class OrchestrationOptions
 
     /// <summary>조사용 디버그 설정. 평소에는 모두 끔.</summary>
     public DebugOptions Debug { get; set; } = new();
+
+    /// <summary>호출 기록 보강(지침·설정 해시, 원문 저장) 설정.</summary>
+    public RecordsOptions Records { get; set; } = new();
+}
+
+/// <summary>appsettings.json의 "Orchestration:Records".</summary>
+public sealed class RecordsOptions
+{
+    /// <summary>
+    /// 시스템 프롬프트·지침·modes.json 원문을 해시 이름으로 저장할 폴더. 비우면 호출 기록 폴더의 blobs/,
+    /// 상대 경로면 호출 기록 폴더 기준. 저장에 실패해도 호출은 진행하고 기록의 StoreErrors에 남는다.
+    /// </summary>
+    public string? BlobFolder { get; set; }
+
+    /// <summary>
+    /// 서버 설정(appsettings.json) 원문도 저장할지. 기본 false = 해시와 키 패턴 검사 결과만 남긴다.
+    /// true여도 키 패턴 검사에 걸리면 저장하지 않는다.
+    /// </summary>
+    public bool StoreSettingsText { get; set; }
 }
 
 /// <summary>appsettings.json의 "Orchestration:Debug".</summary>

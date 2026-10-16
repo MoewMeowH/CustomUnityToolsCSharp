@@ -10,6 +10,9 @@ public sealed record CallMeta(IReadOnlyList<string>? Files, IReadOnlyList<string
 {
     /// <summary>context가 실제로 읽은 추가 루트. 쓰지 않았으면 null (기록에서 필드 생략).</summary>
     public IReadOnlyDictionary<string, string>? ContextRoots { get; init; }
+
+    /// <summary>실행 단위 지침·설정 해시 (단계별 Guidelines 포함). Instructions 해시는 AgentRunner가 채운다.</summary>
+    public CallProvenance? Provenance { get; init; }
 }
 
 /// <summary>모드의 한 단계 실행 정보.</summary>
@@ -72,15 +75,23 @@ public sealed class AgentRunner
         _logPath = logPath;
     }
 
+    /// <summary>호출 기록 파일 경로. 원문 저장 폴더의 기본값도 여기서 정해진다.</summary>
+    public string LogPath => _logPath ?? CallLog.DefaultPath;
+
     public async Task<StepResult> RunStepAsync(StepCall call, CancellationToken ct)
     {
         var maxAttempts = AgentSettings.ResolveMaxAttempts(call.Agent.Options, call.Agent.ProviderOptions);
         var stepWatch = Stopwatch.StartNew();
         var failedKinds = new List<string>();
 
+        // 에이전트에 넘길 문자열 그대로를 해시한다 (Debate 규칙 등 덧붙인 뒤의 최종본). 시도마다 같으므로 한 번만.
+        var provenance = ProvenanceBuilder.WithInstructions(call.Meta.Provenance, call.Instructions, LogPath);
+        if (provenance.StoreErrors is { Count: > 0 } storeErrors)
+            _logger.LogWarning("[{Mode}#{Step}] 지침·설정 원문 저장 실패 (호출은 계속): {Errors}", call.Mode, call.Step, string.Join(" / ", storeErrors));
+
         for (var attempt = 1; ; attempt++)
         {
-            var outcome = await RunAttemptAsync(call, attempt, maxAttempts, ct);
+            var outcome = await RunAttemptAsync(call, provenance, attempt, maxAttempts, ct);
             var record = outcome.Record;
 
             // 기록 실패가 결과 전달을 막으면 안 된다.
@@ -123,7 +134,7 @@ public sealed class AgentRunner
     private sealed record AttemptOutcome(CallRecord Record, string Text, FailureInfo? Failure);
 
     /// <summary>한 번 호출. 사용자 취소만 예외로 올리고, 나머지 실패는 기록과 분류로 돌려준다.</summary>
-    private async Task<AttemptOutcome> RunAttemptAsync(StepCall call, int attempt, int maxAttempts, CancellationToken ct)
+    private async Task<AttemptOutcome> RunAttemptAsync(StepCall call, CallProvenance provenance, int attempt, int maxAttempts, CancellationToken ct)
     {
         var startedAt = DateTimeOffset.Now;
         var sw = Stopwatch.StartNew();
@@ -223,6 +234,7 @@ public sealed class AgentRunner
             Files = call.Meta.Files ?? [],
             Context = call.Meta.Context,
             ContextRoots = call.Meta.ContextRoots,
+            Provenance = provenance,
         };
     }
 
