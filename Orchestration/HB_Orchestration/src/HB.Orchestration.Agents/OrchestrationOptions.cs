@@ -28,6 +28,19 @@ public sealed class OrchestrationOptions
 
     /// <summary>응답 검사기(빈 응답·잘림·언어 이탈) 설정.</summary>
     public ResponseChecksOptions ResponseChecks { get; set; } = new();
+
+    /// <summary>조사용 디버그 설정. 평소에는 모두 끔.</summary>
+    public DebugOptions Debug { get; set; } = new();
+}
+
+/// <summary>appsettings.json의 "Orchestration:Debug".</summary>
+public sealed class DebugOptions
+{
+    /// <summary>
+    /// true면 run_mode가 반환하는 문자열을 그대로 %LOCALAPPDATA%/HB_Orchestration/dumps/에 남긴다.
+    /// 결과가 지휘자에게 가는 길(MCP 직렬화·표시)에서 바뀌는지 가르는 용도 (4장: '&lt;' 조사). 조사가 끝나면 끈다.
+    /// </summary>
+    public bool DumpToolResults { get; set; }
 }
 
 /// <summary>appsettings.json의 "Orchestration:ResponseChecks". 경고는 응답을 막지 않고 기록·결과에 한 줄씩 붙는다.</summary>

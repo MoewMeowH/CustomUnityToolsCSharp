@@ -120,6 +120,28 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         return ResultFormatter.Format(runId, results, returnAll, note);
     }
 
+    /// <summary>
+    /// Debug.DumpToolResults가 켜져 있으면 도구가 반환하는 문자열을 그대로 파일로 남긴다 (UTF-8, BOM 없음, 변환 없음).
+    /// 덤프 실패는 결과 전달을 막지 않는다.
+    /// </summary>
+    public string? DumpToolResult(string tool, string mode, string result)
+    {
+        try
+        {
+            if (!Options.Debug.DumpToolResults) return null;
+            var dir = Path.Combine(Path.GetDirectoryName(CallLog.DefaultPath)!, "dumps");
+            Directory.CreateDirectory(dir);
+            var safeMode = string.Concat(mode.Select(c => char.IsLetterOrDigit(c) || c is '_' or '-' ? c : '_'));
+            var path = Path.Combine(dir, $"{DateTime.Now:yyyyMMdd-HHmmss-fff}_{tool}_{safeMode}.txt");
+            File.WriteAllBytes(path, new UTF8Encoding(false).GetBytes(result));
+            return path;
+        }
+        catch (Exception)
+        {
+            return null; // 조사용 부가 기능: 실패해도 무시
+        }
+    }
+
     /// <summary>save_result: 기록의 응답 원문을 파일로. 쓰기 금지 패턴은 context 전송 금지 목록과 같다.</summary>
     public string SaveResult(string runId, int step, string path, int? codeBlock, bool overwrite) =>
         ResultSaver.Save(runId, step, path, codeBlock, overwrite, Options.Context.AllDenyPatterns);
