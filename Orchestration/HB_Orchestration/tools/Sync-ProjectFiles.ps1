@@ -1,0 +1,218 @@
+﻿<#
+.SYNOPSIS
+    project-files(원본)를 Unity 프로젝트에 맞춘다. 기본은 비교만 한다.
+
+.DESCRIPTION
+    원본 방향: project-files가 원본이고 Unity 프로젝트 쪽은 복사본이다. 규칙을 고칠 때는 원본을 고친 뒤 이 스크립트로 복사한다.
+
+    파일 구분
+      동기화   CLAUDE.md, REVIEW_GUIDELINES.md, .claude/commands/*.md (원본 폴더에 있는 것)  바이트 동일해야 한다
+      확인만   .claude/settings.json   덮지 않는다 (기존 파일이 있으면 allow 항목만 손으로 합친다)
+      제외     .mcp.json               기기마다 경로가 다른 템플릿이다
+
+    -Apply는 Unity 쪽 파일이 원본과 '다름'이면 아무것도 복사하지 않고 멈춘다 (Unity에서 직접 고친 내용을 지우지 않도록).
+    그 내용을 원본에 먼저 합치거나, 버려도 되면 -Force로 덮는다. -Force는 덮기 전에 <Unity>/review_tmp/sync-backup/<시각>/에 백업한다.
+
+    이스케이프 잔재(줄 맨 앞 \---, \_, \[, 1\. 등)가 보이면 경고만 한다. 종료 코드에는 영향이 없다.
+
+    종료 코드: 0 동기화 대상이 모두 같음 / 1 다른 것이 있음(또는 -Apply가 멈춤) / 2 실행 오류
+
+.EXAMPLE
+    powershell -ExecutionPolicy Bypass -File tools\Sync-ProjectFiles.ps1 -UnityProject F:\MyGame
+.EXAMPLE
+    powershell -ExecutionPolicy Bypass -File tools\Sync-ProjectFiles.ps1 -UnityProject F:\MyGame -Apply
+#>
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)][string]$UnityProject,
+    [switch]$Apply,
+    [switch]$Force,
+    # 테스트용. 비우면 이 스크립트 옆의 ..\project-files
+    [string]$Source = ''
+)
+
+$ErrorActionPreference = 'Stop'
+# 예상하지 못한 예외도 '다름'(1)과 구분되게 2로 끝낸다
+trap {
+    Write-Host "[오류] $_"
+    exit 2
+}
+
+function Fail([string]$message) {
+    Write-Host "[오류] $message"
+    exit 2
+}
+
+function Get-Hash([string]$path) {
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+    return (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
+function Short([string]$hash) {
+    # [string] 매개변수는 $null을 ''로 받는다
+    if ([string]::IsNullOrEmpty($hash)) { return '-' }
+    return $hash.Substring(0, 12)
+}
+
+# 규칙서에서 실제로 나온 이스케이프 잔재 모양 (원인 미확인). 코드 블록 안의 정상 사용도 걸릴 수 있어 경고만 한다.
+$EscapePatterns = @(
+    @{ Name = '\---';  Regex = '^\s*\\-{3}' },
+    @{ Name = '\_';    Regex = '\\_' },
+    @{ Name = '\[';    Regex = '\\\[' },
+    @{ Name = 'N\.';   Regex = '^\s*\d+\\\.' },
+    @{ Name = '\* \-'; Regex = '^\s*\\[*\-+]\s' }
+)
+
+function Find-EscapeRemnants([string]$path, [string]$label) {
+    $found = @()
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $found }
+    $lines = [System.IO.File]::ReadAllLines($path, [System.Text.UTF8Encoding]::new($false))
+    for ($i = 0; $i -lt $lines.Length; $i++) {
+        foreach ($p in $EscapePatterns) {
+            if ($lines[$i] -match $p.Regex) {
+                $text = $lines[$i].Trim()
+                if ($text.Length -gt 60) { $text = $text.Substring(0, 60) + '…' }
+                $found += "[경고] 이스케이프 잔재 의심 ($($p.Name)): $label`:$($i + 1)  $text"
+                break
+            }
+        }
+    }
+    return $found
+}
+
+# --- 입력 확인 ---------------------------------------------------------------
+
+if ($Force -and -not $Apply) { Fail '-Force는 -Apply와 함께 써야 합니다.' }
+if ([string]::IsNullOrWhiteSpace($Source)) { $Source = Join-Path $PSScriptRoot '..\project-files' }
+if (-not (Test-Path -LiteralPath $Source -PathType Container)) { Fail "원본 폴더가 없습니다: $Source" }
+if (-not (Test-Path -LiteralPath $UnityProject -PathType Container)) { Fail "Unity 프로젝트 폴더가 없습니다: $UnityProject" }
+$Source = (Resolve-Path -LiteralPath $Source).ProviderPath
+$UnityProject = (Resolve-Path -LiteralPath $UnityProject).ProviderPath
+if ($Source -eq $UnityProject) { Fail '원본과 Unity 프로젝트가 같은 폴더입니다.' }
+
+# --- 대상 목록 ---------------------------------------------------------------
+
+$syncFiles = @('CLAUDE.md', 'REVIEW_GUIDELINES.md')
+foreach ($f in $syncFiles) {
+    if (-not (Test-Path -LiteralPath (Join-Path $Source $f) -PathType Leaf)) { Fail "원본에 $f 가 없습니다: $Source" }
+}
+$srcCommands = Join-Path $Source '.claude\commands'
+$commandNames = @()
+if (Test-Path -LiteralPath $srcCommands -PathType Container) {
+    $commandNames = @(Get-ChildItem -LiteralPath $srcCommands -Filter '*.md' -File -Force | Sort-Object Name | ForEach-Object { $_.Name })
+}
+$syncFiles += $commandNames | ForEach-Object { ".claude/commands/$_" }
+$checkOnlyFiles = @('.claude/settings.json')
+
+function Compare-All {
+    $rows = @()
+    foreach ($rel in $syncFiles) {
+        $s = Get-Hash (Join-Path $Source $rel)
+        $u = Get-Hash (Join-Path $UnityProject $rel)
+        $state = if (Test-Path -LiteralPath (Join-Path $UnityProject $rel) -PathType Container) { 'Unity에 폴더' }
+                 elseif ($null -eq $u) { 'Unity에 없음' } elseif ($s -eq $u) { '같음' } else { '다름' }
+        $rows += [pscustomobject]@{ Kind = 'sync'; Path = $rel; State = $state; Src = $s; Unity = $u }
+    }
+    foreach ($rel in $checkOnlyFiles) {
+        $s = Get-Hash (Join-Path $Source $rel)
+        if ($null -eq $s) { continue }
+        $u = Get-Hash (Join-Path $UnityProject $rel)
+        $state = if ($null -eq $u) { '확인만-Unity에 없음' } elseif ($s -eq $u) { '같음' } else { '확인만-다름' }
+        $rows += [pscustomobject]@{ Kind = 'check'; Path = $rel; State = $state; Src = $s; Unity = $u }
+    }
+    $unityCommands = Join-Path $UnityProject '.claude\commands'
+    if (Test-Path -LiteralPath $unityCommands -PathType Container) {
+        foreach ($f in (Get-ChildItem -LiteralPath $unityCommands -Filter '*.md' -File -Force | Sort-Object Name)) {
+            if ($commandNames -notcontains $f.Name) {
+                $rows += [pscustomobject]@{ Kind = 'extra'; Path = ".claude/commands/$($f.Name)"; State = 'Unity에만 있음'; Src = $null; Unity = (Get-Hash $f.FullName) }
+            }
+        }
+    }
+    return $rows
+}
+
+function Write-Rows($rows) {
+    $width = ($rows | ForEach-Object { $_.State.Length } | Measure-Object -Maximum).Maximum
+    $pathWidth = ($rows | ForEach-Object { $_.Path.Length } | Measure-Object -Maximum).Maximum
+    foreach ($r in $rows) {
+        Write-Host ('{0}  {1}  {2}  {3}' -f $r.State.PadRight($width), $r.Path.PadRight($pathWidth), (Short $r.Src), (Short $r.Unity))
+    }
+}
+
+function Test-AllSynced($rows) {
+    return -not ($rows | Where-Object { $_.Kind -eq 'sync' -and $_.State -ne '같음' })
+}
+
+# --- 비교 --------------------------------------------------------------------
+
+Write-Host "원본:  $Source"
+Write-Host "Unity: $UnityProject"
+Write-Host ''
+$rows = Compare-All
+Write-Rows $rows
+
+$warnings = @()
+foreach ($rel in $syncFiles) {
+    $warnings += @(Find-EscapeRemnants (Join-Path $Source $rel) "원본/$rel")
+    $warnings += @(Find-EscapeRemnants (Join-Path $UnityProject $rel) "Unity/$rel")
+}
+foreach ($r in ($rows | Where-Object { $_.Kind -eq 'extra' })) {
+    $warnings += @(Find-EscapeRemnants (Join-Path $UnityProject $r.Path) "Unity/$($r.Path)")
+}
+if ($warnings.Count -gt 0) {
+    Write-Host ''
+    $warnings | ForEach-Object { Write-Host $_ }
+}
+
+$pending = @($rows | Where-Object { $_.Kind -eq 'sync' -and $_.State -ne '같음' })
+$differ = @($pending | Where-Object { $_.State -eq '다름' })
+
+if (-not $Apply) {
+    Write-Host ''
+    if ($pending.Count -eq 0) { Write-Host '결과: 동기화 대상이 모두 같습니다.'; exit 0 }
+    Write-Host "결과: 동기화 대상 $($pending.Count)개가 원본과 다릅니다. -Apply로 맞출 수 있습니다."
+    exit 1
+}
+
+# --- 적용 --------------------------------------------------------------------
+
+Write-Host ''
+if ($pending.Count -eq 0) { Write-Host '결과: 동기화 대상이 모두 같습니다. 복사할 것이 없습니다.'; exit 0 }
+
+# 파일 자리에 폴더가 있으면 Copy-Item이 그 폴더 안에 복사한다. 아무것도 하지 않고 끝낸다.
+$folders = @($pending | Where-Object { $_.State -eq 'Unity에 폴더' })
+if ($folders.Count -gt 0) {
+    Fail ("파일이어야 할 위치에 폴더가 있습니다. 아무것도 복사하지 않았습니다: " + (($folders | ForEach-Object { $_.Path }) -join ', '))
+}
+
+if ($differ.Count -gt 0 -and -not $Force) {
+    Write-Host "멈춤: Unity 쪽 파일 $($differ.Count)개가 원본과 다릅니다. 아무것도 복사하지 않았습니다."
+    $differ | ForEach-Object { Write-Host "  $($_.Path)" }
+    Write-Host 'Unity에서 고친 내용이 있으면 원본(project-files)에 먼저 합치세요. 버려도 되면 -Force로 덮습니다 (덮기 전에 백업).'
+    exit 1
+}
+
+if ($differ.Count -gt 0) {
+    $backup = Join-Path $UnityProject ('review_tmp\sync-backup\' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    foreach ($r in $differ) {
+        $to = Join-Path $backup $r.Path
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $to) | Out-Null
+        Copy-Item -LiteralPath (Join-Path $UnityProject $r.Path) -Destination $to
+    }
+    Write-Host "백업: $backup ($($differ.Count)개)"
+}
+
+foreach ($r in $pending) {
+    $to = Join-Path $UnityProject $r.Path
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $to) | Out-Null
+    Copy-Item -LiteralPath (Join-Path $Source $r.Path) -Destination $to -Force
+    Write-Host "복사: $($r.Path)"
+}
+
+Write-Host ''
+$after = Compare-All
+Write-Rows $after
+Write-Host ''
+if (Test-AllSynced $after) { Write-Host '결과: 복사 후 동기화 대상의 SHA-256이 모두 원본과 같습니다.'; exit 0 }
+Write-Host '결과: 복사 후에도 원본과 다른 파일이 있습니다.'
+exit 1

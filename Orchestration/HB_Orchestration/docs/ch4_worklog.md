@@ -628,6 +628,97 @@ R2(ModeRunner 결과 조립)는 단위 테스트가 없다. ModeRunner가 설정
 - 저장소의 `core.autocrlf=true`가 체크아웃 때 CRLF로 바꾸지 않도록 `.gitattributes`에 `project-files/CLAUDE.md text eol=lf`를 추가했다 (`git ls-files --eol`: `i/lf w/lf`).
 - Unity 쪽 `CLAUDE.md`는 Unity 저장소에서 미추적(`??`) 파일이라 커밋할 대상이 없다.
 
+### 3. 리뷰 지침 누락 조사
+
+2의 "이스케이프 잔재" 항목에서 추정으로 남긴 것("리뷰 지침이 지휘자 컨텍스트에 들어오지 않고 있었다")을 확인했다. 읽기만 한 조사라 코드·설정은 바꾸지 않았다. 외부 에이전트도 부르지 않았다.
+
+#### 깨진 기간 (git, `ToolWithCS` 저장소 `project-files/CLAUDE.md` 4번째 줄)
+
+| 커밋 | 시각 (KST) | 4번째 줄 |
+|---|---|---|
+| `d348fb5` 커스텀 오케스트레이션 추가 | 10-15 10:44:36 | `@REVIEW_GUIDELINES.md` (처음 생김. REVIEW_GUIDELINES.md도 이 커밋에서 추가) |
+| `901d6e1` unity md path | 10-15 11:01:35 | `@REVIEW\_GUIDELINES.md` (깨짐) |
+| `edf46fb` (이 절의 2) | 10-16 20:11:28 | `@REVIEW_GUIDELINES.md` (복구) |
+
+Unity `CLAUDE.md`는 미추적이라 git 이력이 없다. 그래서 시각 비교만으로는 Unity 쪽 복사본도 깨져 있었는지 알 수 없었다. 아래 세션 기록으로 확정했다.
+
+#### 세션 기록 형식 확인 (5장 사전 조사 겸)
+
+- 위치: `~/.claude/projects/F--AI-ToolCreate/<sessionId>.jsonl`, 한 줄에 JSON 하나. `timestamp`는 UTC. `version` 필드에 Claude Code 버전(이번 대상은 `2.1.300`·`2.1.301`)이 있다.
+- 세션을 시작할 때 불러온 지침은 `"type": "attachment"`이고 `attachment.type`이 `"instructions"`인 항목 한 줄로 남는다. `attachment.files[]`에 파일마다 `path`, `type`(`Project` / `AutoMem`), `content`(불러온 원문)가 있다.
+- **검증용 세션 2개** (지침이 들어간 것이 확실한 세션):
+
+| 세션 | 시작 (KST) | 근거 | `files[].path` |
+|---|---|---|---|
+| `d96d079c` | 10-15 10:01 | `901d6e1`보다 앞 | `CLAUDE.md`, **`REVIEW_GUIDELINES.md`** |
+| `4425775e` (이 조사 세션) | 10-16 20:26 | `edf46fb`보다 뒤, 세션 안에서 지침 원문 인용 확인 | `CLAUDE.md`, **`REVIEW_GUIDELINES.md`**, `MEMORY.md` |
+
+- **판정 기준: instructions 항목의 `files[].path`에 `REVIEW_GUIDELINES.md`가 있는가.**
+  - 본문 문자열("리뷰 지침 (Claude · 외부 에이전트 공통)") 검색은 기준으로 쓰지 않는다. 지휘자가 답에 인용한 문장, tool_result, API 요청 사본(`api-request-blob`)에도 걸린다. 이 조사 세션에서 5줄이 나왔는데 instructions 항목은 그중 1줄뿐이었다.
+- 비공식 형식이다. Claude Code 버전이 바뀌면 위 검증용 세션처럼 "들어간 게 확실한 세션"으로 다시 확인한 뒤 쓴다.
+
+#### 지휘자 쪽 결과
+
+| 세션 | 시작 (KST) | 담긴 작업 | `files[].path` | CLAUDE.md 4번째 줄 |
+|---|---|---|---|---|
+| `320760ac` | 10-16 16:34 | 3장 (`3169f4a54e`, `d49d0cf935`, `dfa393514b` 결과가 tool_result로 있음) | `CLAUDE.md`, `MEMORY.md` | `@REVIEW\_GUIDELINES.md` |
+| `9fe73ae0` | 10-16 16:34 | 위와 같음 | 위와 같음 | 위와 같음 |
+| `0be7835d` | 10-16 17:31 | (3장 run 없음) | `CLAUDE.md`, `MEMORY.md` | `@REVIEW\_GUIDELINES.md` |
+| `3883fd85` | 10-16 19:00 | 4장 (`00b061adf8`, `1133a77981`, `315c6d6108`) | `CLAUDE.md`, `MEMORY.md` | `@REVIEW\_GUIDELINES.md` |
+
+#### 에이전트 쪽 결과
+
+- calls.jsonl의 `Prompt`는 `StepCall.Prompt`(입력 + 첨부)뿐이다. 리뷰 지침이 붙는 시스템 프롬프트(`StepCall.Instructions`)는 기록하지 않는다 (`AgentRunner.cs:222`). 3장·4장 run 19줄의 Prompt 어디에도 지침 문구가 없다. 기록이 없는 구조이니 당연한 결과이고, 들어가지 않았다는 증거는 아니다.
+- 서버 쪽 경로: `ModeRunner.cs:79`에서 `역할 프롬프트 + CommonRules + (UseGuidelines ? 지침 : "")`. 지침 파일은 `GuidelinesLoader`가 `GuidelinesPath` → 환경 변수 `REVIEW_GUIDELINES_PATH` → `Environment.CurrentDirectory/REVIEW_GUIDELINES.md` 순으로 찾고, 실행할 때마다 읽는다.
+  - `appsettings.json`의 `GuidelinesPath`는 `""`, 환경 변수는 프로세스·사용자·시스템 모두 없음.
+  - `F:\AI\ToolCreate\REVIEW_GUIDELINES.md`: 생성 10-15 09:39, 마지막 수정 10-15 12:20. 3장·4장 시점에 있었고 내용은 지금과 같다.
+- 역할별 `UseGuidelines` (`modes.json`, 마지막 수정 10-16 16:54:35):
+
+| 역할 | UseGuidelines | 해당 run |
+|---|---|---|
+| `Reviewer` (내장 역할, `ModeStore.ResolveRole`에서 `true` 고정) | true | 4장 `00b061adf8`, `1133a77981`, `315c6d6108` |
+| `Cross_P1_A/B`, `Cross_P2_A/B`, `Cross_P3_A/B` | false | 3장 `cross_p1` · `cross_p2` · `cross_p3` |
+| `Cross_P1_A_Guided/B_Guided` | true | 3장 `9ff8787171` |
+
+#### 확정 · 추정 · 미확인
+
+- **확정**
+  - 3장 세션(`320760ac`, `9fe73ae0`)과 4장 세션(`3883fd85`)에서 지휘자 컨텍스트에 REVIEW_GUIDELINES.md가 들어가지 않았다. Unity 쪽 CLAUDE.md 복사본도 `@REVIEW\_GUIDELINES.md`로 깨져 있었다.
+  - 이 조사 세션(`edf46fb` 이후)에는 들어갔다. 위 "실제 확인 (미완 — 다음 세션)" 두 항목도 확인됐다: 불러온 CLAUDE.md에 `## 계획서와 작업 로그` 절이 있고, `REVIEW_GUIDELINES.md`가 `files[]`에 있다.
+  - calls.jsonl에는 시스템 프롬프트가 남지 않는다.
+- **추정**
+  - 4장 review 3회와 3장 `cross_p1_guided`에서는 에이전트 시스템 프롬프트에 지침이 붙었다. 근거는 코드 경로, `UseGuidelines=true`, 파일 존재, 경로 설정·환경 변수 없음이다. 단, 서버의 `CurrentDirectory`가 `F:\AI\ToolCreate`였다는 전제가 있다 (stdio MCP 서버는 세션 폴더에서 시작한다는 전제이고, 직접 확인하지 않았다).
+  - 3장 `cross_p1`·`p2`·`p3`에는 지침이 붙지 않았다. 지금 `modes.json` 기준이다. 이 파일이 3장 도중(16:54:35, `d49d0cf935` 뒤·`8e2575f920` 앞)에 수정됐고 그 전 버전의 백업이 없어서, `cross_p1`·`cross_p2` 실행 때의 값은 확인할 수 없다.
+- **미확인**
+  - 에이전트가 실제로 받은 시스템 프롬프트 원문. 기록이 없어서 사후에 확인할 방법이 없다.
+
+**별도 발견:** `project-files/REVIEW_GUIDELINES.md`(원본)와 Unity 쪽 파일이 다르다 (SHA-256 `78cf427f…` / `43efe35d…`). CR을 무시하면 Unity 쪽 끝에 `## Unity 공식 문서 참조` 절(12줄)이 더 있을 뿐이다. 에이전트가 받는 것은 Unity 쪽이다. 맞출지는 정하지 않았다.
+
+#### 지휘자 판정 대조 (4장 review 3회)
+
+**지휘자에게 해당하는 지침 항목.** 리뷰 대상이 .NET 서버 코드라 Unity 전용 항목(`Update` 할당, `GetComponent`, 직렬화, `UnityEngine.Object` null, Addressables 등), C++, 셰이더 항목은 빠진다. 남는 항목은 아래와 같다.
+
+| # | 항목 | 출처 절 |
+|---|---|---|
+| G1 | 실패 경로: 예외, null, 빈 컬렉션, 0 나누기 | 공통 |
+| G2 | 이름이 동작을 정확히 설명하는지 | 공통 |
+| G3 | 테스트하기 어려운 구조 (정적 상태, 숨은 의존성) | 공통 |
+| G4 | async 취소(`CancellationToken`) 처리 | Unity C#의 코루틴/async 항목 중 Unity와 무관한 부분 |
+| G5 | 확실하지 않으면 문서로 확인하고 기억으로 추측하지 않는다 | 공식 문서 참조 (원문은 Unity 문서 대상. .NET 판단에는 정신만 적용) |
+
+**대조 결과**
+
+| run | 자체 검토(C) | 판정(R) | 지침과 어긋나는 곳 |
+|---|---|---|---|
+| `00b061adf8` (2-2 재시도) | C1~C5: 통계·기록 크기·범위·시간·실제 SDK 미확인 | R1·R2·R3 모두 채택 | **G1·G4 누락.** 에이전트가 찾은 R1(사용자 취소 시도 미기록, G4)과 R3(`TimeSpan` 변환 예외, G1)이 자체 검토에 없었다. C5가 타임아웃 예외 경로를 다뤘지만 "실제 SDK에서 그 예외가 오는가"였고, 취소·변환 실패 경로는 아니었다. G3은 지켰다 (대기 함수·기록 경로 주입). 판정은 지침과 어긋나지 않는다. R3은 직접 실행해 확인했다 (G5) |
+| `1133a77981` (2-3 save_result) | C1~C5: 줄바꿈·전체 읽기·TOCTOU·남는 폴더·출력 증가 | R1·R3·R5 채택, R2·R4 기각 | **G1 일부 누락.** C4(쓰기 실패 시 남는 폴더)는 실패 경로를 봤다. 하지만 R3(경로 검사 중 IO·권한 예외가 `[저장 불가]` 대신 예외로 샘)과 R5(드라이브 루트 경계값)는 자체 검토에 없었다. 기각 2건은 지침과 무관한 설계 근거(링크 정책, README에 적힌 Concurrent 동작)다. **G5 관련 1건:** R1 판정 이유의 "macOS 기본(APFS)은 대소문자를 구분하지 않는다"는 확인 없이 기억으로 쓴 것이다. 판정 결과(채택)에는 영향이 없다 |
+| `315c6d6108` (ExtraRoots) | C1~C3: `@` 폴더 가림·기록의 절대 경로·주의 표시 | R1 기각 | 없음. 실패 경로(G1)는 테스트로 다뤘다 (깨진 등록 항목, 참조한 깨진 루트, 루트 밖, 링크). R1 기각 근거(context 오류는 에이전트 호출 전에 지휘자에게만 반환)는 코드 경로를 근거로 했다 |
+
+**정리**
+- **확정:** 판정(채택·기각)이 지침 항목과 어긋난 곳은 없다. 어긋난 것은 자체 검토의 범위다. 3회 중 2회에서 G1(실패 경로 · 예외)과 G4(취소)에 해당하는 결함을 지휘자가 먼저 찾지 못했고, 에이전트가 찾았다.
+- **추정하지 않음:** 지침이 컨텍스트에 있었다면 자체 검토가 이것들을 찾았을지는 알 수 없다. 지침이 없었던 것과 누락이 같이 일어났다는 사실만 남긴다.
+- 3장은 이번 대조 범위에서 뺐다 (사용자가 따로 확인).
+
 ### 4장 마무리 비용
 
 | 항목 | 비용 |
@@ -687,3 +778,119 @@ R2(ModeRunner 결과 조립)는 단위 테스트가 없다. ModeRunner가 설정
 ### 리뷰
 
 없음. 규칙서·문서 변경이라 외부 에이전트 리뷰 대상(`review` 모드를 부르는 작업)이 아니다.
+
+---
+
+## 규칙서 동기화 — REVIEW_GUIDELINES 통일, 동기화 스크립트, LF 고정
+
+계획서: [plans/2026-10-16_규칙서-동기화.md](plans/2026-10-16_규칙서-동기화.md) (사용자 답 원문과 바뀐 항목은 계획서의 `## 결정`)
+
+### 한 것
+
+| 대상 | 내용 |
+|---|---|
+| `.gitattributes` | `project-files/CLAUDE.md` 한 줄을 `project-files/** text eol=lf`로 넓히고, `docs/plans/** text eol=lf` 추가. 모든 대상 파일이 이미 `i/lf w/lf`라 바이트 변화 없음 |
+| `tools/Sync-ProjectFiles.ps1` (새 파일) | 비교(기본) / `-Apply`(다름이 있으면 멈춤) / `-Apply -Force`(백업 후 덮기). 이스케이프 잔재 경고. 종료 코드 0·1·2. UTF-8 BOM (5.1이 한글 리터럴을 읽도록) |
+| `project-files/REVIEW_GUIDELINES.md` | Unity 쪽에만 있던 `## Unity 공식 문서 참조` 절을 합침 (아래 "절 합치기") |
+| `project-files/CLAUDE.md` | `## Unity 공식 문서 참조` 절 삭제 (빈 줄 포함 9줄). `@REVIEW_GUIDELINES.md`로 불러오므로 지휘자에게는 그대로 들어간다 |
+| `project-files/.claude/commands/cross-review.md` | 1번 항목을 "diff가 있으면 … / diff가 없으면(기존 코드 점검) …" 한 항목으로 (사용자 결정) |
+| Unity 프로젝트 | 스크립트 `-Apply -Force`로 `CLAUDE.md`, `REVIEW_GUIDELINES.md`, `cross-review.md` 덮음. 백업 `F:\AI\ToolCreate\review_tmp\sync-backup\20261016-204833\` (3개, 덮기 전 해시 `2841f7b0…` / `43efe35d…` / `2c01dd35…`와 일치) |
+| README | 구조도에 `tools/`, 5절 원본 방향을 `project-files/` 전체로, 스크립트 사용법·종료 코드·멈춤 규칙·이스케이프 경고 |
+| 실제 설정 `Publish_Output/appsettings.json` | `Context.ExtraRoots.orch` 다시 등록 (사용자 선택, review용). 4장 마무리 실제 확인 때 비워 두었던 것. **그대로 두었다** |
+
+### 절 합치기
+
+1. **REVIEW_GUIDELINES:** Unity 쪽 1~34줄이 원본과 바이트 동일함을 `cmp`로 확인 → Unity 쪽 35줄부터를 `tail`로 원본 끝에 붙임 → 두 파일 SHA-256 일치(`43efe35d…`).
+2. **CLAUDE.md 쪽 절과 바이트 비교 (사용자 조건):** 다름. 빈 줄을 빼면 같다. 차이는 번호 항목 사이의 빈 줄 3개뿐이다.
+   - REVIEW_GUIDELINES 쪽(빈 줄 있음)은 `901d6e1` 때 생긴 모양 그대로다. CLAUDE.md 쪽(붙은 목록)은 `edf46fb`에서 정리한 모양이다.
+   - **CLAUDE.md 쪽 모양으로 합쳤다.** REVIEW_GUIDELINES의 절을 CLAUDE.md 절의 바이트로 바꾸고, 바뀐 절이 CLAUDE.md 절과 바이트 동일함을 `cmp`로 확인한 뒤 CLAUDE.md에서 삭제했다. 글자 내용은 바뀌지 않았다.
+3. **cross-review.md:** 원본 문구와 Unity 문구가 각각 원문 그대로 들어갔는지 문자열로 확인. Unity 문구의 `,  `(공백 두 칸)은 한 칸으로 고쳤다. Unity 쪽의 나머지 차이(`\---`, `\[`, `\_`, `*` 목록, 빈 줄)는 들이지 않았다.
+
+### `901d6e1`에서 바뀐 범위 (`project-files/CLAUDE.md`, 70 → 94줄)
+
+| 종류 | 범위 |
+|---|---|
+| **이스케이프** (`\_`, `\[`, 코드 스팬 안은 `\\_`처럼 세 겹) | **일부 줄.** 바꾸기 전 `_` 또는 `[`가 있던 6줄은 전부 이스케이프됐다. 그 커밋에서 새로 들어간 `## Unity 공식 문서 참조` 절의 번호 4줄은 `1\.` 형태였다. 백슬래시가 있는 줄: 1 → 10 |
+| 목록 기호 | **파일 전체.** `- ` 17줄이 전부 `* `로 |
+| 빈 줄 | **파일 전체.** 15 → 33줄 (목록 앞뒤에 추가) |
+| 들여쓰기 | 이어지는 줄 2개가 들여쓰기를 잃음 |
+| 그대로 | 기존 번호 항목 12줄 중 11줄(바뀐 1줄은 `_`·`[` 포함 줄), 그 밖의 일반 줄 21줄 중 19줄 |
+
+- 같은 커밋에서 `.claude/settings.json`에는 `"WebFetch(domain:docs.unity.com)"` 한 줄만 추가됐다 (이스케이프 없음).
+- Unity 쪽 `cross-review.md`(10-15 10:17 수정)에도 같은 종류의 흔적이 있었다: `\---`, `\[`, `\_`, `*` 목록, 빈 줄.
+- **원인은 미확인.** 노션을 거치지는 않았다 (사용자 확인).
+
+### 계획과 달라진 것
+
+- **`-Apply`의 멈춤 범위:** 계획서는 "`Unity에 없음`인 파일은 바로 복사"라고 했지만, 구현은 `다름`이 하나라도 있으면 **아무것도 복사하지 않는다.** 일부만 복사된 상태를 만들지 않기 위해서다. `다름`이 없으면 `Unity에 없음`은 바로 복사한다.
+- **review 결과로 추가:** 파일 자리에 폴더가 있으면 `Unity에 폴더`로 표시하고, `-Apply`는 아무것도 복사하지 않고 종료 코드 2로 끝난다. 숨김 `.md`도 대상에 넣었다. Unity에만 있는 명령 파일도 이스케이프를 검사한다.
+- **ExtraRoots 재등록:** 계획에 없었다. review가 `@orch`를 읽지 못해(`[첨부 코드 오류] … 파일이 없습니다`, 실행 횟수에는 들어가지 않음) 사용자에게 물었고, 사용자가 "ExtraRoots 등록"을 골랐다.
+
+### 테스트 (scratchpad 임시 폴더, 실제 Unity 프로젝트와 별개)
+
+| 경우 | 결과 |
+|---|---|
+| 모두 같음 | 0 |
+| Unity에 없음 | 비교 1 / `-Apply` 복사 후 0, 바이트 동일 |
+| 다름 + `-Apply` | 1, 파일 해시 불변, 같이 있던 `Unity에 없음` 파일도 복사 안 됨 |
+| 다름 + `-Apply -Force` | 0, 백업 해시 = 원래 Unity 파일, 덮은 파일 = 원본, CRLF·LF 섞인 한글 파일 바이트 동일 |
+| `settings.json` 다름 | `확인만-다름`, `-Force`에도 불변, 종료 코드 0 |
+| `.mcp.json` 다름 | 출력에 없음, 0 |
+| Unity에만 있는 명령 | `Unity에만 있음`, 지우지 않음 |
+| 없는 경로 / `-Force` 단독 / 원본 `CLAUDE.md` 없음 | 2 |
+| 이스케이프 5종 | 원본·Unity 각 5건 경고, Windows 경로 줄·정상 마크다운 줄은 경고 없음, 종료 코드 0 |
+| (review R1) 파일 자리에 폴더 | 비교 1 `Unity에 폴더` / `-Apply` 2, 폴더 안에 아무것도 생기지 않음 |
+| (review R2) 숨김 `.md` | 대상에 포함 |
+| (review R4) Unity에만 있는 명령의 `\---` | 경고 |
+
+review 반영 후 위 회귀 경우(1~7번 줄)를 다시 돌려 모두 같은 결과였다.
+
+**테스트 중 고친 것**
+- `Short([string]$hash)`: `[string]` 매개변수가 `$null`을 `''`로 받아 null 검사를 지나 `Substring` 예외가 났다 → `IsNullOrEmpty`.
+- 처리되지 않은 예외가 종료 코드 1("다름")로 끝났다 → `trap`으로 2.
+- 빈 결과를 `+=`로 더하면 `$null` 원소가 생긴다 → `@(...)`로 감쌈.
+- (스크립트 문제 아님) 출력은 cp949다. Git Bash로 받은 출력이 깨져 보인 것은 내 디코딩 문제였다 (`bf f8 ba bb` = "원본").
+
+### 실제 확인
+
+| 항목 | 결과 |
+|---|---|
+| 1. 실제 Unity에 비교 모드 (작업 전) | 종료 코드 1. `REVIEW_GUIDELINES.md`·`cross-review.md` `다름`, Unity 쪽 `cross-review.md` 이스케이프 경고 4건 (1·4·12·13줄) — **실제 문제를 잡음** |
+| 같은 상태에서 `-Apply` | 멈춤(1), Unity 두 파일 해시 불변 |
+| 2. 원본 정리 후 `-Apply -Force` → 다시 비교 | 0 → 0, 경고 0 |
+| 3. `git ls-files --eol` / `check-attr` | `project-files/**`·`docs/plans/**` 모두 `attr/text eol=lf`, `i/lf w/lf` |
+| cross-review 설명 | 복사 직후 이 세션의 스킬 목록이 `cross-review: \---`에서 `cross-review: Claude와 외부 에이전트가 독립적으로 리뷰한 뒤 결과를 종합한다`로 바뀌었다 — **frontmatter가 깨져 있었던 것이 원인이었음을 확정** |
+| **4. 다음 세션 (필수, 미완)** | 세션 기록 instructions 항목(`files[].path`)에 `REVIEW_GUIDELINES.md`가 있고, 그 `content`에 `## Unity 공식 문서 참조`가 있으며, `CLAUDE.md` `content`에는 그 절이 없는지 |
+
+### review (gpt_main_sol, run `83c55b812e`)
+
+- 사용량: 입력 4,948 / 출력 1,126, 33.5초, 약 $0.021 (단가표 기준 계산, 캐시 미반영)
+- context `@orch/tools/Sync-ProjectFiles.ps1:1-208`
+
+**먼저 완성한 Claude의 자체 검토**
+
+| ID | 내용 | 처리 |
+|---|---|---|
+| C1 | Unity에만 있는 명령·`settings.json`은 종료 코드에 영향 없음 | 의도 |
+| C2 | 이스케이프 검사가 코드 블록 안의 정상 사용도 경고 | 경고뿐이라 유지 |
+| C3 | `다름`이 있으면 `Unity에 없음`도 복사 안 함 (계획 문구보다 엄격) | 위 "계획과 달라진 것" |
+| C4 | 복사 도중 실패하면 일부만 복사된 채 2로 끝남 | 유지. 다시 비교하면 상태가 드러난다 |
+| C5 | 원본·Unity 같은 폴더 검사가 문자열 비교 (대소문자 다른 같은 경로 통과) | 유지. 그 경우 모두 `같음`이라 해가 없다 |
+| C6 | Unity 쪽 링크 검사 없음 | 유지 (단일 사용자 PC 전제) |
+
+**에이전트 지적과 판정**
+
+| # | 지적 | 판정 | 이유 / 조치 |
+|---|---|---|---|
+| R1 (minor) | 파일 자리에 폴더가 있으면 `Unity에 없음`으로 분류, `-Apply`가 폴더 안에 복사하고 1로 끝남 | **채택** | `Get-Hash`가 폴더를 "없음"으로 돌려준다. `Unity에 폴더` 상태 + `-Apply` 시작 전에 2로 종료 |
+| R2 (minor) | `Get-ChildItem`에 `-Force`가 없어 숨김 `.md` 누락 | **채택** | 두 열거에 `-Force` |
+| R3 (minor) | `\_`·`\[`에도 줄 시작 조건을 붙여야 함 | **기각** | 실제 잔재는 줄 중간에서 나왔다 (`` `run\_mode` ``, `argument-hint: \[panel]`, `2. REVIEW\_…`). 붙이면 실제 Unity 파일에서 잡은 4건 중 3건을 놓친다. 사용자 지시의 "줄 맨 앞"은 `\---`·`1\.`에 해당하는 것으로 읽었다. 오탐은 경고뿐이다 |
+| R4 (minor) | Unity에만 있는 명령 파일은 이스케이프 검사 안 함 | **채택** | Claude가 불러오는 파일이다. 경고만 하고 종료 코드·복사에는 영향 없음 |
+
+자체 검토와 겹친 지적은 없었다 (에이전트 1개 모드라 공통 지적 없음).
+
+### 확정 · 추정 · 미확인
+
+- **확정:** 원본·Unity 동기화 대상 해시 일치, `.gitattributes` 적용, 백업 해시 일치, cross-review frontmatter 복구(스킬 목록 변화), `901d6e1`의 변경 범위.
+- **추정:** 없음.
+- **미확인:** 이스케이프 원인. 다음 세션의 지침 불러오기 (실제 확인 4).

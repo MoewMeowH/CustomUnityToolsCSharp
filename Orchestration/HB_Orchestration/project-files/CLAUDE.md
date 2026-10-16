@@ -128,12 +128,3 @@
 
 씬·프리팹·에셋 수정이 필요하면 YAML 파일을 직접 고치지 말고, 에디터가 연결돼 있을 때 `unity command`로 조작한다
 (사용 가능한 명령은 `unity command`로 확인). 에디터가 없을 때만 파일을 직접 고치고, 그렇게 한다고 알린다.
-
-## Unity 공식 문서 참조
-
-API나 기능이 확실하지 않을 때만 찾아본다. 기억으로 추측하지 않는다.
-
-1. 어느 페이지인지 모르면 제품별 색인부터: `https://docs.unity.com/<제품>/llms.txt` (전체 목록은 `https://docs.unity.com/llms.txt`)
-2. 페이지를 읽을 때는 URL 끝에 `.md`를 붙여 Markdown으로 가져온다. HTML 페이지는 가져오지 않는다.
-3. 엔진 문서는 이 프로젝트의 Unity 버전(`ProjectSettings/ProjectVersion.txt`)에 맞는 버전 경로를 쓴다.
-4. 페이지 전체를 요약하지 말고 필요한 항목만 확인한다.

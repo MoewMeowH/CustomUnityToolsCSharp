@@ -28,7 +28,8 @@ HB_Orchestration/
 │  ├─ HB.Orchestration.Agents/    ← 제공사·에이전트·모드 실행기 (호스트와 무관한 핵심)
 │  ├─ HB.Orchestration.Mcp/       ← MCP 서버, appsettings.json, modes.json
 │  └─ HB.Orchestration.Dashboard/ ← 호출 기록 + 모드 편집 UI
-└─ project-files/                 ← Unity 프로젝트 루트에 복사할 파일
+├─ project-files/                 ← Unity 프로젝트 루트에 복사할 파일 (원본)
+└─ tools/Sync-ProjectFiles.ps1    ← project-files → Unity 프로젝트 비교·복사
 ```
 
 ## 1. 패키지 & 빌드
@@ -283,7 +284,18 @@ calls.jsonl의 응답 원문을 그대로 저장한다. Claude가 응답을 다�
 ## 5. Unity 프로젝트 쪽
 `project-files/` 내용을 Unity 프로젝트 루트로 복사:
 
-> **`project-files/CLAUDE.md`가 원본이다.** Unity 프로젝트의 `CLAUDE.md`는 이 파일의 복사본으로 둔다. 규칙을 고칠 때는 원본을 고친 뒤 복사한다 (Unity 쪽에서 직접 고치면 두 벌이 갈라진다). 줄바꿈은 LF.
+> **`project-files/`가 원본이다.** Unity 프로젝트의 `CLAUDE.md`, `REVIEW_GUIDELINES.md`, `.claude/commands/*.md`는 복사본으로 둔다. 규칙을 고칠 때는 원본을 고친 뒤 아래 스크립트로 복사한다 (Unity 쪽에서 직접 고치면 두 벌이 갈라진다). 줄바꿈은 LF (`.gitattributes`로 고정).
+
+```powershell
+# 비교만 (기본). 종료 코드 0 = 모두 같음, 1 = 다른 것이 있음, 2 = 실행 오류
+powershell -ExecutionPolicy Bypass -File tools\Sync-ProjectFiles.ps1 -UnityProject F:\MyGame
+# 복사 + 해시 확인
+powershell -ExecutionPolicy Bypass -File tools\Sync-ProjectFiles.ps1 -UnityProject F:\MyGame -Apply
+```
+
+- 동기화 대상: `CLAUDE.md`, `REVIEW_GUIDELINES.md`, `.claude/commands/*.md`. 바이트가 같아야 한다. `.claude/settings.json`은 비교만 하고 덮지 않는다. `.mcp.json`은 기기마다 경로가 달라 대상이 아니다.
+- **`-Apply`는 Unity 쪽 파일이 원본과 다르면 아무것도 복사하지 않고 멈춘다.** Unity에서 고친 내용이 있으면 원본에 먼저 합친다. 버려도 되면 `-Force`로 덮는다. 덮기 전 파일은 `<Unity>/review_tmp/sync-backup/<시각>/`에 백업된다.
+- 줄 맨 앞 `\---`, `\_`, `\[`, `1\.` 같은 이스케이프 잔재가 보이면 경고만 한다 (종료 코드와 무관). 규칙서에 이런 이스케이프가 섞여 지침 불러오기가 깨진 적이 있다 (`@REVIEW\_GUIDELINES.md`, 원인 미확인).
 - `CLAUDE.md` — 언제 어떤 모드를 쓰고, input을 어떻게 줄이고, 결과를 어떻게 종합할지
 - `REVIEW_GUIDELINES.md` — 공통 리뷰 기준 (서버가 자동으로 찾아 주입)
 - `.claude/commands/cross-review.md` — `/cross-review`, `/cross-review panel`

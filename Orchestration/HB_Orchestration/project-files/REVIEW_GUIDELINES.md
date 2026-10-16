@@ -32,3 +32,12 @@
 - 실패 경로: 예외, null, 빈 컬렉션, 0 나누기
 - 이름이 동작을 정확히 설명하는지
 - 테스트하기 어려운 구조(정적 상태, 숨은 의존성)
+
+## Unity 공식 문서 참조
+
+API나 기능이 확실하지 않을 때만 찾아본다. 기억으로 추측하지 않는다.
+
+1. 어느 페이지인지 모르면 제품별 색인부터: `https://docs.unity.com/<제품>/llms.txt` (전체 목록은 `https://docs.unity.com/llms.txt`)
+2. 페이지를 읽을 때는 URL 끝에 `.md`를 붙여 Markdown으로 가져온다. HTML 페이지는 가져오지 않는다.
+3. 엔진 문서는 이 프로젝트의 Unity 버전(`ProjectSettings/ProjectVersion.txt`)에 맞는 버전 경로를 쓴다.
+4. 페이지 전체를 요약하지 말고 필요한 항목만 확인한다.
