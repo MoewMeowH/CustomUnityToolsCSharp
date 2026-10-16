@@ -58,6 +58,7 @@
   },
   "Modes": {
     "review": {
+      "RequireOwnReview": true,
       "MaxRunsPerSession": 3,
       "Description": "코드/diff 단일 교차 리뷰",
       "Flow": "Sequential",
@@ -69,6 +70,7 @@
       ]
     },
     "panel": {
+      "RequireOwnReview": true,
       "MaxRunsPerSession": 1,
       "Description": "여러 모델 동시 독립 리뷰 (비용 큼, 중요한 변경만)",
       "Flow": "Concurrent",
@@ -167,6 +169,7 @@
       ]
     },
     "cross_p1": {
+      "RequireOwnReview": true,
       "MaxRunsPerSession": 2,
       "Description": "교차 검토 Phase 1: 두 모델 독립 검토 (A 반박 GPT sol / B 위험 Gemini argon)",
       "Flow": "Concurrent",
@@ -215,6 +218,7 @@
       ]
     },
     "cross_p1_guided": {
+      "RequireOwnReview": true,
       "MaxRunsPerSession": 1,
       "Description": "비교 실험: cross_p1과 동일하되 리뷰 지침(REVIEW_GUIDELINES.md) 켬",
       "Flow": "Concurrent",

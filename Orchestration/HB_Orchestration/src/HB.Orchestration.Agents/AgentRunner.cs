@@ -13,6 +13,12 @@ public sealed record CallMeta(IReadOnlyList<string>? Files, IReadOnlyList<string
 
     /// <summary>실행 단위 지침·설정 해시 (단계별 Guidelines 포함). Instructions 해시는 AgentRunner가 채운다.</summary>
     public CallProvenance? Provenance { get; init; }
+
+    /// <summary>지휘자가 모드를 부른 이유. 기록 전용 — 에이전트에게 보내지 않는다.</summary>
+    public string? Reason { get; init; }
+
+    /// <summary>지휘자가 결과를 보기 전에 완성한 자체 검토. 기록 전용 — 에이전트에게 보내지 않는다.</summary>
+    public string? OwnReview { get; init; }
 }
 
 /// <summary>모드의 한 단계 실행 정보.</summary>
@@ -235,6 +241,8 @@ public sealed class AgentRunner
             Context = call.Meta.Context,
             ContextRoots = call.Meta.ContextRoots,
             Provenance = provenance,
+            Reason = call.Meta.Reason,
+            OwnReview = call.Meta.OwnReview,
         };
     }
 

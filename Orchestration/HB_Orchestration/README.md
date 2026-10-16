@@ -103,6 +103,7 @@ dotnet build HB_Orchestration.slnx
 | `ResponseChecks.ForeignScriptRatio` | 코드 블록을 뺀 본문에서 일본어 가나 비율이 이 값 이상이면 경고 (기본 0.02 = 2%) |
 | `Debug.DumpToolResults` | `true`면 `run_mode`가 반환하는 문자열을 그대로 `%LOCALAPPDATA%/HB_Orchestration/dumps/`에 남긴다 (조사용, 기본 `false`). 결과가 Claude에게 가는 동안 바뀌는지 가를 때 쓰고, 끝나면 끈다 |
 | `Records.BlobFolder` | 지침·설정 원문 저장 폴더. 비우면 `calls.jsonl` 옆 `blobs/`, 상대 경로면 `calls.jsonl` 폴더 기준 (아래 "호출 기록의 지침·설정 해시") |
+| `Records.MaxReasonChars` · `Records.MaxOwnReviewChars` | `run_mode`의 `reason` · `ownReview` 글자 수 상한 (기본 500 · 30,000, 0 = 무제한). 넘으면 잘라 쓰지 않고 거절 (실행 횟수 차감 없음) |
 | `Records.StoreSettingsText` | 서버 설정(`appsettings.json`) 원문도 저장할지 (기본 `false` = 해시와 키 패턴 검사 결과만). `true`여도 키 패턴이 보이면 저장하지 않음 |
 | `Pricing.KrwPerUsd` | 1달러당 원. 비우면 대시보드는 달러만 표시 |
 | `Pricing.Models.<모델 ID>` | `InputPerMillion`, `CachedInputPerMillion`(비우면 입력과 같음), `OutputPerMillion` — USD / 1M 토큰. 키는 에이전트 이름이 아니라 **모델 ID**(기록에 남는 값). 지금 안 쓰는 예전 모델도 남겨 두면 예전 기록의 비용이 계속 계산됨. 서버는 쓰지 않고 대시보드만 읽음 |
@@ -213,6 +214,7 @@ SDK 자동 재시도(기본 3회, 기록에 안 남음)는 끄고 서버가 직�
 | `Return` | `Last`(기본) / `All` | Claude에게 돌려줄 범위. Concurrent는 항상 All |
 | `MaxInputChars` | 숫자 | 이 모드의 입력 길이 상한. 없으면 `Budget.MaxInputChars` |
 | `MaxRunsPerSession` | 숫자 | Claude Code 세션 하나에서 실행할 수 있는 횟수 (0 = 무제한). 없으면 `Budget.DefaultMaxRunsPerSession` |
+| `RequireOwnReview` | `true` / 없음 | `true`면 `run_mode`의 `ownReview`가 필수 (review 계열). 없으면 필수 아님. `list_modes`에 `[ownReview 필수]` 표시. 기본 modes.json은 `review` · `panel` · `cross_p1` · `cross_p1_guided` |
 | `MaxRounds` (Debate) | 1~5 | 최대 회차. 1회차 = 두 토론자가 한 번씩. 기본 2, 서버 절대 상한 5 |
 | `HistoryWindow` (Debate) | 숫자 | 각 턴이 볼 직전 발언 수 (기본 2). 판정자는 항상 전체 |
 
@@ -233,6 +235,18 @@ SDK 자동 재시도(기본 3회, 기록에 안 남음)는 끄고 서버가 직�
 
 한도에 걸렸는데 더 필요하면 **서버를 재시작하지 말고** 대시보드 **세션** 화면에서 그 세션의 횟수를 초기화한다. 서버를 다시 띄우려면 Claude Code 세션을 새로 열어야 해서 진행 중이던 대화 맥락까지 잃는다.
 - 서버는 세션 상태를 `%LOCALAPPDATA%/HB_Orchestration/sessions/{PID}.json`에 남기고, 대시보드는 초기화 요청을 `{PID}.reset`으로 남긴다. 서버가 다음 `run_mode`·`list_modes` 때 그걸 읽고 적용한다.
+
+### 지휘자의 판단 근거 (`reason` · `ownReview`)
+
+| 인자 | 필수 | 쓰임 |
+|---|---|---|
+| `reason` | 모든 모드 | 이 모드를 부른 이유 한 줄 |
+| `ownReview` | `RequireOwnReview: true` 모드 | 지휘자가 결과를 보기 전에 완성한 자체 검토 원문 |
+
+- **에이전트에게 보내지 않는다.** 프롬프트·시스템 프롬프트 어디에도 들어가지 않고, 호출 기록(`reason` · `ownReview`)과 대시보드에만 남는다 (리뷰의 독립성).
+- 같은 실행의 모든 기록 줄(단계·시도)에 같은 값이 원문 그대로 남는다.
+- 없거나(공백만 포함) 상한을 넘으면 에이전트를 부르기 전에 `[reason 필요]` · `[ownReview 필요]` · `[… 너무 깁니다]`로 거절한다. 실행 횟수는 차감하지 않는다.
+- 도구 스키마에서는 선택 인자다. 필수로 두면 누락이 `[`로 시작하는 안내가 아니라 도구 오류로 나가기 때문에, 필수 여부는 서버가 검사한다.
 
 ### 실행할 때만 에이전트 바꾸기
 `run_mode`의 `agents` 인자로 modes.json을 고치지 않고 이번 실행만 바꿀 수 있다. Claude Code에서는 "panel을 gpt_high_sol이랑 gemini_argon으로 돌려줘"처럼 말하면 된다.

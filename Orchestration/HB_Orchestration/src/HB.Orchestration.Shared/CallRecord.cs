@@ -73,4 +73,13 @@ public sealed record CallRecord
 
     /// <summary>에이전트가 받은 지침·설정의 해시. 모든 호출에 남긴다. 5장 이전 기록은 null(대시보드 "기록 없음").</summary>
     public CallProvenance? Provenance { get; init; }
+
+    /// <summary>지휘자가 이 모드를 부른 이유 (run_mode reason). 에이전트에게는 보내지 않았다. 5장 이전 기록은 null.</summary>
+    public string? Reason { get; init; }
+
+    /// <summary>
+    /// 지휘자가 결과를 보기 전에 완성한 자체 검토 (run_mode ownReview). 에이전트에게는 보내지 않았다.
+    /// 같은 실행의 모든 줄(단계·시도)에 같은 값이 남는다. 넣지 않았으면 null.
+    /// </summary>
+    public string? OwnReview { get; init; }
 }

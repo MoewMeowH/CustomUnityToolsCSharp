@@ -10,7 +10,7 @@ argument-hint: <모드 이름> <요청>
    - `research`면 CLAUDE.md의 "research 모드 순서"를 따른다 (웹 수집은 네가 한다).
    - `parallel`이면 작업 명세를 구체적으로 쓴다 (입출력, 제약, 대상 파일의 관련 부분).
 2. 네 판단이 필요한 모드(debate 등)면 너의 의견을 먼저 정리해두되 input에는 넣지 않는다.
-3. `run_mode` 실행.
+3. `run_mode` 실행. `reason`에 부른 이유 한 줄. `[ownReview 필수]` 모드면 2에서 정리한 너의 의견 원문을 `ownReview`에 넣는다.
 4. 결과 정리:
    - debate/critique: 반론과 검증 결과를 반영해 최종 권고와 이유
    - research: 채택 후보와 다음 행동

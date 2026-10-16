@@ -50,6 +50,12 @@ public sealed class RecordsOptions
     /// true여도 키 패턴 검사에 걸리면 저장하지 않는다.
     /// </summary>
     public bool StoreSettingsText { get; set; }
+
+    /// <summary>run_mode reason(부른 이유) 최대 글자 수. 넘으면 잘라 쓰지 않고 거절한다 (실행 횟수 차감 없음). 0이면 무제한.</summary>
+    public int MaxReasonChars { get; set; } = 500;
+
+    /// <summary>run_mode ownReview(결과를 보기 전의 자체 검토) 최대 글자 수. 넘으면 거절. 0이면 무제한.</summary>
+    public int MaxOwnReviewChars { get; set; } = 30_000;
 }
 
 /// <summary>appsettings.json의 "Orchestration:Debug".</summary>

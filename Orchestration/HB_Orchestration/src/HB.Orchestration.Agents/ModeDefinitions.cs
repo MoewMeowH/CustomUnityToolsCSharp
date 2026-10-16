@@ -46,6 +46,12 @@ public sealed class ModeDefinition
     /// </summary>
     public int? MaxRunsPerSession { get; set; }
 
+    /// <summary>
+    /// true면 run_mode의 ownReview(지휘자가 결과를 보기 전에 완성한 자체 검토)가 필수다 (review 계열).
+    /// 키가 없으면 false = 필수 아님. list_modes에 "[ownReview 필수]"로 보인다.
+    /// </summary>
+    public bool RequireOwnReview { get; set; }
+
     /// <summary>Debate 전용: 최대 회차 (1회차 = 두 토론자가 한 번씩). 기본 2, 서버 상한 MaxRoundsHardCap.</summary>
     public int? MaxRounds { get; set; }
 

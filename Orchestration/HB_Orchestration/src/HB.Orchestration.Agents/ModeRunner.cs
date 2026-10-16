@@ -18,9 +18,11 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     /// modes.json은 그대로 두고, 같은 모드를 다른 모델로 한 번 돌려볼 때 쓴다.
     /// </param>
     /// <param name="context">서버가 디스크에서 읽어 input 뒤에 붙일 코드 범위. Claude가 코드를 input에 다시 쓰지 않게 한다.</param>
+    /// <param name="reason">지휘자가 이 모드를 부른 이유 (필수). 기록에만 남고 에이전트에게는 보내지 않는다.</param>
+    /// <param name="ownReview">결과를 보기 전의 자체 검토 (RequireOwnReview 모드에서 필수). 기록에만 남는다.</param>
     public async Task<string> RunAsync(
         string modeName, string input, IReadOnlyList<string>? files, IReadOnlyList<string>? agentOverrides,
-        IReadOnlyList<ContextRange>? context, CancellationToken ct)
+        IReadOnlyList<ContextRange>? context, string? reason, string? ownReview, CancellationToken ct)
     {
         // ── 1. 실행 전 검증: 여기서 걸리면 토큰을 한 개도 쓰지 않는다 ──────────────
         sessions.ApplyResets();
@@ -38,6 +40,9 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         if (mode.Flow == ModeFlow.Debate && mode.Steps.Count is not (2 or 3))
             return $"[모드 '{modeName}'] Debate는 Steps가 2개(토론자 둘) 또는 3개(+판정자)여야 합니다.";
 
+        // 지휘자의 판단 근거: 기록에만 남긴다 (CallMeta → CallRecord). 프롬프트·시스템 프롬프트 조립에는 넘기지 않는다.
+        if (CheckConductorNotes(modeName, mode, reason, ownReview) is { } notesError) return notesError;
+
         var maxChars = mode.MaxInputChars ?? Options.Budget.MaxInputChars;
         if (maxChars > 0 && input.Length > maxChars)
             return $"[입력이 너무 깁니다] {input.Length:N0}자 / 상한 {maxChars:N0}자. " +
@@ -52,7 +57,12 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
                    "context 범위를 줄여 다시 호출하세요.";
 
         input += attached!.Text;
-        var meta = new CallMeta(files, attached.Sources) { ContextRoots = attached.Roots };
+        var meta = new CallMeta(files, attached.Sources)
+        {
+            ContextRoots = attached.Roots,
+            Reason = reason,
+            OwnReview = string.IsNullOrWhiteSpace(ownReview) ? null : ownReview,
+        };
 
         var budgetMessage = CheckBudget();
         if (budgetMessage is not null) return budgetMessage;
@@ -318,6 +328,24 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         return (map, null);
     }
 
+    /// <summary>reason · ownReview 검사. 문제가 있으면 '['로 시작하는 문구 (실행 횟수 차감 전이라 거절해도 횟수가 그대로다).</summary>
+    private string? CheckConductorNotes(string modeName, ModeDefinition mode, string? reason, string? ownReview)
+    {
+        var records = Options.Records;
+        if (string.IsNullOrWhiteSpace(reason))
+            return "[reason 필요] 이 모드를 부른 이유를 reason에 한 줄로 넣어 다시 호출하세요. 기록용이며 에이전트에게 가지 않습니다. (실행 횟수 차감 없음)";
+        if (records.MaxReasonChars > 0 && reason.Length > records.MaxReasonChars)
+            return $"[reason이 너무 깁니다] {reason.Length:N0}자 / 상한 {records.MaxReasonChars:N0}자. 한 줄로 줄여 다시 호출하세요. (실행 횟수 차감 없음)";
+
+        if (mode.RequireOwnReview && string.IsNullOrWhiteSpace(ownReview))
+            return $"[ownReview 필요] '{modeName}'은(는) 결과를 보기 전에 완성한 자체 검토가 필수입니다. ownReview에 원문을 넣어 다시 호출하세요. " +
+                   "기록용이며 에이전트에게 가지 않습니다. (실행 횟수 차감 없음)";
+        if (ownReview is not null && records.MaxOwnReviewChars > 0 && ownReview.Length > records.MaxOwnReviewChars)
+            return $"[ownReview가 너무 깁니다] {ownReview.Length:N0}자 / 상한 {records.MaxOwnReviewChars:N0}자. 잘라서 남기지 않으니 줄여서 다시 호출하세요. (실행 횟수 차감 없음)";
+
+        return null;
+    }
+
     private int RunLimit(ModeDefinition mode) => mode.MaxRunsPerSession ?? Options.Budget.DefaultMaxRunsPerSession;
 
     /// <summary>오늘 쓴 토큰이 상한을 넘었으면 메시지, 아니면 null.</summary>
@@ -359,7 +387,8 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             var used = sessions.Get(name);
             var quota = limit > 0 ? $" (남은 실행 {Math.Max(0, limit - used)}/{limit})" : "";
             var rounds = mode.Flow == ModeFlow.Debate ? $" 최대 {Math.Clamp(mode.MaxRounds ?? 2, 1, ModeDefinition.MaxRoundsHardCap)}회차" : "";
-            sb.AppendLine($"- {name}: {mode.Description} [{steps}]{rounds}{quota}");
+            var ownReview = mode.RequireOwnReview ? " [ownReview 필수]" : "";
+            sb.AppendLine($"- {name}: {mode.Description} [{steps}]{rounds}{quota}{ownReview}");
         }
         if (sb.Length == 0) return "정의된 모드가 없습니다.";
 

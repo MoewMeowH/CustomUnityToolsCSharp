@@ -71,6 +71,48 @@
 
 ---
 
+## B. `run_mode` 기록용 인자 — 지휘자가 왜, 무엇을 먼저 판단했나
+
+### 바꾼 것
+
+| 파일 | 내용 |
+|---|---|
+| `Mcp/ModeTools.cs` | `reason`, `ownReview` 인자 (nullable, 설명 각 한 줄). 필수 여부는 서버가 검사 |
+| `Agents/ModeDefinitions.cs` | `ModeDefinition.RequireOwnReview` (키 없음 = false) |
+| `Agents/ModeRunner.cs` | `CheckConductorNotes`: 모드를 찾은 직후, Steps·Debate 검사 다음, 입력 길이 · 첨부 · 예산 · 실행 횟수 예약보다 **앞에서** 검사. 두 값은 `CallMeta`로만 흐름. `list_modes`에 `[ownReview 필수]` |
+| `Agents/AgentRunner.cs` · `Shared/CallRecord.cs` | `Reason` · `OwnReview`를 그 실행의 모든 기록 줄에 원문 그대로 남김 (공백만 있는 ownReview는 null) |
+| `Agents/OrchestrationOptions.cs` | `Records.MaxReasonChars`(500) · `MaxOwnReviewChars`(30,000), 0 = 무제한 |
+| `src/…/Mcp/modes.json` | `review` · `panel` · `cross_p1` · `cross_p1_guided`에 `"RequireOwnReview": true` (publish 폴더의 modes.json은 publish가 사용자 설정으로 되돌리므로 마지막 실제 확인 때 같은 4개에 넣는다) |
+| `project-files/CLAUDE.md` | "input 작성"에 "판단 근거는 기록 인자로" 한 항목 |
+| `project-files/.claude/commands/cross-review.md` · `mode.md` | 3단계에 `reason` · `ownReview` |
+| `README.md` | 모드 표 `RequireOwnReview`, 설정 표, "지휘자의 판단 근거" 절 |
+
+### 규칙서 동기화
+
+- `Sync-ProjectFiles.ps1` 비교 결과는 다름 3개(`CLAUDE.md`, `cross-review.md`, `mode.md`)였다.
+- Unity 쪽 세 파일의 SHA-256은 이전 원본(`git show HEAD:…`)과 같았다 (`5194b14e80db` · `c58de8b889a9` · `351e45928084`). Unity에서 직접 고친 내용이 없다는 뜻이다.
+- 스크립트는 차이가 있으면 `-Apply`만으로는 멈추도록 설계돼 있다. 위 확인 뒤 `-Apply -Force`로 복사했다. 백업은 `F:\AI\ToolCreate\review_tmp\sync-backup\20261016-220823`(3개)에 있다.
+- 복사 후 6개 모두 같음이다: `CLAUDE.md` `2067c382f18b`, `cross-review.md` `e42fccce1da3`, `mode.md` `b30191d8b788`.
+- 새 규칙은 다음 세션부터 지휘자 컨텍스트에 실린다. 지금 떠 있는 서버(이전 빌드)는 두 인자를 모른다. 그래서 C의 review 호출까지는 두 인자 없이 부르고, 마지막 실제 확인에서 새 빌드로 처음 쓴다.
+
+### review
+
+계획대로 하지 않았다. 변경이 작고, 핵심 위험(독립성 누출 · 횟수 차감)을 아래 테스트로 직접 확인했다.
+
+### 테스트
+
+`ConductorNotesTests` 13건 (전체 119건 통과).
+
+| 통과 기준 | 테스트 |
+|---|---|
+| `reason` 없이 부르면 거절, 실행 횟수 그대로 | `MissingReason_Rejected_CountUnchanged` (null · "" · 공백 줄바꿈): `[reason 필요]`, 세션 횟수 0, 클라이언트 호출 0, 기록 0줄 |
+| review 계열에서 `ownReview` 없으면 거절, 다른 모드는 성공 | `ReviewMode_MissingOwnReview_Rejected_CountUnchanged`, `OtherMode_WithoutOwnReview_Succeeds` |
+| 에이전트 입력·시스템 프롬프트 어디에도 없음 + 기록에 원문 그대로 | `NotesNeverReachAgents_AndAreRecordedVerbatim` (Sequential 2단계 · Concurrent · Debate 3단계): IChatClient가 받은 시스템 지시 + 메시지, 모든 기록의 `Prompt`, blobs 파일에 표지 문자열이 없다. `Reason`·`OwnReview`는 따옴표·태그·백슬래시·앞뒤 공백까지 UTF-8 바이트가 같다 |
+| 길이 제한 | 500자 / 30,000자 경계 통과, 501자 / 30,001자 거절(횟수 그대로), 0 = 무제한 |
+| `list_modes` 표시 | `ListModes_MarksRequiredOwnReview` |
+
+---
+
 ## 이번에 하지 않는 것 (TODO)
 
 | 항목 | 이유 | 다시 볼 때 |

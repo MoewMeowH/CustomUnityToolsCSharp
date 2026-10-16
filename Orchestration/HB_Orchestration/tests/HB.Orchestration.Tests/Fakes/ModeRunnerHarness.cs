@@ -20,6 +20,8 @@ public sealed class ModeRunnerHarness : IDisposable
           },
           "Modes": {
             "seq":  { "Steps": [ { "Role": "R", "Agent": "a1" } ] },
+            "rev":  { "RequireOwnReview": true, "Steps": [ { "Role": "R", "Agent": "a1" }, { "Role": "R", "Agent": "a1" } ] },
+            "crev": { "RequireOwnReview": true, "Flow": "Concurrent", "Steps": [ { "Role": "R", "Agent": "a1" }, { "Role": "R", "Agent": "a1" } ] },
             "two":  { "Steps": [ { "Role": "R", "Agent": "a1" }, { "Role": "NoG", "Agent": "a1" } ] },
             "noG":  { "Steps": [ { "Role": "NoG", "Agent": "a1" } ] },
             "conc": { "Flow": "Concurrent", "Steps": [ { "Role": "R", "Agent": "a1" }, { "Role": "R", "Agent": "a1" } ] },
@@ -65,7 +67,10 @@ public sealed class ModeRunnerHarness : IDisposable
         Runner = new ModeRunner(new ModeStore(catalog), catalog, agentRunner, Sessions);
     }
 
-    public Task<string> Run(string mode, string input = "요청") => Runner.RunAsync(mode, input, null, null, null, CancellationToken.None);
+    public const string DefaultReason = "테스트 이유";
+
+    public Task<string> Run(string mode, string input = "요청", string? reason = DefaultReason, string? ownReview = null) =>
+        Runner.RunAsync(mode, input, null, null, null, reason, ownReview, CancellationToken.None);
 
     public List<CallRecord> Records() => CallLog.ReadAll(LogPath).OrderBy(r => r.Timestamp).ThenBy(r => r.Step).ToList();
 
