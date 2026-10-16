@@ -394,6 +394,15 @@ unity skill install --help
 - 어느 폴더를 볼지는 대시보드 `appsettings.json`의 `Dashboard:McpConfigDir` (배치로 실행하면 `HB_Orchestration.config`의 `PUBLISH_DIR`가 우선). 편집할 파일을 직접 지정하려면 `Dashboard:ModesPath`.
 - Unity 프로젝트에 `hb-modes.json`이 있으면 그 프로젝트에서는 그쪽이 우선이다. 이 화면은 publish 폴더 쪽만 고친다.
 
+**Claude 세션** (`/ClaudeSessions`) — 지휘자가 무엇을 알고 있었나
+- Claude Code 세션 기록(`~/.claude/projects/<경로 인코딩>/<sessionId>.jsonl`)을 **읽기만** 해서, 세션마다 시작 시각(로컬) · 버전 · 프로젝트 · 불러온 지침 파일 · 부른 `run_mode`를 보여준다. **대화 본문은 보여주지 않는다.**
+- 지침 파일: `instructions` 항목의 `files[]` — 경로 · 종류 · 크기 · SHA-256 (기록된 content의 UTF-8 바이트 기준). 지금 디스크 파일과 대조해 `같음` / `끝 줄바꿈만 다름`(디스크 = content + LF 정확히 1개) / `다름` / `파일 없음`. 세션 기록이 끝 줄바꿈을 빼고 저장하는 것은 파일 3개로 확인한 관찰이다.
+- `run_mode` 연결: 결과 첫 줄 `runId:`가 있으면 **확정**. 머리말이 없는 이전 서버의 결과는 같은 모드 · 같은 프로젝트 · 호출 시각 −2초 ~ +60초에 시작한 실행이 하나뿐일 때만 **추정**. 후보가 여럿이면 연결하지 않고, 실행 전에 거절된 호출(`[`로 시작하는 결과)은 추정하지 않는다. 다른 세션이 확정한 실행은 추정 후보에서 뺀다.
+- 결과가 백그라운드(120초 초과 → `<task-notification>`)나 큰 출력(`<persisted-output>` 미리보기)으로 들어와도 찾는다. 다른 도구 결과(예: Bash로 calls.jsonl을 읽은 출력)에 든 runId는 쓰지 않는다.
+- 세션 기록 형식은 비공식이다. JSON이 아니거나 모양이 다른 줄은 "알 수 없는 줄 n", 알아볼 줄이 하나도 없는 파일은 "알 수 없는 형식"으로 표시한다. 줄마다 엄격한 UTF-8로 읽고, 잘못된 바이트가 있는 줄은 알 수 없는 줄로 센다.
+- 설정: `Dashboard:ClaudeProjectsDir` (비우면 `CLAUDE_CONFIG_DIR/projects` → `%USERPROFILE%\.claude\projects`), `Dashboard:ClaudeSessionLimit` (목록에 보일 최근 세션 수, 기본 50. 연결은 전체 세션으로 계산).
+- `/Sessions`(살아 있는 MCP 서버)와는 다른 화면이다.
+
 ## 8. HB_Orchestration.bat (publish · 대시보드 실행)
 
 솔루션 폴더의 `HB_Orchestration.bat`을 더블클릭하면 메뉴가 뜬다.

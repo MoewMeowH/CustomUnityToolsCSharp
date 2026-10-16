@@ -1,0 +1,108 @@
+@page
+@model ClaudeSessionModel
+@using HB.Orchestration.Shared
+@{
+    var s = Model.Session;
+    ViewData["Title"] = $"HB Orchestration · Claude 세션 {ClaudeSessionsModel.Short(s.FileSessionId)}";
+}
+
+<style>
+    .notice { padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; border: 1px solid var(--line); background: var(--panel); }
+    .notice.warn { border-color: var(--warn); }
+    .meta { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 14px 16px; margin-bottom: 16px; }
+    h3 { font-size: 15px; margin: 22px 0 8px; }
+    .sha { word-break: break-all; }
+</style>
+
+<p><a href="/ClaudeSessions">← Claude 세션</a></p>
+
+<section class="panel meta">
+    <span class="mono">@s.FileSessionId</span>
+    <span>시작 @(s.StartedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "-")</span>
+    <span class="muted">버전 @(s.Version ?? "-")</span>
+    <span class="muted" title="@s.Cwd">@(s.Cwd ?? "-")</span>
+</section>
+
+@if (s.FormatError is not null)
+{
+    <div class="notice warn">알 수 없는 형식: @s.FormatError</div>
+}
+@if (s.UnknownLines > 0)
+{
+    <div class="notice warn">알 수 없는 줄 @(s.UnknownLines)개를 건너뛰었습니다 (JSON이 아니거나 필드 모양이 다름).</div>
+}
+@if (s.SessionId is not null && !string.Equals(s.SessionId, s.FileSessionId, StringComparison.OrdinalIgnoreCase))
+{
+    <div class="notice warn">파일 이름과 기록 안의 sessionId(@s.SessionId)가 다릅니다.</div>
+}
+
+<h3>불러온 지침</h3>
+@if (s.Instructions.Count == 0)
+{
+    <p class="muted">instructions 항목이 없습니다.</p>
+}
+@foreach (var ins in s.Instructions)
+{
+    <p class="muted" style="margin:6px 0">@(ins.Timestamp?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "-") · 기록 @(ins.Line)줄</p>
+    <section class="panel table-scroll">
+        <table>
+            <thead><tr><th>경로</th><th>종류</th><th class="num">크기(B)</th><th>SHA-256 (기록된 내용)</th><th>지금 디스크와</th></tr></thead>
+            <tbody>
+            @foreach (var f in ins.Files)
+            {
+                var match = InstructionDiskCompare.Compare(f);
+                var cls = match switch { InstructionDiskMatch.Same or InstructionDiskMatch.TrailingNewlineOnly => "ok", InstructionDiskMatch.Different => "err", _ => "muted" };
+                <tr>
+                    <td class="mono">@f.Path</td>
+                    <td>@(f.Type ?? "-")</td>
+                    <td class="num">@f.Bytes.ToString("N0")</td>
+                    <td class="mono sha" title="@f.Sha256">@f.Sha256[..12]…</td>
+                    <td class="@cls">@InstructionDiskCompare.Label(match)</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </section>
+}
+<p class="muted" style="font-size:12.5px">
+    크기·해시는 세션 기록에 남은 내용 기준입니다. "끝 줄바꿈만 다름" = 디스크 바이트가 기록 내용 + LF 정확히 1개 (세션 기록이 끝 줄바꿈을 빼고 저장하는 것으로 보이는 관찰, 파일 3개로 확인). 그 밖의 차이는 모두 "다름"입니다.
+</p>
+
+<h3>run_mode 호출</h3>
+@if (Model.Links.Count == 0)
+{
+    <p class="muted">이 세션에서 부른 run_mode가 없습니다.</p>
+}
+else
+{
+    <section class="panel table-scroll">
+        <table>
+            <thead><tr><th>호출 (로컬)</th><th>모드</th><th>runId</th><th>연결</th><th>결과 위치</th></tr></thead>
+            <tbody>
+            @foreach (var l in Model.Links)
+            {
+                <tr>
+                    <td class="mono">@(l.Call.Timestamp?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "-")</td>
+                    <td class="mono">@(l.Call.Mode ?? "-")</td>
+                    <td class="mono">
+                        @if (l.RunId is { } run && Model.FirstCallOfRun.TryGetValue(run, out var callId))
+                        {
+                            <a href="/Call?id=@callId">@run</a>
+                        }
+                        else
+                        {
+                            @(l.RunId ?? "-")
+                            if (l.RunId is not null) { <span class="muted"> (호출 기록 없음)</span> }
+                        }
+                    </td>
+                    <td><span class="badge @(l.Kind == RunLinkKind.Estimated || l.Kind == RunLinkKind.Ambiguous ? "warn" : null)">@ClaudeSessionModel.KindLabel(l)</span></td>
+                    <td class="muted">@(l.Call.ResultSource ?? "결과 없음")</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </section>
+    <p class="muted" style="font-size:12.5px">
+        확정 = 결과 머리말의 <span class="mono">runId:</span>. 추정 = 머리말이 없어(이전 서버) 같은 모드 · 같은 프로젝트에서 호출 시각 −2초 ~ +60초 안에 시작한 실행이 하나뿐일 때.
+    </p>
+}

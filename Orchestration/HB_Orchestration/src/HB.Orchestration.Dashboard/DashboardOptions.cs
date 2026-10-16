@@ -31,5 +31,14 @@ public sealed class DashboardOptions
     /// </summary>
     public Dictionary<string, ModelPrice> Prices { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Claude Code 세션 기록 폴더 (projects). 비우면 CLAUDE_CONFIG_DIR/projects → %USERPROFILE%/.claude/projects.
+    /// 'Claude 세션' 화면이 읽기만 한다.
+    /// </summary>
+    public string? ClaudeProjectsDir { get; set; }
+
+    /// <summary>'Claude 세션' 화면에서 읽을 최근 세션 기록 수 (수정 시각 순). 기본 50.</summary>
+    public int ClaudeSessionLimit { get; set; } = 50;
+
     public string ResolvedLogPath => string.IsNullOrWhiteSpace(LogPath) ? CallLog.DefaultPath : LogPath;
 }
