@@ -25,6 +25,28 @@ public sealed class OrchestrationOptions
 
     /// <summary>모델 단가(USD)와 원화 환율. 서버는 쓰지 않고 대시보드가 비용 표시에 쓴다 (같은 파일에서 함께 편집).</summary>
     public PricingOptions Pricing { get; set; } = new();
+
+    /// <summary>응답 검사기(빈 응답·잘림·언어 이탈) 설정.</summary>
+    public ResponseChecksOptions ResponseChecks { get; set; } = new();
+}
+
+/// <summary>appsettings.json의 "Orchestration:ResponseChecks". 경고는 응답을 막지 않고 기록·결과에 한 줄씩 붙는다.</summary>
+public sealed class ResponseChecksOptions
+{
+    public const double DefaultForeignScriptRatio = 0.02;
+
+    /// <summary>
+    /// 기대하는 응답 언어. 지금은 "ko"만 지원 (코드 블록을 뺀 본문의 일본어 가나 비율을 본다).
+    /// 키가 없으면 "ko"(검사 켬), ""이면 검사 끔. "비우면 기존 동작" 원칙의 의도적 예외다:
+    /// 경고는 실패가 아니라 기존 실행 결과를 바꾸지 않고, 3장처럼 사람이 대시보드를 보기 전엔 모르는 이탈을 기본으로 잡기 위해서다.
+    /// </summary>
+    public string? ExpectedLanguage { get; set; } = "ko";
+
+    /// <summary>본문 글자 중 가나 비율이 이 값 이상이면 경고 (0~1, 기본 0.02 = 2%). 0 이하나 1 초과면 기본값.</summary>
+    public double ForeignScriptRatio { get; set; } = DefaultForeignScriptRatio;
+
+    public double EffectiveForeignScriptRatio =>
+        ForeignScriptRatio is > 0 and <= 1 ? ForeignScriptRatio : DefaultForeignScriptRatio;
 }
 
 /// <summary>appsettings.json의 "Orchestration:Pricing".</summary>

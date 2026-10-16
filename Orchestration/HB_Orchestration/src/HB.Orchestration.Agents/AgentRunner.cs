@@ -12,7 +12,11 @@ public sealed record CallMeta(IReadOnlyList<string>? Files, IReadOnlyList<string
 public sealed record StepCall(
     string RunId, string Mode, int Step, string Role,
     AgentEntry Agent, string Instructions, string Prompt,
-    CallMeta Meta);
+    CallMeta Meta)
+{
+    /// <summary>응답 검사기 설정. 실행 시점의 appsettings 값을 넘긴다.</summary>
+    public ResponseChecksOptions Checks { get; init; } = new();
+}
 
 /// <summary>한 단계의 결과. Text(응답 또는 '['로 시작하는 실패 문구)만 다음 단계에 넘어간다.</summary>
 public sealed record StepResult(int Step, string Role, string Agent, bool Success, string Text)
@@ -29,6 +33,12 @@ public sealed record StepResult(int Step, string Role, string Agent, bool Succes
 
     /// <summary>재시도와 시도 사이 대기를 포함한 단계 전체 시간.</summary>
     public long ElapsedMs { get; init; }
+
+    /// <summary>응답 검사기 경고 ("[경고] …"). 응답은 그대로 전달되고 결과에 한 줄씩 붙는다.</summary>
+    public IReadOnlyList<string> Warnings { get; init; } = [];
+
+    /// <summary>결과에 붙일 안내 줄: 재시도 알림 + 경고.</summary>
+    public IEnumerable<string> Notices => RetryNote is null ? Warnings : Warnings.Prepend(RetryNote);
 
     /// <summary>재시도가 있었으면 "(재시도 1회 후 성공 · 1회차 Timeout)" 같은 한 줄, 없으면 null.</summary>
     public string? RetryNote => FailedKinds.Count == 0
@@ -93,6 +103,7 @@ public sealed class AgentRunner
                     InputTokens = record.InputTokens,
                     OutputTokens = record.OutputTokens,
                     ElapsedMs = stepWatch.ElapsedMilliseconds,
+                    Warnings = record.Warnings,
                 };
             }
 
@@ -125,14 +136,10 @@ public sealed class AgentRunner
             var outTokens = response.Usage?.OutputTokenCount;
             var cachedTokens = response.Usage?.CachedInputTokenCount;
 
-            if (string.IsNullOrWhiteSpace(text))
+            // 빈 응답은 실패다 (다시 보내도 같으므로 재시도하지 않는다).
+            if (ResponseChecker.EmptyFailure(text, response.FinishReason, outTokens, call.Agent.Options) is { } emptyFailure)
             {
-                // 추론 모델은 생각 토큰도 MaxOutputTokens에 포함된다. 상한을 다 쓰면 답변 없이 "성공"으로 끝나므로
-                // Claude가 "문제 없음"으로 오해하지 않도록 실패로 돌려준다. 다시 보내도 같으므로 재시도하지 않는다.
-                var max = call.Agent.Options.MaxOutputTokens;
-                text = max is { } m && outTokens >= m * 0.95
-                    ? $"[빈 응답] 출력 토큰 상한({m:N0})을 추론에 다 써서 답변을 못 했습니다. appsettings.json에서 '{call.Agent.Name}'의 MaxOutputTokens를 올리세요."
-                    : $"[빈 응답] 에이전트가 내용 없이 응답했습니다. (출력 토큰 {outTokens?.ToString("N0") ?? "-"})";
+                text = emptyFailure;
 
                 _logger.LogWarning("[{Mode}#{Step}] {Role}@{Agent} 빈 응답 (출력 {Out})", call.Mode, call.Step, call.Role, call.Agent.Name, outTokens);
                 return new AttemptOutcome(NewRecord() with
@@ -146,8 +153,10 @@ public sealed class AgentRunner
                 }, text, null);
             }
 
-            _logger.LogInformation("[{Mode}#{Step}] {Role}@{Agent} 완료 (시도 {Attempt}) {Elapsed}ms, 입력 {In} / 출력 {Out}",
-                call.Mode, call.Step, call.Role, call.Agent.Name, attempt, sw.ElapsedMilliseconds, inTokens, outTokens);
+            var warnings = CheckWarnings(call, text, response.FinishReason, outTokens);
+
+            _logger.LogInformation("[{Mode}#{Step}] {Role}@{Agent} 완료 (시도 {Attempt}) {Elapsed}ms, 입력 {In} / 출력 {Out}, 경고 {Warnings}",
+                call.Mode, call.Step, call.Role, call.Agent.Name, attempt, sw.ElapsedMilliseconds, inTokens, outTokens, warnings.Count);
             return new AttemptOutcome(NewRecord() with
             {
                 Response = text,
@@ -156,6 +165,7 @@ public sealed class AgentRunner
                 OutputTokens = outTokens,
                 ElapsedMs = sw.ElapsedMilliseconds,
                 Success = true,
+                Warnings = warnings,
             }, text, null);
         }
         catch (Exception ex) when (RetryClassifier.IsUserCancellation(ex, ct))
@@ -209,6 +219,26 @@ public sealed class AgentRunner
             Files = call.Meta.Files ?? [],
             Context = call.Meta.Context,
         };
+    }
+
+    /// <summary>경고 검사. 검사기가 예외를 던져도 응답 전달을 막지 않는다 (경고 없이 넘어가고 로그만 남김).</summary>
+    private IReadOnlyList<string> CheckWarnings(StepCall call, string text, Microsoft.Extensions.AI.ChatFinishReason? finishReason, long? outTokens)
+    {
+        try
+        {
+            if (!ResponseChecker.IsSupportedLanguage(call.Checks.ExpectedLanguage))
+                _logger.LogWarning("ResponseChecks.ExpectedLanguage '{Language}'은(는) 지원하지 않아 언어 검사를 건너뜁니다 (지원: ko).", call.Checks.ExpectedLanguage);
+
+            var warnings = ResponseChecker.Warnings(text, finishReason, outTokens, call.Checks);
+            foreach (var w in warnings)
+                _logger.LogWarning("[{Mode}#{Step}] {Role}@{Agent} {Warning}", call.Mode, call.Step, call.Role, call.Agent.Name, w);
+            return warnings;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[{Mode}#{Step}] 응답 검사기 오류 — 경고 없이 진행", call.Mode, call.Step);
+            return [];
+        }
     }
 
     /// <summary>"Timeout · " / "Client 402 · " 처럼 실패 문구 앞에 붙는 분류.</summary>

@@ -7,10 +7,11 @@ public sealed class ScriptedChatClient(params Func<CancellationToken, ChatRespon
 {
     public int Calls { get; private set; }
 
-    public static Func<CancellationToken, ChatResponse> Reply(string text) =>
+    public static Func<CancellationToken, ChatResponse> Reply(string text, ChatFinishReason? finishReason = null) =>
         _ => new ChatResponse(new ChatMessage(ChatRole.Assistant, text))
         {
             Usage = new UsageDetails { InputTokenCount = 100, OutputTokenCount = 20 },
+            FinishReason = finishReason ?? ChatFinishReason.Stop,
         };
 
     public static Func<CancellationToken, ChatResponse> Throw(Exception ex) => _ => throw ex;

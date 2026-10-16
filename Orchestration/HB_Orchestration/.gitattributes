@@ -1,0 +1,2 @@
+# 테스트 데이터는 calls.jsonl에서 옮긴 응답 원문이다. 줄바꿈 변환 없이 바이트 그대로 둔다.
+tests/**/TestData/** -text

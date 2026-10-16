@@ -96,6 +96,8 @@ dotnet build HB_Orchestration.slnx
 | `Context.DenyPatterns` | 외부로 보내지 않을 파일 glob **추가분**. 내장 목록(`.env`, `*.pem`, `*.key`, `*.keystore`, `*.jks`, `*.p12`, `*.pfx`, `*.mobileprovision`, `credentials*`, `secrets*`, `.git/**` 등)은 항상 적용 |
 | `Budget.DefaultMaxRunsPerSession` | `MaxRunsPerSession`이 없는 모드의 세션당 실행 한도 |
 | `Budget.FreeProviders` | 비용 집계에서 뺄 제공사 (기본 `local`) |
+| `ResponseChecks.ExpectedLanguage` | 기대하는 응답 언어. 지금은 `ko`만 지원. **키가 없으면 `ko`(검사 켬), `""`이면 끔** (아래 "응답 검사기") |
+| `ResponseChecks.ForeignScriptRatio` | 코드 블록을 뺀 본문에서 일본어 가나 비율이 이 값 이상이면 경고 (기본 0.02 = 2%) |
 | `Pricing.KrwPerUsd` | 1달러당 원. 비우면 대시보드는 달러만 표시 |
 | `Pricing.Models.<모델 ID>` | `InputPerMillion`, `CachedInputPerMillion`(비우면 입력과 같음), `OutputPerMillion` — USD / 1M 토큰. 키는 에이전트 이름이 아니라 **모델 ID**(기록에 남는 값). 지금 안 쓰는 예전 모델도 남겨 두면 예전 기록의 비용이 계속 계산됨. 서버는 쓰지 않고 대시보드만 읽음 |
 
@@ -117,6 +119,20 @@ SDK 자동 재시도(기본 3회, 기록에 안 남음)는 끄고 서버가 직�
 - **시도마다 calls.jsonl에 한 줄**씩 남는다 (`Attempt` 1부터, 같은 `RunId`·`Step`). 대시보드 목록에 `시도 n/N` 배지가 붙는다.
 - `run_mode` 결과에는 `(재시도 1회 후 성공 · 1회차 Timeout)`처럼 한 줄로 알린다.
 - **한 단계의 최대 대기 ≈ 타임아웃 × 시도 횟수** (+ 시도 사이 대기). 예: 타임아웃 300초, MaxAttempts 2 → 최대 약 10분.
+
+### 응답 검사기
+
+| 검사 | 기준 | 처리 |
+|---|---|---|
+| 빈 응답 | 내용 없음 | **실패** `[빈 응답]` (종료 이유가 길이 제한이면 MaxOutputTokens 안내) |
+| 출력 상한에서 잘림 | 응답의 종료 이유가 길이 제한(`length`) | 경고 |
+| 언어 이탈 | 코드 블록(```` ``` ```` · `~~~`)과 인라인 코드를 뺀 본문에서 가나 비율 ≥ `ForeignScriptRatio`, 가나 5자 이상 | 경고 |
+
+- 경고는 실패가 아니다. 응답은 그대로 전달하고, `run_mode` 결과의 해당 단계 아래에 `[경고] 응답 언어 이탈 감지 (가나 비율 10.7%, 308자)`처럼 한 줄씩 붙인다.
+- 경고는 기록(`Warnings`)에도 남고, 대시보드 목록과 상세 화면에 `경고 n` 배지로 보인다.
+- 검사기 자체가 오류를 내면 경고 없이 넘어가고 서버 로그만 남긴다.
+- `ExpectedLanguage`는 "비우면 기존 동작" 원칙의 **예외**로, 키가 없어도 검사가 켜진다. 경고는 결과를 바꾸지 않고, 사람이 대시보드를 보기 전에는 모르는 이탈(3장)을 기본으로 잡기 위해서다. 끄려면 `""`.
+- 한자(중국어) 이탈은 잡지 않는다.
 
 ### 재시작이 필요한 경우
 | 바꾼 것 | 필요한 동작 |

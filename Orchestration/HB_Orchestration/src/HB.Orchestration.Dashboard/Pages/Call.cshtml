@@ -44,6 +44,17 @@
     <div><div class="label">프로젝트</div><div class="value mono" title="@c.ProjectDir">@IndexModel.ProjectName(c.ProjectDir)</div></div>
 </section>
 
+@if (c.Warnings.Count > 0)
+{
+    <section class="panel files">
+        <span class="badge warn">응답 검사기 경고</span>
+        <span class="muted" style="font-size:12.5px"> — 응답은 그대로 전달됐습니다</span>
+        <ul>
+            @foreach (var w in c.Warnings) { <li>@w</li> }
+        </ul>
+    </section>
+}
+
 @if (Model.RunSteps.Count > 1)
 {
     var runIn = Model.RunSteps.Sum(r => r.InputTokens ?? 0);
@@ -62,6 +73,7 @@
                     else { <a href="/Call/@s.Id">@label</a> }
                     <span class="muted"> — @(s.InputTokens?.ToString("N0") ?? "-") / @(s.OutputTokens?.ToString("N0") ?? "-") 토큰, @((s.ElapsedMs / 1000.0).ToString("0.0"))s</span>
                     @if (!s.Success) { <span class="err"> 실패@(s.ErrorKind is { } sk ? $" {sk}" : "")</span> }
+                    @if (s.Warnings.Count > 0) { <span class="badge warn" title="@string.Join("\n", s.Warnings)">경고 @s.Warnings.Count</span> }
                 </li>
             }
         </ol>

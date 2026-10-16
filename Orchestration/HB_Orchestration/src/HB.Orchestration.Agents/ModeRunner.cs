@@ -117,13 +117,12 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             note = note is null ? swapNote : $"{note}\n{swapNote}";
         }
 
-        // 재시도가 있었던 단계는 한 줄로 알린다. 제목과 함께 보이는 단계는 제목 아래에,
+        // 재시도·검사기 경고가 있었던 단계는 한 줄씩 알린다. 제목과 함께 보이는 단계는 제목 아래에,
         // 출력에서 빠지는 단계(Last 모드의 앞 단계 등)와 제목 없이 본문만 돌려주는 경우는 끝의 note에.
         var toShow = returnAll ? results : new List<StepResult> { failed ?? results[^1] };
         var bodyOnly = !returnAll && failed is null;
         var retries = (bodyOnly ? results : results.Except(toShow))
-            .Where(r => r.RetryNote is not null)
-            .Select(r => $"단계 {r.Step} {r.RetryNote}")
+            .SelectMany(r => r.Notices.Select(n => $"단계 {r.Step} {n}"))
             .ToList();
         if (retries.Count > 0)
             note = note is null ? string.Join("\n", retries) : $"{string.Join("\n", retries)}\n{note}";
@@ -135,7 +134,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         foreach (var r in toShow)
         {
             sb.AppendLine($"### {r.Step}. {r.Role} · {r.Agent}");
-            if (r.RetryNote is not null) sb.AppendLine(r.RetryNote);
+            foreach (var notice in r.Notices) sb.AppendLine(notice);
             sb.AppendLine(r.Text).AppendLine();
         }
 
@@ -155,7 +154,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             var prompt = BuildPrompt(input, results, i == 0 ? StepSees.Input : def.Sees);
 
             var result = await runner.RunStepAsync(
-                new StepCall(runId, mode, i + 1, def.Role, agent, instructions, prompt, meta), ct);
+                new StepCall(runId, mode, i + 1, def.Role, agent, instructions, prompt, meta) { Checks = Options.ResponseChecks }, ct);
             results.Add(result);
 
             // 앞 단계가 실패하면 뒤 단계는 의미가 없으므로 토큰을 쓰지 않고 멈춘다.
@@ -170,7 +169,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     {
         var prompt = BuildPrompt(input, [], StepSees.Input);
         var tasks = plan.Select((p, i) => runner.RunStepAsync(
-            new StepCall(runId, mode, i + 1, p.Def.Role, p.Agent, p.Instructions, prompt, meta), ct));
+            new StepCall(runId, mode, i + 1, p.Def.Role, p.Agent, p.Instructions, prompt, meta) { Checks = Options.ResponseChecks }, ct));
         return [.. await Task.WhenAll(tasks)];
     }
 
@@ -192,7 +191,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             {
                 var prompt = BuildDebatePrompt(input, turns.TakeLast(window), round, rounds);
                 var result = await runner.RunStepAsync(
-                    new StepCall(runId, mode, ++step, stepDef.Role, agent, instructions + Prompts.DebateRules, prompt, meta), ct);
+                    new StepCall(runId, mode, ++step, stepDef.Role, agent, instructions + Prompts.DebateRules, prompt, meta) { Checks = Options.ResponseChecks }, ct);
                 turns.Add(result);
 
                 if (!result.Success) return (turns, $"(턴 {step}에서 실패해 토론 중단)");
@@ -210,7 +209,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             var (judgeDef, judgeAgent, judgeInstructions) = plan[2];
             var judgePrompt = BuildDebatePrompt(input, turns, round: 0, rounds: rounds);
             var verdict = await runner.RunStepAsync(
-                new StepCall(runId, mode, ++step, judgeDef.Role, judgeAgent, judgeInstructions, judgePrompt, meta), ct);
+                new StepCall(runId, mode, ++step, judgeDef.Role, judgeAgent, judgeInstructions, judgePrompt, meta) { Checks = Options.ResponseChecks }, ct);
             turns.Add(verdict);
         }
 

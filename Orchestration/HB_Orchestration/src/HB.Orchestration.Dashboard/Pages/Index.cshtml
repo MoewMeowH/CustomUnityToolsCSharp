@@ -108,6 +108,10 @@
                     <td><span class="badge">@IndexModel.ProviderOf(c)</span> <span class="mono">@c.Model</span></td>
                     <td>@IndexModel.ProjectName(c.ProjectDir)</td>
                     <td>
+                        @if (c.Warnings.Count > 0)
+                        {
+                            <span class="badge warn" title="@string.Join("\n", c.Warnings)">경고 @c.Warnings.Count</span>
+                        }
                         <a class="row-link" href="/Call/@c.Id">
                             @if (c.Success) { @IndexModel.Preview(c.Response) }
                             else { <span class="err">@IndexModel.Preview(c.Error)</span> }
