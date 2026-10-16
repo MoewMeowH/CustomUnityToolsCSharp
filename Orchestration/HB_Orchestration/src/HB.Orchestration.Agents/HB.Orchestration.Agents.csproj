@@ -12,4 +12,9 @@
     <ProjectReference Include="..\HB.Orchestration.Shared\HB.Orchestration.Shared.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- AgentRunner의 대기·기록 경로 주입 생성자를 테스트에서 쓴다 -->
+    <InternalsVisibleTo Include="HB.Orchestration.Tests" />
+  </ItemGroup>
+
 </Project>

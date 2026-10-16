@@ -81,11 +81,13 @@ dotnet build HB_Orchestration.slnx
 | `Providers.<이름>.Endpoint` | API 주소. OpenAI는 비움, Gemini `https://generativelanguage.googleapis.com/v1beta/openai/`, Ollama `http://localhost:11434/v1`, LM Studio `http://localhost:1234/v1` |
 | `Providers.<이름>.ApiKeyEnv` | API 키를 담은 **환경 변수 이름**. 로컬처럼 키가 필요 없으면 생략 |
 | `Providers.<이름>.TimeoutSeconds` | 요청 하나의 네트워크 타임아웃(초). 에이전트에 값이 없을 때 적용 (생략 = SDK 기본 100초) |
+| `Providers.<이름>.MaxAttempts` | 한 단계의 최대 시도 횟수 (첫 시도 포함). 에이전트에 값이 없을 때 적용 (생략 = 2) |
 | `Agents[].Name` | 에이전트 이름 (영문·숫자·`_`·`-`, 64자 이내). modes.json의 `Agent`가 이 이름을 가리킨다 |
 | `Agents[].Provider` | 위 `Providers`의 이름 |
 | `Agents[].Model` | 제공사의 모델 ID |
 | `Agents[].MaxOutputTokens` | 응답 상한 (생략 = 제한 없음) |
 | `Agents[].TimeoutSeconds` | 요청 하나의 네트워크 타임아웃(초). **에이전트 → 제공사 → SDK 기본 100초** 순. 긴 응답을 쓰는 모델(sol 등)만 길게 잡을 때 사용. 대시보드 에이전트 표의 "타임아웃(초)" 칸 |
+| `Agents[].MaxAttempts` | 한 단계의 최대 시도 횟수 (첫 시도 포함, 1~5). **에이전트 → 제공사 → 2**(= 최대 1회 재시도) 순. 아래 "재시도" 참고 |
 | `Agents[].Enabled` | `false`면 끔 (생략 = 켬) |
 | `Budget.DailyTokenLimit` | 하루 입력+출력 토큰 상한 (0 = 끔). `FreeProviders`는 집계 제외 |
 | `Budget.MaxInputChars` | `run_mode` 입력 최대 글자 수 (input + `context` 첨부 합계, 기본 100,000). Debate는 토론자가 매 턴 요청 전체를 받으므로 비용이 턴 수만큼 곱해짐 |
@@ -96,6 +98,25 @@ dotnet build HB_Orchestration.slnx
 | `Budget.FreeProviders` | 비용 집계에서 뺄 제공사 (기본 `local`) |
 | `Pricing.KrwPerUsd` | 1달러당 원. 비우면 대시보드는 달러만 표시 |
 | `Pricing.Models.<모델 ID>` | `InputPerMillion`, `CachedInputPerMillion`(비우면 입력과 같음), `OutputPerMillion` — USD / 1M 토큰. 키는 에이전트 이름이 아니라 **모델 ID**(기록에 남는 값). 지금 안 쓰는 예전 모델도 남겨 두면 예전 기록의 비용이 계속 계산됨. 서버는 쓰지 않고 대시보드만 읽음 |
+
+### 재시도
+
+SDK 자동 재시도(기본 3회, 기록에 안 남음)는 끄고 서버가 직접 재시도한다.
+
+| 오류 | 재시도 | 기록의 `ErrorKind` |
+|---|---|---|
+| 네트워크 타임아웃, 408 | O | `Timeout` |
+| 429 요청 과다 | O (`Retry-After`·`retry-after-ms`를 따름, **30초를 넘으면 기다리지 않고 실패**) | `RateLimit` |
+| 5xx | O | `Server` |
+| 연결 실패 (응답 없음) | O | `Network` |
+| 그 외 4xx (400 · 401 · 402 크레딧 부족 · 404 …) | X — 다시 보내도 같다 | `Client` |
+| 사용자 취소 | X — 기록 없이 중단 | — |
+| 빈 응답 | X — 원인이 출력 상한이라 같다 | — |
+
+- 서버가 대기 시간을 알려주지 않으면 2초 → 5초를 기다린 뒤 다시 보낸다.
+- **시도마다 calls.jsonl에 한 줄**씩 남는다 (`Attempt` 1부터, 같은 `RunId`·`Step`). 대시보드 목록에 `시도 n/N` 배지가 붙는다.
+- `run_mode` 결과에는 `(재시도 1회 후 성공 · 1회차 Timeout)`처럼 한 줄로 알린다.
+- **한 단계의 최대 대기 ≈ 타임아웃 × 시도 횟수** (+ 시도 사이 대기). 예: 타임아웃 300초, MaxAttempts 2 → 최대 약 10분.
 
 ### 재시작이 필요한 경우
 | 바꾼 것 | 필요한 동작 |

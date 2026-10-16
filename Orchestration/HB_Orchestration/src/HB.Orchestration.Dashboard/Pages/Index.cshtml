@@ -98,7 +98,13 @@
                 <tr>
                     <td class="num"><a class="row-link" href="/Call/@c.Id">@c.Timestamp.LocalDateTime.ToString("MM-dd HH:mm:ss")</a></td>
                     <td><span class="badge">@c.Tool</span></td>
-                    <td>@(c.Step is { } st ? $"{st}. " : "")@(c.Role ?? "-") · @(c.Agent ?? c.Tool)</td>
+                    <td>
+                        @(c.Step is { } st ? $"{st}. " : "")@(c.Role ?? "-") · @(c.Agent ?? c.Tool)
+                        @if (Model.AttemptOf(c) is { } at)
+                        {
+                            <span class="badge warn" title="이 단계는 재시도가 있었습니다@(c.ErrorKind is { } k ? $" · 이 시도 {k}" : "")">시도 @at.Attempt/@at.Total</span>
+                        }
+                    </td>
                     <td><span class="badge">@IndexModel.ProviderOf(c)</span> <span class="mono">@c.Model</span></td>
                     <td>@IndexModel.ProjectName(c.ProjectDir)</td>
                     <td>

@@ -8,13 +8,13 @@
     <style>
         :root {
             --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #6b7385; --line: #e3e6ec;
-            --accent: #3b6ef5; --ok: #1f9d55; --err: #d64545; --code: #f1f3f6;
+            --accent: #3b6ef5; --ok: #1f9d55; --err: #d64545; --warn: #b7791f; --code: #f1f3f6;
             --mono: ui-monospace, "JetBrains Mono", Consolas, monospace;
         }
         @@media (prefers-color-scheme: dark) {
             :root {
                 --bg: #16181d; --panel: #1e2128; --text: #e4e7ee; --muted: #8b93a5; --line: #2d313b;
-                --accent: #6b93ff; --ok: #4ccb84; --err: #ff6b6b; --code: #262a33;
+                --accent: #6b93ff; --ok: #4ccb84; --err: #ff6b6b; --warn: #e3b341; --code: #262a33;
             }
         }
         * { box-sizing: border-box; }
@@ -33,6 +33,7 @@
         .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px;
                  border: 1px solid var(--line); background: var(--code); }
         .ok { color: var(--ok); } .err { color: var(--err); }
+        .badge.warn { color: var(--warn); border-color: var(--warn); }
         pre { background: var(--code); padding: 12px 14px; border-radius: 8px; overflow-x: auto;
               font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; word-break: break-word; margin: 0; }
         table { width: 100%; border-collapse: collapse; }

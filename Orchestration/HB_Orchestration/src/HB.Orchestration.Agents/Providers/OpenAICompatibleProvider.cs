@@ -1,4 +1,5 @@
 using System.ClientModel;
+using System.ClientModel.Primitives;
 using Microsoft.Extensions.AI;
 using OpenAI;
 
@@ -37,6 +38,10 @@ public sealed class OpenAICompatibleProvider : IChatClientProvider
 
         // 에이전트 → 제공사 → SDK 기본값(100초). 기본값과 같아도 명시해 두면 실제 적용 값이 코드에서 보인다.
         clientOptions.NetworkTimeout = AgentSettings.ResolveTimeout(agent, options);
+
+        // SDK 자동 재시도(기본 3회)는 끈다. 재시도가 기록에 남지 않고, 402처럼 다시 보내도 소용없는 오류까지
+        // 다시 보내기 때문이다. 재시도는 AgentRunner가 오류 종류를 보고 직접 하고 시도마다 기록한다.
+        clientOptions.RetryPolicy = new ClientRetryPolicy(maxRetries: 0);
 
         return new OpenAIClient(new ApiKeyCredential(apiKey), clientOptions)
             .GetChatClient(agent.Model)

@@ -36,7 +36,11 @@
     <div><div class="label">응답 시간</div><div class="value">@((c.ElapsedMs / 1000.0).ToString("0.0"))s</div></div>
     <div><div class="label">입력 / 출력 토큰</div><div class="value">@(c.InputTokens?.ToString("N0") ?? "-") / @(c.OutputTokens?.ToString("N0") ?? "-")@(c.CachedInputTokens is > 0 ? $" (캐시 {c.CachedInputTokens:N0})" : "")</div></div>
     <div><div class="label">예상 비용</div><div class="value">@Model.Pricing.Format(Model.Cost)</div></div>
-    <div><div class="label">상태</div><div class="value @(c.Success ? "ok" : "err")">@(c.Success ? "성공" : "실패")</div></div>
+    <div><div class="label">상태</div><div class="value @(c.Success ? "ok" : "err")">@(c.Success ? "성공" : "실패")@(c.ErrorKind is { } kind ? $" ({kind})" : "")</div></div>
+    @if (Model.StepAttempts > 1)
+    {
+        <div><div class="label">시도</div><div class="value"><span class="badge warn">@(c.Attempt ?? 1) / @Model.StepAttempts</span></div></div>
+    }
     <div><div class="label">프로젝트</div><div class="value mono" title="@c.ProjectDir">@IndexModel.ProjectName(c.ProjectDir)</div></div>
 </section>
 
@@ -53,10 +57,11 @@
             @foreach (var s in Model.RunSteps)
             {
                 <li>
-                    @if (s.Id == c.Id) { <strong>@s.Role · @s.Agent</strong> }
-                    else { <a href="/Call/@s.Id">@s.Role · @s.Agent</a> }
+                    @{ var label = $"{s.Role} · {s.Agent}" + (s.Attempt is > 1 ? $" (시도 {s.Attempt})" : ""); }
+                    @if (s.Id == c.Id) { <strong>@label</strong> }
+                    else { <a href="/Call/@s.Id">@label</a> }
                     <span class="muted"> — @(s.InputTokens?.ToString("N0") ?? "-") / @(s.OutputTokens?.ToString("N0") ?? "-") 토큰, @((s.ElapsedMs / 1000.0).ToString("0.0"))s</span>
-                    @if (!s.Success) { <span class="err"> 실패</span> }
+                    @if (!s.Success) { <span class="err"> 실패@(s.ErrorKind is { } sk ? $" {sk}" : "")</span> }
                 </li>
             }
         </ol>

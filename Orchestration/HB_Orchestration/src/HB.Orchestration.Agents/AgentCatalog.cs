@@ -9,6 +9,9 @@ namespace HB.Orchestration.Agents;
 /// <summary>설정의 에이전트 하나 = 제공사·모델이 정해진 채팅 클라이언트 하나. 역할(프롬프트)은 실행 시점에 붙는다.</summary>
 public sealed record AgentEntry(AgentOptions Options, IChatClient Client)
 {
+    /// <summary>이 에이전트가 쓰는 제공사 설정. 타임아웃·시도 횟수의 기본값을 정할 때 쓴다.</summary>
+    public ProviderOptions? ProviderOptions { get; init; }
+
     public string Name => Options.Name;
     public string Provider => Options.Provider;
     public string Model => Options.Model;
@@ -143,7 +146,7 @@ public sealed partial class AgentCatalog
                 if (a.MaxOutputTokens is { } max)
                     client = client.AsBuilder().ConfigureOptions(o => o.MaxOutputTokens ??= max).Build();
 
-                agents[a.Name] = new AgentEntry(a, client);
+                agents[a.Name] = new AgentEntry(a, client) { ProviderOptions = providerOptions };
                 _logger.LogInformation("에이전트 등록: {Name} ({Provider}/{Model})", a.Name, a.Provider, a.Model);
             }
             catch (Exception ex) when (ex is ProviderConfigurationException or UriFormatException)

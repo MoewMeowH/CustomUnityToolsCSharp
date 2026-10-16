@@ -26,6 +26,9 @@ public sealed class CallModel(IOptions<DashboardOptions> options, PricingService
     /// <summary>같은 모드 실행(RunId)에 속한 단계들. 단계 순서대로.</summary>
     public List<CallRecord> RunSteps { get; private set; } = [];
 
+    /// <summary>이 기록과 같은 단계(RunId·Step)의 시도 수. 2 이상이면 재시도가 있었다.</summary>
+    public int StepAttempts { get; private set; } = 1;
+
     public IActionResult OnGet(string id)
     {
         var all = CallLog.ReadAll(Opt.ResolvedLogPath);
@@ -38,7 +41,10 @@ public sealed class CallModel(IOptions<DashboardOptions> options, PricingService
         ContextLinks = call.Context.Select(f => FileLinks.Build(f, call.ProjectDir, Opt.FileLinkTemplate)).ToList();
         Cost = pricing.CostOf(call);
         if (call.RunId is { } runId)
-            RunSteps = all.Where(c => c.RunId == runId).OrderBy(c => c.Step).ToList();
+        {
+            RunSteps = all.Where(c => c.RunId == runId).OrderBy(c => c.Step).ThenBy(c => c.Attempt ?? 1).ToList();
+            StepAttempts = Math.Max(1, RunSteps.Count(c => c.Step == call.Step));
+        }
         return Page();
     }
 }

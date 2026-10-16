@@ -30,6 +30,15 @@ public sealed class IndexModel(IOptions<DashboardOptions> options, PricingServic
 
     public decimal? TotalCost => pricing.TotalOf(Calls);
 
+    /// <summary>RunId·Step별 시도 수. 2 이상이면 그 단계에 재시도가 있었다 (시도마다 기록이 한 줄씩 남는다).</summary>
+    private Dictionary<(string RunId, int Step), int> _attempts = [];
+
+    /// <summary>재시도가 있었던 단계의 기록이면 (이 시도 번호, 전체 시도 수), 아니면 null.</summary>
+    public (int Attempt, int Total)? AttemptOf(CallRecord c) =>
+        c.RunId is { } run && c.Step is { } step && _attempts.TryGetValue((run, step), out var total) && total > 1
+            ? (c.Attempt ?? 1, total)
+            : null;
+
     public void OnGet()
     {
         var all = CallLog.ReadAll(Opt.ResolvedLogPath);
@@ -42,6 +51,11 @@ public sealed class IndexModel(IOptions<DashboardOptions> options, PricingServic
             .Where(c => string.IsNullOrEmpty(Tool) || c.Tool == Tool)
             .Where(c => string.IsNullOrEmpty(Provider) || ProviderOf(c) == Provider)
             .ToList();
+
+        _attempts = all
+            .Where(c => c.RunId is not null && c.Step is not null)
+            .GroupBy(c => (c.RunId!, c.Step!.Value))
+            .ToDictionary(g => g.Key, g => g.Count());
 
         Daily = Calls
             .GroupBy(c => DateOnly.FromDateTime(c.Timestamp.LocalDateTime))

@@ -13,5 +13,15 @@ public static class AgentSettings
         return seconds is { } s ? TimeSpan.FromSeconds(s) : SdkDefaultTimeout;
     }
 
+    public const int DefaultMaxAttempts = 2;
+    public const int MaxAttemptsCap = 5;
+
+    /// <summary>한 단계의 최대 시도 횟수 (첫 시도 포함). 0 이하는 설정하지 않은 것으로 보고, 상한을 넘으면 상한으로 자른다.</summary>
+    public static int ResolveMaxAttempts(AgentOptions agent, ProviderOptions? provider)
+    {
+        var value = Positive(agent.MaxAttempts) ?? Positive(provider?.MaxAttempts) ?? DefaultMaxAttempts;
+        return Math.Min(value, MaxAttemptsCap);
+    }
+
     private static int? Positive(int? value) => value is > 0 ? value : null;
 }

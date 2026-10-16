@@ -90,6 +90,9 @@ public sealed class ProviderOptions
 
     /// <summary>요청 하나의 네트워크 타임아웃(초). 에이전트에 값이 없을 때 쓴다. 비우면 SDK 기본값 100초.</summary>
     public int? TimeoutSeconds { get; set; }
+
+    /// <summary>한 단계의 최대 시도 횟수 (첫 시도 포함). 에이전트에 값이 없을 때 쓴다. 비우면 2.</summary>
+    public int? MaxAttempts { get; set; }
 }
 
 public sealed class AgentOptions
@@ -111,6 +114,12 @@ public sealed class AgentOptions
     /// 같은 제공사라도 빠른 모델과 긴 응답을 쓰는 모델의 필요 시간이 달라 에이전트 단위로 둔다.
     /// </summary>
     public int? TimeoutSeconds { get; set; }
+
+    /// <summary>
+    /// 한 단계의 최대 시도 횟수 (첫 시도 포함, 1~5). 비우면 제공사 값 → 2 (= 최대 1회 재시도).
+    /// 타임아웃·429·5xx·네트워크 오류만 재시도한다. 최악의 대기 = 타임아웃 × 시도 횟수 (+ 시도 사이 대기).
+    /// </summary>
+    public int? MaxAttempts { get; set; }
 }
 
 public sealed class BudgetOptions

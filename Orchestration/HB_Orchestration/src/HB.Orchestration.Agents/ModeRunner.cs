@@ -117,13 +117,27 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             note = note is null ? swapNote : $"{note}\n{swapNote}";
         }
 
-        if (!returnAll && failed is null)
+        // 재시도가 있었던 단계는 한 줄로 알린다. 제목과 함께 보이는 단계는 제목 아래에,
+        // 출력에서 빠지는 단계(Last 모드의 앞 단계 등)와 제목 없이 본문만 돌려주는 경우는 끝의 note에.
+        var toShow = returnAll ? results : new List<StepResult> { failed ?? results[^1] };
+        var bodyOnly = !returnAll && failed is null;
+        var retries = (bodyOnly ? results : results.Except(toShow))
+            .Where(r => r.RetryNote is not null)
+            .Select(r => $"단계 {r.Step} {r.RetryNote}")
+            .ToList();
+        if (retries.Count > 0)
+            note = note is null ? string.Join("\n", retries) : $"{string.Join("\n", retries)}\n{note}";
+
+        if (bodyOnly)
             return note is null ? results[^1].Text : $"{results[^1].Text}\n\n{note}";
 
-        var toShow = returnAll ? results : new List<StepResult> { failed! };
         var sb = new StringBuilder();
         foreach (var r in toShow)
-            sb.AppendLine($"### {r.Step}. {r.Role} · {r.Agent}").AppendLine(r.Text).AppendLine();
+        {
+            sb.AppendLine($"### {r.Step}. {r.Role} · {r.Agent}");
+            if (r.RetryNote is not null) sb.AppendLine(r.RetryNote);
+            sb.AppendLine(r.Text).AppendLine();
+        }
 
         if (note is not null) sb.AppendLine(note);
 

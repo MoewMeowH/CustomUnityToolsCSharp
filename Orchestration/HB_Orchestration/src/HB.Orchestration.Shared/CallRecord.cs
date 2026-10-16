@@ -47,6 +47,12 @@ public sealed record CallRecord
     public bool Success { get; init; }
     public string? Error { get; init; }
 
+    /// <summary>같은 단계 안에서 몇 번째 시도인지 (1부터). 같은 RunId·Step의 시도는 각각 한 줄씩 남는다. 예전 기록은 null(= 1).</summary>
+    public int? Attempt { get; init; }
+
+    /// <summary>실패 종류: Timeout · RateLimit · Server · Client · Network, 사용자 취소는 Canceled. 성공이거나 분류할 수 없는 실패면 null.</summary>
+    public string? ErrorKind { get; init; }
+
     /// <summary>관련 파일. "Assets/Scripts/Player.cs" 또는 "Assets/Scripts/Player.cs:42" 형식.</summary>
     public IReadOnlyList<string> Files { get; init; } = [];
 
