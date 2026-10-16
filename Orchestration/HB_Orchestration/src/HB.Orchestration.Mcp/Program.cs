@@ -6,6 +6,14 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
+// publish 뒤 HB_Orchestration.bat이 부르는 설정 비교. 서버(Host)를 만들기 전에 출력하고 끝낸다.
+// 인자 없이 실행되면(Claude Code가 띄울 때) 이 분기를 지나쳐 기존 서버 그대로다.
+if (args.Length > 0 && args[0] == ConfigDriftReport.Flag)
+{
+    Console.OutputEncoding = new System.Text.UTF8Encoding(false);
+    return ConfigDriftReport.Run(args, Console.Out, Console.Error);
+}
+
 // Claude Code는 이 서버를 Unity 프로젝트 폴더에서 실행한다.
 // appsettings.json은 그 폴더가 아니라 dll 옆에서 읽어야 하므로 ContentRoot를 실행 파일 위치로 고정한다.
 var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
@@ -52,3 +60,4 @@ var sessions = app.Services.GetRequiredService<SessionTracker>();
 app.Services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping.Register(sessions.Remove);
 
 await app.RunAsync();
+return 0;

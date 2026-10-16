@@ -53,7 +53,7 @@ dotnet build HB_Orchestration.slnx
 평소 publish와 대시보드 실행은 **`HB_Orchestration.bat`** 으로 한다 (아래 8절).
 
 - publish 출력은 **솔루션 폴더 밖**으로. `dotnet run`으로 MCP 등록하지 말 것.
-- publish는 `appsettings.json` / `modes.json`을 **복사하지 않는다** (publish 폴더에서 고친 설정을 덮어쓰지 않도록). 처음 publish할 때만 배치가 기본 파일을 넣어준다.
+- publish는 `appsettings.json` / `modes.json`을 **복사하지 않는다** (publish 폴더에서 고친 설정을 덮어쓰지 않도록). 처음 publish할 때만 배치가 기본 파일을 넣어준다. 원본에 새로 생긴 키는 publish 끝에 `[알림]`으로 보여 준다 (8절).
 - .NET 10 SDK가 없으면 `Directory.Build.props`의 `net10.0` → `net9.0`.
 
 ## 2. 에이전트 — `appsettings.json` ("누가")
@@ -422,7 +422,7 @@ unity skill install --help
 
 | 메뉴 | 동작 |
 |---|---|
-| 1 | MCP 서버 publish → `PUBLISH_DIR`. 실행 중인 MCP 서버가 있으면 **서버만 종료할지 묻고** 진행. 설정 파일은 백업 후 그대로 유지 |
+| 1 | MCP 서버 publish → `PUBLISH_DIR`. 실행 중인 MCP 서버가 있으면 **서버만 종료할지 묻고** 진행. 설정 파일은 백업 후 그대로 유지하고, 원본에만 있는 경로를 알린다 (아래) |
 | 2 | 대시보드 빌드 후 별도 창에서 실행 + 브라우저 열기. 이미 떠 있으면 브라우저만 연다 |
 | 3 | 1 + 2 |
 | 4 | `HB_Orchestration.config`를 메모장으로 열기. 메모장을 닫으면 바로 다시 읽는다 |
@@ -445,6 +445,21 @@ unity skill install --help
   - 확인하고 싶으면 "server_info 실행해줘" → 새 빌드 시각이 나오면 새 서버.
   - 대시보드 **세션** 화면에서도 세션별 서버 빌드 시각으로 확인할 수 있다.
 - 실행 중인 서버가 없으면 그냥 publish하고, 다음에 Claude Code를 열 때 새 서버가 뜬다.
+
+**publish와 설정 파일 (`appsettings.json` · `modes.json`)**
+- publish 전에 사용 중 설정을 `%LOCALAPPDATA%\HB_Orchestration\config-backup\<yyyyMMdd-HHmmss-난수>\`에 백업하고, publish 뒤 그 백업으로 되돌린다. 백업은 최근 20개를 남긴다 (이 이름 모양의 폴더만 정리).
+- 백업에 실패하면 publish하지 않고 멈춘다. 되돌리기에 실패하면 `[ERROR]`와 백업 경로를 보여 주고 멈춘다 (손으로 복사).
+- publish가 끝나면 **원본(`src/HB.Orchestration.Mcp/`)에만 있는 경로**를 `[알림]`으로 보여 준다. 파일은 바꾸지 않는다 — 필요한 항목을 사용 중 설정에 직접(또는 대시보드로) 옮긴다.
+  ```
+  [알림] modes.json: 원본에만 있음 Modes.work_order
+  [알림] appsettings.json: 원본에만 있음 Agents[Name=gpt_new].MaxOutputTokens
+  appsettings.json: 원본에만 있는 경로 없음
+  ```
+  - 원본에만 있는 키는 그 경로 하나만 보인다 (안쪽은 펼치지 않음). 같은 경로에서 자료형이 다르면 `자료형 다름`. 사용 중에만 있는 키, 같은 자료형의 값 차이는 알리지 않는다.
+  - 키는 대소문자 무시. Name을 가진 객체 배열(`Agents`)은 Name으로 짝짓는다. **그 밖의 배열(`Steps`, `FreeProviders` 등)은 안쪽을 비교하지 않는다.**
+  - 2-way 비교라 사용 중 설정에서 일부러 지운 모드도 publish 때마다 다시 알린다.
+  - publish 폴더 기준이다. `ModesPath` · `HB_MODES_PATH` · 프로젝트의 `hb-modes.json`을 쓰면 실제로 쓰이는 파일은 다를 수 있다.
+  - 직접 실행: `dotnet <publish 폴더>\HB.Orchestration.Mcp.dll --config-drift <원본 폴더> <publish 폴더>` (종료 코드 0 비교함 / 1 비교 못 한 파일 있음 / 2 사용법 오류). 인자 없이 실행하면 평소의 MCP 서버다.
 
 **기타**
 - 대시보드 창을 닫으면 대시보드가 꺼진다.

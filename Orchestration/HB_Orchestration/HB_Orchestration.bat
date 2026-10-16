@@ -179,27 +179,47 @@ if not exist "%PUBLISH_DIR%" mkdir "%PUBLISH_DIR%"
 
 rem Back up the live config first. The SDK can delete files it published last time but not this time
 rem (incremental publish clean), so the config files are restored from this backup after publish.
-set "CFG_BACKUP=%TEMP%\HB_Orchestration_cfg_backup"
-if exist "%CFG_BACKUP%" rmdir /s /q "%CFG_BACKUP%"
-mkdir "%CFG_BACKUP%"
+rem Each run gets its own folder and earlier backups are kept (the newest CFG_BACKUP_KEEP runs),
+rem so a wrong restore can still be undone by hand. If the backup fails, nothing is published.
+set "CFG_BACKUP_ROOT=%LOCALAPPDATA%\HB_Orchestration\config-backup"
+set "CFG_BACKUP_KEEP=20"
+set "CFG_STAMP="
+for /f "usebackq delims=" %%T in (`powershell -NoProfile -Command "(Get-Date).ToString('yyyyMMdd-HHmmss') + '-' + (Get-Random -Maximum 10000).ToString('0000')"`) do set "CFG_STAMP=%%T"
+set "CFG_BACKUP=%CFG_BACKUP_ROOT%\%CFG_STAMP%"
+if not defined CFG_STAMP goto :backup_failed
+rem A new folder only: reusing one that already exists could restore files left from an earlier run.
+if exist "%CFG_BACKUP%" goto :backup_failed
+mkdir "%CFG_BACKUP%" >nul 2>nul || goto :backup_failed
+if not exist "%CFG_BACKUP%\" goto :backup_failed
+set "BACKUP_FAILED="
 for %%F in (appsettings.json modes.json) do (
-    if exist "%PUBLISH_DIR%\%%F" copy /y "%PUBLISH_DIR%\%%F" "%CFG_BACKUP%\%%F" >nul
+    if exist "%PUBLISH_DIR%\%%F" (
+        copy /y "%PUBLISH_DIR%\%%F" "%CFG_BACKUP%\%%F" >nul || set "BACKUP_FAILED=1"
+    )
 )
+if defined BACKUP_FAILED goto :backup_failed
+
+rem Prune old backups: only folders named like this script's stamps, never the one just made.
+powershell -NoProfile -Command "$ErrorActionPreference='Stop'; Get-ChildItem -LiteralPath $env:CFG_BACKUP_ROOT -Directory | Where-Object { $_.Name -match '^\d{8}-\d{6}-\d{4}$' -and $_.FullName -ne $env:CFG_BACKUP } | Sort-Object Name -Descending | Select-Object -Skip ([int]$env:CFG_BACKUP_KEEP - 1) | Remove-Item -Recurse -Force" >nul 2>nul || echo [WARN] Could not prune old config backups in %CFG_BACKUP_ROOT%
 
 dotnet publish "%MCP_PROJ%" -c %CONFIGURATION% -o "%PUBLISH_DIR%" --nologo
 set "PUBLISH_RESULT=%errorlevel%"
 
 rem Restore config: your backup first, the source default only on a fresh publish folder.
+set "RESTORE_FAILED="
 for %%F in (appsettings.json modes.json) do (
     if exist "%CFG_BACKUP%\%%F" (
         fc /b "%CFG_BACKUP%\%%F" "%PUBLISH_DIR%\%%F" >nul 2>nul || (
-            copy /y "%CFG_BACKUP%\%%F" "%PUBLISH_DIR%\%%F" >nul
-            echo [Info] Restored your %%F from backup.
+            copy /y "%CFG_BACKUP%\%%F" "%PUBLISH_DIR%\%%F" >nul && echo [Info] Restored your %%F from backup. || set "RESTORE_FAILED=1"
         )
     ) else if not exist "%PUBLISH_DIR%\%%F" (
-        copy /y "%MCP_SRC%\%%F" "%PUBLISH_DIR%\%%F" >nul
-        echo [Info] %%F did not exist - copied the default from source.
+        copy /y "%MCP_SRC%\%%F" "%PUBLISH_DIR%\%%F" >nul && echo [Info] %%F did not exist - copied the default from source. || set "RESTORE_FAILED=1"
     )
+)
+if defined RESTORE_FAILED (
+    echo [ERROR] Could not restore the config files in %PUBLISH_DIR%.
+    echo         Copy them back by hand from: %CFG_BACKUP%
+    exit /b 1
 )
 echo [Info] Config kept in place. Backup of this run: %CFG_BACKUP%
 
@@ -209,6 +229,12 @@ if not "%PUBLISH_RESULT%"=="0" (
 )
 
 echo [OK] Publish complete.
+
+rem Tell which modes / roles / fields exist only in the source config. Files are not changed.
+echo.
+dotnet "%MCP_DLL%" --config-drift "%MCP_SRC%" "%PUBLISH_DIR%"
+if errorlevel 1 echo [WARN] The config comparison did not finish for every file - see above. Publish itself succeeded.
+
 if defined STOPPED (
     echo.
     echo [Next] The MCP server was stopped in your running Claude Code sessions.
@@ -220,6 +246,12 @@ if defined STOPPED (
     echo        Start Claude Code, or run /mcp and reconnect hb-orchestration, to load the new server.
 )
 exit /b 0
+
+:backup_failed
+echo [ERROR] Could not back up the live config to "%CFG_BACKUP%".
+echo         Publish cancelled - nothing was changed in %PUBLISH_DIR%.
+if defined STOPPED echo         The MCP server was stopped. Run /mcp in Claude Code to reconnect it.
+exit /b 1
 
 
 rem ============================================================================
