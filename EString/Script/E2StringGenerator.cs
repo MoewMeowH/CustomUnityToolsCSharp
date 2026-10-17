@@ -45,11 +45,17 @@ namespace EString.Script
             "'{0}'의 확장 클래스 이름 '{1}'이(가) 같은 namespace의 다른 enum과 겹쳐 생성하지 않습니다",
             Category, DiagnosticSeverity.Warning, isEnabledByDefault: true);
 
+        private static readonly DiagnosticDescriptor ParseMethodClashRule = new DiagnosticDescriptor(
+            "E2S005",
+            "To{Enum}Fast 확장 메서드 이름이 겹칩니다",
+            "'{0}'의 To{1}Fast가 같은 namespace의 {2}와 이름이 같아 확장 호출(\"x\".To{1}Fast())이 모호합니다. {3}.To{1}Fast(...)처럼 정적 호출로 쓰세요.",
+            Category, DiagnosticSeverity.Warning, isEnabledByDefault: true);
+
         /// <summary>테스트에서 단계별 캐시 여부를 확인할 때 쓰는 이름.</summary>
         internal static class TrackingNames
         {
             public const string Enums = "E2String.Enums";
-            public const string CollisionLosers = "E2String.CollisionLosers";
+            public const string Collisions = "E2String.Collisions";
         }
 
         private const int RejectNone = 0;
@@ -67,12 +73,12 @@ namespace EString.Script
                 .Select(static (m, _) => m!)
                 .WithTrackingName(TrackingNames.Enums);
 
-            // 생성 클래스 이름 충돌(E2S004)은 전체를 봐야 안다. 결과(생성하지 않을 enum 목록)가 같으면 enum별 출력은 캐시를 쓴다.
-            var losers = enums.Collect()
-                .Select(static (all, _) => FindCollisionLosers(all))
-                .WithTrackingName(TrackingNames.CollisionLosers);
+            // 이름 충돌(E2S004 · E2S005 · hintName 대소문자)은 전체를 봐야 안다. 결과가 같으면 enum별 출력은 캐시를 쓴다.
+            var collisions = enums.Collect()
+                .Select(static (all, _) => CollisionInfo.From(all))
+                .WithTrackingName(TrackingNames.Collisions);
 
-            context.RegisterSourceOutput(enums.Combine(losers), static (spc, pair) => Emit(spc, pair.Left, pair.Right));
+            context.RegisterSourceOutput(enums.Combine(collisions), static (spc, pair) => Emit(spc, pair.Left, pair.Right));
         }
 
         private static EnumModel? Analyze(EnumDeclarationSyntax declaration, SemanticModel semanticModel, CancellationToken cancellationToken)
@@ -87,6 +93,7 @@ namespace EString.Script
             {
                 Name = symbol.Name,
                 FullTypeName = symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                DisplayName = symbol.ToDisplayString(),
                 Location = LocationInfo.From(declaration.Identifier.GetLocation()),
                 Reject = RejectNone,
             };
@@ -101,20 +108,26 @@ namespace EString.Script
             return model with { Info = info, Accessibility = accessibility, ClassKey = $"{info.Namespace}.{info.ClassName}" };
         }
 
-        /// <summary>생성 클래스 이름이 겹치면 먼저 나온 enum만 생성한다. 생성하지 않을 enum의 FullTypeName 목록.</summary>
-        private static EquatableArray<string> FindCollisionLosers(ImmutableArray<EnumModel> all)
+        /// <summary>생성 파일 이름(확장자 제외). AddSource는 hintName을 대소문자 없이 비교하므로 겹침은 CollisionInfo가 따로 본다.</summary>
+        internal static string GetHintBase(EnumInfo info) =>
+            string.IsNullOrEmpty(info.HintNamespace) ? info.ClassName : $"{info.HintNamespace}.{info.ClassName}";
+
+        /// <summary>실행마다 같은 값이 나오는 32비트 FNV-1a (string.GetHashCode는 프로세스마다 달라질 수 있음).</summary>
+        private static string StableHash(string text)
         {
-            var generatedClasses = new HashSet<string>(StringComparer.Ordinal);
-            var losers = new List<string>();
-            foreach (var model in all)
+            unchecked
             {
-                if (model.Info != null && !generatedClasses.Add(model.ClassKey))
-                    losers.Add(model.FullTypeName);
+                var hash = 2166136261u;
+                foreach (var c in text)
+                {
+                    hash ^= c;
+                    hash *= 16777619u;
+                }
+                return hash.ToString("X8", CultureInfo.InvariantCulture);
             }
-            return new EquatableArray<string>(losers.ToArray());
         }
 
-        private static void Emit(SourceProductionContext context, EnumModel model, EquatableArray<string> losers)
+        private static void Emit(SourceProductionContext context, EnumModel model, CollisionInfo collisions)
         {
             var location = model.Location.ToLocation();
 
@@ -129,10 +142,16 @@ namespace EString.Script
             }
 
             var info = model.Info!;
-            if (losers.Contains(model.FullTypeName))
+            if (collisions.Losers.Contains(model.FullTypeName))
             {
                 context.ReportDiagnostic(Diagnostic.Create(ClassNameCollisionRule, location, model.Name, info.ClassName));
                 return;
+            }
+
+            foreach (var clash in collisions.ParseClashes)
+            {
+                if (clash.FullTypeName == model.FullTypeName)
+                    context.ReportDiagnostic(Diagnostic.Create(ParseMethodClashRule, location, model.DisplayName, info.EnumName, clash.Others, info.ClassName));
             }
 
             if (info.HasIntConversion)
@@ -143,11 +162,12 @@ namespace EString.Script
                 }
             }
 
-            var hintName = string.IsNullOrEmpty(info.HintNamespace)
-                ? $"{info.ClassName}.g.cs"
-                : $"{info.HintNamespace}.{info.ClassName}.g.cs";
+            // 대소문자만 다른 hintName이 겹치면 AddSource가 예외를 던져 생성기 전체가 멈춘다 → 정확한 ClassKey의 해시를 붙여 구분
+            var hintName = GetHintBase(info);
+            if (collisions.HashedHints.Contains(model.FullTypeName))
+                hintName += "." + StableHash(model.ClassKey);
 
-            context.AddSource(hintName, SourceText.From(GenerateExtensionClass(info, model.Accessibility), Encoding.UTF8));
+            context.AddSource(hintName + ".g.cs", SourceText.From(GenerateExtensionClass(info, model.Accessibility), Encoding.UTF8));
         }
 
         /// <summary>[E2String] 어트리뷰트를 찾고 옵션을 읽습니다. 옵션 인자가 없으면 ParseExact(0).</summary>
@@ -231,6 +251,9 @@ namespace EString.Script
             return true;
         }
 
+        // 생성 코드는 사용자 namespace 안에 들어가므로 같은 이름의 사용자 타입과 겹치지 않게 global::로 쓴다
+        private const string AggressiveInlining = "[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]";
+
         private static string GenerateExtensionClass(EnumInfo info, string accessibility)
         {
             var w = new CodeWriter();
@@ -241,8 +264,6 @@ namespace EString.Script
             w.Line("// <auto-generated/>");
             w.Line("#nullable enable");
             w.Line("#pragma warning disable");
-            w.Line("using System;");
-            w.Line("using System.Runtime.CompilerServices;");
             w.Line();
 
             var hasNamespace = !string.IsNullOrEmpty(info.Namespace);
@@ -272,7 +293,7 @@ namespace EString.Script
             // 2. Enum -> String (ParseExact)
             w.Line("#region Enum -> String");
             w.Line("/// <summary>Enum 값을 무할당(Zero-Allocation) 문자열로 고속 변환합니다. 같은 값의 별칭은 먼저 선언된 이름을 반환합니다. 정의 밖 값이면 fallback을 반환합니다.</summary>");
-            w.Line("[MethodImpl(MethodImplOptions.AggressiveInlining)]");
+            w.Line(AggressiveInlining);
             w.Line($"public static string ToStringFast(this {t} value, string fallback = \"{info.DefaultFallback}\")");
             w.Open();
             w.Line($"switch (({u})value)");
@@ -326,11 +347,11 @@ namespace EString.Script
                 w.Line();
                 w.Line("#region Enum <-> Int");
                 w.Line("/// <summary>명시적 캐스트로 박싱 없이 int로 변환합니다. int 범위를 벗어난 값은 잘립니다.</summary>");
-                w.Line("[MethodImpl(MethodImplOptions.AggressiveInlining)]");
+                w.Line(AggressiveInlining);
                 w.Line($"public static int ToIntFast(this {t} value) => unchecked((int)value);");
                 w.Line();
                 w.Line($"/// <summary>int 값을 {intCheck} 검사 후 Enum으로 변환합니다. 유효하지 않으면 fallback을 반환합니다.</summary>");
-                w.Line("[MethodImpl(MethodImplOptions.AggressiveInlining)]");
+                w.Line(AggressiveInlining);
                 w.Line($"public static {t} To{info.EnumName}Fast(this int value, {t} fallback = default)");
                 w.Line($"    => {intCheck}(value) ? unchecked(({t})value) : fallback;");
                 w.Line("#endregion");
@@ -338,14 +359,14 @@ namespace EString.Script
 
                 w.Line("#region IsDefined");
                 w.Line("/// <summary>Enum 값이 이름이 정의된 값인지 고속 검사합니다." + (info.IsFlags ? " 조합 값은 IsValidFlagsFast를 사용하세요." : "") + "</summary>");
-                w.Line("[MethodImpl(MethodImplOptions.AggressiveInlining)]");
+                w.Line(AggressiveInlining);
                 w.Line($"public static bool IsDefinedFast({t} value)");
                 w.Open();
                 WriteCaseCheck(w, $"({u})value", distinct.Select(m => m.Literal));
                 w.Close();
                 w.Line();
                 w.Line("/// <summary>정수 값이 이름이 정의된 Enum 값인지 고속 검사합니다 (잘림 없이 값 그대로 비교).</summary>");
-                w.Line("[MethodImpl(MethodImplOptions.AggressiveInlining)]");
+                w.Line(AggressiveInlining);
                 w.Line("public static bool IsDefinedFast(int value)");
                 w.Open();
                 WriteCaseCheck(w, "value", distinct.Where(m => m.FitsInt).Select(m => m.IntLiteral));
@@ -360,7 +381,7 @@ namespace EString.Script
             if (info.IsFlags)
             {
                 w.Line();
-                w.Line("[MethodImpl(MethodImplOptions.AggressiveInlining)]");
+                w.Line(AggressiveInlining);
                 w.Line($"private static ulong ToBits({t} value) => unchecked((ulong)({u})value);");
             }
 
@@ -392,7 +413,7 @@ namespace EString.Script
             var flagMembers = info.FlagMembers;
 
             w.Line();
-            w.Line("private static readonly System.Collections.Generic.Dictionary<ulong, string> s_flagNameCache = new System.Collections.Generic.Dictionary<ulong, string>();");
+            w.Line("private static readonly global::System.Collections.Generic.Dictionary<ulong, string> s_flagNameCache = new global::System.Collections.Generic.Dictionary<ulong, string>();");
             w.Line();
             w.Line("/// <summary>[Flags] 조합 값을 Enum.ToString()과 같은 \"A, B\" 형식으로 만듭니다. 처음 한 번만 할당하고 캐시합니다.</summary>");
             w.Line($"private static string FormatFlags({t} value, string fallback)");
@@ -430,7 +451,7 @@ namespace EString.Script
                     w.Line($"if ((remaining & {hex}) == {hex}) {{ remaining &= ~{hex}; picked[{i}] = true; }}");
                 }
                 w.Line("if (remaining != 0UL) return null;");
-                w.Line("var sb = new System.Text.StringBuilder();");
+                w.Line("var sb = new global::System.Text.StringBuilder();");
                 for (var i = 0; i < flagMembers.Count; i++)
                     w.Line($"if (picked[{i}]) {{ if (sb.Length > 0) sb.Append(\", \"); sb.Append(\"{flagMembers[i].Name}\"); }}");
                 w.Line("return sb.ToString();");
@@ -453,7 +474,7 @@ namespace EString.Script
                     w.Line($"case {group.Key}:");
                     foreach (var member in group)
                     {
-                        w.Line($"    if (string.Compare(s, start, \"{member.Name}\", 0, {group.Key}, StringComparison.Ordinal) == 0) {{ result = {info.Cast(member)}; return true; }}");
+                        w.Line($"    if (string.Compare(s, start, \"{member.Name}\", 0, {group.Key}, global::System.StringComparison.Ordinal) == 0) {{ result = {info.Cast(member)}; return true; }}");
                     }
                     w.Line("    break;");
                 }
@@ -503,11 +524,11 @@ namespace EString.Script
             w.Line($"private const ulong FlagMask = {info.FlagMaskLiteral};");
             w.Line();
             w.Line("/// <summary>[Flags] 값이 정의된 플래그들의 조합으로만 이루어져 있는지 검사합니다 (0 포함).</summary>");
-            w.Line("[MethodImpl(MethodImplOptions.AggressiveInlining)]");
+            w.Line(AggressiveInlining);
             w.Line($"public static bool IsValidFlagsFast({t} value) => (ToBits(value) & ~FlagMask) == 0UL;");
             w.Line();
             w.Line("/// <summary>정수 값이 정의된 플래그들의 조합인지 검사합니다 (기본 형식 범위 밖이면 false).</summary>");
-            w.Line("[MethodImpl(MethodImplOptions.AggressiveInlining)]");
+            w.Line(AggressiveInlining);
             w.Line("public static bool IsValidFlagsFast(int value)");
             w.Open();
             switch (info.UnderlyingType)
@@ -536,11 +557,73 @@ namespace EString.Script
     {
         public string Name { get; init; } = "";
         public string FullTypeName { get; init; } = "";
+        public string DisplayName { get; init; } = "";
         public LocationInfo Location { get; init; }
         public int Reject { get; init; }
         public EnumInfo? Info { get; init; }
         public string Accessibility { get; init; } = "";
         public string ClassKey { get; init; } = "";
+    }
+
+    /// <summary>전체 enum을 봐야 알 수 있는 이름 충돌. enum별 출력 단계에 넘긴다.</summary>
+    internal sealed record CollisionInfo
+    {
+        /// <summary>생성 클래스 이름(ClassKey)이 앞선 enum과 같아 생성하지 않을 enum (E2S004)</summary>
+        public EquatableArray<string> Losers { get; init; }
+
+        /// <summary>hintName이 대소문자 없이 겹쳐 해시를 붙여야 하는 enum</summary>
+        public EquatableArray<string> HashedHints { get; init; }
+
+        /// <summary>같은 namespace에서 To{Enum}Fast 이름이 겹치는 enum (E2S005)</summary>
+        public EquatableArray<ParseClash> ParseClashes { get; init; }
+
+        public static CollisionInfo From(ImmutableArray<EnumModel> all)
+        {
+            var generatedClasses = new HashSet<string>(StringComparer.Ordinal);
+            var losers = new List<string>();
+            var generated = new List<EnumModel>();
+            foreach (var model in all)
+            {
+                if (model.Info == null)
+                    continue;
+                if (generatedClasses.Add(model.ClassKey))
+                    generated.Add(model);
+                else
+                    losers.Add(model.FullTypeName);
+            }
+
+            var hashedHints = generated
+                .GroupBy(m => E2StringGenerator.GetHintBase(m.Info!), StringComparer.OrdinalIgnoreCase)
+                .Where(g => g.Count() > 1)
+                .SelectMany(g => g)
+                .Select(m => m.FullTypeName)
+                .ToArray();
+
+            var clashes = new List<ParseClash>();
+            foreach (var group in generated.GroupBy(m => m.Info!.Namespace + "\0" + m.Info!.EnumName, StringComparer.Ordinal))
+            {
+                if (group.Count() < 2)
+                    continue;
+                foreach (var model in group)
+                {
+                    var others = string.Join(", ", group.Where(o => !ReferenceEquals(o, model)).Select(o => $"'{o.DisplayName}'"));
+                    clashes.Add(new ParseClash { FullTypeName = model.FullTypeName, Others = others });
+                }
+            }
+
+            return new CollisionInfo
+            {
+                Losers = new EquatableArray<string>(losers.ToArray()),
+                HashedHints = new EquatableArray<string>(hashedHints),
+                ParseClashes = new EquatableArray<ParseClash>(clashes.ToArray()),
+            };
+        }
+    }
+
+    internal sealed record ParseClash
+    {
+        public string FullTypeName { get; init; } = "";
+        public string Others { get; init; } = "";
     }
 
     /// <summary>진단 위치를 값으로 들고 있다가 출력 단계에서 Location으로 되돌린다.</summary>
