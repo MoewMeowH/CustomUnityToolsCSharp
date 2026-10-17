@@ -10,6 +10,7 @@ namespace HB_TestFrameworkHelper.Analyzers
     {
         public const string DiagnosticIdSerializeField = "HB_NeedSlotNullCheckSerializeField";
         public const string DiagnosticIdInvalidType = "HB_NeedSlotNullCheckInvalidType";
+        public const string DiagnosticIdNotSerializable = "HB_NeedSlotNullCheckNotSerializable";
 
         private const string Category = "HB_CodingConvention";
 
@@ -17,11 +18,11 @@ namespace HB_TestFrameworkHelper.Analyzers
         private static readonly DiagnosticDescriptor RuleMissingSerializeField = new DiagnosticDescriptor(
             DiagnosticIdSerializeField,
             "[NeedSlotNullCheck] 필드의 [SerializeField] 누락",
-            "[NeedSlotNullCheck]가 선언된 private 필드 '{0}'에는 반드시 [SerializeField]가 선언되어야 합니다",
+            "[NeedSlotNullCheck]가 선언된 public이 아닌 필드 '{0}'에는 반드시 [SerializeField]가 선언되어야 합니다",
             Category,
             DiagnosticSeverity.Warning,
             isEnabledByDefault: true,
-            description: "private 슬롯 필드에 [NeedSlotNullCheck]가 선언되었으나 [SerializeField]가 없으면 Unity 인스펙터에 노출 및 직렬화되지 않아 널 검사가 무의미해집니다.");
+            description: "public이 아닌(private · protected · internal) 슬롯 필드에 [NeedSlotNullCheck]가 선언되었으나 [SerializeField]가 없으면 Unity 인스펙터에 노출 및 직렬화되지 않아 널 검사가 무의미해집니다.");
 
         // 규칙 2: UnityEngine.Object 상속 타입 검사 (컴포넌트, GameObject, ScriptableObject 등)
         private static readonly DiagnosticDescriptor RuleInvalidType = new DiagnosticDescriptor(
@@ -33,8 +34,18 @@ namespace HB_TestFrameworkHelper.Analyzers
             isEnabledByDefault: true,
             description: "[NeedSlotNullCheck]는 인스펙터에서 참조를 할당받는 UnityEngine.Object 계열 슬롯 필드에만 유효합니다. 일반 C# 클래스나 값 타입에는 사용할 수 없습니다.");
 
+        // 규칙 3: [SerializeField]를 붙여도 Unity가 직렬화하지 않는 필드 (static · readonly · const · [NonSerialized])
+        private static readonly DiagnosticDescriptor RuleNotSerializable = new DiagnosticDescriptor(
+            DiagnosticIdNotSerializable,
+            "[NeedSlotNullCheck] 직렬화되지 않는 필드",
+            "[NeedSlotNullCheck]가 선언된 필드 '{0}'은(는) {1}라서 Unity가 직렬화하지 않습니다",
+            Category,
+            DiagnosticSeverity.Warning,
+            isEnabledByDefault: true,
+            description: "Unity는 static · readonly · const 필드와 [NonSerialized] 필드를 [SerializeField]가 있어도 직렬화하지 않습니다. 인스펙터에서 할당할 수 없으므로 널 검사가 무의미합니다.");
+
         public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics =>
-            ImmutableArray.Create(RuleMissingSerializeField, RuleInvalidType);
+            ImmutableArray.Create(RuleMissingSerializeField, RuleInvalidType, RuleNotSerializable);
 
         public override void Initialize(AnalysisContext context)
         {
@@ -72,8 +83,16 @@ namespace HB_TestFrameworkHelper.Analyzers
                 return; // 유효하지 않은 타입인 경우 [SerializeField] 검사는 생략
             }
 
-            // 3. private 필드인 경우 [SerializeField] 선언 여부 검사
-            if (fieldSymbol.DeclaredAccessibility == Accessibility.Private)
+            // 3. Unity가 직렬화하지 않는 필드 ([SerializeField]로도 해결되지 않음)
+            if (GetNotSerializableReason(fieldSymbol, attributes) is { } reason)
+            {
+                var location = fieldSymbol.Locations.FirstOrDefault() ?? Location.None;
+                context.ReportDiagnostic(Diagnostic.Create(RuleNotSerializable, location, fieldSymbol.Name, reason));
+                return;
+            }
+
+            // 4. public이 아닌 필드(private · protected · internal)는 [SerializeField]가 있어야 직렬화된다
+            if (fieldSymbol.DeclaredAccessibility != Accessibility.Public)
             {
                 bool hasSerializeField = attributes.Any(a =>
                     a.AttributeClass != null &&
@@ -86,6 +105,18 @@ namespace HB_TestFrameworkHelper.Analyzers
                     context.ReportDiagnostic(diagnostic);
                 }
             }
+        }
+
+        private static string? GetNotSerializableReason(IFieldSymbol fieldSymbol, ImmutableArray<AttributeData> attributes)
+        {
+            if (fieldSymbol.IsConst) return "const";
+            if (fieldSymbol.IsStatic) return "static";
+            if (fieldSymbol.IsReadOnly) return "readonly";
+
+            bool hasNonSerialized = attributes.Any(a =>
+                a.AttributeClass != null &&
+                (a.AttributeClass.Name == "NonSerialized" || a.AttributeClass.Name == "NonSerializedAttribute"));
+            return hasNonSerialized ? "[NonSerialized]" : null;
         }
 
         private static bool IsUnityEngineObjectType(ITypeSymbol? typeSymbol)

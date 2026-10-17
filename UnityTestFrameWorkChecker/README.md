@@ -12,14 +12,15 @@
 | ID | 심각도 | 조건 | 코드 수정 |
 |---|---|---|---|
 | `HB_NeedSlotNullCheckInvalidType` | **Error** | `[NeedSlotNullCheck]` 필드의 타입이 `UnityEngine.Object` 계열이 아님 | 없음 |
-| `HB_NeedSlotNullCheckSerializeField` | Warning | `[NeedSlotNullCheck]`가 붙은 **private** 필드에 `[SerializeField]`가 없음 | `[SerializeField]` 추가 |
+| `HB_NeedSlotNullCheckNotSerializable` | Warning | `[NeedSlotNullCheck]` 필드가 `static` · `readonly` · `const`이거나 `[NonSerialized]`라서 Unity가 직렬화하지 않음 (`[SerializeField]`로도 안 됨) | 없음 |
+| `HB_NeedSlotNullCheckSerializeField` | Warning | `[NeedSlotNullCheck]`가 붙은 **public이 아닌**(private · protected · internal) 필드에 `[SerializeField]`가 없음 | `[SerializeField]` 추가 |
 
 타입 검사에서 허용하는 것:
 - `UnityEngine.Object`를 상속하는 타입: `Component`, `MonoBehaviour`, `GameObject`, `ScriptableObject`, `Transform` 등
 - 위 타입의 배열: `GameObject[]`
 - 위 타입의 제네릭 컬렉션: `List<Transform>`
 
-타입 검사에서 걸리면 `[SerializeField]` 검사는 건너뜁니다. public 필드는 이미 직렬화되므로 `[SerializeField]` 검사 대상이 아닙니다.
+검사 순서는 타입 → 직렬화 가능 여부 → `[SerializeField]`이고, 앞에서 걸리면 뒤 검사는 건너뜁니다. public 필드는 이미 직렬화되므로 `[SerializeField]` 검사 대상이 아닙니다.
 
 ```csharp
 public class Slots : MonoBehaviour
@@ -28,10 +29,12 @@ public class Slots : MonoBehaviour
     [NeedSlotNullCheck, SerializeField] private Image _icon; // OK
     [NeedSlotNullCheck] public List<GameObject> Items;       // OK
     [NeedSlotNullCheck, SerializeField] private int _count;  // ⛔ HB_NeedSlotNullCheckInvalidType
+    [NeedSlotNullCheck] protected Transform _parent;         // ⚠ HB_NeedSlotNullCheckSerializeField (protected도 직렬화 안 됨)
+    [NeedSlotNullCheck, SerializeField] private static Transform s_root; // ⚠ HB_NeedSlotNullCheckNotSerializable
 }
 ```
 
-**코드 수정** (Rider `Alt+Enter`): 필드 맨 앞에 `[SerializeField]`를 별도 어트리뷰트 목록으로 넣습니다. 파일에 `using UnityEngine;`이 없으면 그것도 추가합니다. Fix All(파일 · 프로젝트 · 솔루션 단위)을 지원합니다.
+**코드 수정** (Rider `Alt+Enter`): 필드 맨 앞에 `[SerializeField]`를 별도 어트리뷰트 목록으로 넣습니다. 파일에 `using UnityEngine;`이 없으면(namespace 안의 것도 찾음) 파일 맨 위에 추가합니다. Fix All(파일 · 프로젝트 · 솔루션 단위)을 지원합니다.
 
 ## 어트리뷰트
 
@@ -59,6 +62,6 @@ public sealed class NeedSlotNullCheckAttribute : System.Attribute { }
 
 ## 주의 · 한계
 
-- `[NonSerialized]` public 필드는 검사하지 않습니다. 직렬화되지 않아도 경고가 나오지 않습니다.
 - 제네릭 판별은 "`List` 또는 `IEnumerable` 구현 + 첫 번째 타입 인자"로 합니다. 그래서 `Dictionary<GameObject, int>`처럼 Unity가 직렬화하지 않는 타입도 통과합니다.
+- 배열의 배열(`Transform[][]`)도 Unity가 직렬화하지 않지만 통과합니다.
 - 진단 메시지는 한국어 고정입니다. 지역화 리소스는 쓰지 않으며, `RS2008`(릴리스 추적)은 `NoWarn`으로 꺼 두었습니다.

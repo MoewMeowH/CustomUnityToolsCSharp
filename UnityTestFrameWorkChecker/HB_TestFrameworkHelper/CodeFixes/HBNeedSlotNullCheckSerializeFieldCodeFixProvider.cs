@@ -63,11 +63,19 @@ namespace HB_TestFrameworkHelper.CodeFixes
 
             if (newRoot is CompilationUnitSyntax compilationUnit)
             {
-                bool hasUnityEngineUsing = compilationUnit.Usings.Any(u => u.Name.ToString() == "UnityEngine");
+                // namespace 안의 using UnityEngine;도 있는 것으로 본다 (파일 맨 위에 중복으로 넣지 않게)
+                bool hasUnityEngineUsing = compilationUnit.DescendantNodes(n => !(n is TypeDeclarationSyntax))
+                    .OfType<UsingDirectiveSyntax>()
+                    .Any(u => u.Alias == null && u.Name.ToString() == "UnityEngine");
                 if (!hasUnityEngineUsing)
                 {
+                    // 기존 using이 없으면 아래 코드와 한 줄 띄운다 (줄바꿈 없이 넣으면 "using UnityEngine;public class …"가 된다)
+                    var trailing = compilationUnit.Usings.Count == 0
+                        ? SyntaxFactory.TriviaList(SyntaxFactory.CarriageReturnLineFeed, SyntaxFactory.CarriageReturnLineFeed)
+                        : SyntaxFactory.TriviaList(SyntaxFactory.CarriageReturnLineFeed);
                     var usingDirective = SyntaxFactory.UsingDirective(SyntaxFactory.ParseName("UnityEngine"))
-                        .NormalizeWhitespace();
+                        .NormalizeWhitespace()
+                        .WithTrailingTrivia(trailing);
                     newRoot = compilationUnit.AddUsings(usingDirective);
                 }
             }
