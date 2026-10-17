@@ -1,12 +1,11 @@
 using HB.Orchestration.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
-using Microsoft.Extensions.Options;
 
 namespace HB.Orchestration.Dashboard.Pages;
 
 /// <summary>세션 하나: 불러온 지침 파일(경로 · 종류 · 크기 · SHA-256 · 지금 디스크와 대조)과 run_mode 호출 연결.</summary>
-public sealed class ClaudeSessionModel(IOptions<DashboardOptions> options, ClaudeSessionsService service) : PageModel
+public sealed class ClaudeSessionModel(CallLogCache log, ClaudeSessionsService service) : PageModel
 {
     public TranscriptSummary Session { get; private set; } = null!;
     public List<RunLink> Links { get; private set; } = [];
@@ -16,7 +15,7 @@ public sealed class ClaudeSessionModel(IOptions<DashboardOptions> options, Claud
 
     public IActionResult OnGet(string id)
     {
-        var calls = CallLog.ReadAll(options.Value.ResolvedLogPath);
+        var calls = log.All;
         var snap = service.Load(calls);
         var session = snap.AllSessions.FirstOrDefault(s => string.Equals(s.FileSessionId, id, StringComparison.OrdinalIgnoreCase));
         if (session is null) return NotFound();

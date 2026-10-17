@@ -5,6 +5,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorPages();
 builder.Services.Configure<DashboardOptions>(builder.Configuration.GetSection("Dashboard"));
 builder.Services.AddSingleton<ModesConfigService>();
+builder.Services.AddSingleton<CallLogCache>();
 builder.Services.AddSingleton<PricingService>();
 builder.Services.AddSingleton<ClaudeSessionsService>();
 

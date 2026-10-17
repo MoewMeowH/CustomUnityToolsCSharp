@@ -2,14 +2,13 @@ using HB.Orchestration.Agents;
 using HB.Orchestration.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
-using Microsoft.Extensions.Options;
 
 namespace HB.Orchestration.Dashboard.Pages;
 
 /// <summary>모델 단가 표의 한 줄: 설정·에이전트·호출 기록 어디서든 나온 모델.</summary>
 public sealed record PriceRow(string Model, ModelPrice? Price, IReadOnlyList<string> Agents, int Calls, DateTimeOffset? LastUsed);
 
-public sealed class ModesModel(ModesConfigService service, IOptions<DashboardOptions> options) : PageModel
+public sealed class ModesModel(ModesConfigService service, CallLogCache log) : PageModel
 {
     public ModesSnapshot? Snapshot { get; private set; }
     public string? LoadError { get; private set; }
@@ -157,7 +156,7 @@ public sealed class ModesModel(ModesConfigService service, IOptions<DashboardOpt
         var calls = new Dictionary<string, (int Count, DateTimeOffset Last)>(StringComparer.OrdinalIgnoreCase);
         try
         {
-            foreach (var c in CallLog.ReadAll(options.Value.ResolvedLogPath))
+            foreach (var c in log.All)
             {
                 calls.TryGetValue(c.Model, out var x);
                 calls[c.Model] = (x.Count + 1, c.Timestamp > x.Last ? c.Timestamp : x.Last);

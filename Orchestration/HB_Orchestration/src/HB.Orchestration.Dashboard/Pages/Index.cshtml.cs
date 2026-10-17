@@ -5,7 +5,7 @@ using Microsoft.Extensions.Options;
 
 namespace HB.Orchestration.Dashboard.Pages;
 
-public sealed class IndexModel(IOptions<DashboardOptions> options, PricingService pricing) : PageModel
+public sealed class IndexModel(IOptions<DashboardOptions> options, PricingService pricing, CallLogCache log) : PageModel
 {
     public DashboardOptions Opt => options.Value;
     public PricingService Pricing => pricing;
@@ -50,7 +50,7 @@ public sealed class IndexModel(IOptions<DashboardOptions> options, PricingServic
 
     public void OnGet()
     {
-        var all = CallLog.ReadAll(Opt.ResolvedLogPath);
+        var all = log.All;
         ToolNames = all.Select(c => c.Tool).Distinct().Order().ToList();
         ProviderNames = all.Select(ProviderOf).Distinct().Order().ToList();
 

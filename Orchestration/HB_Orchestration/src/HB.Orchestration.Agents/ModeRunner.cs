@@ -354,10 +354,8 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         var limit = Options.Budget.DailyTokenLimit;
         if (limit <= 0) return null;
 
-        var today = DateOnly.FromDateTime(DateTime.Now);
         var free = new HashSet<string>(Options.Budget.FreeProviders, StringComparer.OrdinalIgnoreCase);
-        var used = CallLog.ReadAll()
-            .Where(c => DateOnly.FromDateTime(c.Timestamp.LocalDateTime) == today)
+        var used = CallLog.ReadSince(new DateTimeOffset(DateTime.Today))
             .Where(c => c.Provider is null || !free.Contains(c.Provider))
             .Sum(c => (c.InputTokens ?? 0) + (c.OutputTokens ?? 0));
 

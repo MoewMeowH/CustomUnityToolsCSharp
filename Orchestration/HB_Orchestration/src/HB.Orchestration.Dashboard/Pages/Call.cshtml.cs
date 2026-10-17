@@ -6,7 +6,7 @@ using Microsoft.Extensions.Options;
 
 namespace HB.Orchestration.Dashboard.Pages;
 
-public sealed class CallModel(IOptions<DashboardOptions> options, PricingService pricing, ClaudeSessionsService sessions) : PageModel
+public sealed class CallModel(IOptions<DashboardOptions> options, PricingService pricing, ClaudeSessionsService sessions, CallLogCache log) : PageModel
 {
     public PricingService Pricing => pricing;
 
@@ -42,7 +42,7 @@ public sealed class CallModel(IOptions<DashboardOptions> options, PricingService
 
     public IActionResult OnGet(string id)
     {
-        var all = CallLog.ReadAll(Opt.ResolvedLogPath);
+        var all = log.All;
         var call = all.FirstOrDefault(c => c.Id == id);
         if (call is null) return NotFound();
 
@@ -70,7 +70,7 @@ public sealed class CallModel(IOptions<DashboardOptions> options, PricingService
     public IActionResult OnGetBlob(string id, string sha)
     {
         if (!BlobStore.IsValidSha(sha)) return NotFound();
-        var call = CallLog.ReadAll(Opt.ResolvedLogPath).FirstOrDefault(c => c.Id == id);
+        var call = log.All.FirstOrDefault(c => c.Id == id);
         if (call?.Provenance is not { BlobFolder: { } folder } p || !ProvenanceView.AllowedShas(p).Contains(sha)) return NotFound();
 
         // 링크(폴더 밖을 가리킬 수 있음)는 열지 않는다. 검사와 읽기 사이의 바꿔치기는 ContextLoader와 같은 한계로 막지 않는다.
@@ -90,7 +90,7 @@ public sealed class CallModel(IOptions<DashboardOptions> options, PricingService
         return File(bytes, "text/plain; charset=utf-8");
     }
 
-    private (string, RunLinkKind)? FindSession(string runId, List<CallRecord> all)
+    private (string, RunLinkKind)? FindSession(string runId, IReadOnlyList<CallRecord> all)
     {
         try
         {
