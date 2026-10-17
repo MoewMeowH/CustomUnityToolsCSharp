@@ -15,6 +15,7 @@
 * `critique` / `debate`: 설계 결정, 두 가지 이상 방식 중 선택할 때. 가벼운 건 critique, 중요한 건 debate
 * `research`: 사용자가 기능·도구 조사를 요청했을 때
 * `parallel`: 사용자가 요청했을 때만
+* `perf_sol`: 핫패스·할당·동기화가 걸린 변경, 사용자가 성능 점검을 요청했을 때. 중요한 핫패스는 `perf_astra`, 다른 회사 시선은 `perf_argon`. 여러 파일·구조를 바꾸는 큰 작업은 `/preflight`를 제안한다 (`preflight_*` 모드는 그 명령으로만 쓴다)
 * 사소한 변경, 단순 질문에는 쓰지 않는다.
 
 ### input 작성 — 토큰 절약 규칙

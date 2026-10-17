@@ -215,7 +215,7 @@ SDK 자동 재시도(기본 3회, 기록에 안 남음)는 끄고 서버가 직�
 | `Return` | `Last`(기본) / `All` | Claude에게 돌려줄 범위. Concurrent는 항상 All |
 | `MaxInputChars` | 숫자 | 이 모드의 입력 길이 상한. 없으면 `Budget.MaxInputChars` |
 | `MaxRunsPerSession` | 숫자 | Claude Code 세션 하나에서 실행할 수 있는 횟수 (0 = 무제한). 없으면 `Budget.DefaultMaxRunsPerSession` |
-| `RequireOwnReview` | `true` / 없음 | `true`면 `run_mode`의 `ownReview`가 필수 (review 계열). 없으면 필수 아님. `list_modes`에 `[ownReview 필수]` 표시. 기본 modes.json은 `review` · `panel` · `cross_p1` · `cross_p1_guided` · `work_order` |
+| `RequireOwnReview` | `true` / 없음 | `true`면 `run_mode`의 `ownReview`가 필수 (review 계열). 없으면 필수 아님. `list_modes`에 `[ownReview 필수]` 표시. 기본 modes.json은 `review` · `panel` · `cross_p1` · `cross_p1_guided` · `work_order` · `preflight_p1` · `preflight_check` · `preflight_perf` · `perf_sol` · `perf_astra` · `perf_argon` |
 | `MaxRounds` (Debate) | 1~5 | 최대 회차. 1회차 = 두 토론자가 한 번씩. 기본 2, 서버 절대 상한 5 |
 | `HistoryWindow` (Debate) | 숫자 | 각 턴이 볼 직전 발언 수 (기본 2). 판정자는 항상 전체 |
 
@@ -344,6 +344,7 @@ powershell -ExecutionPolicy Bypass -File tools\Sync-ProjectFiles.ps1 -UnityProje
 - `.claude/commands/mode.md` — `/mode debate ...`, `/mode deliberate ...`, `/mode research ...`, `/mode parallel ...`
 - `.claude/commands/unity-test.md` — `/unity-test`, `/unity-test PlayMode MyGame.Combat`
 - `.claude/commands/work-order.md` — `/work-order <요청> [첨부]`: 오케스트레이션에 맡길 작업 지시서를 만든다. 조사 → 초안 → `work_order` 모드(luna | flash 동시 검토) → `그외 이상사항` 정리 → `WorkOrders.Folder`(없으면 `docs/work-orders/`)에 저장 + 대화에 출력. 코드는 고치지 않는다. 모드별 지침은 CLAUDE.md가 아니라 이 명령 파일에 둔다 (CLAUDE.md는 세션마다 컨텍스트에 올라감)
+- `.claude/commands/preflight.md` — `/preflight <요청> [첨부]`: 큰 작업의 실행 전 점검. `preflight_p1`(A 반박 · B 위험 · 성능 동시 검토) → `preflight_p2`(상호 판정) → 사용자 확정 → `preflight_p3`(최종 수정안) → 지휘자 종합 → `preflight_check`(전체, astra) · `preflight_perf`(성능, sol). 단계마다 멈추고, P5에는 앞 단계 논의를 붙이지 않는다. 산출물은 `docs/preflight/<날짜>_<주제>/`. 첨부 xlsx·csv는 `xlsx_dump.py`로 Markdown을 만들어 `context`로 붙인다. 성능만 볼 때는 `/mode perf_sol …`(기본) · `perf_astra`(중요한 핫패스) · `perf_argon`(Gemini)
 - `.claude/scripts/xlsx_dump.py` — `/work-order`의 첨부 읽기 도우미. 기획서 xlsx·csv를 Markdown 표로 뽑고(병합 셀·메모·텍스트 상자 글 포함) 이미지는 `review_tmp/work-order/<파일>/`에 붙은 셀 이름으로 저장. 필요: Python 3.9+, `openpyxl` (`python -m pip install openpyxl`). `.xls`는 지원하지 않음
 - `.claude/settings.example.json` → Unity의 `.claude/settings.json` — Unity CLI 조회·테스트 명령은 매번 승인 없이 실행 (기존 파일이 있으면 `allow` 항목만 합치기)
 - `.mcp.example.json` → Unity의 `.mcp.json` — dll 경로를 publish 폴더로 (JSON 안에서는 경로를 `/`로 쓸 것. `\`는 JSON에서 특수 문자)
