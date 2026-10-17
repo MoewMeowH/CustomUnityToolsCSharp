@@ -533,7 +533,8 @@ namespace EString.Script
             if (!symbol.ContainingNamespace.IsGlobalNamespace)
             {
                 info.Namespace = symbol.ContainingNamespace.ToDisplayString(NamespaceFormatHolder.Format);
-                info.HintNamespace = symbol.ContainingNamespace.ToDisplayString();
+                // 파일 이름용: 키워드 namespace(@event)의 '@'는 hintName에 쓸 수 없어 AddSource가 예외를 던진다 (생성기 전체 중단)
+                info.HintNamespace = symbol.ContainingNamespace.ToDisplayString().Replace("@", "");
             }
 
             var containers = new List<string>();
