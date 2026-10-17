@@ -10,7 +10,7 @@
 
 <style>
     .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 16px; }
-    .toolbar select, .toolbar button { font: inherit; padding: 5px 10px; border-radius: 6px;
+    .toolbar select, .toolbar button, .toolbar input[type=search] { font: inherit; padding: 5px 10px; border-radius: 6px;
         border: 1px solid var(--line); background: var(--panel); color: var(--text); }
     .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
     .stat { padding: 14px 16px; }
@@ -22,6 +22,8 @@
     .bar-labels { display: flex; gap: 6px; margin-top: 4px; }
     .bar-labels span { flex: 1; min-width: 8px; text-align: center; font-size: 11px; color: var(--muted); overflow: hidden; }
     td a.row-link { color: var(--text); text-decoration: none; }
+    a.badge.run { text-decoration: none; color: var(--muted); }
+    .toolbar input[type=search] { min-width: 220px; }
     .empty { padding: 40px; text-align: center; }
 </style>
 
@@ -46,6 +48,12 @@
             <option value="@p" selected="@(Model.Provider == p)">@p</option>
         }
     </select>
+    <input type="search" name="Q" value="@Model.Q" placeholder="검색 (run id · 이유 · 모델 · 파일 · 응답…)" />
+    @if (!string.IsNullOrWhiteSpace(Model.Run))
+    {
+        <input type="hidden" name="Run" value="@Model.Run" />
+        <span class="badge">실행 <span class="mono">@Model.Run</span> <a href="?Days=@Model.Days" title="실행 필터 해제">×</a></span>
+    }
     <label class="muted"><input type="checkbox" name="Live" value="true" checked="@Model.Live" onchange="this.form.submit()" /> 자동 새로고침</label>
     <span class="muted mono" style="margin-left:auto">@Model.Opt.ResolvedLogPath</span>
 </form>
@@ -87,7 +95,7 @@
         <table>
             <thead>
             <tr>
-                <th>시간</th><th>모드</th><th>역할 · 에이전트</th><th>제공사 / 모델</th><th>프로젝트</th><th>응답 미리보기</th>
+                <th>시간</th><th>모드</th><th>역할 · 에이전트</th><th>제공사 / 모델</th><th>프로젝트</th><th>이유</th>
                 <th class="num">입력</th><th class="num">출력</th><th class="num">시간</th><th class="num">비용</th>
             </tr>
             </thead>
@@ -97,7 +105,13 @@
                 var cost = Model.Pricing.CostOf(c);
                 <tr>
                     <td class="num"><a class="row-link" href="/Call/@c.Id">@c.Timestamp.LocalDateTime.ToString("MM-dd HH:mm:ss")</a></td>
-                    <td><span class="badge">@c.Tool</span></td>
+                    <td>
+                        <span class="badge">@c.Tool</span>
+                        @if (c.RunId is { } run)
+                        {
+                            <a class="badge run mono" href="?Run=@run&Days=0" title="실행 @run · 눌러서 이 실행만 보기">@run[..Math.Min(6, run.Length)]</a>
+                        }
+                    </td>
                     <td>
                         @(c.Step is { } st ? $"{st}. " : "")@(c.Role ?? "-") · @(c.Agent ?? c.Tool)
                         @if (Model.AttemptOf(c) is { } at)
@@ -112,9 +126,11 @@
                         {
                             <span class="badge warn" title="@string.Join("\n", c.Warnings)">경고 @c.Warnings.Count</span>
                         }
-                        <a class="row-link" href="/Call/@c.Id">
-                            @if (c.Success) { @IndexModel.Preview(c.Response) }
-                            else { <span class="err">@IndexModel.Preview(c.Error)</span> }
+                        <a class="row-link" href="/Call/@c.Id" title="@IndexModel.Preview(c.Success ? c.Response : c.Error, 300)">
+                            @if (!c.Success) { <span class="err">@IndexModel.Preview(c.Error)</span> }
+                            else if (string.IsNullOrWhiteSpace(c.Reason)) { @IndexModel.Preview(c.Response) }
+                            else if (Model.IsRunHead(c)) { @IndexModel.Preview(c.Reason) }
+                            else { <span class="muted">↳ 같은 실행</span> }
                         </a>
                         @if (c.Files.Count > 0) { <span class="muted"> · 파일 @c.Files.Count</span> }
                         @if (c.Context.Count > 0) { <span class="muted"> · 첨부 @c.Context.Count</span> }

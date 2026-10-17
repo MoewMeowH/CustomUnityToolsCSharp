@@ -14,6 +14,10 @@ public sealed class IndexModel(IOptions<DashboardOptions> options, PricingServic
     [BindProperty(SupportsGet = true)] public int Days { get; set; } = 7;
     [BindProperty(SupportsGet = true)] public string? Tool { get; set; }
     [BindProperty(SupportsGet = true)] public string? Provider { get; set; }
+    /// <summary>이 실행(RunId)의 기록만. 앞부분만 넣어도 된다.</summary>
+    [BindProperty(SupportsGet = true)] public string? Run { get; set; }
+    /// <summary>검색어. Id·RunId는 앞부분 일치, 나머지(이유·역할·에이전트·모델·파일·응답·오류)는 부분 일치.</summary>
+    [BindProperty(SupportsGet = true)] public string? Q { get; set; }
     /// <summary>true면 10초마다 자동 새로고침.</summary>
     [BindProperty(SupportsGet = true)] public bool Live { get; set; }
 
@@ -39,6 +43,11 @@ public sealed class IndexModel(IOptions<DashboardOptions> options, PricingServic
             ? (c.Attempt ?? 1, total)
             : null;
 
+    /// <summary>화면에 보이는 기록 중 각 실행의 첫 줄(가장 최근 단계). 이유는 이 줄에만 보이고 나머지 줄은 "같은 실행"으로 줄인다.</summary>
+    private HashSet<string> _runHeads = [];
+
+    public bool IsRunHead(CallRecord c) => c.RunId is null || _runHeads.Contains(c.Id);
+
     public void OnGet()
     {
         var all = CallLog.ReadAll(Opt.ResolvedLogPath);
@@ -50,7 +59,14 @@ public sealed class IndexModel(IOptions<DashboardOptions> options, PricingServic
             .Where(c => Days <= 0 || c.Timestamp >= since)
             .Where(c => string.IsNullOrEmpty(Tool) || c.Tool == Tool)
             .Where(c => string.IsNullOrEmpty(Provider) || ProviderOf(c) == Provider)
+            .Where(c => string.IsNullOrWhiteSpace(Run) || (c.RunId?.StartsWith(Run.Trim(), StringComparison.OrdinalIgnoreCase) ?? false))
+            .Where(c => string.IsNullOrWhiteSpace(Q) || Matches(c, Q.Trim()))
             .ToList();
+
+        _runHeads = Calls.Where(c => c.RunId is not null)
+            .GroupBy(c => c.RunId!)
+            .Select(g => g.First().Id)
+            .ToHashSet();
 
         _attempts = all
             .Where(c => c.RunId is not null && c.Step is not null)
@@ -62,6 +78,17 @@ public sealed class IndexModel(IOptions<DashboardOptions> options, PricingServic
             .OrderBy(g => g.Key)
             .Select(g => (g.Key, g.Sum(c => (c.InputTokens ?? 0) + (c.OutputTokens ?? 0)), g.Count()))
             .ToList();
+    }
+
+    public static bool Matches(CallRecord c, string q)
+    {
+        if (c.Id.StartsWith(q, StringComparison.OrdinalIgnoreCase)) return true;
+        if (c.RunId?.StartsWith(q, StringComparison.OrdinalIgnoreCase) ?? false) return true;
+
+        bool Has(string? text) => text?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false;
+        return Has(c.Reason) || Has(c.Role) || Has(c.Agent) || Has(c.Model) || Has(c.Tool)
+            || c.Files.Any(Has) || c.Context.Any(Has)
+            || Has(c.Response) || Has(c.Error);
     }
 
     /// <summary>예전(GptAgents 시절) 기록은 Provider가 없으므로 openai로 본다.</summary>
