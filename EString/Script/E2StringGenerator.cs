@@ -1,8 +1,11 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Globalization;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
@@ -10,7 +13,7 @@ using Microsoft.CodeAnalysis.Text;
 namespace EString.Script
 {
     [Generator]
-    public class E2StringGenerator : ISourceGenerator
+    public class E2StringGenerator : IIncrementalGenerator
     {
         private const string Category = "E2String";
 
@@ -42,64 +45,109 @@ namespace EString.Script
             "'{0}'의 확장 클래스 이름 '{1}'이(가) 같은 namespace의 다른 enum과 겹쳐 생성하지 않습니다",
             Category, DiagnosticSeverity.Warning, isEnabledByDefault: true);
 
-        public void Initialize(GeneratorInitializationContext context)
+        /// <summary>테스트에서 단계별 캐시 여부를 확인할 때 쓰는 이름.</summary>
+        internal static class TrackingNames
         {
-            context.RegisterForSyntaxNotifications(() => new EnumSyntaxReceiver());
+            public const string Enums = "E2String.Enums";
+            public const string CollisionLosers = "E2String.CollisionLosers";
         }
 
-        public void Execute(GeneratorExecutionContext context)
+        private const int RejectNone = 0;
+        private const int RejectGenericContainer = 1;
+        private const int RejectInaccessible = 2;
+
+        public void Initialize(IncrementalGeneratorInitializationContext context)
         {
-            if (!(context.SyntaxReceiver is EnumSyntaxReceiver receiver))
-                return;
+            // enum마다 의미 분석을 해서 값으로 비교되는 모델로 바꾼다. 내용이 같으면 다음 단계는 캐시를 쓴다 (바뀐 enum만 다시 생성).
+            var enums = context.SyntaxProvider
+                .CreateSyntaxProvider(
+                    static (node, _) => node is EnumDeclarationSyntax e && e.AttributeLists.Count > 0,
+                    static (ctx, ct) => Analyze((EnumDeclarationSyntax)ctx.Node, ctx.SemanticModel, ct))
+                .Where(static m => m != null)
+                .Select(static (m, _) => m!)
+                .WithTrackingName(TrackingNames.Enums);
 
-            var generatedClasses = new HashSet<string>(StringComparer.Ordinal);
+            // 생성 클래스 이름 충돌(E2S004)은 전체를 봐야 안다. 결과(생성하지 않을 enum 목록)가 같으면 enum별 출력은 캐시를 쓴다.
+            var losers = enums.Collect()
+                .Select(static (all, _) => FindCollisionLosers(all))
+                .WithTrackingName(TrackingNames.CollisionLosers);
 
-            foreach (var enumDeclaration in receiver.CandidateEnums)
+            context.RegisterSourceOutput(enums.Combine(losers), static (spc, pair) => Emit(spc, pair.Left, pair.Right));
+        }
+
+        private static EnumModel? Analyze(EnumDeclarationSyntax declaration, SemanticModel semanticModel, CancellationToken cancellationToken)
+        {
+            if (!(semanticModel.GetDeclaredSymbol(declaration, cancellationToken) is INamedTypeSymbol symbol))
+                return null;
+
+            if (!TryGetTargetAttribute(symbol, out var options))
+                return null;
+
+            var model = new EnumModel
             {
-                var model = context.Compilation.GetSemanticModel(enumDeclaration.SyntaxTree);
-                if (!(model.GetDeclaredSymbol(enumDeclaration, context.CancellationToken) is INamedTypeSymbol symbol))
-                    continue;
+                Name = symbol.Name,
+                FullTypeName = symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                Location = LocationInfo.From(declaration.Identifier.GetLocation()),
+                Reject = RejectNone,
+            };
 
-                if (!TryGetTargetAttribute(symbol, out var options))
-                    continue;
+            if (HasGenericContainingType(symbol))
+                return model with { Reject = RejectGenericContainer };
 
-                var location = enumDeclaration.Identifier.GetLocation();
+            if (!TryGetAccessibility(symbol, out var accessibility))
+                return model with { Reject = RejectInaccessible };
 
-                if (HasGenericContainingType(symbol))
-                {
-                    context.ReportDiagnostic(Diagnostic.Create(GenericContainerRule, location, symbol.Name));
-                    continue;
-                }
+            var info = EnumInfo.Create(symbol, options);
+            return model with { Info = info, Accessibility = accessibility, ClassKey = $"{info.Namespace}.{info.ClassName}" };
+        }
 
-                if (!TryGetAccessibility(symbol, out var accessibility))
-                {
-                    context.ReportDiagnostic(Diagnostic.Create(InaccessibleRule, location, symbol.Name));
-                    continue;
-                }
-
-                var info = EnumInfo.Create(symbol, options);
-
-                var classKey = $"{info.Namespace}.{info.ClassName}";
-                if (!generatedClasses.Add(classKey))
-                {
-                    context.ReportDiagnostic(Diagnostic.Create(ClassNameCollisionRule, location, symbol.Name, info.ClassName));
-                    continue;
-                }
-
-                if (info.HasIntConversion)
-                {
-                    foreach (var member in info.Members.Where(m => !m.FitsInt))
-                    {
-                        context.ReportDiagnostic(Diagnostic.Create(OutOfIntRangeRule, location, symbol.Name, member.Name, info.EnumName));
-                    }
-                }
-
-                var hintName = string.IsNullOrEmpty(info.HintNamespace)
-                    ? $"{info.ClassName}.g.cs"
-                    : $"{info.HintNamespace}.{info.ClassName}.g.cs";
-
-                context.AddSource(hintName, SourceText.From(GenerateExtensionClass(info, accessibility), Encoding.UTF8));
+        /// <summary>생성 클래스 이름이 겹치면 먼저 나온 enum만 생성한다. 생성하지 않을 enum의 FullTypeName 목록.</summary>
+        private static EquatableArray<string> FindCollisionLosers(ImmutableArray<EnumModel> all)
+        {
+            var generatedClasses = new HashSet<string>(StringComparer.Ordinal);
+            var losers = new List<string>();
+            foreach (var model in all)
+            {
+                if (model.Info != null && !generatedClasses.Add(model.ClassKey))
+                    losers.Add(model.FullTypeName);
             }
+            return new EquatableArray<string>(losers.ToArray());
+        }
+
+        private static void Emit(SourceProductionContext context, EnumModel model, EquatableArray<string> losers)
+        {
+            var location = model.Location.ToLocation();
+
+            switch (model.Reject)
+            {
+                case RejectGenericContainer:
+                    context.ReportDiagnostic(Diagnostic.Create(GenericContainerRule, location, model.Name));
+                    return;
+                case RejectInaccessible:
+                    context.ReportDiagnostic(Diagnostic.Create(InaccessibleRule, location, model.Name));
+                    return;
+            }
+
+            var info = model.Info!;
+            if (losers.Contains(model.FullTypeName))
+            {
+                context.ReportDiagnostic(Diagnostic.Create(ClassNameCollisionRule, location, model.Name, info.ClassName));
+                return;
+            }
+
+            if (info.HasIntConversion)
+            {
+                foreach (var member in info.Members.Where(m => !m.FitsInt))
+                {
+                    context.ReportDiagnostic(Diagnostic.Create(OutOfIntRangeRule, location, model.Name, member.Name, info.EnumName));
+                }
+            }
+
+            var hintName = string.IsNullOrEmpty(info.HintNamespace)
+                ? $"{info.ClassName}.g.cs"
+                : $"{info.HintNamespace}.{info.ClassName}.g.cs";
+
+            context.AddSource(hintName, SourceText.From(GenerateExtensionClass(info, model.Accessibility), Encoding.UTF8));
         }
 
         /// <summary>[E2String] 어트리뷰트를 찾고 옵션을 읽습니다. 옵션 인자가 없으면 ParseExact(0).</summary>
@@ -480,36 +528,123 @@ namespace EString.Script
         }
     }
 
-    internal sealed class EnumMemberInfo
+    /// <summary>
+    /// 증분 파이프라인 단계 사이에 넘기는 enum 하나. ISymbol · Location(SyntaxTree를 붙잡음)을 들고 있지 않고
+    /// 값으로만 비교되어야 캐시가 걸린다.
+    /// </summary>
+    internal sealed record EnumModel
     {
-        public string Name = "";
-        public string Literal = "";
-        public string IntLiteral = "";
-        public string BitsLiteral = "";
-        public ulong Bits;
-        public bool FitsInt;
+        public string Name { get; init; } = "";
+        public string FullTypeName { get; init; } = "";
+        public LocationInfo Location { get; init; }
+        public int Reject { get; init; }
+        public EnumInfo? Info { get; init; }
+        public string Accessibility { get; init; } = "";
+        public string ClassKey { get; init; } = "";
     }
 
-    internal sealed class EnumInfo
+    /// <summary>진단 위치를 값으로 들고 있다가 출력 단계에서 Location으로 되돌린다.</summary>
+    internal readonly struct LocationInfo : IEquatable<LocationInfo>
     {
-        public string EnumName = "";
-        public string FullTypeName = "";
-        public string Namespace = "";
-        public string HintNamespace = "";
-        public string ClassName = "";
-        public string UnderlyingKeyword = "int";
-        public SpecialType UnderlyingType;
-        public bool IsFlags;
-        public bool HasIntConversion;
-        public bool HasCollections;
-        public string FlagMaskLiteral = "0x0UL";
-        public List<EnumMemberInfo> Members = new List<EnumMemberInfo>();
+        private readonly string? _filePath;
+        private readonly TextSpan _span;
+        private readonly LinePositionSpan _lineSpan;
+
+        private LocationInfo(string filePath, TextSpan span, LinePositionSpan lineSpan)
+        {
+            _filePath = filePath;
+            _span = span;
+            _lineSpan = lineSpan;
+        }
+
+        public static LocationInfo From(Location location) =>
+            new LocationInfo(location.SourceTree?.FilePath ?? "", location.SourceSpan, location.GetLineSpan().Span);
+
+        public Location ToLocation() => Location.Create(_filePath ?? "", _span, _lineSpan);
+
+        public bool Equals(LocationInfo other) =>
+            string.Equals(_filePath, other._filePath, StringComparison.Ordinal) && _span.Equals(other._span) && _lineSpan.Equals(other._lineSpan);
+
+        public override bool Equals(object? obj) => obj is LocationInfo other && Equals(other);
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                var hash = StringComparer.Ordinal.GetHashCode(_filePath ?? "");
+                hash = hash * 31 + _span.GetHashCode();
+                return hash * 31 + _lineSpan.GetHashCode();
+            }
+        }
+    }
+
+    /// <summary>요소 값으로 비교되는 읽기 전용 배열 (record의 기본 Equals는 배열을 참조로 비교하므로).</summary>
+    internal readonly struct EquatableArray<T> : IEquatable<EquatableArray<T>>, IReadOnlyList<T>
+        where T : IEquatable<T>
+    {
+        private readonly T[]? _items;
+
+        public EquatableArray(T[] items)
+        {
+            _items = items;
+        }
+
+        private T[] Items => _items ?? Array.Empty<T>();
+
+        public int Count => Items.Length;
+
+        public T this[int index] => Items[index];
+
+        public bool Equals(EquatableArray<T> other) => Items.SequenceEqual(other.Items);
+
+        public override bool Equals(object? obj) => obj is EquatableArray<T> other && Equals(other);
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                var hash = 17;
+                foreach (var item in Items)
+                    hash = hash * 31 + (item == null ? 0 : item.GetHashCode());
+                return hash;
+            }
+        }
+
+        public IEnumerator<T> GetEnumerator() => ((IEnumerable<T>)Items).GetEnumerator();
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    internal sealed record EnumMemberInfo
+    {
+        public string Name { get; init; } = "";
+        public string Literal { get; init; } = "";
+        public string IntLiteral { get; init; } = "";
+        public string BitsLiteral { get; init; } = "";
+        public ulong Bits { get; init; }
+        public bool FitsInt { get; init; }
+    }
+
+    internal sealed record EnumInfo
+    {
+        public string EnumName { get; init; } = "";
+        public string FullTypeName { get; init; } = "";
+        public string Namespace { get; init; } = "";
+        public string HintNamespace { get; init; } = "";
+        public string ClassName { get; init; } = "";
+        public string UnderlyingKeyword { get; init; } = "int";
+        public SpecialType UnderlyingType { get; init; }
+        public bool IsFlags { get; init; }
+        public bool HasIntConversion { get; init; }
+        public bool HasCollections { get; init; }
+        public string FlagMaskLiteral { get; init; } = "0x0UL";
+        public EquatableArray<EnumMemberInfo> Members { get; init; }
 
         /// <summary>값이 같은 별칭을 제거한 멤버 (먼저 선언된 것 우선)</summary>
-        public List<EnumMemberInfo> DistinctMembers = new List<EnumMemberInfo>();
+        public EquatableArray<EnumMemberInfo> DistinctMembers { get; init; }
 
         /// <summary>0이 아닌 고유 값 멤버, 비트 값 오름차순</summary>
-        public List<EnumMemberInfo> FlagMembers = new List<EnumMemberInfo>();
+        public EquatableArray<EnumMemberInfo> FlagMembers { get; init; }
 
         /// <summary>ToStringFast의 fallback 기본값</summary>
         public string DefaultFallback => $"not defined {EnumName}";
@@ -532,17 +667,22 @@ namespace EString.Script
 
             if (!symbol.ContainingNamespace.IsGlobalNamespace)
             {
-                info.Namespace = symbol.ContainingNamespace.ToDisplayString(NamespaceFormatHolder.Format);
-                // 파일 이름용: 키워드 namespace(@event)의 '@'는 hintName에 쓸 수 없어 AddSource가 예외를 던진다 (생성기 전체 중단)
-                info.HintNamespace = symbol.ContainingNamespace.ToDisplayString().Replace("@", "");
+                info = info with
+                {
+                    Namespace = symbol.ContainingNamespace.ToDisplayString(NamespaceFormatHolder.Format),
+                    // 파일 이름용: 키워드 namespace(@event)의 '@'는 hintName에 쓸 수 없어 AddSource가 예외를 던진다 (생성기 전체 중단)
+                    HintNamespace = symbol.ContainingNamespace.ToDisplayString().Replace("@", ""),
+                };
             }
 
             var containers = new List<string>();
             for (var type = symbol.ContainingType; type != null; type = type.ContainingType)
                 containers.Insert(0, type.Name);
             containers.Add(symbol.Name);
-            info.ClassName = string.Join("_", containers) + "Extensions";
 
+            var members = new List<EnumMemberInfo>();
+            var distinctMembers = new List<EnumMemberInfo>();
+            var flagMembers = new List<EnumMemberInfo>();
             var seenBits = new HashSet<ulong>();
             ulong mask = 0;
             foreach (var field in symbol.GetMembers().OfType<IFieldSymbol>())
@@ -551,20 +691,26 @@ namespace EString.Script
                     continue;
 
                 var member = CreateMember(field.Name, field.ConstantValue, info.UnderlyingType);
-                info.Members.Add(member);
+                members.Add(member);
 
                 if (seenBits.Add(member.Bits))
                 {
-                    info.DistinctMembers.Add(member);
+                    distinctMembers.Add(member);
                     if (member.Bits != 0)
-                        info.FlagMembers.Add(member);
+                        flagMembers.Add(member);
                 }
                 mask |= member.Bits;
             }
 
-            info.FlagMembers.Sort((a, b) => a.Bits.CompareTo(b.Bits));
-            info.FlagMaskLiteral = $"0x{mask:X}UL";
-            return info;
+            flagMembers.Sort((a, b) => a.Bits.CompareTo(b.Bits));
+            return info with
+            {
+                ClassName = string.Join("_", containers) + "Extensions",
+                Members = new EquatableArray<EnumMemberInfo>(members.ToArray()),
+                DistinctMembers = new EquatableArray<EnumMemberInfo>(distinctMembers.ToArray()),
+                FlagMembers = new EquatableArray<EnumMemberInfo>(flagMembers.ToArray()),
+                FlagMaskLiteral = $"0x{mask:X}UL",
+            };
         }
 
         private static EnumMemberInfo CreateMember(string name, object value, SpecialType underlying)
@@ -643,19 +789,5 @@ namespace EString.Script
         }
 
         public override string ToString() => _sb.ToString();
-    }
-
-    internal class EnumSyntaxReceiver : ISyntaxReceiver
-    {
-        public List<EnumDeclarationSyntax> CandidateEnums { get; } = new List<EnumDeclarationSyntax>();
-
-        public void OnVisitSyntaxNode(SyntaxNode syntaxNode)
-        {
-            if (syntaxNode is EnumDeclarationSyntax enumDeclaration &&
-                enumDeclaration.AttributeLists.Count > 0)
-            {
-                CandidateEnums.Add(enumDeclaration);
-            }
-        }
     }
 }

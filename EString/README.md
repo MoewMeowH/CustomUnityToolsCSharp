@@ -3,8 +3,9 @@
 `[E2String]`이 붙은 enum마다 **박싱 · 리플렉션 · 문자열 할당 없이** 동작하는 변환 확장 메서드를 컴파일 시점에 생성하는 Roslyn 소스 생성기입니다.
 `Enum.ToString()` · `Enum.Parse` · `Enum.IsDefined`를 런타임에 부르지 않으려는 용도입니다.
 
-- 대상: `netstandard2.0`, `Microsoft.CodeAnalysis.CSharp` 3.8.0 (`ISourceGenerator`)
-- 호환: Unity 2020.2 이상 (Unity 6 포함). 생성 코드는 C# 8 문법만 쓰며 Unity API에 의존하지 않습니다.
+- 대상: `netstandard2.0`, `Microsoft.CodeAnalysis.CSharp` 4.3.0 (`IIncrementalGenerator`)
+- 호환: **Unity 6.0 이상**. Unity 6은 생성기에 Roslyn 4.3을 요구합니다. Unity 2022 이하에서는 dll이 로드되지 않습니다. 생성 코드는 C# 8 문법만 쓰며 Unity API에 의존하지 않습니다.
+- 증분 생성: enum마다 분석 결과를 캐시해 바뀐 enum만 다시 생성합니다 (IDE에서 입력할 때 가벼움). 같은 파일 안의 enum은 위치가 바뀌므로 함께 다시 생성됩니다.
 - 산출물: `Script/bin/Release/netstandard2.0/EString.dll`
 
 ## 옵션 (`E2StringOptions`)
