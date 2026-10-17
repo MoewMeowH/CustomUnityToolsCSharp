@@ -4,6 +4,7 @@
 런타임 널 검사나 테스트를 돌리기 전에, 직렬화되지 않거나 참조형 슬롯이 아닌 필드를 미리 걸러 냅니다.
 
 - 대상: `netstandard2.0`, `Microsoft.CodeAnalysis.CSharp` + `Workspaces` 3.8.0
+- 호환: **Unity 6.3 이상**
 - 소스: `HB_TestFrameworkHelper/Analyzers`, `HB_TestFrameworkHelper/CodeFixes`
 - 산출물: `HB_TestFrameworkHelper/bin/Release/netstandard2.0/HB_TestFrameworkHelper.dll`
 
@@ -58,7 +59,7 @@ public sealed class NeedSlotNullCheckAttribute : System.Attribute { }
    - 코드 수정은 IDE(Rider/VS)에서만 동작합니다. Unity Console에는 진단만 나옵니다.
    - `bin/` 안의 언어별 폴더(`ko`, `ja`, …)는 Roslyn 리소스이므로 Unity에 복사하지 않아도 됩니다.
 
-특정 어셈블리에만 적용하려면 dll을 해당 `.asmdef` 폴더 아래에 둡니다. 그러면 그 어셈블리와, 그 어셈블리를 참조하는 어셈블리에만 적용됩니다 (Unity 2020.2 이상).
+특정 어셈블리에만 적용하려면 dll을 해당 `.asmdef` 폴더 아래에 둡니다. 그러면 그 어셈블리와, 그 어셈블리를 참조하는 어셈블리에만 적용됩니다.
 
 ## 주의 · 한계
 

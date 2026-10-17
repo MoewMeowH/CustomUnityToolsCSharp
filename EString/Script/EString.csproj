@@ -21,7 +21,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Unity 6.0+ : 생성기는 Microsoft.CodeAnalysis.CSharp 4.3을 써야 한다 (Unity 매뉴얼). 4.0부터 IIncrementalGenerator -->
+    <!-- Unity 6.3+ : 생성기는 Microsoft.CodeAnalysis.CSharp 4.3을 써야 한다 (Unity 매뉴얼). 4.0부터 IIncrementalGenerator -->
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.3.0" PrivateAssets="all" />
     <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.3.4" PrivateAssets="all">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

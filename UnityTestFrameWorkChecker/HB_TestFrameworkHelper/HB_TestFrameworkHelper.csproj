@@ -17,7 +17,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Unity 2020.2+ / Unity 6 호환 Roslyn 컴파일러 버전 (3.8.0) -->
+    <!-- Unity 6.3+ 대상. 분석기는 더 새로운 컴파일러에서도 로드되므로 3.8.0 그대로 둔다 (4.3 요구는 소스 생성기에만 해당) -->
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="3.8.0" PrivateAssets="all" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="3.8.0" PrivateAssets="all" />
     <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.3.4">
