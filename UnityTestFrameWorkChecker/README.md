@@ -19,7 +19,8 @@
 타입 검사에서 허용하는 것:
 - `UnityEngine.Object`를 상속하는 타입: `Component`, `MonoBehaviour`, `GameObject`, `ScriptableObject`, `Transform` 등
 - 위 타입의 배열: `GameObject[]`
-- 위 타입의 제네릭 컬렉션: `List<Transform>`
+- 위 타입의 `List`: `List<Transform>` (다른 컬렉션은 불가, 아래 주의 참고)
+- 제약에 위 타입이 있는 제네릭 타입 매개변수: `class Slot<T> : MonoBehaviour where T : Component { T _target; }` (제약 없는 `T`는 에러)
 
 검사 순서는 타입 → 직렬화 가능 여부 → `[SerializeField]`이고, 앞에서 걸리면 뒤 검사는 건너뜁니다. public 필드는 이미 직렬화되므로 `[SerializeField]` 검사 대상이 아닙니다.
 
@@ -63,6 +64,6 @@ public sealed class NeedSlotNullCheckAttribute : System.Attribute { }
 
 ## 주의 · 한계
 
-- 제네릭 판별은 "`List` 또는 `IEnumerable` 구현 + 첫 번째 타입 인자"로 합니다. 그래서 `Dictionary<GameObject, int>`처럼 Unity가 직렬화하지 않는 타입도 통과합니다.
-- 배열의 배열(`Transform[][]`)도 Unity가 직렬화하지 않지만 통과합니다.
+- 컬렉션은 Unity가 직렬화하고 검증 엔진이 원소까지 검사하는 **1차원 배열과 `List<T>`만** 허용합니다. `HashSet<GameObject>` · `Dictionary<GameObject, int>` · 배열의 배열(`Transform[][]`) · 다차원 배열(`Transform[,]`)은 에러입니다.
+- 제네릭 타입 매개변수는 제약을 따라가며(`where T : U, U : Component`도 인정) 판별하고, 순환 제약(`where T : List<T>` 등)에서도 멈춥니다.
 - 진단 메시지는 한국어 고정입니다. 지역화 리소스는 쓰지 않으며, `RS2008`(릴리스 추적)은 `NoWarn`으로 꺼 두었습니다.

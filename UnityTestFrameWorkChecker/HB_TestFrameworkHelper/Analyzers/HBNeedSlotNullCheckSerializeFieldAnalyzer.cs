@@ -1,4 +1,5 @@
-﻿using System.Collections.Immutable;
+﻿using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Diagnostics;
@@ -119,6 +120,10 @@ namespace HB_TestFrameworkHelper.Analyzers
             return hasNonSerialized ? "[NonSerialized]" : null;
         }
 
+        /// <summary>
+        /// 슬롯 필드 타입: UnityEngine.Object 계열, 그 1차원 배열, 또는 List&lt;그 타입&gt;.
+        /// Unity가 직렬화하고 검증 엔진이 원소까지 검사하는 컬렉션은 이 둘뿐이다 (HashSet · Dictionary · 다차원 · 가변 배열 불가).
+        /// </summary>
         private static bool IsUnityEngineObjectType(ITypeSymbol? typeSymbol)
         {
             if (typeSymbol == null)
@@ -126,34 +131,60 @@ namespace HB_TestFrameworkHelper.Analyzers
                 return false;
             }
 
-            // 배열 지원 (e.g. GameObject[], Transform[])
             if (typeSymbol is IArrayTypeSymbol arrayType)
             {
-                return IsUnityEngineObjectType(arrayType.ElementType);
+                return arrayType.Rank == 1 && IsSlotElementType(arrayType.ElementType);
             }
 
-            // 제네릭 컬렉션 지원 (e.g. List<Transform>, List<GameObject>)
-            if (typeSymbol is INamedTypeSymbol namedType && namedType.IsGenericType)
+            if (typeSymbol is INamedTypeSymbol namedType && namedType.IsGenericType &&
+                namedType.OriginalDefinition.ToDisplayString() == "System.Collections.Generic.List<T>")
             {
-                if (namedType.Name == "List" || namedType.AllInterfaces.Any(i => i.Name == "IEnumerable"))
+                return IsSlotElementType(namedType.TypeArguments[0]);
+            }
+
+            return IsSlotElementType(typeSymbol);
+        }
+
+        /// <summary>
+        /// UnityEngine.Object를 상속하는 타입이거나, 제약에 그런 타입이 있는 제네릭 타입 매개변수
+        /// (e.g. class Slot&lt;T&gt; : MonoBehaviour where T : Component { T _target; }). 제약이 없는 T는 무엇이든 될 수 있으므로 아니다.
+        /// where T : U, U : Component처럼 매개변수끼리 이어지는 제약은 방문 집합으로 따라가며 순환(where T : U, U : T)을 끊는다.
+        /// </summary>
+        private static bool IsSlotElementType(ITypeSymbol typeSymbol)
+        {
+            var visited = new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default);
+            var pending = new Stack<ITypeSymbol>();
+            pending.Push(typeSymbol);
+
+            while (pending.Count > 0)
+            {
+                var current = pending.Pop();
+                if (!visited.Add(current)) continue;
+
+                if (current is ITypeParameterSymbol typeParameter)
                 {
-                    var typeArg = namedType.TypeArguments.FirstOrDefault();
-                    if (typeArg != null && IsUnityEngineObjectType(typeArg))
-                    {
-                        return true;
-                    }
+                    foreach (var constraint in typeParameter.ConstraintTypes)
+                        pending.Push(constraint);
+                    continue;
+                }
+
+                if (DerivesFromUnityEngineObject(current))
+                {
+                    return true;
                 }
             }
 
-            // 상속 계층 순회: UnityEngine.Object 상속 여부 확인
-            var current = typeSymbol;
-            while (current != null)
+            return false;
+        }
+
+        private static bool DerivesFromUnityEngineObject(ITypeSymbol typeSymbol)
+        {
+            for (var current = typeSymbol; current != null; current = current.BaseType)
             {
                 if (current.Name == "Object" && current.ContainingNamespace?.ToDisplayString() == "UnityEngine")
                 {
                     return true;
                 }
-                current = current.BaseType;
             }
 
             return false;
