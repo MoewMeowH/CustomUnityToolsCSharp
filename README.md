@@ -66,5 +66,3 @@ Orchestration/Publish_Output/
 - Orchestration은 빌드 산출물을 커밋하지 않습니다. `Publish_Output/`은 배치가 매번 다시 만듭니다.
 - API 키는 어떤 파일에도 넣지 않습니다. 시스템 환경 변수로만 둡니다 (HB_Orchestration README 2장).
 
-## 관련 해서 있었던 이슈
-[이슈들](Orchestration/HB_Orchestration/IssueList.md)
