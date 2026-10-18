@@ -29,6 +29,13 @@
     .none { color: var(--muted); font-style: italic; }
     .prov td { font-size: 13px; }
     .sha { font-family: var(--mono); font-size: 12px; }
+    .view { font-size: 12px; margin-left: 8px; }
+    .thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin-top: 8px; }
+    .thumbs figure { margin: 0; }
+    .thumbs .box { display: flex; align-items: center; justify-content: center; height: 150px; background: var(--code);
+                   border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+    .thumbs img { max-width: 100%; max-height: 150px; }
+    .thumbs figcaption { font-size: 12px; margin-top: 4px; word-break: break-all; }
 </style>
 
 <a class="back" href="/">← 목록</a>
@@ -171,10 +178,13 @@
     <section class="panel files">
         <span class="muted" style="font-size:12.5px">첨부 코드 — 서버가 읽어 에이전트에게 보낸 범위 (내용은 아래 요청에 있음)</span>
         <ul>
-            @foreach (var l in Model.ContextLinks)
+            @for (var i = 0; i < Model.ContextLinks.Count; i++)
             {
+                var l = Model.ContextLinks[i];
                 <li>
-                    <a class="mono" href="@l.Url" target="_blank" rel="noopener" title="@l.FullPath">@l.Display</a>
+                    <a class="mono" href="/Attachment?id=@c.Id&kind=context&i=@i" title="@l.FullPath">@l.Display</a>
+                    @if (l.Url is { } url) { <a class="view" href="@url">Rider</a> }
+                    else { <span class="view muted" title="Rider는 열린 솔루션 폴더 안 파일만 연다">Rider 없음</span> }
                     @if (!l.Exists) { <span class="muted"> (이 PC에서 찾을 수 없음)</span> }
                 </li>
             }
@@ -182,28 +192,48 @@
     </section>
 }
 
-@if (Model.Call.Images is { Count: > 0 } images)
+@if (Model.Images.Count > 0)
 {
     <section class="panel files">
-        <span class="muted" style="font-size:12.5px">첨부 이미지 — 서버가 읽어 에이전트에게 보낸 순서 (원문은 기록에 없음)</span>
-        <ol>
-            @foreach (var image in images)
+        <span class="muted" style="font-size:12.5px">첨부 이미지 — 서버가 읽어 에이전트에게 보낸 순서. 원문은 기록에 없고 지금 파일을 보여 준다 (기록의 sha256과 비교)</span>
+        <div class="thumbs">
+            @foreach (var img in Model.Images)
             {
-                <li class="mono">@image</li>
+                var view = $"/Attachment?id={c.Id}&kind=images&i={img.Index}";
+                <figure>
+                    <a href="@view" class="box">
+                        @if (img.Match is ImageMatch.Same or ImageMatch.Changed)
+                        {
+                            <img src="/Attachment?handler=Raw&id=@c.Id&kind=images&i=@img.Index" alt="@img.Path" loading="lazy" />
+                        }
+                        else
+                        {
+                            <span class="muted">@Attachments.Describe(img.Match)</span>
+                        }
+                    </a>
+                    <figcaption>
+                        <b>@(img.Index + 1).</b> <span class="mono">@img.Path</span><br />
+                        <span class="muted">@img.Detail</span><br />
+                        <span class="@(img.Match == ImageMatch.Same ? "ok" : "err")">@Attachments.Describe(img.Match)</span>
+                    </figcaption>
+                </figure>
             }
-        </ol>
+        </div>
     </section>
 }
 
 @if (Model.Links.Count > 0)
 {
     <section class="panel files">
-        <span class="muted" style="font-size:12.5px">관련 파일 — 클릭하면 Rider에서 열림</span>
+        <span class="muted" style="font-size:12.5px">관련 파일 — 클릭하면 대시보드에서 보기, "Rider"는 IDE에서 열기 (솔루션 폴더 안 파일만)</span>
         <ul>
-            @foreach (var l in Model.Links)
+            @for (var i = 0; i < Model.Links.Count; i++)
             {
+                var l = Model.Links[i];
                 <li>
-                    <a class="mono" href="@l.Url" target="_blank" rel="noopener" title="@l.FullPath">@l.Display</a>
+                    <a class="mono" href="/Attachment?id=@c.Id&kind=files&i=@i" title="@l.FullPath">@l.Display</a>
+                    @if (l.Url is { } url) { <a class="view" href="@url">Rider</a> }
+                    else { <span class="view muted" title="Rider는 열린 솔루션 폴더 안 파일만 연다">Rider 없음</span> }
                     @if (!l.Exists) { <span class="muted"> (이 PC에서 찾을 수 없음)</span> }
                 </li>
             }

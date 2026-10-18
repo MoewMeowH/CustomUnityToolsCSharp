@@ -10,6 +10,9 @@ public sealed record AttachedImage(string Path, string MediaType, byte[] Data, i
 {
     /// <summary>호출 기록 한 줄: "docs/image/a.png (512x288, 41,234B, sha256:0123456789ab)". 원문(base64)은 기록에 남기지 않는다.</summary>
     public string RecordText => $"{Path} ({Width}x{Height}, {Data.Length:N0}B, sha256:{Sha256[..12]})";
+
+    /// <summary>"@이름/…"으로 읽었으면 (설정의 이름, 그때의 절대 경로). 기록의 ContextRoots에 합쳐 대시보드가 같은 파일을 찾게 한다.</summary>
+    public (string Name, string Path)? Root { get; init; }
 }
 
 /// <summary>
@@ -39,12 +42,14 @@ public static class ImageLoader
             var shown = raw;
             var relative = raw;
             var imageRoot = root;
+            (string, string)? usedRoot = null;
             if (ContextLoader.TrySplitRootPrefix(raw, out var name, out var rest) && context.TryGetExtraRoot(name, out var key, out var rootPath))
             {
                 if (ContextLoader.ExtraRootProblem(key, rootPath) is { } problem) return (null, $"'{raw}': ExtraRoots '{key}' — {problem}");
                 imageRoot = System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetFullPath(rootPath));
                 relative = rest;
                 shown = $"@{key}/{rest.Replace('\\', '/')}";
+                usedRoot = (key, imageRoot);
             }
             else
             {
@@ -78,14 +83,14 @@ public static class ImageLoader
             var sha = Convert.ToHexStringLower(SHA256.HashData(data));
             if (!seen.Add(sha)) return (null, $"'{shown}': 같은 이미지가 이미 들어 있습니다.");
 
-            images.Add(new AttachedImage(shown, mediaType, data, width, height, sha));
+            images.Add(new AttachedImage(shown, mediaType, data, width, height, sha) { Root = usedRoot });
         }
 
         return (images, null);
     }
 
     /// <summary>파일 머리에서 형식과 크기를 읽는다. png·jpeg가 아니거나 읽을 수 없으면 null.</summary>
-    internal static (string MediaType, int Width, int Height)? ReadHeader(ReadOnlySpan<byte> data)
+    public static (string MediaType, int Width, int Height)? ReadHeader(ReadOnlySpan<byte> data)
     {
         // PNG: 8바이트 서명 + IHDR(길이 4 · "IHDR" 4 · 너비 4 · 높이 4)
         if (data.Length >= 24 && data[..8].SequenceEqual((ReadOnlySpan<byte>)[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])

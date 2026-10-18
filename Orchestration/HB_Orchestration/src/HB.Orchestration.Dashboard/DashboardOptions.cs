@@ -20,10 +20,23 @@ public sealed class DashboardOptions
     public string? ModesPath { get; set; }
 
     /// <summary>
-    /// 파일 링크 템플릿. {path}=절대 경로(URL 인코딩), {line}=줄 번호.
-    /// 기본값은 JetBrains IDE 내장 서버로 Rider에서 바로 연다.
+    /// 파일 링크 템플릿. {project}가 있으면 {project}=Rider 프로젝트 이름, {path}=그 프로젝트 폴더 기준 상대 경로,
+    /// 없으면 {path}=절대 경로(URL 인코딩). {line}=줄 번호.
+    /// 기본값은 jetbrains:// 프로토콜(JetBrains 데몬이 Rider로 넘김). 예전 기본값인 내장 서버 /api/file은
+    /// Rider 2026.2에 없어 404다 (2026-10-19 확인).
     /// </summary>
-    public string FileLinkTemplate { get; set; } = "http://localhost:63342/api/file?file={path}&line={line}";
+    public string FileLinkTemplate { get; set; } = DefaultFileLinkTemplate;
+
+    public const string DefaultFileLinkTemplate = "jetbrains://rider/navigate/reference?project={project}&path={path}:{line}";
+
+    /// <summary>
+    /// 폴더(절대 경로) → Rider 프로젝트 이름. Rider 최근 솔루션 목록보다 먼저 쓴다.
+    /// 최근 목록에 없거나 이름이 다를 때만 넣는다. 파일은 가장 깊은 폴더의 프로젝트로 연다.
+    /// </summary>
+    public Dictionary<string, string> RiderProjects { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Rider 최근 솔루션 목록 파일. 비우면 %APPDATA%/JetBrains/Rider*/options/recentSolutions.xml 중 최근 것.</summary>
+    public string? RiderRecentSolutionsPath { get; set; }
 
     /// <summary>
     /// (예전 방식) 모델별 1M 토큰당 가격(USD). 단가는 이제 MCP appsettings.json의 Orchestration:Pricing에 두고

@@ -1,0 +1,76 @@
+@page
+@model AttachmentModel
+@{
+    var t = Model.Target;
+    ViewData["Title"] = $"첨부 · {System.IO.Path.GetFileName(t.Display)}";
+    var kindLabel = Model.Kind switch { AttachmentKind.Context => "첨부 코드", AttachmentKind.Files => "관련 파일", _ => "보낸 이미지" };
+    var rawUrl = $"/Attachment?handler=Raw&id={Model.Call.Id}&kind={Model.Kind.ToString().ToLowerInvariant()}&i={Model.Index}";
+}
+
+<style>
+    .back { display: inline-block; margin-bottom: 12px; }
+    .head { padding: 12px 16px; margin-bottom: 16px; }
+    .head .path { font-family: var(--mono); font-size: 13px; word-break: break-all; }
+    .head .links a { margin-right: 12px; }
+    .code { padding: 0; overflow: auto; max-height: 80vh; }
+    .code table { border-collapse: collapse; width: 100%; font-family: var(--mono); font-size: 12.5px; }
+    .code td { padding: 0 10px; white-space: pre-wrap; word-break: break-word; vertical-align: top; border: 0; }
+    .code td.n { color: var(--muted); text-align: right; user-select: none; width: 1%; white-space: nowrap; }
+    .code tr.hit td { background: var(--code); }
+    .code tr.hit td.n { color: var(--text, inherit); font-weight: 600; }
+    .shot { padding: 12px; text-align: center; }
+    .shot img { max-width: 100%; border: 1px solid var(--line); border-radius: 6px; }
+</style>
+
+<a class="back" href="/Call/@Model.Call.Id">← 호출 상세</a>
+
+<section class="panel head">
+    <div class="muted" style="font-size:12.5px">@kindLabel @(Model.Index + 1) · @Model.Call.Agent · @Model.Call.Timestamp.LocalDateTime.ToString("MM-dd HH:mm")</div>
+    <div class="path">@t.Display @if (t.StartLine is { } s) { <span class="muted">(@s@(t.EndLine is { } e && e != s ? $"-{e}" : "")줄)</span> }</div>
+    @if (t.FullPath is { } full) { <div class="muted mono" style="word-break:break-all">@full</div> }
+    <div class="links">
+        @if (Model.Kind != AttachmentKind.Images)
+        {
+            if (Model.RiderUrl is { } riderUrl) { <a href="@riderUrl">Rider에서 열기</a> }
+            else { <span class="muted" title="Rider는 열린 솔루션 폴더 안 파일만 연다">Rider 링크 없음 (솔루션 폴더 밖)</span> }
+        }
+        @if (Model.Kind == AttachmentKind.Context) { <span class="muted">에이전트가 실제로 받은 내용은 호출 상세의 요청(Prompt)에 있다. 파일은 그 뒤 바뀌었을 수 있다.</span> }
+    </div>
+</section>
+
+@if (t.Error is { } err)
+{
+    <section class="panel head"><span class="err">열 수 없음: @err</span></section>
+}
+else if (Model.Kind == AttachmentKind.Images)
+{
+    var match = Model.Match ?? ImageMatch.Missing;
+    <section class="panel head">
+        <span class="@(match == ImageMatch.Same ? "ok" : "err")">@Attachments.Describe(match)</span>
+        @if (t.RecordedSha12 is { } sha) { <span class="muted mono"> · 기록 sha256:@sha</span> }
+    </section>
+    @if (match is ImageMatch.Same or ImageMatch.Changed)
+    {
+        <section class="panel shot"><img src="@rawUrl" alt="@t.Display" /></section>
+    }
+}
+else if (Model.ReadError is { } readError)
+{
+    <section class="panel head"><span class="err">@readError</span></section>
+}
+else
+{
+    @if (Model.Truncated) { <section class="panel head"><span class="badge warn">파일이 커서 앞부분만 표시</span></section> }
+    <section class="panel code">
+        <table>
+            @for (var n = 1; n <= Model.Lines.Count; n++)
+            {
+                <tr id="L@(n)" class="@(Model.InRange(n) ? "hit" : "")"><td class="n">@n</td><td>@Model.Lines[n - 1]</td></tr>
+            }
+        </table>
+    </section>
+    @if (t.StartLine is { } start)
+    {
+        <script>document.getElementById("L@(Math.Max(1, start - 3))")?.scrollIntoView();</script>
+    }
+}

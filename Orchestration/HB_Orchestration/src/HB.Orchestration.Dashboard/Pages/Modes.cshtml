@@ -130,7 +130,7 @@
                 <div class="table-scroll">
                     <table class="agents edit">
                         <thead>
-                        <tr><th>이름</th><th>제공사</th><th>모델 ID</th><th>출력 상한</th><th title="요청 하나의 네트워크 타임아웃. 비우면 제공사 값 → 100초">타임아웃(초)</th><th>사용</th><th>삭제</th><th>쓰는 모드</th></tr>
+                        <tr><th>이름</th><th>제공사</th><th>모델 ID</th><th>출력 상한</th><th title="요청 하나의 네트워크 타임아웃. 비우면 제공사 값 → 100초">타임아웃(초)</th><th>사용</th><th title="이미지 입력을 받는지 (Vision). 표시 전용 — 바꾸려면 appsettings.json을 직접 고친다">이미지</th><th>삭제</th><th>쓰는 모드</th></tr>
                         </thead>
                         <tbody>
                         @for (var i = 0; i <= snap.Agents.Count; i++)
@@ -154,6 +154,7 @@
                                 <td><input type="number" min="1" name="@("ag.max." + i)" value="@(a?.MaxOutputTokens)" placeholder="없음" /></td>
                                 <td><input type="number" min="1" name="@("ag.timeout." + i)" value="@(a?.TimeoutSeconds)" placeholder="@Model.TimeoutPlaceholder(a)" /></td>
                                 <td><input type="checkbox" name="@("ag.enabled." + i)" value="true" checked="@(a?.Enabled ?? true)" /></td>
+                                <td class="@(a is { Vision: false } ? "muted" : "ok")" title="표시 전용">@(a is null ? "" : a.Vision ? "✓" : "✗")</td>
                                 <td>
                                     @if (a is not null)
                                     {
@@ -173,6 +174,29 @@
                 <span class="muted">마지막 빈 줄 = 새 에이전트 · 이름을 바꾸면 그 이름을 쓰는 모드도 같이 바뀝니다 · 백업: <span class="mono">settings-backup/</span></span>
             </div>
         </form>
+    }
+
+    <h2 class="section">이미지 첨부 (appsettings.json · 표시 전용)</h2>
+    if (snap.McpSettingsPath is not null)
+    {
+        <section class="panel">
+            <div class="table-scroll">
+                <table class="agents">
+                    <thead><tr><th>설정</th><th>값</th><th>설명</th></tr></thead>
+                    <tbody>
+                    <tr><td class="mono">Images.MaxCount</td><td>@(snap.Images.MaxCount > 0 ? $"{snap.Images.MaxCount}장" : "무제한")</td><td class="muted">run_mode 한 번에 보낼 장수</td></tr>
+                    <tr><td class="mono">Images.MaxBytes</td><td>@(snap.Images.MaxBytes > 0 ? $"{snap.Images.MaxBytes:N0}바이트" : "무제한")</td><td class="muted">장당 파일 크기</td></tr>
+                    <tr><td class="mono">Images.MaxDimension</td><td>@(snap.Images.MaxDimension > 0 ? $"{snap.Images.MaxDimension}px" : "무제한")</td><td class="muted">긴 변. 넘으면 거절 (축소는 image_prep.py shrink)</td></tr>
+                    @foreach (var p in snap.ProviderNames)
+                    {
+                        var detail = snap.ProviderImageDetails.GetValueOrDefault(p);
+                        <tr><td class="mono">Providers.@(p).ImageDetail</td><td>@(string.IsNullOrWhiteSpace(detail) ? "(비움 = 제공사 기본값)" : detail)</td><td class="muted">이미지 부분에 실을 detail</td></tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+        <div class="actions"><span class="muted">에이전트별 이미지 입력 여부는 위 에이전트 표의 "이미지" 열 · 바꾸려면 appsettings.json을 직접 고친다</span></div>
     }
 
     <h2 class="section">모델 단가 (appsettings.json · Orchestration:Pricing)</h2>

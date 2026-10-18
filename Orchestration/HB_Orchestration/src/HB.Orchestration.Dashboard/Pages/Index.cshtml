@@ -142,6 +142,7 @@
                         </a>
                         @if (c.Files.Count > 0) { <span class="muted"> · 파일 @c.Files.Count</span> }
                         @if (c.Context.Count > 0) { <span class="muted"> · 첨부 @c.Context.Count</span> }
+                        @if (c.Images is { Count: > 0 } imgs) { <span class="muted"> · 이미지 @imgs.Count</span> }
                     </td>
                     <td class="num">@(c.InputTokens?.ToString("N0") ?? "-")</td>
                     <td class="num">@(c.OutputTokens?.ToString("N0") ?? "-")</td>

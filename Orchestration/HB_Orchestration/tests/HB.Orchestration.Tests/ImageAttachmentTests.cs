@@ -222,6 +222,16 @@ public sealed class ImageAttachmentTests : IDisposable
     }
 
     [Fact]
+    public async Task Run_ImageExtraRoot_RecordedInContextRoots()
+    {
+        var root = ShotsRoot();
+
+        await Run("seq", [root + "a.png"]);
+
+        Assert.Equal(_h.Root, _h.Records().Single().ContextRoots!["tc"]);
+    }
+
+    [Fact]
     public async Task Run_NoImages_RecordHasNoField()
     {
         await _h.Run("seq");

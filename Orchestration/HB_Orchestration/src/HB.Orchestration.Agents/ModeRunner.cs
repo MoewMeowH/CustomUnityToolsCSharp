@@ -64,7 +64,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         var promptInput = new PromptInput(input, attached!.Text, loadedImages!);
         var meta = new CallMeta(files, attached.Sources)
         {
-            ContextRoots = attached.Roots,
+            ContextRoots = MergeRoots(attached.Roots, loadedImages),
             Reason = reason,
             OwnReview = string.IsNullOrWhiteSpace(ownReview) ? null : ownReview,
         };
@@ -339,6 +339,17 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         }
 
         return new BuiltPrompt(sb.ToString().TrimEnd(), prefix, includeInput ? ImagesOf(input) : null);
+    }
+
+    /// <summary>context와 images가 읽은 추가 루트를 합친다. 둘 다 안 썼으면 null (기록에서 필드 생략).</summary>
+    private static IReadOnlyDictionary<string, string>? MergeRoots(IReadOnlyDictionary<string, string>? contextRoots, IReadOnlyList<AttachedImage> images)
+    {
+        if (images.All(i => i.Root is null)) return contextRoots;
+        var merged = contextRoots is null
+            ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, string>(contextRoots, StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, path) in images.Where(i => i.Root is not null).Select(i => i.Root!.Value)) merged[name] = path;
+        return merged;
     }
 
     /// <summary>"from=to" 목록을 검증된 사전으로. 오류면 메시지 (실행 전이라 토큰 0).</summary>

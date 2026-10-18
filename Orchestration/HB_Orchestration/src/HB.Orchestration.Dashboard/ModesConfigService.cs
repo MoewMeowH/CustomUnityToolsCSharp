@@ -11,7 +11,7 @@ using Microsoft.Extensions.Options;
 
 namespace HB.Orchestration.Dashboard;
 
-public sealed record AgentInfo(string Name, string Provider, string Model, int? MaxOutputTokens, bool Enabled, int? TimeoutSeconds = null);
+public sealed record AgentInfo(string Name, string Provider, string Model, int? MaxOutputTokens, bool Enabled, int? TimeoutSeconds = null, bool Vision = true);
 
 /// <summary>디스크에서 읽은 MCP 설정(modes.json + appsettings.json) 한 시점의 상태.</summary>
 public sealed class ModesSnapshot
@@ -36,6 +36,12 @@ public sealed class ModesSnapshot
 
     /// <summary>제공사별 TimeoutSeconds. 에이전트 칸이 비었을 때 실제로 적용되는 값을 안내하는 데 쓴다.</summary>
     public Dictionary<string, int?> ProviderTimeouts { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>제공사별 ImageDetail (run_mode images의 detail). 비어 있으면 제공사 기본값. 표시 전용.</summary>
+    public Dictionary<string, string?> ProviderImageDetails { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Orchestration:Images (run_mode images 상한). 표시 전용.</summary>
+    public ImageOptions Images { get; init; } = new();
     public required int DefaultMaxRunsPerSession { get; init; }
 
     /// <summary>Orchestration:Pricing (모델 단가 USD + 원화 환율).</summary>
@@ -152,6 +158,24 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
         return (modes, settings);
     }
 
+    /// <summary>
+    /// MCP appsettings의 Orchestration 섹션. 첨부 보기의 전송 금지 패턴·이미지 상한에 쓴다 (modes.json이 없어도 동작).
+    /// 설정을 찾지 못하거나 읽지 못하면 기본값 (내장 금지 패턴은 항상 적용됨).
+    /// </summary>
+    public OrchestrationOptions McpOptionsOrDefault()
+    {
+        try
+        {
+            var dir = McpConfigDir;
+            var settings = dir is null ? null : Path.Combine(dir, "appsettings.json");
+            return settings is not null && File.Exists(settings) ? ReadMcpOptions(settings) ?? new() : new();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or FormatException or InvalidOperationException)
+        {
+            return new();
+        }
+    }
+
     private static OrchestrationOptions? ReadMcpOptions(string settingsPath)
     {
         // Microsoft.Extensions.Configuration의 JSON 공급자는 주석을 허용하므로 MCP appsettings를 그대로 읽을 수 있다.
@@ -190,6 +214,8 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
         var agents = new List<AgentInfo>();
         var providers = new List<string>();
         var providerTimeouts = new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase);
+        var imageDetails = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        var images = new ImageOptions();
         var defaultRuns = new BudgetOptions().DefaultMaxRunsPerSession;
         var pricing = new PricingOptions();
         JsonObject? settingsRoot = null;
@@ -214,9 +240,14 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
             if (ReadMcpOptions(settingsPath) is { } mcp)
             {
                 foreach (var a in mcp.Agents)
-                    agents.Add(new AgentInfo(a.Name, a.Provider, a.Model, a.MaxOutputTokens, a.Enabled, a.TimeoutSeconds));
+                    agents.Add(new AgentInfo(a.Name, a.Provider, a.Model, a.MaxOutputTokens, a.Enabled, a.TimeoutSeconds, a.Vision));
                 providers.AddRange(mcp.Providers.Keys.Order(StringComparer.OrdinalIgnoreCase));
-                foreach (var (name, p) in mcp.Providers) providerTimeouts[name] = p.TimeoutSeconds;
+                foreach (var (name, p) in mcp.Providers)
+                {
+                    providerTimeouts[name] = p.TimeoutSeconds;
+                    imageDetails[name] = p.ImageDetail;
+                }
+                images = mcp.Images;
                 defaultRuns = mcp.Budget.DefaultMaxRunsPerSession;
                 pricing = mcp.Pricing;
             }
@@ -237,6 +268,8 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
             Agents = agents,
             ProviderNames = providers,
             ProviderTimeouts = providerTimeouts,
+            ProviderImageDetails = imageDetails,
+            Images = images,
             DefaultMaxRunsPerSession = defaultRuns,
             Pricing = pricing,
         };

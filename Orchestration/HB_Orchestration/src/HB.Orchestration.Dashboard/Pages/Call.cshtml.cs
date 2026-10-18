@@ -6,7 +6,7 @@ using Microsoft.Extensions.Options;
 
 namespace HB.Orchestration.Dashboard.Pages;
 
-public sealed class CallModel(IOptions<DashboardOptions> options, PricingService pricing, ClaudeSessionsService sessions, CallLogCache log) : PageModel
+public sealed class CallModel(IOptions<DashboardOptions> options, PricingService pricing, ClaudeSessionsService sessions, CallLogCache log, ModesConfigService config, RiderProjects rider) : PageModel
 {
     public PricingService Pricing => pricing;
 
@@ -21,6 +21,9 @@ public sealed class CallModel(IOptions<DashboardOptions> options, PricingService
 
     /// <summary>서버가 프롬프트에 첨부한 코드 범위 (에이전트가 실제로 본 코드).</summary>
     public List<FileLinks.Link> ContextLinks { get; private set; } = [];
+
+    /// <summary>보낸 이미지 (기록 순서). Match는 지금 파일이 기록의 sha와 같은지.</summary>
+    public List<(int Index, string Path, string Detail, ImageMatch Match)> Images { get; private set; } = [];
     public decimal? Cost { get; private set; }
 
     /// <summary>같은 모드 실행(RunId)에 속한 단계들. 단계 순서대로.</summary>
@@ -48,9 +51,21 @@ public sealed class CallModel(IOptions<DashboardOptions> options, PricingService
 
         Call = call;
         ResponseHtml = Markdown.ToHtml(call.Response ?? "", Pipeline);
-        Links = call.Files.Select(f => FileLinks.Build(f, call.ProjectDir, Opt.FileLinkTemplate)).ToList();
-        ContextLinks = call.Context.Select(f => FileLinks.Build(f, call.ProjectDir, Opt.FileLinkTemplate, call.ContextRoots)).ToList();
+        var projects = rider.All;
+        Links = call.Files.Select(f => FileLinks.Build(f, call.ProjectDir, Opt.FileLinkTemplate, projects: projects)).ToList();
+        ContextLinks = call.Context.Select(f => FileLinks.Build(f, call.ProjectDir, Opt.FileLinkTemplate, call.ContextRoots, projects)).ToList();
         Cost = pricing.CostOf(call);
+        if (call.Images is { Count: > 0 } images)
+        {
+            var mcp = config.McpOptionsOrDefault();
+            for (var i = 0; i < images.Count; i++)
+            {
+                var target = Attachments.Find(call, AttachmentKind.Images, i, mcp.Context.AllDenyPatterns)!;
+                var (path, _) = Attachments.SplitImageRecord(images[i]);
+                var detail = images[i].Length > path.Length ? images[i][path.Length..].Trim().Trim('(', ')') : "";
+                Images.Add((i, path, detail, Attachments.ReadImage(target, mcp.Images.MaxBytes).Match));
+            }
+        }
         if (call.RunId is { } runId)
         {
             RunSteps = all.Where(c => c.RunId == runId).OrderBy(c => c.Step).ThenBy(c => c.Attempt ?? 1).ToList();
