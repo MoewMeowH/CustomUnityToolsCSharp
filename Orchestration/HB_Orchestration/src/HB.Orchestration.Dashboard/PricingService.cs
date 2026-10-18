@@ -64,20 +64,8 @@ public sealed class PricingService(IOptions<DashboardOptions> options, ModesConf
         : options.Value.Prices.TryGetValue(model, out var legacy) ? legacy
         : null;
 
-    /// <summary>
-    /// USD 비용. 단가가 없으면 null.
-    /// 입력 토큰에는 캐시된 토큰이 포함되어 있으므로 (입력 - 캐시) × 입력 단가 + 캐시 × 캐시 단가 + 출력 × 출력 단가.
-    /// </summary>
-    public decimal? CostOf(CallRecord r)
-    {
-        if (PriceOf(r.Model) is not { } p) return null;
-
-        var input = r.InputTokens ?? 0;
-        var cached = Math.Clamp(r.CachedInputTokens ?? 0, 0, input);
-        return (input - cached) / 1_000_000m * p.InputPerMillion
-             + cached / 1_000_000m * (p.CachedInputPerMillion ?? p.InputPerMillion)
-             + (r.OutputTokens ?? 0) / 1_000_000m * p.OutputPerMillion;
-    }
+    /// <summary>USD 비용 (계산식은 서버 비용 상한과 같은 <see cref="ModelPrice.CostOf"/>). 단가가 없으면 null.</summary>
+    public decimal? CostOf(CallRecord r) => PriceOf(r.Model)?.CostOf(r);
 
     /// <summary>합계. 단가가 있는 기록이 하나도 없으면 null.</summary>
     public decimal? TotalOf(IEnumerable<CallRecord> records)

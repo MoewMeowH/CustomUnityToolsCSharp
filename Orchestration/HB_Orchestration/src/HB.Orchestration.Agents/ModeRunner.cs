@@ -64,9 +64,6 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             OwnReview = string.IsNullOrWhiteSpace(ownReview) ? null : ownReview,
         };
 
-        var budgetMessage = CheckBudget();
-        if (budgetMessage is not null) return budgetMessage;
-
         var (swap, swapError) = ParseOverrides(agentOverrides, mode);
         if (swapError is not null) return $"[모드 '{modeName}'] {swapError}";
 
@@ -95,6 +92,9 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             plan.Add(new PlannedStep(step, agent, role.Prompt + Prompts.CommonRules + (role.UseGuidelines ? guidelines.Text : ""),
                 ProvenanceBuilder.ForStep(guidelines, role.UseGuidelines)));
         }
+
+        // 비용 상한은 단계별 모델을 알아야 하므로 에이전트를 정한 뒤에 검사한다.
+        if (CheckBudget(plan.Select(p => p.Agent)) is { } budgetMessage) return budgetMessage;
 
         // 세션당 실행 한도: 검증을 다 통과한 실행만 센다 (설정 오류로 거절된 호출은 횟수에 안 들어감).
         var limit = RunLimit(mode);
@@ -348,17 +348,34 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
 
     private int RunLimit(ModeDefinition mode) => mode.MaxRunsPerSession ?? Options.Budget.DefaultMaxRunsPerSession;
 
-    /// <summary>오늘 쓴 토큰이 상한을 넘었으면 메시지, 아니면 null.</summary>
-    private string? CheckBudget()
+    /// <summary>
+    /// 오늘 쓴 토큰·비용이 상한을 넘었거나, 비용 상한이 켜져 있는데 단가 없는 모델을 쓰려 하면 메시지, 아니면 null.
+    /// 실행 전에 한 번만 본다 (이번 실행이 쓸 양은 미리 알 수 없으므로 실행 중에 넘을 수 있다).
+    /// </summary>
+    private string? CheckBudget(IEnumerable<AgentEntry> agents)
     {
-        var limit = Options.Budget.DailyTokenLimit;
-        if (limit <= 0) return null;
+        var budget = Options.Budget;
+        if (budget.DailyTokenLimit <= 0 && budget.DailyCostLimitUsd <= 0) return null;
 
-        var used = Options.Budget.CountedTokens(CallLog.ReadSince(new DateTimeOffset(DateTime.Today)));
+        var pricing = Options.Pricing;
+        if (budget.DailyCostLimitUsd > 0)
+        {
+            var unpriced = agents.Where(a => !budget.IsFree(a.Provider) && !pricing.Models.ContainsKey(a.Model))
+                .Select(a => $"{a.Name}({a.Model})").Distinct().ToList();
+            if (unpriced.Count > 0)
+                return $"[단가 없는 모델] {string.Join(", ", unpriced)}. 비용 상한(Budget.DailyCostLimitUsd)이 켜져 있어 비용을 셀 수 없는 모델은 실행하지 않습니다. " +
+                       "대시보드 '모드' 화면의 모델 단가 표(appsettings.json의 Pricing.Models)에 단가를 넣으세요.";
+        }
 
-        return used >= limit
-            ? $"[오늘 토큰 상한 도달] {used:N0} / {limit:N0}. 외부 에이전트 없이 진행하거나 appsettings.json의 Budget.DailyTokenLimit을 조정하세요."
-            : null;
+        var today = CallLog.ReadSince(new DateTimeOffset(DateTime.Today), runner.LogPath);
+
+        if (budget.DailyTokenLimit > 0 && budget.CountedTokens(today) is var tokens && tokens >= budget.DailyTokenLimit)
+            return $"[오늘 토큰 상한 도달] {tokens:N0} / {budget.DailyTokenLimit:N0}. 외부 에이전트 없이 진행하거나 appsettings.json의 Budget.DailyTokenLimit을 조정하세요.";
+
+        if (budget.DailyCostLimitUsd > 0 && budget.CountedCost(today, pricing) is var cost && cost >= budget.DailyCostLimitUsd)
+            return $"[오늘 비용 상한 도달] ${cost:0.00} / ${budget.DailyCostLimitUsd:0.00}. 외부 에이전트 없이 진행하거나 appsettings.json의 Budget.DailyCostLimitUsd를 조정하세요.";
+
+        return null;
     }
 
     /// <summary>list_modes용 요약. 짧게 유지할수록 Claude 쪽 토큰 절약.</summary>

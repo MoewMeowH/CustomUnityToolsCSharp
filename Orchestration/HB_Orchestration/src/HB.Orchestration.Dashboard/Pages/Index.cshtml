@@ -59,8 +59,12 @@
 </form>
 
 <section class="stats">
+    <div class="panel stat" title="오늘 0시부터 · MCP 단가로 계산 · 무료 제공사 제외 (서버 비용 상한과 같은 기준, 위 필터와 무관)">
+        <div class="label">오늘 비용 상한@(Model.DailyCostLimit > 0 ? $" · {(int)(Model.TodayCost * 100 / Model.DailyCostLimit)}%" : "")</div>
+        <div class="value @(Model.DailyCostLimit > 0 && Model.TodayCost >= Model.DailyCostLimit ? "err" : "")">$@Model.TodayCost.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)@(Model.DailyCostLimit > 0 ? $" / ${Model.DailyCostLimit.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)}" : "")</div>
+    </div>
     <div class="panel stat" title="오늘 0시부터 · 입력+출력 · 무료 제공사 제외 (서버 일일 상한과 같은 기준, 위 필터와 무관)">
-        <div class="label">오늘 상한 사용@(Model.DailyLimit > 0 ? $" · {Model.TodayCounted * 100 / Model.DailyLimit}%" : "")</div>
+        <div class="label">오늘 토큰 상한@(Model.DailyLimit > 0 ? $" · {Model.TodayCounted * 100 / Model.DailyLimit}%" : "")</div>
         <div class="value @(Model.DailyLimit > 0 && Model.TodayCounted >= Model.DailyLimit ? "err" : "")">@Model.TodayCounted.ToString("N0")@(Model.DailyLimit > 0 ? $" / {Model.DailyLimit:N0}" : "")</div>
     </div>
     <div class="panel stat"><div class="label">호출</div><div class="value">@Model.Calls.Count.ToString("N0")</div></div>

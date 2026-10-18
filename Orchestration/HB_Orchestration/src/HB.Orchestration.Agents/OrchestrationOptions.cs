@@ -148,6 +148,19 @@ public sealed class ModelPrice
     public decimal? CachedInputPerMillion { get; set; }
 
     public decimal OutputPerMillion { get; set; }
+
+    /// <summary>
+    /// 한 기록의 USD 비용. 입력 토큰에는 캐시된 토큰이 포함되어 있으므로
+    /// (입력 - 캐시) × 입력 단가 + 캐시 × 캐시 단가 + 출력 × 출력 단가.
+    /// </summary>
+    public decimal CostOf(CallRecord r)
+    {
+        var input = r.InputTokens ?? 0;
+        var cached = Math.Clamp(r.CachedInputTokens ?? 0, 0, input);
+        return (input - cached) / 1_000_000m * InputPerMillion
+             + cached / 1_000_000m * (CachedInputPerMillion ?? InputPerMillion)
+             + (r.OutputTokens ?? 0) / 1_000_000m * OutputPerMillion;
+    }
 }
 
 /// <summary>run_mode의 context(서버가 읽어 붙이는 코드 범위) 제한.</summary>
@@ -251,6 +264,12 @@ public sealed class BudgetOptions
     public long DailyTokenLimit { get; set; }
 
     /// <summary>
+    /// 하루(로컬 날짜 기준) 비용 상한 (USD, Pricing 단가로 계산). 0이면 끔. 토큰 상한과 함께 쓰면 먼저 닿는 쪽에서 거절한다.
+    /// 켜져 있으면 단가가 없는 모델은 실행하지 않는다 (FreeProviders 제외) — 비용이 집계에서 새지 않게.
+    /// </summary>
+    public decimal DailyCostLimitUsd { get; set; }
+
+    /// <summary>
     /// run_mode 입력 최대 글자 수 (input + context로 붙인 코드 합계). 넘으면 실행하지 않고 줄여달라고 돌려준다.
     /// 모드별로 덮어쓸 수 있음. Debate는 토론자가 매 턴 요청 전체를 다시 받으므로 실제 비용은 턴 수만큼 곱해진다.
     /// </summary>
@@ -263,11 +282,15 @@ public sealed class BudgetOptions
     public List<string> FreeProviders { get; set; } = ["local"];
 
     /// <summary>상한에 세는 토큰 (입력+출력, FreeProviders 제외). 기간은 호출하는 쪽이 고른다. 서버 검사와 대시보드가 같은 식을 쓴다.</summary>
-    public long CountedTokens(IEnumerable<CallRecord> calls)
-    {
-        var free = new HashSet<string>(FreeProviders, StringComparer.OrdinalIgnoreCase);
-        return calls
-            .Where(c => c.Provider is null || !free.Contains(c.Provider))
-            .Sum(c => (c.InputTokens ?? 0) + (c.OutputTokens ?? 0));
-    }
+    public long CountedTokens(IEnumerable<CallRecord> calls) =>
+        Counted(calls).Sum(c => (c.InputTokens ?? 0) + (c.OutputTokens ?? 0));
+
+    /// <summary>상한에 세는 비용 (USD, FreeProviders 제외). 단가가 없는 모델의 기록은 0으로 센다 (상한이 켜져 있으면 애초에 실행되지 않는다).</summary>
+    public decimal CountedCost(IEnumerable<CallRecord> calls, PricingOptions pricing) =>
+        Counted(calls).Sum(c => pricing.Models.TryGetValue(c.Model, out var p) ? p.CostOf(c) : 0m);
+
+    public bool IsFree(string? provider) =>
+        provider is not null && FreeProviders.Contains(provider, StringComparer.OrdinalIgnoreCase);
+
+    private IEnumerable<CallRecord> Counted(IEnumerable<CallRecord> calls) => calls.Where(c => !IsFree(c.Provider));
 }

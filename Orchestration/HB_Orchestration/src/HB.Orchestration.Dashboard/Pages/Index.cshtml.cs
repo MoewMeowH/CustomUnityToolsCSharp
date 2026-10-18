@@ -46,6 +46,12 @@ public sealed class IndexModel(IOptions<DashboardOptions> options, PricingServic
     /// <summary>MCP 서버의 일일 상한. 0이면 끔.</summary>
     public long DailyLimit { get; private set; }
 
+    /// <summary>오늘 비용 상한에 세는 비용 (USD). 서버와 같이 MCP appsettings의 단가만 쓴다 (대시보드 예전 단가 보완 없음).</summary>
+    public decimal TodayCost { get; private set; }
+
+    /// <summary>MCP 서버의 일일 비용 상한 (USD). 0이면 끔.</summary>
+    public decimal DailyCostLimit { get; private set; }
+
     /// <summary>RunId·Step별 시도 수. 2 이상이면 그 단계에 재시도가 있었다 (시도마다 기록이 한 줄씩 남는다).</summary>
     private Dictionary<(string RunId, int Step), int> _attempts = [];
 
@@ -68,8 +74,11 @@ public sealed class IndexModel(IOptions<DashboardOptions> options, PricingServic
 
         var budget = pricing.Budget;
         var today = new DateTimeOffset(DateTime.Today);
-        TodayCounted = budget.CountedTokens(all.Where(c => c.Timestamp >= today));
+        var todayCalls = all.Where(c => c.Timestamp >= today).ToList();
+        TodayCounted = budget.CountedTokens(todayCalls);
         DailyLimit = budget.DailyTokenLimit;
+        TodayCost = budget.CountedCost(todayCalls, pricing.Current);
+        DailyCostLimit = budget.DailyCostLimitUsd;
 
         var since = DateTimeOffset.Now.AddDays(-Days);
         Calls = all

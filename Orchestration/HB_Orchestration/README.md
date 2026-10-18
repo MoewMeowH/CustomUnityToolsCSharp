@@ -92,6 +92,7 @@ dotnet build HB_Orchestration.slnx
 | `Agents[].MaxAttempts` | 한 단계의 최대 시도 횟수 (첫 시도 포함, 1~5). **에이전트 → 제공사 → 2**(= 최대 1회 재시도) 순. 아래 "재시도" 참고 |
 | `Agents[].Enabled` | `false`면 끔 (생략 = 켬) |
 | `Budget.DailyTokenLimit` | 하루 입력+출력 토큰 상한 (0 = 끔). `FreeProviders`는 집계 제외 |
+| `Budget.DailyCostLimitUsd` | 하루 비용 상한 USD (0 = 끔). `Pricing.Models` 단가로 계산(캐시 단가 반영), `FreeProviders` 제외. 토큰 상한과 함께 쓰면 먼저 닿는 쪽에서 거절. **켜져 있으면 단가 없는 모델은 실행 거절** |
 | `Budget.MaxInputChars` | `run_mode` 입력 최대 글자 수 (input + `context` 첨부 합계, 기본 350,000). Debate는 토론자가 매 턴 요청 전체를 받으므로 비용이 턴 수만큼 곱해짐 |
 | `Context.MaxRanges` | `context` 범위 개수 상한 (기본 30) |
 | `Context.MaxFileBytes` | 읽기 전에 확인하는 파일 크기 상한 (기본 2,000,000바이트) |
@@ -309,7 +310,7 @@ calls.jsonl의 응답 원문을 그대로 저장한다. Claude가 응답을 다�
 | 고정 시스템 프롬프트 앞부분 | 서버 | 역할+규칙+지침이 매번 같아 제공사 프롬프트 캐시 적중 |
 | `UseGuidelines: false` | modes.json | 코드와 무관한 역할에 지침을 안 붙임 |
 | `MaxOutputTokens` | appsettings | 응답 폭주 방지 |
-| `Budget.DailyTokenLimit` | appsettings | 하루 상한 도달 시 실행 거부 (로컬 제외) |
+| `Budget.DailyTokenLimit` · `Budget.DailyCostLimitUsd` | appsettings | 하루 토큰·비용 상한 도달 시 실행 거부 (로컬 제외). 실행 전에만 검사하므로 실행 중에 넘을 수 있음 |
 | `MaxRounds` · `HistoryWindow` · `[합의]` 조기 종료 | modes.json | 다회차 토론의 누적 비용 제한 |
 | `MaxRunsPerSession` | modes.json | 리뷰→수정→재리뷰, 추가 조사 반복 같은 루프를 세션 단위로 차단. 기본값은 `Budget.DefaultMaxRunsPerSession` |
 | `files`는 에이전트에 안 보냄 | 서버 | 경로 목록은 기록·링크 전용 |
@@ -375,7 +376,7 @@ unity skill install --help
 
 **호출 기록** (`/`)
 - 기간 · 모드 · 제공사 필터, 호출 수 · 토큰 · 평균 응답 · 예상 비용 · 실패, 일별 토큰
-- **오늘 상한 사용** 칸: 오늘 0시부터 입력+출력, `FreeProviders` 제외 / `Budget.DailyTokenLimit` (서버 검사와 같은 식, 필터와 무관). 기간 필터의 "최근 24시간"은 어제 호출도 들어가므로 이 값과 다르다
+- **오늘 비용 상한** · **오늘 토큰 상한** 칸: 오늘 0시부터, `FreeProviders` 제외 / `Budget.DailyCostLimitUsd` · `Budget.DailyTokenLimit` (서버 검사와 같은 식, 필터와 무관. 비용은 MCP appsettings 단가만 사용). 기간 필터의 "최근 24시간"은 어제 호출도 들어가므로 이 값과 다르다
 - 캐시: `캐시 0`은 미적중, `캐시 정보 없음`은 제공사가 값을 주지 않은 기록(Gemini는 미적중일 때 값이 없음, 예전 기록)
 - 상세: 요청/응답, **같은 실행의 다른 단계와 실행 전체 토큰 합계**, 관련 파일 → Rider로 열기
 - 상세 위쪽에 **지휘자 판단과 에이전트 응답을 나란히**: `reason` · `ownReview`(결과를 보기 전 자체 검토) · 응답. 5장 이전 기록은 "기록 없음", ownReview가 필수가 아닌 모드에서 넣지 않았으면 "넣지 않음"
