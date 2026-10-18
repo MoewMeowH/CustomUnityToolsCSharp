@@ -28,6 +28,9 @@ public sealed class IndexModel(IOptions<DashboardOptions> options, PricingServic
 
     public long TotalIn => Calls.Sum(c => c.InputTokens ?? 0);
     public long TotalCached => Calls.Sum(c => c.CachedInputTokens ?? 0);
+
+    /// <summary>입력 토큰은 있는데 캐시 값이 없는 기록 수. 0(미적중)과 다르다: 제공사가 값을 주지 않았거나(Gemini 미적중 등) 예전 기록.</summary>
+    public int CacheUnknown => Calls.Count(c => c.InputTokens is not null && c.CachedInputTokens is null);
     public long TotalOut => Calls.Sum(c => c.OutputTokens ?? 0);
     public int Failures => Calls.Count(c => !c.Success);
     public double AvgSeconds => Calls.Count == 0 ? 0 : Calls.Average(c => c.ElapsedMs) / 1000.0;
