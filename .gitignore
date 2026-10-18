@@ -20,3 +20,6 @@ Orchestration/Publish_Output/
 
 # Orchestration 작업 기록 (계획서 · 작업 로그, 로컬에만 둠)
 Orchestration/HB_Orchestration/docs/
+
+# Orchestration 리뷰 임시폴더
+review_tmp/
