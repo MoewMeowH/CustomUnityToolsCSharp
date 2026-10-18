@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using HB.Orchestration.Shared;
+using HB.Orchestration.Agents.Providers;
 using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 
 namespace HB.Orchestration.Agents;
@@ -29,6 +31,28 @@ public sealed record StepCall(
 {
     /// <summary>응답 검사기 설정. 실행 시점의 appsettings 값을 넘긴다.</summary>
     public ResponseChecksOptions Checks { get; init; } = new();
+
+    /// <summary>Prompt의 앞부분 중 첨부 자료 (Prompt가 이 문자열로 시작한다). 첨부가 없거나 이 단계에 입력을 안 보내면 null.</summary>
+    public string? ContextPrefix { get; init; }
+
+    /// <summary>
+    /// 이 호출의 프롬프트 캐시 방식. 제공사 설정을 따르되, Context인데 첨부가 짧으면 Off
+    /// (저장 지점은 최소 길이 1,024토큰에 못 미치면 쓰이지 않으므로 블록을 나눌 이유가 없다).
+    /// </summary>
+    public PromptCacheMode CacheMode
+    {
+        get
+        {
+            var mode = Agent.ProviderOptions?.PromptCache ?? PromptCacheMode.ProviderDefault;
+            if (mode != PromptCacheMode.Context) return mode;
+            // 블록을 Prompt[ContextPrefix.Length..]로 자르므로 앞부분이 실제로 일치할 때만 나눈다.
+            var usable = ContextPrefix is { Length: >= MinContextCacheChars } prefix && Prompt.StartsWith(prefix, StringComparison.Ordinal);
+            return usable ? PromptCacheMode.Context : PromptCacheMode.Off;
+        }
+    }
+
+    /// <summary>저장 지점을 둘 최소 첨부 길이(문자). 1,024토큰을 코드·한국어 혼합 기준으로 넉넉히 어림한 값.</summary>
+    public const int MinContextCacheChars = 3_000;
 }
 
 /// <summary>한 단계의 결과. Text(응답 또는 '['로 시작하는 실패 문구)만 다음 단계에 넘어간다.</summary>
@@ -151,7 +175,13 @@ public sealed class AgentRunner
             AIAgent agent = new ChatClientAgent(call.Agent.Client, instructions: call.Instructions, name: call.Agent.Name);
 
             // 호출마다 새 스레드: 이전 대화가 섞이지 않는다 (= 쓸데없는 히스토리 토큰 없음).
-            var response = await agent.RunAsync(call.Prompt, cancellationToken: ct);
+            // Context면 첨부 자료와 나머지를 text 블록 둘로 나눠 보낸다. 정책이 첫 블록 끝에 저장 지점을 단다.
+            var cacheMode = call.CacheMode;
+            using var cacheScope = PromptCacheScope.Enter(cacheMode);
+            var response = cacheMode == PromptCacheMode.Context
+                ? await agent.RunAsync(new ChatMessage(ChatRole.User,
+                    [new TextContent(call.ContextPrefix), new TextContent(call.Prompt[call.ContextPrefix!.Length..])]), cancellationToken: ct)
+                : await agent.RunAsync(call.Prompt, cancellationToken: ct);
             var text = response.Text;
             var inTokens = response.Usage?.InputTokenCount;
             var outTokens = response.Usage?.OutputTokenCount;

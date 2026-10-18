@@ -43,6 +43,10 @@ public sealed class OpenAICompatibleProvider : IChatClientProvider
         // 다시 보내기 때문이다. 재시도는 AgentRunner가 오류 종류를 보고 직접 하고 시도마다 기록한다.
         clientOptions.RetryPolicy = new ClientRetryPolicy(maxRetries: 0);
 
+        // 캐시 지시는 호출마다 다르므로 정책은 붙여 두고, 실제 방식은 AgentRunner가 놓는 PromptCacheScope로 정한다.
+        if (options.PromptCache != PromptCacheMode.ProviderDefault)
+            clientOptions.AddPolicy(new PromptCachePolicy(), PipelinePosition.PerCall);
+
         return new OpenAIClient(new ApiKeyCredential(apiKey), clientOptions)
             .GetChatClient(agent.Model)
             .AsIChatClient();

@@ -17,7 +17,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     /// 이번 실행에서만 에이전트를 바꾼다. "원래이름=새이름" 또는 "*=새이름"(모든 단계).
     /// modes.json은 그대로 두고, 같은 모드를 다른 모델로 한 번 돌려볼 때 쓴다.
     /// </param>
-    /// <param name="context">서버가 디스크에서 읽어 input 뒤에 붙일 코드 범위. Claude가 코드를 input에 다시 쓰지 않게 한다.</param>
+    /// <param name="context">서버가 디스크에서 읽어 프롬프트 맨 앞(input 앞)에 둘 코드 범위. Claude가 코드를 input에 다시 쓰지 않게 한다.</param>
     /// <param name="reason">지휘자가 이 모드를 부른 이유 (필수). 기록에만 남고 에이전트에게는 보내지 않는다.</param>
     /// <param name="ownReview">결과를 보기 전의 자체 검토 (RequireOwnReview 모드에서 필수). 기록에만 남는다.</param>
     public async Task<string> RunAsync(
@@ -56,7 +56,8 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             return $"[입력이 너무 깁니다] input {input.Length:N0}자 + 첨부 코드 {attached.Text.Length:N0}자 / 상한 {maxChars:N0}자. " +
                    "context 범위를 줄여 다시 호출하세요.";
 
-        input += attached!.Text;
+        // 첨부 자료는 input과 따로 들고 다니다가 프롬프트 맨 앞에 둔다 (같은 자료로 다시 물을 때 앞부분이 같아야 캐시에 걸린다).
+        var promptInput = new PromptInput(input, attached!.Text);
         var meta = new CallMeta(files, attached.Sources)
         {
             ContextRoots = attached.Roots,
@@ -126,13 +127,13 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         switch (mode.Flow)
         {
             case ModeFlow.Concurrent:
-                results = await RunConcurrentAsync(runId, modeName, plan, input, meta, ct);
+                results = await RunConcurrentAsync(runId, modeName, plan, promptInput, meta, ct);
                 break;
             case ModeFlow.Debate:
-                (results, note) = await RunDebateAsync(runId, modeName, mode, plan, input, meta, ct);
+                (results, note) = await RunDebateAsync(runId, modeName, mode, plan, promptInput, meta, ct);
                 break;
             default:
-                results = await RunSequentialAsync(runId, modeName, plan, input, meta, ct);
+                results = await RunSequentialAsync(runId, modeName, plan, promptInput, meta, ct);
                 if (results.Count < plan.Count)
                     note = $"(단계 {results.Count}에서 실패해 이후 {plan.Count - results.Count}단계는 실행하지 않음)";
                 break;
@@ -181,16 +182,23 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     private sealed record PlannedStep(StepDefinition Def, AgentEntry Agent, string Instructions, GuidelinesProvenance Guidelines);
 
     /// <summary>단계 호출. 실행 단위 Provenance에 이 단계의 지침 표시를 얹는다 (Instructions 해시는 AgentRunner가 보낼 문자열로 계산).</summary>
-    private StepCall NewCall(string runId, string mode, int step, PlannedStep p, string instructions, string prompt, CallMeta meta) =>
-        new(runId, mode, step, p.Def.Role, p.Agent, instructions, prompt,
+    private StepCall NewCall(string runId, string mode, int step, PlannedStep p, string instructions, BuiltPrompt prompt, CallMeta meta) =>
+        new(runId, mode, step, p.Def.Role, p.Agent, instructions, prompt.Text,
             meta with { Provenance = (meta.Provenance ?? new CallProvenance()) with { Guidelines = p.Guidelines } })
         {
             Checks = Options.ResponseChecks,
+            ContextPrefix = prompt.ContextPrefix,
         };
+
+    /// <summary>사용자 input과 서버가 읽은 첨부 자료. 프롬프트에서는 첨부가 먼저 온다.</summary>
+    private sealed record PromptInput(string Request, string Context);
+
+    /// <summary>보낼 프롬프트. ContextPrefix는 Text의 앞부분(첨부 자료)이고 없으면 null.</summary>
+    private sealed record BuiltPrompt(string Text, string? ContextPrefix);
 
     private async Task<List<StepResult>> RunSequentialAsync(
         string runId, string mode, List<PlannedStep> plan,
-        string input, CallMeta meta, CancellationToken ct)
+        PromptInput input, CallMeta meta, CancellationToken ct)
     {
         var results = new List<StepResult>();
         for (var i = 0; i < plan.Count; i++)
@@ -209,7 +217,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
 
     private async Task<List<StepResult>> RunConcurrentAsync(
         string runId, string mode, List<PlannedStep> plan,
-        string input, CallMeta meta, CancellationToken ct)
+        PromptInput input, CallMeta meta, CancellationToken ct)
     {
         var prompt = BuildPrompt(input, [], StepSees.Input);
         var tasks = plan.Select((p, i) => runner.RunStepAsync(NewCall(runId, mode, i + 1, p, p.Instructions, prompt, meta), ct));
@@ -219,7 +227,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     private async Task<(List<StepResult> Results, string? Note)> RunDebateAsync(
         string runId, string mode, ModeDefinition def,
         List<PlannedStep> plan,
-        string input, CallMeta meta, CancellationToken ct)
+        PromptInput input, CallMeta meta, CancellationToken ct)
     {
         var rounds = Math.Clamp(def.MaxRounds ?? 2, 1, ModeDefinition.MaxRoundsHardCap);
         var window = Math.Max(1, def.HistoryWindow);
@@ -264,10 +272,11 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     }
 
     /// <summary>round=0이면 판정자용 (회차 안내 없음).</summary>
-    private static string BuildDebatePrompt(string input, IEnumerable<StepResult> history, int round, int rounds)
+    private static BuiltPrompt BuildDebatePrompt(PromptInput input, IEnumerable<StepResult> history, int round, int rounds)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("## 요청").AppendLine(input).AppendLine();
+        var prefix = AppendContext(sb, input);
+        sb.AppendLine("## 요청").AppendLine(input.Request).AppendLine();
 
         var list = history.ToList();
         if (list.Count > 0)
@@ -280,10 +289,19 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         if (round > 0)
             sb.AppendLine($"(현재 {round}/{rounds}회차{(round == rounds ? " — 마지막 회차" : "")})");
 
-        return sb.ToString().TrimEnd();
+        return new BuiltPrompt(sb.ToString().TrimEnd(), prefix);
     }
 
-    private static string BuildPrompt(string input, List<StepResult> previous, StepSees sees)
+    /// <summary>첨부 자료가 있으면 맨 앞에 쓰고 그 부분(뒤 빈 줄 포함)을 돌려준다. 뒤에 항상 "## 요청"이 오므로 TrimEnd에 잘리지 않는다.</summary>
+    private static string? AppendContext(StringBuilder sb, PromptInput input)
+    {
+        var context = input.Context.Trim();
+        if (context.Length == 0) return null;
+        sb.AppendLine(context).AppendLine();
+        return sb.ToString();
+    }
+
+    private static BuiltPrompt BuildPrompt(PromptInput input, List<StepResult> previous, StepSees sees)
     {
         var includeInput = sees is StepSees.Input or StepSees.InputAndPrevious or StepSees.All;
         IEnumerable<StepResult> prior = sees switch
@@ -294,7 +312,12 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         };
 
         var sb = new StringBuilder();
-        if (includeInput) sb.AppendLine("## 요청").AppendLine(input).AppendLine();
+        string? prefix = null;
+        if (includeInput)
+        {
+            prefix = AppendContext(sb, input);
+            sb.AppendLine("## 요청").AppendLine(input.Request).AppendLine();
+        }
 
         var priorList = prior.ToList();
         if (priorList.Count > 0)
@@ -304,7 +327,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
                 sb.AppendLine($"### {r.Step}. {r.Role}").AppendLine(r.Text).AppendLine();
         }
 
-        return sb.ToString().TrimEnd();
+        return new BuiltPrompt(sb.ToString().TrimEnd(), prefix);
     }
 
     /// <summary>"from=to" 목록을 검증된 사전으로. 오류면 메시지 (실행 전이라 토큰 0).</summary>

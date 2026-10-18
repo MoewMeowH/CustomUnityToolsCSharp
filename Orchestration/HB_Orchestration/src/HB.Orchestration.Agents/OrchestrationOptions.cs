@@ -239,6 +239,24 @@ public sealed class ProviderOptions
     /// <summary>한 단계의 최대 시도 횟수 (첫 시도 포함). 에이전트에 값이 없을 때 쓴다. 비우면 2.</summary>
     public int? MaxAttempts { get; set; }
 
+    /// <summary>
+    /// 프롬프트 캐시 방식. OpenAI Chat Completions 요청 본문에만 적용한다 (다른 제공사는 모르는 필드에 오류를 낼 수 있음).
+    /// 비우면 ProviderDefault = 손대지 않음.
+    /// </summary>
+    public PromptCacheMode PromptCache { get; set; } = PromptCacheMode.ProviderDefault;
+}
+
+/// <summary>프롬프트 캐시 방식. 호출 단위로 정해져 HTTP 정책(PromptCachePolicy)이 요청 본문에 반영한다.</summary>
+public enum PromptCacheMode
+{
+    /// <summary>제공사 기본 동작 (OpenAI: 입력 전부를 캐시에 쓰고 1.25배 청구).</summary>
+    ProviderDefault,
+
+    /// <summary>캐시 쓰기 안 함 (explicit 모드, 저장 지점 없음). 읽기 할인도 없다.</summary>
+    Off,
+
+    /// <summary>첨부 자료 끝에만 저장 지점 (explicit 모드). 같은 자료로 30분 안에 다시 물으면 자료 부분을 읽기로 처리.</summary>
+    Context,
 }
 
 public sealed class AgentOptions

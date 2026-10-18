@@ -84,6 +84,7 @@ dotnet build HB_Orchestration.slnx
 | `Providers.<이름>.ApiKeyEnv` | API 키를 담은 **환경 변수 이름**. 로컬처럼 키가 필요 없으면 생략 |
 | `Providers.<이름>.TimeoutSeconds` | 요청 하나의 네트워크 타임아웃(초). 에이전트에 값이 없을 때 적용 (생략 = SDK 기본 100초) |
 | `Providers.<이름>.MaxAttempts` | 한 단계의 최대 시도 횟수 (첫 시도 포함). 에이전트에 값이 없을 때 적용 (생략 = 2) |
+| `Providers.<이름>.PromptCache` | 프롬프트 캐시 방식 (OpenAI Chat Completions 전용). `ProviderDefault`(생략, 손대지 않음 — OpenAI는 입력 전부를 캐시에 쓰고 쓰기분을 입력의 1.25배로 청구) · `Off`(쓰기 안 함, 읽기 할인도 없음) · `Context`(첨부 자료가 약 3,000자 이상이면 그 끝에만 저장 지점, 짧으면 `Off`). 캐시는 30분 보관 — 같은 첨부로 30분 안에 다시 물으면 첨부 부분이 0.05배(sol)로 읽히고, 30분이 지나 다시 쓰면 그 1회는 1.25배. 다른 제공사에는 넣지 말 것 (모르는 필드 오류 가능) |
 | `Agents[].Name` | 에이전트 이름 (영문·숫자·`_`·`-`, 64자 이내). modes.json의 `Agent`가 이 이름을 가리킨다 |
 | `Agents[].Provider` | 위 `Providers`의 이름 |
 | `Agents[].Model` | 제공사의 모델 ID |
