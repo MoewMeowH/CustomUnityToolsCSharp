@@ -155,7 +155,10 @@ public sealed class AgentRunner
             var text = response.Text;
             var inTokens = response.Usage?.InputTokenCount;
             var outTokens = response.Usage?.OutputTokenCount;
-            var cachedTokens = response.Usage?.CachedInputTokenCount;
+            var usageRaw = UsageExtractor.RawUsageJson(response);
+            var cachedTokens = response.Usage?.CachedInputTokenCount ?? UsageExtractor.CachedTokens(usageRaw);
+            var cacheWriteTokens = UsageExtractor.CacheWriteTokens(usageRaw);
+            var reasoningTokens = response.Usage?.ReasoningTokenCount;
 
             // 빈 응답은 실패다 (다시 보내도 같으므로 재시도하지 않는다).
             if (ResponseChecker.EmptyFailure(text, response.FinishReason, outTokens, call.Agent.Options) is { } emptyFailure)
@@ -167,7 +170,10 @@ public sealed class AgentRunner
                 {
                     InputTokens = inTokens,
                     CachedInputTokens = cachedTokens,
+                    CacheWriteTokens = cacheWriteTokens,
                     OutputTokens = outTokens,
+                    ReasoningTokens = reasoningTokens,
+                    UsageRaw = usageRaw,
                     ElapsedMs = sw.ElapsedMilliseconds,
                     Success = false,
                     Error = text,
@@ -183,7 +189,10 @@ public sealed class AgentRunner
                 Response = text,
                 InputTokens = inTokens,
                 CachedInputTokens = cachedTokens,
+                CacheWriteTokens = cacheWriteTokens,
                 OutputTokens = outTokens,
+                ReasoningTokens = reasoningTokens,
+                UsageRaw = usageRaw,
                 ElapsedMs = sw.ElapsedMilliseconds,
                 Success = true,
                 Warnings = warnings,

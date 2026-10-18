@@ -147,18 +147,27 @@ public sealed class ModelPrice
     /// <summary>프롬프트 캐시에 걸린 입력 토큰 단가. 비우면 InputPerMillion과 같다고 본다.</summary>
     public decimal? CachedInputPerMillion { get; set; }
 
+    /// <summary>
+    /// 프롬프트 캐시에 새로 쓴 입력 토큰 단가. 비우면 InputPerMillion과 같다고 본다.
+    /// OpenAI GPT-5.6 이후는 입력 단가의 1.25배 (2026-10-17 UTC 하루 청구액으로 확인).
+    /// </summary>
+    public decimal? CacheWritePerMillion { get; set; }
+
     public decimal OutputPerMillion { get; set; }
 
     /// <summary>
-    /// 한 기록의 USD 비용. 입력 토큰에는 캐시된 토큰이 포함되어 있으므로
-    /// (입력 - 캐시) × 입력 단가 + 캐시 × 캐시 단가 + 출력 × 출력 단가.
+    /// 한 기록의 USD 비용. 입력 토큰에는 캐시 읽기·쓰기 토큰이 포함되어 있으므로
+    /// (입력 - 읽기 - 쓰기) × 입력 단가 + 읽기 × 캐시 단가 + 쓰기 × 캐시 쓰기 단가 + 출력 × 출력 단가.
+    /// 쓰기 토큰을 기록하기 전의 호출(CacheWriteTokens null)은 쓰기 0으로 계산한다.
     /// </summary>
     public decimal CostOf(CallRecord r)
     {
         var input = r.InputTokens ?? 0;
         var cached = Math.Clamp(r.CachedInputTokens ?? 0, 0, input);
-        return (input - cached) / 1_000_000m * InputPerMillion
+        var written = Math.Clamp(r.CacheWriteTokens ?? 0, 0, input - cached);
+        return (input - cached - written) / 1_000_000m * InputPerMillion
              + cached / 1_000_000m * (CachedInputPerMillion ?? InputPerMillion)
+             + written / 1_000_000m * (CacheWritePerMillion ?? InputPerMillion)
              + (r.OutputTokens ?? 0) / 1_000_000m * OutputPerMillion;
     }
 }
@@ -229,6 +238,7 @@ public sealed class ProviderOptions
 
     /// <summary>한 단계의 최대 시도 횟수 (첫 시도 포함). 에이전트에 값이 없을 때 쓴다. 비우면 2.</summary>
     public int? MaxAttempts { get; set; }
+
 }
 
 public sealed class AgentOptions

@@ -108,7 +108,7 @@ dotnet build HB_Orchestration.slnx
 | `Records.StoreSettingsText` | 서버 설정(`appsettings.json`) 원문도 저장할지 (기본 `false` = 해시와 키 패턴 검사 결과만). `true`여도 키 패턴이 보이면 저장하지 않음 |
 | `WorkOrders.Folder` | `/work-order`가 지시서를 남길 폴더 (프로젝트 루트 기준 상대 경로). 값이 있으면 `list_modes` 끝에 `지시서 폴더: …` 줄이 붙고, 비우면 줄이 없고 명령은 `docs/work-orders/`를 쓴다. 절대 경로·`..`·`@이름`은 `[주의]`로만 표시. **서버는 이 폴더에 쓰지 않는다** (지휘자가 직접 씀) |
 | `Pricing.KrwPerUsd` | 1달러당 원. 비우면 대시보드는 달러만 표시 |
-| `Pricing.Models.<모델 ID>` | `InputPerMillion`, `CachedInputPerMillion`(비우면 입력과 같음), `OutputPerMillion` — USD / 1M 토큰. 키는 에이전트 이름이 아니라 **모델 ID**(기록에 남는 값). 지금 안 쓰는 예전 모델도 남겨 두면 예전 기록의 비용이 계속 계산됨. 서버는 쓰지 않고 대시보드만 읽음 |
+| `Pricing.Models.<모델 ID>` | `InputPerMillion`, `CachedInputPerMillion`(비우면 입력과 같음), `CacheWritePerMillion`(캐시 쓰기, 비우면 입력과 같음 — OpenAI GPT-5.6 이후는 입력의 1.25배, 쓰기 토큰은 호출 기록 `CacheWriteTokens`), `OutputPerMillion` — USD / 1M 토큰. 키는 에이전트 이름이 아니라 **모델 ID**(기록에 남는 값). 지금 안 쓰는 예전 모델도 남겨 두면 예전 기록의 비용이 계속 계산됨. 서버는 쓰지 않고 대시보드만 읽음 |
 
 ### 재시도
 

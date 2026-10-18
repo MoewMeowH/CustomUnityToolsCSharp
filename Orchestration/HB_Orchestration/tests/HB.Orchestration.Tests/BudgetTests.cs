@@ -57,6 +57,25 @@ public sealed class BudgetTests : IDisposable
     }
 
     [Fact]
+    public void CostOf_AppliesCacheWritePrice_AndTreatsMissingWriteAsZero()
+    {
+        var price = new ModelPrice { InputPerMillion = 2, CachedInputPerMillion = 0.1m, CacheWritePerMillion = 2.5m, OutputPerMillion = 10 };
+
+        // 1M 입력 = 읽기 0.2M + 쓰기 0.6M + 일반 0.2M: 0.2×2 + 0.2×0.1 + 0.6×2.5 + 출력 0.1M×10
+        Assert.Equal(0.4m + 0.02m + 1.5m + 1m, price.CostOf(Call("openai", 1_000_000, 100_000, cached: 200_000) with { CacheWriteTokens = 600_000 }));
+
+        // 쓰기 기록 없는 예전 호출은 쓰기 0
+        Assert.Equal(2m + 1m, price.CostOf(Call("openai", 1_000_000, 100_000)));
+
+        // 읽기 + 쓰기가 입력보다 크면 쓰기를 남은 입력까지만 센다
+        Assert.Equal(0.9m * 0.1m + 0.1m * 2.5m, price.CostOf(Call("openai", 1_000_000, 0, cached: 900_000) with { CacheWriteTokens = 500_000 }));
+
+        // 쓰기 단가가 없으면 입력 단가
+        var noWrite = new ModelPrice { InputPerMillion = 2, OutputPerMillion = 10 };
+        Assert.Equal(2m, noWrite.CostOf(Call("openai", 1_000_000, 0) with { CacheWriteTokens = 1_000_000 }));
+    }
+
+    [Fact]
     public async Task CostLimitReached_RejectsBeforeCall()
     {
         _h.Options.Pricing = Prices();

@@ -68,8 +68,8 @@
         <div class="value @(Model.DailyLimit > 0 && Model.TodayCounted >= Model.DailyLimit ? "err" : "")">@Model.TodayCounted.ToString("N0")@(Model.DailyLimit > 0 ? $" / {Model.DailyLimit:N0}" : "")</div>
     </div>
     <div class="panel stat"><div class="label">호출</div><div class="value">@Model.Calls.Count.ToString("N0")</div></div>
-    <div class="panel stat"><div class="label" title="캐시 정보 없음 = 제공사가 캐시 값을 주지 않은 기록 (미적중 0과 다름)">입력 토큰 (캐시 @Model.TotalCached.ToString("N0")@(Model.CacheUnknown > 0 ? $" · 정보 없음 {Model.CacheUnknown}건" : ""))</div><div class="value">@Model.TotalIn.ToString("N0")</div></div>
-    <div class="panel stat"><div class="label">출력 토큰</div><div class="value">@Model.TotalOut.ToString("N0")</div></div>
+    <div class="panel stat"><div class="label" title="캐시 정보 없음 = 제공사가 캐시 값을 주지 않은 기록 (미적중 0과 다름)">입력 토큰 (캐시 @Model.TotalCached.ToString("N0")@(Model.TotalCacheWrite > 0 ? $" · 쓰기 {Model.TotalCacheWrite:N0}" : "")@(Model.CacheUnknown > 0 ? $" · 정보 없음 {Model.CacheUnknown}건" : ""))</div><div class="value">@Model.TotalIn.ToString("N0")</div></div>
+    <div class="panel stat"><div class="label">출력 토큰@(Model.TotalReasoning > 0 ? $" (추론 {Model.TotalReasoning:N0})" : "")</div><div class="value">@Model.TotalOut.ToString("N0")</div></div>
     <div class="panel stat"><div class="label">평균 응답</div><div class="value">@Model.AvgSeconds.ToString("0.0")s</div></div>
     <div class="panel stat"><div class="label">예상 비용@(Model.Pricing.Current.KrwPerUsd is { } rate ? $" · 1$ = ₩{rate:N0}" : "")</div><div class="value">@Model.Pricing.Format(Model.TotalCost, 3)</div></div>
     <div class="panel stat"><div class="label">실패</div><div class="value @(Model.Failures > 0 ? "err" : "")">@Model.Failures</div></div>

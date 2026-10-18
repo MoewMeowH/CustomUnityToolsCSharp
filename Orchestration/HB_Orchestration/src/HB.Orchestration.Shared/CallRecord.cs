@@ -43,7 +43,20 @@ public sealed record CallRecord
     /// <summary>InputTokens 중 제공사 프롬프트 캐시에 걸린 토큰. 제공사가 알려주지 않거나 예전 기록이면 null.</summary>
     public long? CachedInputTokens { get; init; }
 
+    /// <summary>InputTokens 중 제공사 프롬프트 캐시에 새로 쓴 토큰. usage 원문에 없거나 예전 기록이면 null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? CacheWriteTokens { get; init; }
+
     public long? OutputTokens { get; init; }
+
+    /// <summary>OutputTokens 중 추론(생각) 토큰. 제공사가 알려주지 않거나 예전 기록이면 null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? ReasoningTokens { get; init; }
+
+    /// <summary>제공사 usage JSON 원문 (Chat Completions). SDK가 모르는 필드 확인용. 꺼내지 못했거나 예전 기록이면 null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? UsageRaw { get; init; }
+
     public long ElapsedMs { get; init; }
 
     public bool Success { get; init; }
