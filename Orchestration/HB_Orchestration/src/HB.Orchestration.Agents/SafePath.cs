@@ -35,10 +35,33 @@ public static class SafePath
     private static readonly StringComparison PathComparison =
         OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
+    /// <summary>
+    /// Windows 예약 장치 이름(CON·PRN·AUX·NUL·COM0~9·LPT0~9·CONIN$·CONOUT$, 확장자가 붙어도 장치)과 끝이 점·공백인 구성 요소를 거절한다.
+    /// 장치 이름으로 쓰면 파일이 아니라 콘솔·직렬 포트를 연다 (쓰기 모드 실측 2026-10-19). 끝 점·공백은 Windows가 잘라 다른 이름으로 열린다.
+    /// 운영체제와 관계없이 막는다 (같은 경로 규칙을 Unity 프로젝트 쪽과 공유하므로).
+    /// </summary>
+    internal static string? WindowsNameProblem(string raw)
+    {
+        foreach (var part in raw.Split('/', '\\'))
+        {
+            if (part.Length == 0 || part is "." or "..") continue;
+            if (part.EndsWith('.') || part.EndsWith(' ')) return $"경로 구성 요소 '{part}'가 점이나 공백으로 끝납니다 (Windows가 잘라 다른 이름으로 엽니다).";
+            var stem = part.Split('.')[0].TrimEnd(' ').ToUpperInvariant();
+            if (stem is "CON" or "PRN" or "AUX" or "NUL" or "CONIN$" or "CONOUT$"
+                || (stem.Length == 4 && (stem.StartsWith("COM") || stem.StartsWith("LPT")) && (char.IsAsciiDigit(stem[3]) || stem[3] is '¹' or '²' or '³')))
+                return $"'{part}'은(는) Windows 장치 이름이라 쓸 수 없습니다.";
+        }
+        return null;
+    }
+
     private static (string? FullPath, string? Error) Check(string? raw, string rootDir, IEnumerable<string> denyPatterns, Access access)
     {
         if (string.IsNullOrWhiteSpace(raw)) return (null, "경로가 비어 있습니다.");
         if (Path.IsPathRooted(raw)) return (null, "프로젝트 루트 기준 상대 경로만 받습니다.");
+        // 상대 경로에 ':'가 있으면 NTFS 대체 데이터 스트림(".env::$DATA" = 주 스트림)이다. 금지 패턴은 이름 끝을 보므로
+        // 그대로 두면 우회된다 (self-reviewer 시범에서 발견, 실측 확인 2026-10-19).
+        if (raw.Contains(':')) return (null, "경로에 ':'를 쓸 수 없습니다 (대체 데이터 스트림).");
+        if (WindowsNameProblem(raw) is { } nameProblem) return (null, nameProblem);
 
         string root, full;
         try
