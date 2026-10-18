@@ -108,6 +108,15 @@
 
 `unity` CLI로 직접 테스트를 돌릴 수 있다. 명령 형식이 불확실하면 `unity <명령> --help`로 확인한다.
 
+### 배치 테스트 전용 프로젝트
+
+* 배치 테스트(`unity test`)는 사람이 여는 프로젝트가 아니라 **배치 전용 프로젝트** `F:\AI\Unity_AITest\<버전>\ForAI`(6.3 · 7.0)에서 돌린다.
+  * 이유: 사람 확인용 프로젝트를 같이 쓰면 manifest · Define · embedded 패키지가 중간에 바뀌고, 에디터를 닫아 달라는 요청이 필요해진다 (2026-10-17 ToolTest6.3: Sentis가 Define 줄을 바꿔 `USE_HLOG`가 빠진 채 테스트가 두 번 돎).
+  * 이 프로젝트는 사람이 열지 않는다. Test Framework·`com.unity.pipeline`만 있고 Define을 바꾸는 패키지가 없다 (스모크 테스트 `AITest.Smoke.Editor`가 확인).
+  * 테스트할 패키지는 그 프로젝트의 `Packages/manifest.json`에 `file:` 경로로 넣는다. 필요한 Define은 줄 전체를 바꾸지 말고 해당 심볼만 덧붙이거나 뺀다. 끝나면 `git -C F:\AI\Unity_AITest checkout -- .`으로 되돌리고 `git status`가 깨끗한지 본다.
+  * 서버 설정의 추가 루트 이름은 `@unity_ai_test`다.
+* 사람이 직접 확인할 때만 기존 프로젝트(예: ToolTest6.3)를 쓴다.
+
 ### 순서
 
 1. `unity status --format json`으로 이 프로젝트를 연 에디터가 있는지 본다.
