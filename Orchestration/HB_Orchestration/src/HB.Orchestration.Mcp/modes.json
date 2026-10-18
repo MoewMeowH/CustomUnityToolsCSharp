@@ -113,6 +113,7 @@
       "Description": "주장/설계에 반박 후 양쪽 논리 검증",
       "Flow": "Sequential",
       "Return": "All",
+      "MaxInputChars": 100000,
       "Steps": [
         {
           "Role": "Rebuttal",

@@ -92,7 +92,7 @@ dotnet build HB_Orchestration.slnx
 | `Agents[].MaxAttempts` | 한 단계의 최대 시도 횟수 (첫 시도 포함, 1~5). **에이전트 → 제공사 → 2**(= 최대 1회 재시도) 순. 아래 "재시도" 참고 |
 | `Agents[].Enabled` | `false`면 끔 (생략 = 켬) |
 | `Budget.DailyTokenLimit` | 하루 입력+출력 토큰 상한 (0 = 끔). `FreeProviders`는 집계 제외 |
-| `Budget.MaxInputChars` | `run_mode` 입력 최대 글자 수 (input + `context` 첨부 합계, 기본 100,000). Debate는 토론자가 매 턴 요청 전체를 받으므로 비용이 턴 수만큼 곱해짐 |
+| `Budget.MaxInputChars` | `run_mode` 입력 최대 글자 수 (input + `context` 첨부 합계, 기본 350,000). Debate는 토론자가 매 턴 요청 전체를 받으므로 비용이 턴 수만큼 곱해짐 |
 | `Context.MaxRanges` | `context` 범위 개수 상한 (기본 30) |
 | `Context.MaxFileBytes` | 읽기 전에 확인하는 파일 크기 상한 (기본 2,000,000바이트) |
 | `Context.DenyPatterns` | 외부로 보내지 않을 파일 glob **추가분**. 내장 목록(`.env`, `*.pem`, `*.key`, `*.keystore`, `*.jks`, `*.p12`, `*.pfx`, `*.mobileprovision`, `credentials*`, `secrets*`, `.git/**` 등)은 항상 적용 |
@@ -375,6 +375,7 @@ unity skill install --help
 
 **호출 기록** (`/`)
 - 기간 · 모드 · 제공사 필터, 호출 수 · 토큰 · 평균 응답 · 예상 비용 · 실패, 일별 토큰
+- **오늘 상한 사용** 칸: 오늘 0시부터 입력+출력, `FreeProviders` 제외 / `Budget.DailyTokenLimit` (서버 검사와 같은 식, 필터와 무관). 기간 필터의 "최근 24시간"은 어제 호출도 들어가므로 이 값과 다르다
 - 상세: 요청/응답, **같은 실행의 다른 단계와 실행 전체 토큰 합계**, 관련 파일 → Rider로 열기
 - 상세 위쪽에 **지휘자 판단과 에이전트 응답을 나란히**: `reason` · `ownReview`(결과를 보기 전 자체 검토) · 응답. 5장 이전 기록은 "기록 없음", ownReview가 필수가 아닌 모드에서 넣지 않았으면 "넣지 않음"
 - **에이전트가 받은 지침·설정** 표: 시스템 프롬프트 · 리뷰 지침 · modes.json · 서버 설정의 경로 · SHA-256 · 크기. 원문이 `blobs/`에 있으면 "원문" 링크 (그 기록이 가리키는 해시만 열림, 링크 파일은 열지 않음, 서버 설정은 기본 저장 안 함). 단계 목록에 단계별 시스템 프롬프트 해시 앞 8자

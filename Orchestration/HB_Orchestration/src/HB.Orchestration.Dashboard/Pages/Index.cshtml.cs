@@ -34,6 +34,15 @@ public sealed class IndexModel(IOptions<DashboardOptions> options, PricingServic
 
     public decimal? TotalCost => pricing.TotalOf(Calls);
 
+    /// <summary>
+    /// 오늘(로컬 0시부터) 일일 상한에 세는 토큰. 화면 필터와 상관없이 전체 기록에서 서버 검사(ModeRunner.CheckBudget)와 같은 식으로 센다.
+    /// 위 기간 필터의 "최근 24시간"은 지금부터 24시간 전까지라 이 값과 다르다.
+    /// </summary>
+    public long TodayCounted { get; private set; }
+
+    /// <summary>MCP 서버의 일일 상한. 0이면 끔.</summary>
+    public long DailyLimit { get; private set; }
+
     /// <summary>RunId·Step별 시도 수. 2 이상이면 그 단계에 재시도가 있었다 (시도마다 기록이 한 줄씩 남는다).</summary>
     private Dictionary<(string RunId, int Step), int> _attempts = [];
 
@@ -53,6 +62,11 @@ public sealed class IndexModel(IOptions<DashboardOptions> options, PricingServic
         var all = log.All;
         ToolNames = all.Select(c => c.Tool).Distinct().Order().ToList();
         ProviderNames = all.Select(ProviderOf).Distinct().Order().ToList();
+
+        var budget = pricing.Budget;
+        var today = new DateTimeOffset(DateTime.Today);
+        TodayCounted = budget.CountedTokens(all.Where(c => c.Timestamp >= today));
+        DailyLimit = budget.DailyTokenLimit;
 
         var since = DateTimeOffset.Now.AddDays(-Days);
         Calls = all

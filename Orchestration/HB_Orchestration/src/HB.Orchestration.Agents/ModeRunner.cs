@@ -354,10 +354,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         var limit = Options.Budget.DailyTokenLimit;
         if (limit <= 0) return null;
 
-        var free = new HashSet<string>(Options.Budget.FreeProviders, StringComparer.OrdinalIgnoreCase);
-        var used = CallLog.ReadSince(new DateTimeOffset(DateTime.Today))
-            .Where(c => c.Provider is null || !free.Contains(c.Provider))
-            .Sum(c => (c.InputTokens ?? 0) + (c.OutputTokens ?? 0));
+        var used = Options.Budget.CountedTokens(CallLog.ReadSince(new DateTimeOffset(DateTime.Today)));
 
         return used >= limit
             ? $"[오늘 토큰 상한 도달] {used:N0} / {limit:N0}. 외부 에이전트 없이 진행하거나 appsettings.json의 Budget.DailyTokenLimit을 조정하세요."

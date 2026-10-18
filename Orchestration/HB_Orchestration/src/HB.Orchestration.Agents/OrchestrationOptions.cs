@@ -1,3 +1,5 @@
+using HB.Orchestration.Shared;
+
 namespace HB.Orchestration.Agents;
 
 /// <summary>appsettings.json의 "Orchestration" 섹션 — "누가"(제공사·모델)와 안전장치. 서버 시작 시 1회 로드.</summary>
@@ -252,11 +254,20 @@ public sealed class BudgetOptions
     /// run_mode 입력 최대 글자 수 (input + context로 붙인 코드 합계). 넘으면 실행하지 않고 줄여달라고 돌려준다.
     /// 모드별로 덮어쓸 수 있음. Debate는 토론자가 매 턴 요청 전체를 다시 받으므로 실제 비용은 턴 수만큼 곱해진다.
     /// </summary>
-    public int MaxInputChars { get; set; } = 100_000;
+    public int MaxInputChars { get; set; } = 350_000;
 
     /// <summary>MaxRunsPerSession을 정하지 않은 모드의 세션당 실행 한도. 0이면 무제한.</summary>
     public int DefaultMaxRunsPerSession { get; set; } = 5;
 
     /// <summary>예산 집계에서 뺄 제공사 (무료인 로컬 등).</summary>
     public List<string> FreeProviders { get; set; } = ["local"];
+
+    /// <summary>상한에 세는 토큰 (입력+출력, FreeProviders 제외). 기간은 호출하는 쪽이 고른다. 서버 검사와 대시보드가 같은 식을 쓴다.</summary>
+    public long CountedTokens(IEnumerable<CallRecord> calls)
+    {
+        var free = new HashSet<string>(FreeProviders, StringComparer.OrdinalIgnoreCase);
+        return calls
+            .Where(c => c.Provider is null || !free.Contains(c.Provider))
+            .Sum(c => (c.InputTokens ?? 0) + (c.OutputTokens ?? 0));
+    }
 }
