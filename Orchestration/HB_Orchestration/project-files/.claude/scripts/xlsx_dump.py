@@ -164,6 +164,44 @@ def drawing_images(zf: zipfile.ZipFile, drawing_path: str) -> list[tuple[str, st
     return images
 
 
+def stored_cells(ws) -> list:
+    """시트에 실제로 저장된 셀만 (행·열 순). iter_rows()는 전체 칸을 돌아서,
+    빈 서식 행이 엑셀 끝(약 105만 행)까지 있는 시트에서는 수천만 칸을 만들며 수십 분 걸린다."""
+    cells = getattr(ws, "_cells", None)   # openpyxl 내부 dict {(행, 열): 셀}. 없으면 느린 방식으로
+    if cells is None:
+        return [c for row in ws.iter_rows() for c in row]
+    return [cells[key] for key in sorted(cells)]
+
+
+def progress(message: str) -> None:
+    """진행 상황은 stderr로 (stdout Markdown은 그대로). 큰 파일에서 멈춘 건지 느린 건지 구분용."""
+    print(f"[진행] {message}", file=sys.stderr, flush=True)
+
+
+def needs_formula_pass(zf: zipfile.ZipFile) -> bool:
+    """계산 값이 없거나 비어 있는 수식 셀이 있는지 시트 XML을 훑는다.
+    없으면(엑셀에서 저장한 파일은 보통 없음) 수식용으로 두 번째 여는 것을 건너뛴다 — 출력은 같다."""
+    c_tag = f"{{{NS['m']}}}c"
+    row_tag = f"{{{NS['m']}}}row"
+    try:
+        for name in zf.namelist():
+            if not (name.startswith("xl/worksheets/") and name.endswith(".xml")):
+                continue
+            with zf.open(name) as f:
+                for _, el in ET.iterparse(f):
+                    if el.tag == c_tag:
+                        if el.find("m:f", NS) is not None:
+                            v = el.find("m:v", NS)
+                            if v is None or not (v.text or "").strip():
+                                return True
+                        el.clear()
+                    elif el.tag == row_tag:
+                        el.clear()
+    except (KeyError, ET.ParseError):
+        return True   # 판단할 수 없으면 기존처럼 두 번 연다
+    return False
+
+
 def save_media(zf: zipfile.ZipFile, member: str, out_dir: Path, stem: str, saved: dict[str, Path]) -> tuple[Path, bool]:
     data = zf.read(member)
     digest = hashlib.sha256(data).hexdigest()
@@ -183,12 +221,16 @@ def dump_xlsx(path: Path, out_dir: Path, max_rows: int, max_cols: int) -> None:
     except ImportError:
         fail("openpyxl이 없습니다. 'python -m pip install openpyxl'로 설치하거나 csv로 저장해 주세요.")
 
+    progress(f"'{path.name}' 여는 중 ({path.stat().st_size / 1e6:.1f}MB)")
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")   # 도형 미지원 경고 — 도형 글은 아래에서 압축을 직접 읽는다
             wb = openpyxl.load_workbook(path, data_only=True)        # 수식은 마지막으로 계산된 값
-            formulas = openpyxl.load_workbook(path, data_only=False)  # 계산 값이 저장되지 않은 수식 표시용
-        zf = zipfile.ZipFile(path)
+            zf = zipfile.ZipFile(path)
+            formulas = None                                           # 계산 값이 저장되지 않은 수식 표시용
+            if needs_formula_pass(zf):
+                progress("계산 값이 없는 수식이 있어 수식용으로 한 번 더 엽니다")
+                formulas = openpyxl.load_workbook(path, data_only=False)
     except Exception as ex:  # 손상·암호·형식 오류
         fail(f"'{path.name}'을(를) 열 수 없습니다: {type(ex).__name__}: {ex}")
 
@@ -203,7 +245,7 @@ def dump_xlsx(path: Path, out_dir: Path, max_rows: int, max_cols: int) -> None:
     print(f"이미지 폴더: {out_dir.as_posix()}\n")
 
     for ws in wb.worksheets:
-        fs = formulas[ws.title]
+        fs = formulas[ws.title] if formulas is not None else ws   # 수식 로드를 건너뛰면 계산 값 시트로 대신한다
 
         def value_at(r: int, c: int) -> str:
             value = ws.cell(r, c).value
@@ -213,8 +255,11 @@ def dump_xlsx(path: Path, out_dir: Path, max_rows: int, max_cols: int) -> None:
 
         hidden = "" if ws.sheet_state == "visible" else f" ({ws.sheet_state})"
         print(f"## 시트: {ws.title}{hidden}\n")
+        progress(f"시트 '{ws.title}' (범위 {fs.dimensions})")
+        if fs.max_row > 100_000:
+            progress(f"[주의] 시트 '{ws.title}'의 범위가 {fs.max_row:,}행입니다. 빈 서식 행이 많은 것으로 보입니다 (값 있는 셀만 읽음).")
 
-        filled = [(c.row, c.column) for row in fs.iter_rows() for c in row if c.value is not None and str(c.value).strip()]
+        filled = [(c.row, c.column) for c in stored_cells(fs) if c.value is not None and str(c.value).strip()]
         if filled:
             rows = sorted({r for r, _ in filled})
             cols = sorted({c for _, c in filled})
@@ -233,7 +278,7 @@ def dump_xlsx(path: Path, out_dir: Path, max_rows: int, max_cols: int) -> None:
         if merged:
             print(f"\n병합 셀: {', '.join(merged[:50])}" + (" …" if len(merged) > 50 else ""))
 
-        comments = [(c.coordinate, c.comment.text) for row in ws.iter_rows() for c in row if c.comment]
+        comments = [(c.coordinate, c.comment.text) for c in stored_cells(ws) if c.comment]
         if comments:
             print("\n메모:")
             for coord, text in comments:
@@ -280,8 +325,9 @@ def main() -> None:
     parser.add_argument("--max-cols", type=int, default=40)
     args = parser.parse_args()
 
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")   # Windows 콘솔 기본 인코딩(cp949) 회피
+    for stream in (sys.stdout, sys.stderr):   # Windows 콘솔 기본 인코딩(cp949) 회피 — [오류]·[진행]도 UTF-8로
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
 
     path = Path(args.file)
     if not path.is_file():
