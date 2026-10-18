@@ -6,7 +6,7 @@ using Microsoft.Extensions.Options;
 
 namespace HB.Orchestration.Dashboard.Pages;
 
-public sealed class CallModel(IOptions<DashboardOptions> options, PricingService pricing, ClaudeSessionsService sessions, CallLogCache log, ModesConfigService config, RiderProjects rider) : PageModel
+public sealed class CallModel(IOptions<DashboardOptions> options, PricingService pricing, ClaudeSessionsService sessions, CallLogCache log, ModesConfigService config, RiderProjects rider, VerdictLogCache verdicts) : PageModel
 {
     public PricingService Pricing => pricing;
 
@@ -31,6 +31,9 @@ public sealed class CallModel(IOptions<DashboardOptions> options, PricingService
 
     /// <summary>이 기록과 같은 단계(RunId·Step)의 시도 수. 2 이상이면 재시도가 있었다.</summary>
     public int StepAttempts { get; private set; } = 1;
+
+    /// <summary>이 실행에 대한 지휘자의 판정 (record_verdicts). 단계 순서, Claude만 지적은 맨 뒤.</summary>
+    public List<VerdictView> RunVerdicts { get; private set; } = [];
 
     /// <summary>지휘자의 자체 검토(ownReview)를 응답과 같은 방식(원시 HTML 금지)으로 렌더링한 것.</summary>
     public string OwnReviewHtml { get; private set; } = "";
@@ -71,6 +74,7 @@ public sealed class CallModel(IOptions<DashboardOptions> options, PricingService
             RunSteps = all.Where(c => c.RunId == runId).OrderBy(c => c.Step).ThenBy(c => c.Attempt ?? 1).ToList();
             StepAttempts = Math.Max(1, RunSteps.Count(c => c.Step == call.Step));
             Session = FindSession(runId, all);
+            RunVerdicts = VerdictStats.ForRun(verdicts.Latest, RunSteps, runId);
         }
 
         OwnReviewHtml = Markdown.ToHtml(call.OwnReview ?? "", Pipeline);

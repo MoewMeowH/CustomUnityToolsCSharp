@@ -5,7 +5,7 @@ using Microsoft.Extensions.Options;
 
 namespace HB.Orchestration.Dashboard.Pages;
 
-public sealed class IndexModel(IOptions<DashboardOptions> options, PricingService pricing, CallLogCache log) : PageModel
+public sealed class IndexModel(IOptions<DashboardOptions> options, PricingService pricing, CallLogCache log, VerdictLogCache verdicts) : PageModel
 {
     public DashboardOptions Opt => options.Value;
     public PricingService Pricing => pricing;
@@ -69,6 +69,11 @@ public sealed class IndexModel(IOptions<DashboardOptions> options, PricingServic
 
     public bool IsRunHead(CallRecord c) => c.RunId is null || _runHeads.Contains(c.Id);
 
+    private Dictionary<string, int> _verdictCounts = [];
+
+    /// <summary>이 실행의 판정 수 (record_verdicts, 대체된 판정 제외).</summary>
+    public int VerdictCount(string runId) => _verdictCounts.GetValueOrDefault(runId);
+
     public void OnGet()
     {
         var all = log.All;
@@ -96,6 +101,8 @@ public sealed class IndexModel(IOptions<DashboardOptions> options, PricingServic
             .GroupBy(c => c.RunId!)
             .Select(g => g.First().Id)
             .ToHashSet();
+
+        _verdictCounts = verdicts.Latest.GroupBy(v => v.RunId).ToDictionary(g => g.Key, g => g.Count());
 
         _attempts = all
             .Where(c => c.RunId is not null && c.Step is not null)

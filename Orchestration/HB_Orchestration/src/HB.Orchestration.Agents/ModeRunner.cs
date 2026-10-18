@@ -195,6 +195,10 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     public string SaveResult(string runId, int step, string path, int? codeBlock, bool overwrite) =>
         ResultSaver.Save(runId, step, path, codeBlock, overwrite, Options.Context.AllDenyPatterns);
 
+    /// <summary>record_verdicts: 지적마다 판정을 호출 기록 옆 verdicts.jsonl에. reason 상한은 run_mode reason과 같다.</summary>
+    public string RecordVerdicts(string runId, IReadOnlyList<VerdictItem>? items) =>
+        VerdictRecorder.Record(runId, items, Options.Records.MaxReasonChars, runner.LogPath);
+
     /// <summary>실행 계획의 한 단계. Guidelines는 이 단계 역할에 지침을 붙였는지 (기록용).</summary>
     private sealed record PlannedStep(StepDefinition Def, AgentEntry Agent, string Instructions, GuidelinesProvenance Guidelines, PromptCacheMode? PromptCache);
 

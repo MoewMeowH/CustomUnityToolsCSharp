@@ -5,10 +5,11 @@ using ModelContextProtocol.Server;
 namespace HB.Orchestration.Mcp;
 
 /// <summary>
-/// MCP 도구는 list_modes, run_mode, save_result와 확인용 server_info 넷뿐이다. 모드를 추가·수정해도 도구 목록이 바뀌지 않으므로
+/// MCP 도구는 list_modes, run_mode, save_result, record_verdicts와 확인용 server_info 다섯뿐이다. 모드를 추가·수정해도 도구 목록이 바뀌지 않으므로
 /// modes.json만 고치면 재시작 없이 반영되고, Claude 컨텍스트에 올라가는 도구 설명도 최소로 유지된다.
 /// save_result는 설명이 컨텍스트에 늘 올라가는 비용을 감수하고 추가했다: 지휘자가 응답을 다시 출력해 옮겨 적는
 /// 토큰과 옮겨 적기 오류를 없애고, 저장 위치를 기록의 프로젝트 폴더로 고정한다.
+/// record_verdicts도 같은 비용을 감수했다: 지적마다 채택·기각을 남겨야 에이전트·모드의 가치를 데이터로 볼 수 있다 (대시보드 판정 화면).
 /// </summary>
 [McpServerToolType]
 public sealed class ModeTools(ModeRunner modes)
@@ -45,6 +46,13 @@ public sealed class ModeTools(ModeRunner modes)
         [Description("N번째 코드 블록만 저장 (1부터, 선택)")] int? codeBlock = null,
         [Description("이미 있으면 덮어쓰기 (기본 false)")] bool overwrite = false)
         => modes.SaveResult(runId, step, path, codeBlock, overwrite);
+
+    [McpServerTool(Name = "record_verdicts")]
+    [Description("결과 종합 뒤 지적마다 판정(채택·부분 채택·기각·보류·중복)과 근거를 기록한다. Claude만 지적한 것은 steps 없이.")]
+    public string RecordVerdicts(
+        [Description("run_mode 결과 첫 줄의 runId")] string runId,
+        [Description("지적별 판정")] VerdictItem[] items)
+        => modes.RecordVerdicts(runId, items);
 
     [McpServerTool(Name = "server_info")]
     [Description("이 MCP 서버의 빌드 시각·PID·설정 로드 시각을 본다. 사용자가 서버 상태나 publish 반영 여부를 물을 때만 호출.")]

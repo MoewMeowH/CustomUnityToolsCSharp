@@ -43,12 +43,20 @@ public static class CallLog
         await Gate.WaitAsync();
         try
         {
-            // Claude Code 세션이 여러 개면 MCP 서버 프로세스도 여러 개라 잠깐 충돌할 수 있다 → 짧게 재시도
+            // Claude Code 세션이 여러 개면 MCP 서버 프로세스도 여러 개다. FileMode.Append는 열 때 끝으로 옮긴 위치에 쓰므로
+            // 동시에 쓰면 같은 위치를 덮을 수 있다 → 쓰는 동안 다른 쓰기를 막고(FileShare.Read), 막힌 쪽은 공유 위반으로 짧게 재시도 (review 7c780ad3cd).
             for (var attempt = 0; ; attempt++)
             {
                 try
                 {
-                    await using var fs = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+                    await using var fs = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
+                    // 앞 쓰기가 줄 중간에서 끊겼으면 줄을 먼저 끊는다: 안 그러면 이번 기록이 깨진 줄에 붙어 함께 버려진다.
+                    if (fs.Length > 0)
+                    {
+                        fs.Position = fs.Length - 1;
+                        if (fs.ReadByte() != '\n') fs.WriteByte((byte)'\n');
+                    }
+                    fs.Position = fs.Length;
                     await fs.WriteAsync(bytes);
                     return;
                 }

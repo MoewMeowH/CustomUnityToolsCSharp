@@ -118,6 +118,10 @@
                         @if (c.RunId is { } run)
                         {
                             <a class="badge run mono" href="?Run=@run&Days=0" title="실행 @run · 눌러서 이 실행만 보기">@run[..Math.Min(6, run.Length)]</a>
+                            @if (Model.IsRunHead(c) && Model.VerdictCount(run) is var vc and > 0)
+                            {
+                                <span class="badge" title="지휘자 판정 @(vc)건 (record_verdicts)">판정 @vc</span>
+                            }
                         }
                     </td>
                     <td>

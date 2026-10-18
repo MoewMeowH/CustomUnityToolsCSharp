@@ -6,6 +6,7 @@ builder.Services.AddRazorPages();
 builder.Services.Configure<DashboardOptions>(builder.Configuration.GetSection("Dashboard"));
 builder.Services.AddSingleton<ModesConfigService>();
 builder.Services.AddSingleton<CallLogCache>();
+builder.Services.AddSingleton<VerdictLogCache>();
 builder.Services.AddSingleton<RiderProjects>();
 builder.Services.AddSingleton<PricingService>();
 builder.Services.AddSingleton<ClaudeSessionsService>();

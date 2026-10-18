@@ -1,0 +1,32 @@
+@model IReadOnlyList<HB.Orchestration.Dashboard.VerdictRow>
+@inject HB.Orchestration.Dashboard.PricingService Pricing
+
+<div class="table-scroll">
+    <table>
+        <thead>
+        <tr>
+            <th></th><th class="num">지적</th><th class="num">채택</th><th class="num">부분</th><th class="num">기각</th><th class="num">보류</th><th class="num">중복</th>
+            <th class="num">채택률</th><th class="num">에이전트만</th><th class="num">놓침</th><th class="num">비용</th><th class="num">채택 1건당</th>
+        </tr>
+        </thead>
+        <tbody>
+        @foreach (var r in Model)
+        {
+            <tr>
+                <td class="mono">@r.Key</td>
+                <td class="num">@r.Findings</td>
+                <td class="num">@r.Adopted</td>
+                <td class="num">@r.Partial</td>
+                <td class="num">@r.Rejected</td>
+                <td class="num">@r.Deferred</td>
+                <td class="num">@r.Duplicate</td>
+                <td class="num">@HB.Orchestration.Dashboard.Pages.VerdictsModel.Percent(r.Rate)</td>
+                <td class="num">@r.AgentOnlyAdopted</td>
+                <td class="num">@r.Missed</td>
+                <td class="num">@Pricing.Format(r.Cost)</td>
+                <td class="num">@Pricing.Format(r.CostPerAdopted)</td>
+            </tr>
+        }
+        </tbody>
+    </table>
+</div>

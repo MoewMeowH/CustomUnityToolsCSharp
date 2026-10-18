@@ -173,6 +173,32 @@
     </section>
 }
 
+@if (c.RunId is not null)
+{
+    <section class="panel files">
+        <span class="muted" style="font-size:12.5px">지휘자 판정 (record_verdicts) — <a href="/Verdicts">판정 화면</a></span>
+        @if (Model.RunVerdicts.Count == 0)
+        {
+            <p class="none">판정 없음</p>
+        }
+        else
+        {
+            <ul>
+                @foreach (var v in Model.RunVerdicts)
+                {
+                    var r = v.Verdict;
+                    <li>
+                        <strong class="@(r.Verdict switch { "adopted" => "ok", "rejected" => "err", _ => "muted" })">@HB.Orchestration.Shared.Verdicts.Label(r.Verdict)</strong>
+                        <span class="muted">[@(r.IsClaudeOnly ? "Claude만" : string.Join(", ", v.Agents))@(!r.IsClaudeOnly && r.ClaudeAlsoFound ? " +Claude" : "")]</span>
+                        @r.Summary
+                        @if (r.Reason is { } why) { <span class="muted"> — @why</span> }
+                    </li>
+                }
+            </ul>
+        }
+    </section>
+}
+
 @if (Model.ContextLinks.Count > 0)
 {
     <section class="panel files">

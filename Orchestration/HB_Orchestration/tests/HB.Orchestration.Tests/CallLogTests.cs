@@ -80,4 +80,13 @@ public sealed class CallLogTests : IDisposable
         File.WriteAllText(Log, "");
         Assert.Empty(CallLog.ReadSince(DateTimeOffset.MinValue, Log));
     }
+
+    [Fact]
+    public async Task Line_cut_by_interrupted_write_does_not_swallow_next_record()
+    {
+        File.WriteAllText(Log, "{\"id\":\"broken\",\"tool\":");   // 개행 없이 끊긴 줄 (review 7c780ad3cd R5와 같은 경우)
+        await CallLog.AppendAsync(Record("ok", DateTimeOffset.Now), Log);
+
+        Assert.Equal("ok", Assert.Single(CallLog.ReadAll(Log)).Id);
+    }
 }
