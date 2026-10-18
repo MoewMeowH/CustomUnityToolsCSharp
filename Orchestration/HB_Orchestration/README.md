@@ -216,6 +216,7 @@ SDK 자동 재시도(기본 3회, 기록에 안 남음)는 끄고 서버가 직�
 | `Steps` | 배열 | 단계 목록 (아래 표) |
 | `Return` | `Last`(기본) / `All` | Claude에게 돌려줄 범위. Concurrent는 항상 All |
 | `MaxInputChars` | 숫자 | 이 모드의 입력 길이 상한. 없으면 `Budget.MaxInputChars` |
+| `PromptCache` | `Off` / `Context` / 없음 | 이 모드의 프롬프트 캐시 방식. 없으면 제공사 설정(`Providers.<이름>.PromptCache`). 제공사가 정책 없음(`ProviderDefault`)이면 무시. 같은 첨부를 30분 안에 다시 보내지 않는 모드는 `Off`(쓰기 1.25배만 내지 않게). 기본 modes.json은 preflight 단계 5개 · `parallel` · `work_order`가 `Off` |
 | `MaxRunsPerSession` | 숫자 | Claude Code 세션 하나에서 실행할 수 있는 횟수 (0 = 무제한). 없으면 `Budget.DefaultMaxRunsPerSession` |
 | `RequireOwnReview` | `true` / 없음 | `true`면 `run_mode`의 `ownReview`가 필수 (review 계열). 없으면 필수 아님. `list_modes`에 `[ownReview 필수]` 표시. 기본 modes.json은 `review` · `panel` · `work_order` · `preflight_p1` · `preflight_check` · `preflight_perf` · `perf_sol` · `perf_astra` · `perf_argon` |
 | `MaxRounds` (Debate) | 1~5 | 최대 회차. 1회차 = 두 토론자가 한 번씩. 기본 2, 서버 절대 상한 5 |

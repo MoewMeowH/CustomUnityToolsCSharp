@@ -91,7 +91,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
 
             // 시스템 프롬프트 = 역할 + 공통 규칙 (+ 지침). 매번 같은 앞부분이라 제공사 프롬프트 캐시에 걸린다.
             plan.Add(new PlannedStep(step, agent, role.Prompt + Prompts.CommonRules + (role.UseGuidelines ? guidelines.Text : ""),
-                ProvenanceBuilder.ForStep(guidelines, role.UseGuidelines)));
+                ProvenanceBuilder.ForStep(guidelines, role.UseGuidelines), mode.PromptCache));
         }
 
         // 비용 상한은 단계별 모델을 알아야 하므로 에이전트를 정한 뒤에 검사한다.
@@ -179,7 +179,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         ResultSaver.Save(runId, step, path, codeBlock, overwrite, Options.Context.AllDenyPatterns);
 
     /// <summary>실행 계획의 한 단계. Guidelines는 이 단계 역할에 지침을 붙였는지 (기록용).</summary>
-    private sealed record PlannedStep(StepDefinition Def, AgentEntry Agent, string Instructions, GuidelinesProvenance Guidelines);
+    private sealed record PlannedStep(StepDefinition Def, AgentEntry Agent, string Instructions, GuidelinesProvenance Guidelines, PromptCacheMode? PromptCache);
 
     /// <summary>단계 호출. 실행 단위 Provenance에 이 단계의 지침 표시를 얹는다 (Instructions 해시는 AgentRunner가 보낼 문자열로 계산).</summary>
     private StepCall NewCall(string runId, string mode, int step, PlannedStep p, string instructions, BuiltPrompt prompt, CallMeta meta) =>
@@ -188,6 +188,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         {
             Checks = Options.ResponseChecks,
             ContextPrefix = prompt.ContextPrefix,
+            ModePromptCache = p.PromptCache,
         };
 
     /// <summary>사용자 input과 서버가 읽은 첨부 자료. 프롬프트에서는 첨부가 먼저 온다.</summary>

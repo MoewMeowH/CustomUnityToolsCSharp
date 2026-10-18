@@ -214,4 +214,36 @@ public sealed class PromptCacheTests : IDisposable
         var mismatched = Call(new string('x', StepCall.MinContextCacheChars)) with { Prompt = "다른 프롬프트" };
         Assert.Equal(PromptCacheMode.Off, mismatched.CacheMode);
     }
+
+    // ── 모드별 방식 ──────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData(PromptCacheMode.Context, PromptCacheMode.Off, PromptCacheMode.Off)]          // 모드가 제공사를 이김
+    [InlineData(PromptCacheMode.Off, PromptCacheMode.Context, PromptCacheMode.Context)]
+    [InlineData(PromptCacheMode.Context, null, PromptCacheMode.Context)]                     // 모드 값 없으면 제공사
+    [InlineData(PromptCacheMode.Context, PromptCacheMode.ProviderDefault, PromptCacheMode.Context)] // 모드 ProviderDefault = 제공사 따름
+    [InlineData(PromptCacheMode.ProviderDefault, PromptCacheMode.Context, PromptCacheMode.ProviderDefault)] // 정책 없는 제공사는 손대지 않음
+    public void CacheMode_ModeOverridesProvider(PromptCacheMode provider, PromptCacheMode? mode, PromptCacheMode expected)
+    {
+        var agent = new AgentEntry(new AgentOptions { Name = "a", Provider = "p", Model = "m" }, _h.Client)
+        {
+            ProviderOptions = new ProviderOptions { PromptCache = provider },
+        };
+        var prefix = new string('x', StepCall.MinContextCacheChars);
+        var call = new StepCall("r", "m", 1, "R", agent, "i", prefix + "## 요청", new CallMeta(null, [])) { ContextPrefix = prefix, ModePromptCache = mode };
+
+        Assert.Equal(expected, call.CacheMode);
+    }
+
+    [Fact]
+    public async Task ModeOff_LongAttachment_SendsSingleBlock()
+    {
+        File.WriteAllText(_h.ModesPath, ModeRunnerHarness.DefaultModes.Replace("\"seq\":  {", "\"seq\":  { \"PromptCache\": \"Off\","));
+        _h.Options.Providers["fake"].PromptCache = PromptCacheMode.Context;
+
+        await RunWithContext(WriteAttachment(200), 200);
+
+        var user = _h.Client.Received.Single().Messages.Single(m => m.Role == ChatRole.User);
+        Assert.Single(user.Contents.OfType<TextContent>());
+    }
 }

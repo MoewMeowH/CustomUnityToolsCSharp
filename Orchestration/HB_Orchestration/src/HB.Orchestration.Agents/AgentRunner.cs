@@ -35,15 +35,20 @@ public sealed record StepCall(
     /// <summary>Prompt의 앞부분 중 첨부 자료 (Prompt가 이 문자열로 시작한다). 첨부가 없거나 이 단계에 입력을 안 보내면 null.</summary>
     public string? ContextPrefix { get; init; }
 
+    /// <summary>모드 설정(ModeDefinition.PromptCache). 있으면 제공사 설정보다 우선한다.</summary>
+    public PromptCacheMode? ModePromptCache { get; init; }
+
     /// <summary>
-    /// 이 호출의 프롬프트 캐시 방식. 제공사 설정을 따르되, Context인데 첨부가 짧으면 Off
-    /// (저장 지점은 최소 길이 1,024토큰에 못 미치면 쓰이지 않으므로 블록을 나눌 이유가 없다).
+    /// 이 호출의 프롬프트 캐시 방식. 제공사가 ProviderDefault(정책 없음)면 그대로 두고, 아니면 모드 설정 → 제공사 설정.
+    /// Context인데 첨부가 짧으면 Off (저장 지점은 최소 길이 1,024토큰에 못 미치면 쓰이지 않으므로 블록을 나눌 이유가 없다).
     /// </summary>
     public PromptCacheMode CacheMode
     {
         get
         {
-            var mode = Agent.ProviderOptions?.PromptCache ?? PromptCacheMode.ProviderDefault;
+            var provider = Agent.ProviderOptions?.PromptCache ?? PromptCacheMode.ProviderDefault;
+            if (provider == PromptCacheMode.ProviderDefault) return provider;
+            var mode = ModePromptCache is { } m && m != PromptCacheMode.ProviderDefault ? m : provider;
             if (mode != PromptCacheMode.Context) return mode;
             // 블록을 Prompt[ContextPrefix.Length..]로 자르므로 앞부분이 실제로 일치할 때만 나눈다.
             var usable = ContextPrefix is { Length: >= MinContextCacheChars } prefix && Prompt.StartsWith(prefix, StringComparison.Ordinal);

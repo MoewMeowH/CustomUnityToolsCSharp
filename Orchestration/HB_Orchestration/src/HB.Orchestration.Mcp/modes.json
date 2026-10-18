@@ -167,6 +167,7 @@
       ]
     },
     "parallel": {
+      "PromptCache": "Off",
       "MaxRunsPerSession": 2,
       "Description": "같은 작업을 두 모델이 각자 구현 (Claude가 비교 후 적용)",
       "Flow": "Concurrent",
@@ -182,6 +183,7 @@
       ]
     },
     "work_order": {
+      "PromptCache": "Off",
       "RequireOwnReview": true,
       "MaxRunsPerSession": 3,
       "Description": "작업 지시서 초안 검토 (/work-order 전용). input에 요청 원문+첨부 요약+초안",
@@ -199,6 +201,7 @@
       ]
     },
     "preflight_p1": {
+      "PromptCache": "Off",
       "Description": "실행 전 점검 1: A 반박(sol) · B 위험(argon) · 성능(sol) 독립 검토. 다음은 preflight_p2",
       "RequireOwnReview": true,
       "MaxRunsPerSession": 2,
@@ -220,6 +223,7 @@
       ]
     },
     "preflight_p2": {
+      "PromptCache": "Off",
       "Description": "실행 전 점검 2: 상대·성능 지적 판정. context에 요청 + P1 원문 셋. 끝나면 사용자 확정 받기",
       "MaxRunsPerSession": 2,
       "Flow": "Concurrent",
@@ -236,6 +240,7 @@
       ]
     },
     "preflight_p3": {
+      "PromptCache": "Off",
       "Description": "실행 전 점검 3: 확정 사항 반영 최종 수정안. input에 확정 사항, context에 요청·P1·P2 원문",
       "MaxRunsPerSession": 2,
       "Flow": "Concurrent",
@@ -288,6 +293,7 @@
       ]
     },
     "preflight_check": {
+      "PromptCache": "Off",
       "Description": "실행 전 점검 5a: 최종안 전체 재검사(회귀·확정 위반·기각 여부). 요청·확정 사항·최종안만 첨부 (PF1 목록·P1~P3 논의 첨부 금지)",
       "RequireOwnReview": true,
       "MaxRunsPerSession": 2,
@@ -300,6 +306,7 @@
       ]
     },
     "preflight_perf": {
+      "PromptCache": "Off",
       "Description": "실행 전 점검 5b: 최종안 성능만 재검사(sol). 요청·확정 사항·최종안·PF1 목록만 첨부 (P1~P3 논의 첨부 금지)",
       "RequireOwnReview": true,
       "MaxRunsPerSession": 2,

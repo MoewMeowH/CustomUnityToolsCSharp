@@ -52,6 +52,12 @@ public sealed class ModeDefinition
     /// </summary>
     public bool RequireOwnReview { get; set; }
 
+    /// <summary>
+    /// 이 모드의 프롬프트 캐시 방식. 비우면 제공사 설정(Providers.*.PromptCache).
+    /// 제공사가 ProviderDefault(캐시 정책 없음)면 무시한다. 같은 앞부분을 30분 안에 다시 보내지 않는 모드는 Off.
+    /// </summary>
+    public PromptCacheMode? PromptCache { get; set; }
+
     /// <summary>Debate 전용: 최대 회차 (1회차 = 두 토론자가 한 번씩). 기본 2, 서버 상한 MaxRoundsHardCap.</summary>
     public int? MaxRounds { get; set; }
 
