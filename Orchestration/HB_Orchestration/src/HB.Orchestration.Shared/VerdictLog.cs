@@ -41,6 +41,10 @@ public sealed record VerdictRecord
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? File { get; init; }
 
+    /// <summary>구조화 출력의 지적 ID ("1-F2" 등). 주고 기록했으면 대시보드가 지적 원문으로 잇는다. 예전 기록·ID 없이 쓴 판정은 null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? FindingIds { get; init; }
+
     public bool IsClaudeOnly => Steps.Count == 0;
 }
 

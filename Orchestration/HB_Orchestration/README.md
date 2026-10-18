@@ -102,6 +102,7 @@ dotnet build HB_Orchestration.slnx
 | `Images.MaxCount` · `Images.MaxBytes` · `Images.MaxDimension` | `run_mode` `images` 상한: 장수(기본 20), 장당 바이트(기본 2,000,000), 긴 변 px(기본 1024). 서버는 이미지를 줄이지 않고 넘으면 거절한다 (축소는 `image_prep.py shrink`). 이미지는 `MaxInputChars`에 들어가지 않고, 토큰은 실제 사용량으로 일일 한도·비용에 잡힌다 |
 | `Providers.<이름>.ImageDetail` | 이미지 부분에 실을 `detail` 값 (OpenAI: `auto`·`low`·`high`·`original`). 비우면 보내지 않음 (= 제공사 기본값). Gemini OpenAI 호환 엔드포인트는 이 필드를 문서화하지 않아 제공사 단위로 둔다 |
 | `Agents[].Vision` | 이미지 입력을 받는 모델인지 (기본 `true`). `false`인 에이전트가 낀 모드에 `images`가 오면 실행 전에 거절 |
+| `Agents[].StructuredOutput` · `Providers.<이름>.StructuredOutput` | 구조화 출력(역할 `Output`) 요청 방식. **에이전트 → 제공사 → `Prompt`** 순. `Prompt` = 시스템 프롬프트에만 JSON 형식을 적음. `Schema` = 거기에 `response_format: json_schema`(strict)까지 보내 강제. 모델이 미지원이면 400 → 그 단계 실패 (자동으로 `Prompt`로 다시 보내지 않음, 이 값을 `Prompt`로 바꿀 것). 기본 설정은 `openai`만 `Schema` (아래 "구조화 출력") |
 | `Budget.DefaultMaxRunsPerSession` | `MaxRunsPerSession`이 없는 모드의 세션당 실행 한도 |
 | `Budget.FreeProviders` | 비용 집계에서 뺄 제공사 (기본 `local`) |
 | `ResponseChecks.ExpectedLanguage` | 기대하는 응답 언어. 지금은 `ko`만 지원. **키가 없으면 `ko`(검사 켬), `""`이면 끔** (아래 "응답 검사기") |
@@ -208,8 +209,9 @@ SDK 자동 재시도(기본 3회, 기록에 안 남음)는 끄고 서버가 직�
 | `Prompt` | 문자열 | 시스템 프롬프트 본문 |
 | `PromptFile` | 경로 | 프롬프트가 길면 파일로 분리 (modes.json 기준 상대 경로). `Prompt`와 둘 중 하나 |
 | `UseGuidelines` | `true`(기본) / `false` | REVIEW_GUIDELINES.md를 붙일지. 코드와 무관한 역할(탐색·실효성)은 `false`로 입력 토큰 절약 |
+| `Output` | `findings` · `perf_findings` / 생략 | 구조화 출력 형식. 지정하면 서버가 JSON 형식 설명을 시스템 프롬프트에 붙이고 응답을 해석한다. 역할 프롬프트에는 출력 형식을 따로 적지 않는다. 모르는 이름이면 `[모드 설정 오류]`. `WebSearch` 단계와 함께 쓸 수 없다 |
 
-내장 역할 `Reviewer`, `Critic`은 코드에 들어 있고, 같은 이름으로 정의하면 덮어쓴다.
+내장 역할 `Reviewer`, `Critic`은 코드에 들어 있고, 같은 이름으로 정의하면 덮어쓴다. 내장 `Reviewer`는 `Output: findings`다 (modes.json에서 덮어쓰면 그쪽 `Output`을 따른다). `PerfReviewer`는 modes.json에 `Output: perf_findings`로 둔다.
 
 ### 모드 (`Modes.<이름>`)
 | 키 | 값 | 의미 |
@@ -296,9 +298,39 @@ runId: dfa393514b
 <에이전트 응답>
 ```
 - `runId`는 `save_result`에 넘기는 값이다. 대시보드와 calls.jsonl에서도 같은 값으로 찾을 수 있다.
+- 구조화 출력 역할이면 `<에이전트 응답>` 자리에 서버가 그린 지적 목록이 온다 (아래 "구조화 출력").
 - 토큰은 성공한 시도의 값, 시간은 재시도와 대기를 포함한 단계 전체 시간이다.
 - `Return: Last`도 runId와 마지막 단계 제목 줄을 붙인다. 출력에서 빠지는 단계의 재시도·경고는 결과 끝에 `단계 N …`으로 모은다.
 - 실행 전에 거절된 경우(`[모드 설정 오류]`, `[입력이 너무 깁니다]` 등)는 아직 runId가 없으므로 기존처럼 `[`로 시작하는 한 줄이다.
+
+### 구조화 출력 (역할 `Output`)
+review 계열(`Reviewer` · `PerfReviewer`)의 응답을 JSON으로 받아 지적마다 ID를 매긴다. 계획서 `docs/plans/2026-10-19_리뷰-구조화-출력.md`.
+
+- 형식 (코드 내장 `FindingFormat`, 스키마 버전은 기록의 `Structured.Format`에 `findings@1`처럼 남음)
+  - `findings`: `findings[]`(`severity` critical·major·minor·nit, `file`, `line`, `problem`, `detail`, `suggestion`, `confidence` high·medium·low) + `needsInfo[]`
+  - `perf_findings`: 위 + 지적마다 `frequency`·`scaling`·`measurement`, severity는 high·medium·low, 최상위 `specDependent[]`·`fixDirection[]`·`measurePriority[]`
+- 해석 순서: 종료 사유 → JSON(코드 펜스·앞뒤 문장은 첫 `{`~마지막 `}`로 벗김) → 타입·값 검증 → ID. 항목 하나라도 틀리면 응답 전체를 해석 실패로 본다.
+
+| 상태 (`Structured.State`) | 조건 | 지휘자에게 |
+|---|---|---|
+| `complete` | 정상 종료, 검증 통과, 자료 부족 없음 | 그린 목록. 0건이면 `문제 없음` |
+| `needs_info` | 검증 통과, `needsInfo` 있음 | 그린 목록 + 끝줄 `검토 불완전: 자료 부족 n건` (`문제 없음`을 쓰지 않음) |
+| `incomplete` | 출력 상한 잘림·필터 중단인데 JSON은 읽힘 | 그린 목록 + `검토 불완전: … 일부 지적만 있을 수 있음` |
+| `failed` | JSON이 아니거나 검증 실패 | **원문 그대로** + `[경고] 구조화 출력 해석 실패 (사유)`. 단계 실패로 치지 않음 |
+
+```
+- 1-F1 [major] src/A.cs:42 — 문제 / 제안 / 확신도(high)
+  상세: 발생 조건·원인·영향
+  빈도: 매 프레임 · 증가: O(N) · 측정: …     ← perf_findings만
+자료 부족: …
+사양 의존: / 수정 방향: / 측정 우선순위:      ← perf_findings만, 있을 때
+총 1건(critical 0 / major 1 / minor 0 / nit 0)
+```
+- 지적 ID `단계-F순번`은 심각도 → 에이전트가 낸 순서로 매긴다. 기록 시점에 한 번 정하고 다시 해석하지 않는다. runId 안에서만 유일하다.
+- **겹침 후보**: 서로 다른 단계의 지적 중 `file`·`line`이 둘 다 있고 같은 파일, 그룹 첫 줄에서 5줄 이내면 결과 끝에 `겹침 후보: src/A.cs:40-44 — 1-F1, 2-F1` 한 줄. 최대 10줄 (넘으면 `외 n그룹`). 합치지 않는다 — 같은 문제인지는 지휘자가 판단한다.
+- 기록: `Response`는 원문(JSON) 그대로, `Structured`에 해석 결과(상태·지적·ID·요청 방식 `schema`/`prompt`). 언어 이탈 검사는 그린 텍스트에 돌린다.
+- `save_result`는 해석된 기록이면 **그린 텍스트**를 저장한다 (원문 JSON은 대시보드 호출 상세의 "응답 원문"에서 본다).
+- 대시보드 호출 상세: 형식·요청 방식·상태 한 줄, 그린 목록, 접힌 원문.
 
 ### save_result — 응답 원문을 파일로
 `save_result(runId, step, path, codeBlock?, overwrite?)`
@@ -313,11 +345,12 @@ calls.jsonl의 응답 원문을 그대로 저장한다. Claude가 응답을 다�
 - 이 도구로 MCP 도구는 4개가 된다. 도구 설명이 컨텍스트에 늘 올라가므로 설명은 한 문장으로 짧게 두었다.
 
 ### record_verdicts — 지적마다 판정 기록
-`record_verdicts(runId, items[])` — item: `findingKey`, `summary`, `verdict`, `steps?`, `reason?`, `severity?`, `claudeAlsoFound?`, `file?`
+`record_verdicts(runId, items[])` — item: `findingKey`, `summary?`, `verdict`, `steps?`, `reason?`, `severity?`, `claudeAlsoFound?`, `file?`, `findingIds?`
 
 결과를 종합한 뒤 지휘자가 지적마다 판정을 남긴다. 대시보드 **판정** 화면의 원본이다 (규칙은 CLAUDE.md "결과 종합" 5번).
 - `verdict`: `adopted`(채택) · `partial`(부분 채택) · `rejected`(기각) · `deferred`(보류) · `duplicate`(중복). 채택이 아니면 `reason` 필수 (`Records.MaxReasonChars` 이내).
 - `steps`: 그 지적을 낸 단계 번호. 그 실행에 없는 번호는 거절. 비우면 **Claude만 지적**(에이전트가 놓친 것)으로 기록하고 `claudeAlsoFound`는 true가 된다.
+- `findingIds`(구조화 출력의 지적 ID, 예: `["1-F2","2-F1"]`): 주면 `steps`를 ID에서 채우고(같이 주면 일치해야 함), 비어 있는 `summary`·`file`·`severity`를 **첫 ID**의 지적에서 채운다. severity는 여러 ID 중 가장 높은 것을 high·medium·low로 바꿔 쓴다. 이 실행에 없는 ID는 거절. 판정 줄에 `FindingIds`로 남는다.
 - 하나라도 틀리면 아무것도 쓰지 않는다 (`[판정 기록 불가] …`에 틀린 항목을 모두 적음). 한 번에 50건까지.
 - 저장: `calls.jsonl`과 같은 폴더의 `verdicts.jsonl` (환경 변수 `HB_ORCH_VERDICTS_PATH`로 바꿀 수 있음). 한 줄 = 판정 1회, 한 호출의 줄은 한 번에 쓴다.
 - 같은 `runId`·`findingKey`로 다시 쓰면 마지막 판정이 이긴다 (보류 → 결론, 사용자가 뒤집은 판정). 이전 줄은 지우지 않는다.
@@ -329,7 +362,7 @@ calls.jsonl의 응답 원문을 그대로 저장한다. Claude가 응답을 다�
 |---|---|
 | 채택률 | (채택 + 부분 채택 × 0.5) / (채택 + 부분 채택 + 기각). 보류·중복은 뺀다. **지휘자가 받아들인 비율**이지 정확도가 아니다 |
 | 에이전트만 | 채택·부분 채택 중 ownReview에 없던 것 |
-| 놓침 | Claude만 지적해 채택된 것이 있던 실행에 그 에이전트가 있었던 수 (판정자·검증 역할도 포함) |
+| 놓침 | Claude만 지적해 채택된 것이 있던 실행에서 그 에이전트가 **지적을 내는 단계**였던 수. 지적을 내는 단계 = 구조화 출력을 냈거나 그 실행에서 지적을 하나라도 낸 단계 (판정자·검증 역할 제외). 자유 텍스트로 지적 0건을 낸 리뷰어는 빠진다 |
 | 비용 · 채택 1건당 | 판정이 있는 실행의 호출(재시도 포함) 비용 합계와 그것을 (채택 + 부분 채택 × 0.5)로 나눈 값. 기록에서 계산만 한다 |
 
 - 기간은 판정 시각이 아니라 실행 시작 시각 기준 (소급 판정도 그 실행의 기간에 들어간다).

@@ -42,6 +42,10 @@ public static class Prompts
         - 검색 횟수에 상한이 있다. 가장 결정적인 검색부터 한다.
         """;
 
+    /// <summary>내장 역할의 구조화 출력 형식. 출력 형식 설명은 FindingFormat.PromptText가 붙는다 (역할 프롬프트에는 없음).</summary>
+    public static readonly IReadOnlyDictionary<string, string> BuiltInOutputs =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["Reviewer"] = "findings" };
+
     public static readonly IReadOnlyDictionary<string, string> BuiltInRoles =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -50,12 +54,7 @@ public static class Prompts
                 다른 리뷰어가 같은 코드를 독립적으로 리뷰하고 있다. 그 리뷰어가 놓칠 만한 문제를 찾는 것이 목적이다.
 
                 - 실제 문제만 지적한다. 스타일 취향은 nit으로만, 최대 3개.
-                - 코드에서 확인할 수 없는 부분은 추측하지 말고 '확인 필요'로 남긴다.
-
-                출력 형식 (항목마다):
-                - [critical|major|minor|nit] 위치 — 문제 / 제안 / 확신도(high|medium|low)
-
-                마지막 줄: "문제 없음" 또는 "총 N건(critical a / major b / minor c / nit d)"
+                - 코드에서 확인할 수 없는 부분은 추측하지 말고 needsInfo에 남긴다.
                 """,
 
             ["Critic"] = """

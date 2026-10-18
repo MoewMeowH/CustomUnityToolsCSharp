@@ -51,7 +51,8 @@ public static class ResultSaver
             return "[저장 불가] 이 기록에는 프로젝트 폴더(ProjectDir)가 없어 저장 위치를 정할 수 없습니다.";
 
         // ── 저장할 내용 ─────────────────────────────────────────────────────
-        var content = record.Response!;
+        // 구조화 출력을 해석한 기록이면 지휘자가 받은 그린 텍스트를 저장한다 (원문 JSON은 대시보드에서 본다).
+        var content = record.Structured is { Parsed: true } structured ? FindingRenderer.Render(structured) : record.Response!;
         var blockNote = "";
         if (codeBlock is { } n)
         {

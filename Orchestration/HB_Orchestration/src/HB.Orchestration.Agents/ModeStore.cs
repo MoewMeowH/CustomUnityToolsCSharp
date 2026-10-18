@@ -58,22 +58,33 @@ public sealed class ModeStore(AgentCatalog catalog)
     }
 
     /// <summary>역할 이름 → (시스템 프롬프트, 지침 사용 여부). modes.json이 내장 역할보다 우선.</summary>
-    public static (string Prompt, bool UseGuidelines) ResolveRole(Loaded loaded, string role)
+    /// <summary>역할의 프롬프트 · 지침 사용 · 구조화 출력 형식. Output이 알 수 없는 이름이면 설정 오류.</summary>
+    public static (string Prompt, bool UseGuidelines, FindingFormat? Output) ResolveRole(Loaded loaded, string role)
+    {
+        var (prompt, useGuidelines, output) = ResolveRaw(loaded, role);
+        if (string.IsNullOrWhiteSpace(output)) return (prompt, useGuidelines, null);
+        return FindingFormat.Find(output) is { } format
+            ? (prompt, useGuidelines, format)
+            : throw new ModeConfigException($"역할 '{role}'의 Output '{output}'을(를) 모릅니다. 사용 가능: {FindingFormat.KnownNames}");
+    }
+
+    private static (string Prompt, bool UseGuidelines, string? Output) ResolveRaw(Loaded loaded, string role)
     {
         if (loaded.File.Roles.TryGetValue(role, out var def))
         {
-            if (!string.IsNullOrWhiteSpace(def.Prompt)) return (def.Prompt, def.UseGuidelines);
+            if (!string.IsNullOrWhiteSpace(def.Prompt)) return (def.Prompt, def.UseGuidelines, def.Output);
             if (!string.IsNullOrWhiteSpace(def.PromptFile))
             {
                 var p = System.IO.Path.IsPathRooted(def.PromptFile)
                     ? def.PromptFile
                     : System.IO.Path.Combine(System.IO.Path.GetDirectoryName(loaded.Path)!, def.PromptFile);
                 if (!File.Exists(p)) throw new ModeConfigException($"역할 '{role}'의 PromptFile을 찾을 수 없습니다: {p}");
-                return (File.ReadAllText(p), def.UseGuidelines);
+                return (File.ReadAllText(p), def.UseGuidelines, def.Output);
             }
         }
 
-        if (Prompts.BuiltInRoles.TryGetValue(role, out var builtIn)) return (builtIn, true);
+        if (Prompts.BuiltInRoles.TryGetValue(role, out var builtIn))
+            return (builtIn, true, Prompts.BuiltInOutputs.GetValueOrDefault(role));
         throw new ModeConfigException($"역할 '{role}'이(가) 정의되지 않았습니다.");
     }
 }

@@ -109,6 +109,13 @@ public sealed record CallRecord
     /// 같은 실행의 모든 줄(단계·시도)에 같은 값이 남는다. 넣지 않았으면 null.
     /// </summary>
     public string? OwnReview { get; init; }
+
+    /// <summary>
+    /// 역할에 구조화 출력(Output)을 지정한 호출의 해석 결과 (지적 ID 포함). Response는 원문(JSON) 그대로다.
+    /// 구조화 출력을 쓰지 않은 호출과 예전 기록에는 필드 자체를 남기지 않는다.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public StructuredOutputRecord? Structured { get; init; }
 }
 
 /// <summary>

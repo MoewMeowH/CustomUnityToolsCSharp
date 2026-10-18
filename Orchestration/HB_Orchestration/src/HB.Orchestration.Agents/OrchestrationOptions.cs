@@ -276,6 +276,22 @@ public sealed class ProviderOptions
     /// 제공사 단위인 이유: Gemini OpenAI 호환 엔드포인트는 이 필드를 문서화하지 않았다.
     /// </summary>
     public string? ImageDetail { get; set; }
+
+    /// <summary>
+    /// 구조화 출력(역할 Output)을 요청하는 방식. 에이전트에 값이 없을 때 쓴다. 비우면 Prompt.
+    /// Gemini OpenAI 호환 엔드포인트의 json_schema 지원은 문서에 없어(2026-10-19) 실제 호출로 확인한 뒤 Schema로 바꾼다.
+    /// </summary>
+    public StructuredOutputMode? StructuredOutput { get; set; }
+}
+
+/// <summary>구조화 출력 요청 방식.</summary>
+public enum StructuredOutputMode
+{
+    /// <summary>시스템 프롬프트에만 JSON 형식을 적는다 (response_format 없음).</summary>
+    Prompt,
+
+    /// <summary>프롬프트 + response_format json_schema(strict)로 강제한다. 미지원이면 400 → 실패 (자동 재전송 없음).</summary>
+    Schema,
 }
 
 /// <summary>프롬프트 캐시 방식. 호출 단위로 정해져 HTTP 정책(PromptCachePolicy)이 요청 본문에 반영한다.</summary>
@@ -319,6 +335,9 @@ public sealed class AgentOptions
 
     /// <summary>이미지 입력을 받는 모델인지. false인 에이전트가 낀 모드에 images가 오면 실행하지 않는다 (로컬 텍스트 모델 등).</summary>
     public bool Vision { get; set; } = true;
+
+    /// <summary>구조화 출력 요청 방식. 비우면 제공사 값 → Prompt 순 (같은 제공사라도 모델마다 지원이 다를 수 있어 에이전트 단위로 둔다).</summary>
+    public StructuredOutputMode? StructuredOutput { get; set; }
 }
 
 public sealed class BudgetOptions

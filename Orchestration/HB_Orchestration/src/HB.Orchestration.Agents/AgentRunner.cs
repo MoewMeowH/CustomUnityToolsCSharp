@@ -44,6 +44,12 @@ public sealed record StepCall(
     /// <summary>이 단계의 웹검색 설정 (modes.json 단계의 WebSearch). 없으면 검색 도구를 주지 않는다.</summary>
     public WebSearchSettings? WebSearch { get; init; }
 
+    /// <summary>역할의 구조화 출력 형식. 있으면 응답을 해석해 지적 ID를 매기고 그린 텍스트를 넘긴다. 없으면 자유 텍스트.</summary>
+    public FindingFormat? Output { get; init; }
+
+    /// <summary>구조화 출력 요청 방식 (에이전트 → 제공사 → Prompt). Output이 없으면 의미 없다.</summary>
+    public StructuredOutputMode OutputMode => AgentSettings.ResolveStructuredOutput(Agent.Options, Agent.ProviderOptions);
+
     /// <summary>
     /// 이 호출의 프롬프트 캐시 방식. 제공사가 ProviderDefault(정책 없음)면 그대로 두고, 아니면 모드 설정 → 제공사 설정.
     /// Context인데 첨부가 짧으면 Off (저장 지점은 최소 길이 1,024토큰에 못 미치면 쓰이지 않으므로 블록을 나눌 이유가 없다).
@@ -84,6 +90,9 @@ public sealed record StepResult(int Step, string Role, string Agent, bool Succes
 
     /// <summary>응답 검사기 경고 ("[경고] …"). 응답은 그대로 전달되고 결과에 한 줄씩 붙는다.</summary>
     public IReadOnlyList<string> Warnings { get; init; } = [];
+
+    /// <summary>구조화 출력 해석 결과 (Output이 있는 역할이 성공했을 때). 겹침 후보 계산에 쓴다.</summary>
+    public StructuredOutputRecord? Structured { get; init; }
 
     /// <summary>결과에 붙일 안내 줄: 재시도 알림 + 경고.</summary>
     public IEnumerable<string> Notices => RetryNote is null ? Warnings : Warnings.Prepend(RetryNote);
@@ -160,6 +169,7 @@ public sealed class AgentRunner
                     OutputTokens = record.OutputTokens,
                     ElapsedMs = stepWatch.ElapsedMilliseconds,
                     Warnings = record.Warnings,
+                    Structured = record.Structured,
                 };
             }
 
@@ -183,9 +193,15 @@ public sealed class AgentRunner
         try
         {
             // 역할 프롬프트는 단계마다 다르므로 실행 시점에 MAF 에이전트를 만든다 (가벼운 객체).
-            AIAgent agent = call.WebSearch is null
-                ? new ChatClientAgent(call.Agent.Client, instructions: call.Instructions, name: call.Agent.Name)
-                : new ChatClientAgent(call.Agent.Client, instructions: call.Instructions, name: call.Agent.Name, tools: [new HostedWebSearchTool()]);
+            AIAgent agent = call.WebSearch is not null
+                ? new ChatClientAgent(call.Agent.Client, instructions: call.Instructions, name: call.Agent.Name, tools: [new HostedWebSearchTool()])
+                : call.Output is { } schemaFormat && call.OutputMode == StructuredOutputMode.Schema
+                ? new ChatClientAgent(call.Agent.Client, new ChatClientAgentOptions
+                {
+                    Name = call.Agent.Name,
+                    ChatOptions = StructuredRequest.Options(call.Instructions, schemaFormat),
+                })
+                : new ChatClientAgent(call.Agent.Client, instructions: call.Instructions, name: call.Agent.Name);
 
             // 호출마다 새 스레드: 이전 대화가 섞이지 않는다 (= 쓸데없는 히스토리 토큰 없음).
             // Context면 첨부 자료와 나머지를 text 블록 둘로 나눠 보낸다. 정책이 첫 블록 끝에 저장 지점을 단다.
@@ -228,7 +244,20 @@ public sealed class AgentRunner
                 }, text, null);
             }
 
+            // 구조화 출력: 원문(JSON)은 기록에, 지휘자·다음 단계에는 그린 텍스트. 해석 실패면 원문 그대로 + 경고 (실패로 치지 않음).
+            var raw = text;
+            StructuredOutputRecord? structured = null;
+            string? structuredWarning = null;
+            if (call.Output is { } format)
+            {
+                structured = FindingParser.Parse(format, call.Step, text, response.FinishReason,
+                    call.OutputMode == StructuredOutputMode.Schema ? "schema" : "prompt");
+                if (structured.Parsed) text = FindingRenderer.Render(structured);
+                else structuredWarning = $"[경고] 구조화 출력 해석 실패 ({structured.Error}) — 원문을 그대로 전달";
+            }
+
             var warnings = CheckWarnings(call, text, response.FinishReason, outTokens);
+            if (structuredWarning is not null) warnings = [.. warnings, structuredWarning];
             if (webSearch is { Unverified.Count: > 0 } searched)
             {
                 // 출처 대조 경고: 응답은 그대로 전달하고 결과에 한 줄 붙인다 (지휘자가 해당 URL을 근거로 쓰지 않도록).
@@ -241,7 +270,8 @@ public sealed class AgentRunner
                 call.Mode, call.Step, call.Role, call.Agent.Name, attempt, sw.ElapsedMilliseconds, inTokens, outTokens, warnings.Count);
             return new AttemptOutcome(NewRecord() with
             {
-                Response = text,
+                Response = raw,
+                Structured = structured,
                 InputTokens = inTokens,
                 CachedInputTokens = cachedTokens,
                 CacheWriteTokens = cacheWriteTokens,

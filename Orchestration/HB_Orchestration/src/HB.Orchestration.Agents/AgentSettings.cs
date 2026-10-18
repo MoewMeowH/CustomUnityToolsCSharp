@@ -13,6 +13,10 @@ public static class AgentSettings
         return seconds is { } s ? TimeSpan.FromSeconds(s) : SdkDefaultTimeout;
     }
 
+    /// <summary>구조화 출력 요청 방식: 에이전트 → 제공사 → Prompt.</summary>
+    public static StructuredOutputMode ResolveStructuredOutput(AgentOptions agent, ProviderOptions? provider) =>
+        agent.StructuredOutput ?? provider?.StructuredOutput ?? StructuredOutputMode.Prompt;
+
     public const int DefaultMaxAttempts = 2;
     public const int MaxAttemptsCap = 5;
 

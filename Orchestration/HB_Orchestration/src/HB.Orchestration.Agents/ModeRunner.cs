@@ -90,7 +90,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             if (!catalog.TryGet(agentName, out var agent))
                 return $"[모드 '{modeName}'] 에이전트 '{agentName}' 사용 불가: {catalog.WhyUnavailable(agentName)}";
 
-            (string Prompt, bool UseGuidelines) role;
+            (string Prompt, bool UseGuidelines, FindingFormat? Output) role;
             try { role = ModeStore.ResolveRole(loaded, step.Role); }
             catch (ModeConfigException ex) { return $"[모드 '{modeName}'] {ex.Message}"; }
 
@@ -102,10 +102,13 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
                            $"(지금 '{agent.ProviderOptions?.Type}'). appsettings의 웹검색용 에이전트로 바꾸세요.";
             }
 
-            // 시스템 프롬프트 = 역할 + 공통 규칙 (+ 웹검색 규칙) (+ 지침). 매번 같은 앞부분이라 제공사 프롬프트 캐시에 걸린다.
+            if (role.Output is not null && step.WebSearch is not null)
+                return $"[모드 '{modeName}'] {step.Role}@{agentName}: 구조화 출력(Output)과 WebSearch는 함께 쓸 수 없습니다 (웹검색 경로는 구조화 출력을 지원하지 않음).";
+
+            // 시스템 프롬프트 = 역할 + 출력 형식(구조화 출력) + 공통 규칙 (+ 웹검색 규칙) (+ 지침). 매번 같은 앞부분이라 제공사 프롬프트 캐시에 걸린다.
             plan.Add(new PlannedStep(step, agent,
-                role.Prompt + Prompts.CommonRules + (step.WebSearch is null ? "" : Prompts.WebSearchRules) + (role.UseGuidelines ? guidelines.Text : ""),
-                ProvenanceBuilder.ForStep(guidelines, role.UseGuidelines), mode.PromptCache));
+                role.Prompt + (role.Output?.PromptText ?? "") + Prompts.CommonRules + (step.WebSearch is null ? "" : Prompts.WebSearchRules) + (role.UseGuidelines ? guidelines.Text : ""),
+                ProvenanceBuilder.ForStep(guidelines, role.UseGuidelines), mode.PromptCache, role.Output));
         }
 
         if (loadedImages!.Count > 0 && plan.Where(p => !p.Agent.Options.Vision).Select(p => p.Agent.Name).Distinct().ToList() is { Count: > 0 } blind)
@@ -166,6 +169,10 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             note = note is null ? swapNote : $"{note}\n{swapNote}";
         }
 
+        // 겹침 후보: 서로 다른 단계가 같은 위치를 지적했으면 끝에 한 줄씩 (판단은 지휘자).
+        if (FindingOverlap.Lines(results.SelectMany(r => r.Structured?.Findings ?? [])) is { Count: > 0 } overlaps)
+            note = note is null ? string.Join("\n", overlaps) : $"{string.Join("\n", overlaps)}\n{note}";
+
         return ResultFormatter.Format(runId, results, returnAll, note);
     }
 
@@ -200,7 +207,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         VerdictRecorder.Record(runId, items, Options.Records.MaxReasonChars, runner.LogPath);
 
     /// <summary>실행 계획의 한 단계. Guidelines는 이 단계 역할에 지침을 붙였는지 (기록용).</summary>
-    private sealed record PlannedStep(StepDefinition Def, AgentEntry Agent, string Instructions, GuidelinesProvenance Guidelines, PromptCacheMode? PromptCache);
+    private sealed record PlannedStep(StepDefinition Def, AgentEntry Agent, string Instructions, GuidelinesProvenance Guidelines, PromptCacheMode? PromptCache, FindingFormat? Output);
 
     /// <summary>단계 호출. 실행 단위 Provenance에 이 단계의 지침 표시를 얹는다 (Instructions 해시는 AgentRunner가 보낼 문자열로 계산).</summary>
     private StepCall NewCall(string runId, string mode, int step, PlannedStep p, string instructions, BuiltPrompt prompt, CallMeta meta) =>
@@ -212,6 +219,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             ModePromptCache = p.PromptCache,
             Images = prompt.Images,
             WebSearch = p.Def.WebSearch,
+            Output = p.Output,
         };
 
     /// <summary>사용자 input과 서버가 읽은 첨부 자료·이미지. 프롬프트에서는 첨부가 먼저 온다.</summary>

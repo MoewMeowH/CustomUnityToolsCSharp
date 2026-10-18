@@ -9,6 +9,9 @@ public sealed class ScriptedChatClient(params Func<CancellationToken, ChatRespon
 
     public int Calls { get; private set; }
 
+    /// <summary>호출마다 수행할 동작. 하네스처럼 클라이언트를 먼저 만든 경우 테스트에서 바꿔 끼운다.</summary>
+    public Func<CancellationToken, ChatResponse>[] Script { get; set; } = script;
+
     /// <summary>호출마다 받은 메시지와 옵션 (호출 순서대로).</summary>
     public List<(List<ChatMessage> Messages, ChatOptions? Options)> Received { get; } = [];
 
@@ -27,7 +30,7 @@ public sealed class ScriptedChatClient(params Func<CancellationToken, ChatRespon
         lock (_gate) // Concurrent 모드에서 동시에 불린다
         {
             Received.Add((messages.ToList(), options?.Clone()));
-            step = script[Math.Min(Calls, script.Length - 1)];
+            step = Script[Math.Min(Calls, Script.Length - 1)];
             Calls++;
         }
         return Task.FromResult(step(cancellationToken));

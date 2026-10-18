@@ -53,7 +53,8 @@ public sealed class CallModel(IOptions<DashboardOptions> options, PricingService
         if (call is null) return NotFound();
 
         Call = call;
-        ResponseHtml = Markdown.ToHtml(call.Response ?? "", Pipeline);
+        // 구조화 출력을 해석한 기록이면 지휘자가 받은 그린 텍스트를 보여 주고, 원문(JSON)은 따로 접어 둔다.
+        ResponseHtml = Markdown.ToHtml(call.Structured is { Parsed: true } s ? HB.Orchestration.Agents.FindingRenderer.Render(s) : call.Response ?? "", Pipeline);
         var projects = rider.All;
         Links = call.Files.Select(f => FileLinks.Build(f, call.ProjectDir, Opt.FileLinkTemplate, projects: projects)).ToList();
         ContextLinks = call.Context.Select(f => FileLinks.Build(f, call.ProjectDir, Opt.FileLinkTemplate, call.ContextRoots, projects)).ToList();

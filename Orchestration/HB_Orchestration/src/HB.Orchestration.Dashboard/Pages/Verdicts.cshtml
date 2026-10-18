@@ -42,7 +42,7 @@ else
 {
     <section class="panel block">
         <h2>에이전트별</h2>
-        <p class="muted note">에이전트만 = ownReview에 없던 채택·부분 채택. 놓침 = Claude만 지적해 채택된 것이 있던 실행에 이 에이전트가 있었던 수 (판정자·검증 역할도 포함). 비용은 판정이 있는 실행의 호출(재시도 포함)만.</p>
+        <p class="muted note">에이전트만 = ownReview에 없던 채택·부분 채택. 놓침 = Claude만 지적해 채택된 것이 있던 실행에서 이 에이전트가 지적을 내는 단계였던 수 (구조화 출력을 냈거나 그 실행에서 지적을 하나라도 낸 단계, 판정자·검증 역할 제외). 비용은 판정이 있는 실행의 호출(재시도 포함)만.</p>
         @await Html.PartialAsync("_VerdictTable", s.ByAgent)
     </section>
 

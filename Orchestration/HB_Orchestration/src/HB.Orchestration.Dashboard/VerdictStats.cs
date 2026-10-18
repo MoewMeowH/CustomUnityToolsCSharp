@@ -98,9 +98,11 @@ public static class VerdictStats
     {
         var runs = calls.Where(c => c.RunId is not null).GroupBy(c => c.RunId!)
             .ToDictionary(g => g.Key, g => g.ToList());
-        bool InPeriod(List<CallRecord> run) => since is null || run.Min(c => c.Timestamp) >= since;
+        // 실행마다 첫 호출을 한 번만 구한다 (판정마다 다시 훑지 않도록 — perf_argon 094ba91515 1-F1).
+        var firsts = runs.ToDictionary(kv => kv.Key, kv => kv.Value.MinBy(c => c.Timestamp)!);
+        bool InPeriod(string runId) => since is null || firsts[runId].Timestamp >= since;
 
-        var verdicts = latest.Where(v => runs.TryGetValue(v.RunId, out var run) && InPeriod(run)).ToList();
+        var verdicts = latest.Where(v => runs.ContainsKey(v.RunId) && InPeriod(v.RunId)).ToList();
         var judged = verdicts.Select(v => v.RunId).ToHashSet();
 
         var byAgent = new Dictionary<string, VerdictRow>();
@@ -109,6 +111,15 @@ public static class VerdictStats
         VerdictRow Row(Dictionary<string, VerdictRow> d, string key) =>
             d.TryGetValue(key, out var r) ? r : d[key] = new VerdictRow(key);
 
+        // 놓침은 지적을 내는 단계에만 매긴다 (판정자·검증 역할 제외 — review 453bc0e4fe 1-F1·2-F3):
+        // 구조화 출력을 낸 단계, 또는 그 실행에서 지적을 하나라도 낸 단계. 단계마다 대표 호출 하나만 본다.
+        var findingSteps = verdicts.GroupBy(v => v.RunId).ToDictionary(g => g.Key, g => g.SelectMany(v => v.Steps).ToHashSet());
+        List<CallRecord> Reviewers(string runId, List<CallRecord> run) =>
+            run.Where(c => c.Step is not null).Select(c => c.Step!.Value).Distinct()
+                .Select(s => StepCall(run, s)).OfType<CallRecord>()
+                .Where(c => c.Success && (c.Structured is not null || findingSteps[runId].Contains(c.Step!.Value)))
+                .ToList();
+
         foreach (var v in verdicts)
         {
             var run = runs[v.RunId];
@@ -116,8 +127,9 @@ public static class VerdictStats
             {
                 Row(claudeOnly, ModeOf(run)).Add(v);
                 if (v.Verdict is not (Verdicts.Adopted or Verdicts.Partial)) continue;
-                foreach (var agent in run.Where(c => c.Success).Select(AgentOf).Distinct()) Row(byAgent, agent).Missed++;
-                foreach (var mr in run.Where(c => c.Success).Select(ModeRoleOf).Distinct()) Row(byModeRole, mr).Missed++;
+                var reviewers = Reviewers(v.RunId, run);
+                foreach (var agent in reviewers.Select(AgentOf).Distinct()) Row(byAgent, agent).Missed++;
+                foreach (var mr in reviewers.Select(ModeRoleOf).Distinct()) Row(byModeRole, mr).Missed++;
                 continue;
             }
 
@@ -139,12 +151,8 @@ public static class VerdictStats
 
         var views = verdicts.OrderByDescending(v => v.Timestamp).Take(recent).Select(v => View(v, runs[v.RunId])).ToList();
 
-        var unjudged = runs.Where(kv => !judged.Contains(kv.Key) && InPeriod(kv.Value))
-            .Select(kv =>
-            {
-                var first = kv.Value.MinBy(c => c.Timestamp)!;
-                return new UnjudgedRun(kv.Key, ModeOf(kv.Value), first.Timestamp, first.Id);
-            })
+        var unjudged = runs.Where(kv => !judged.Contains(kv.Key) && InPeriod(kv.Key))
+            .Select(kv => new UnjudgedRun(kv.Key, ModeOf(kv.Value), firsts[kv.Key].Timestamp, firsts[kv.Key].Id))
             .OrderByDescending(u => u.Start).ToList();
 
         return new VerdictSummary(
@@ -155,11 +163,15 @@ public static class VerdictStats
     }
 
     /// <summary>한 실행의 판정 (호출 상세 화면용). 단계 순서, Claude만 지적은 맨 뒤.</summary>
-    public static List<VerdictView> ForRun(IReadOnlyList<VerdictRecord> latest, IReadOnlyList<CallRecord> runCalls, string runId) =>
-        latest.Where(v => v.RunId == runId)
+    public static List<VerdictView> ForRun(IReadOnlyList<VerdictRecord> latest, IReadOnlyList<CallRecord> runCalls, string runId)
+    {
+        if (runCalls.Count == 0) return []; // 기록 없는 실행 (review 453bc0e4fe 2-F2)
+        var run = runCalls.ToList();
+        return latest.Where(v => v.RunId == runId)
             .OrderBy(v => v.IsClaudeOnly).ThenBy(v => v.Steps.Count > 0 ? v.Steps[0] : int.MaxValue)
-            .Select(v => View(v, runCalls.ToList()))
+            .Select(v => View(v, run))
             .ToList();
+    }
 
     private static VerdictView View(VerdictRecord v, List<CallRecord> run)
     {

@@ -88,7 +88,15 @@
         <h2>에이전트 응답 (@(c.Agent ?? c.Tool))</h2>
         @if (c.Success)
         {
+            @if (c.Structured is { } so)
+            {
+                <p class="muted" style="font-size:12.5px">구조화 출력 <span class="mono">@so.Format</span> · @so.RequestedBy · 상태 <span class="@(so.State == "failed" ? "err" : so.State == "complete" ? "ok" : null)">@so.State</span>@(so.Error is { } se ? $" ({se})" : "")</p>
+            }
             <div class="md">@Html.Raw(Model.ResponseHtml)</div>
+            @if (c.Structured is { Parsed: true })
+            {
+                <details style="margin-top:10px"><summary class="muted">응답 원문 (JSON)</summary><pre>@c.Response</pre></details>
+            }
         }
         else
         {

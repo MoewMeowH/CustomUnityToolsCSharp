@@ -23,6 +23,12 @@ public sealed class RoleDefinition
     /// 매 호출 지침 분량만큼 입력 토큰이 줄어든다.
     /// </summary>
     public bool UseGuidelines { get; set; } = true;
+
+    /// <summary>
+    /// 구조화 출력 형식 (findings · perf_findings). 지정하면 서버가 형식 설명을 시스템 프롬프트 끝에 붙이고, 응답을 해석해
+    /// 지적 ID를 매긴다. 역할 프롬프트에는 출력 형식을 따로 적지 않는다. 비우면 자유 텍스트 (지금 동작).
+    /// </summary>
+    public string? Output { get; set; }
 }
 
 public sealed class ModeDefinition

@@ -171,4 +171,41 @@ public sealed class VerdictTests : IDisposable
         Assert.Equal(1m, argon.Cost);
         Assert.Null(argon.CostPerAdopted);
     }
+
+    [Fact]
+    public void Missed_counts_only_finding_steps_not_judge()
+    {
+        // 단계 1 리뷰어(sol, 지적 있음) · 단계 2 판정자(astra, 지적 없음). Claude만 지적이 채택되면 sol만 놓침.
+        CallRecord[] calls = [Call("r1", 1, "sol"), Call("r1", 2, "astra", role: "Judge")];
+        var now = DateTimeOffset.Now;
+        VerdictRecord[] verdicts =
+        [
+            new() { Id = "a", Timestamp = now, RunId = "r1", FindingKey = "a", Summary = "s", Verdict = Verdicts.Rejected, Steps = [1], Reason = "x" },
+            new() { Id = "c", Timestamp = now, RunId = "r1", FindingKey = "c", Summary = "s", Verdict = Verdicts.Adopted, ClaudeAlsoFound = true },
+        ];
+
+        var s = VerdictStats.Build(verdicts, calls, _ => null);
+        Assert.Equal(1, s.ByAgent.Single(r => r.Key == "sol").Missed);
+        Assert.DoesNotContain(s.ByAgent, r => r.Key == "astra");
+    }
+
+    [Fact]
+    public void Missed_counts_structured_reviewer_with_zero_findings()
+    {
+        var structured = new StructuredOutputRecord { Format = "findings@1", State = OutputStates.Complete, RequestedBy = "schema" };
+        CallRecord[] calls = [Call("r1", 1, "sol") with { Structured = structured }];
+        VerdictRecord[] verdicts =
+        [
+            new() { Id = "c", Timestamp = DateTimeOffset.Now, RunId = "r1", FindingKey = "c", Summary = "s", Verdict = Verdicts.Adopted, ClaudeAlsoFound = true },
+        ];
+
+        Assert.Equal(1, VerdictStats.Build(verdicts, calls, _ => null).ByAgent.Single(r => r.Key == "sol").Missed);
+    }
+
+    [Fact]
+    public void For_run_with_no_calls_is_empty()
+    {
+        VerdictRecord[] verdicts = [new() { Id = "c", Timestamp = DateTimeOffset.Now, RunId = "r1", FindingKey = "c", Summary = "s", Verdict = Verdicts.Adopted }];
+        Assert.Empty(VerdictStats.ForRun(verdicts, [], "r1"));
+    }
 }
