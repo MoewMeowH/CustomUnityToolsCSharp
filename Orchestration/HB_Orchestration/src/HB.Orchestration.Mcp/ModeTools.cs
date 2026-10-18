@@ -25,12 +25,13 @@ public sealed class ModeTools(ModeRunner modes)
         [Description("관련 파일 경로 (프로젝트 루트 기준, 'path:line' 가능). 기록·대시보드 링크용이며 에이전트에게는 전달되지 않음.")] string[]? files = null,
         [Description("이번 실행만 에이전트 교체 (선택). 'from=to' 또는 '*=to'. 사용자가 다른 모델을 요청했을 때만 사용. 이름은 list_modes 참고.")] string[]? agents = null,
         [Description("에이전트에게 보낼 코드 범위 (선택). 서버가 디스크에서 읽어 줄 번호와 함께 input 앞에 둔다(같은 자료로 다시 물을 때 프롬프트 캐시에 걸리도록). path는 프로젝트 루트 기준 상대 경로, startLine~endLine은 1부터이고 끝 줄 포함. 판단에 필요한 주변 코드(해제부, 호출부 등)까지 범위에 넣을 것")] ContextRange[]? context = null,
+        [Description("에이전트에게 보낼 이미지 경로 (선택, png·jpeg). 프로젝트 루트 기준 상대 경로. 사용자가 고른 뒤 image_prep.py shrink로 줄인 _send/ 파일만 넣을 것. 서버는 줄이지 않고 큰 이미지는 거절한다")] string[]? images = null,
         // 필수 여부는 서버가 검사한다: 스키마에서 필수로 두면 누락이 '['로 시작하는 안내 대신 도구 오류로 나간다.
         [Description("이 모드를 부른 이유 한 줄. 필수. 기록용이며 에이전트에게 전달되지 않음.")] string? reason = null,
         [Description("결과를 보기 전에 완성한 자체 검토 원문. [ownReview 필수] 모드에서 필수. 기록용이며 에이전트에게 전달되지 않음.")] string? ownReview = null,
         CancellationToken cancellationToken = default)
     {
-        var result = await modes.RunAsync(mode, input, files, agents, context, reason, ownReview, cancellationToken);
+        var result = await modes.RunAsync(mode, input, files, agents, context, images, reason, ownReview, cancellationToken);
         modes.DumpToolResult("run_mode", mode, result); // Debug.DumpToolResults가 켜졌을 때만 (반환 직전 문자열 그대로)
         return result;
     }

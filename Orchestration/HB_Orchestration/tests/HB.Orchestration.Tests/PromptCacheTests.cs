@@ -139,7 +139,7 @@ public sealed class PromptCacheTests : IDisposable
     }
 
     private Task<string> RunWithContext(string path, int lines) =>
-        _h.Runner.RunAsync("seq", "질문", null, null, [new ContextRange(path, 1, lines)], ModeRunnerHarness.DefaultReason, null, CancellationToken.None);
+        _h.Runner.RunAsync("seq", "질문", null, null, [new ContextRange(path, 1, lines)], null, ModeRunnerHarness.DefaultReason, null, CancellationToken.None);
 
     [Fact]
     public async Task Prompt_PutsAttachmentBeforeRequest()

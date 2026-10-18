@@ -25,6 +25,9 @@ public sealed class OrchestrationOptions
 
     public ContextOptions Context { get; set; } = new();
 
+    /// <summary>run_mode images(서버가 읽어 보내는 이미지) 제한.</summary>
+    public ImageOptions Images { get; set; } = new();
+
     /// <summary>모델 단가(USD)와 원화 환율. 서버는 쓰지 않고 대시보드가 비용 표시에 쓴다 (같은 파일에서 함께 편집).</summary>
     public PricingOptions Pricing { get; set; } = new();
 
@@ -222,6 +225,22 @@ public sealed class ContextOptions
     }
 }
 
+/// <summary>
+/// run_mode images 제한. 서버는 이미지를 줄이지 않으므로 축소는 image_prep.py shrink가 하고, 여기서는 넘친 것을 거절만 한다.
+/// 이미지는 MaxInputChars(텍스트 글자 수)에 들어가지 않는다. 토큰은 실제 사용량(InputTokens)으로 일일 한도·비용에 잡힌다.
+/// </summary>
+public sealed class ImageOptions
+{
+    /// <summary>한 번에 받을 장수 상한. 0이면 무제한.</summary>
+    public int MaxCount { get; set; } = 20;
+
+    /// <summary>장당 파일 크기 상한(바이트). 0이면 무제한.</summary>
+    public long MaxBytes { get; set; } = 2_000_000;
+
+    /// <summary>긴 변 상한(px). 넘으면 축소를 빠뜨린 것으로 보고 거절한다. 0이면 무제한.</summary>
+    public int MaxDimension { get; set; } = 1024;
+}
+
 public sealed class ProviderOptions
 {
     /// <summary>클라이언트 구현 종류. 현재는 "openai-compatible" 하나로 OpenAI·Gemini·Ollama·LM Studio를 모두 처리.</summary>
@@ -244,6 +263,12 @@ public sealed class ProviderOptions
     /// 비우면 ProviderDefault = 손대지 않음.
     /// </summary>
     public PromptCacheMode PromptCache { get; set; } = PromptCacheMode.ProviderDefault;
+
+    /// <summary>
+    /// run_mode images의 이미지 부분에 실을 detail 값 (OpenAI: auto · low · high · original). 비우면 보내지 않는다 (= 제공사 기본값).
+    /// 제공사 단위인 이유: Gemini OpenAI 호환 엔드포인트는 이 필드를 문서화하지 않았다.
+    /// </summary>
+    public string? ImageDetail { get; set; }
 }
 
 /// <summary>프롬프트 캐시 방식. 호출 단위로 정해져 HTTP 정책(PromptCachePolicy)이 요청 본문에 반영한다.</summary>
@@ -284,6 +309,9 @@ public sealed class AgentOptions
     /// 타임아웃·429·5xx·네트워크 오류만 재시도한다. 최악의 대기 = 타임아웃 × 시도 횟수 (+ 시도 사이 대기).
     /// </summary>
     public int? MaxAttempts { get; set; }
+
+    /// <summary>이미지 입력을 받는 모델인지. false인 에이전트가 낀 모드에 images가 오면 실행하지 않는다 (로컬 텍스트 모델 등).</summary>
+    public bool Vision { get; set; } = true;
 }
 
 public sealed class BudgetOptions

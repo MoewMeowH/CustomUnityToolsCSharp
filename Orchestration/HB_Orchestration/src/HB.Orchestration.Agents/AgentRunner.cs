@@ -38,6 +38,9 @@ public sealed record StepCall(
     /// <summary>모드 설정(ModeDefinition.PromptCache). 있으면 제공사 설정보다 우선한다.</summary>
     public PromptCacheMode? ModePromptCache { get; init; }
 
+    /// <summary>이 단계에 보낼 이미지 (run_mode images). 입력을 받는 단계에만 붙는다. 없으면 null.</summary>
+    public IReadOnlyList<AttachedImage>? Images { get; init; }
+
     /// <summary>
     /// 이 호출의 프롬프트 캐시 방식. 제공사가 ProviderDefault(정책 없음)면 그대로 두고, 아니면 모드 설정 → 제공사 설정.
     /// Context인데 첨부가 짧으면 Off (저장 지점은 최소 길이 1,024토큰에 못 미치면 쓰이지 않으므로 블록을 나눌 이유가 없다).
@@ -183,7 +186,9 @@ public sealed class AgentRunner
             // Context면 첨부 자료와 나머지를 text 블록 둘로 나눠 보낸다. 정책이 첫 블록 끝에 저장 지점을 단다.
             var cacheMode = call.CacheMode;
             using var cacheScope = PromptCacheScope.Enter(cacheMode);
-            var response = cacheMode == PromptCacheMode.Context
+            var response = call.Images is { Count: > 0 }
+                ? await agent.RunAsync(WithImages(call), cancellationToken: ct)
+                : cacheMode == PromptCacheMode.Context
                 ? await agent.RunAsync(new ChatMessage(ChatRole.User,
                     [new TextContent(call.ContextPrefix), new TextContent(call.Prompt[call.ContextPrefix!.Length..])]), cancellationToken: ct)
                 : await agent.RunAsync(call.Prompt, cancellationToken: ct);
@@ -284,10 +289,35 @@ public sealed class AgentRunner
             Files = call.Meta.Files ?? [],
             Context = call.Meta.Context,
             ContextRoots = call.Meta.ContextRoots,
+            Images = call.Images is { Count: > 0 } images ? [.. images.Select(i => i.RecordText)] : null,
             Provenance = provenance,
             Reason = call.Meta.Reason,
             OwnReview = call.Meta.OwnReview,
         };
+    }
+
+    /// <summary>
+    /// 이미지가 있는 user 메시지: [첨부 자료] → [이미지마다 이름표 + 이미지] → [나머지(요청…)].
+    /// 첨부 자료가 첫 text 블록으로 남아 Context 캐시 저장 지점은 지금처럼 그 끝에 붙는다 (이미지는 저장 지점 뒤라 캐시되지 않음).
+    /// 첨부가 없거나 Prompt가 첨부로 시작하지 않으면 이미지를 맨 앞에 둔다.
+    /// </summary>
+    internal static ChatMessage WithImages(StepCall call)
+    {
+        var split = call.ContextPrefix is { Length: > 0 } prefix && call.Prompt.StartsWith(prefix, StringComparison.Ordinal) ? prefix.Length : 0;
+        var detail = call.Agent.ProviderOptions?.ImageDetail;
+        var contents = new List<AIContent>(call.Images!.Count * 2 + 2);
+
+        if (split > 0) contents.Add(new TextContent(call.Prompt[..split]));
+        for (var i = 0; i < call.Images.Count; i++)
+        {
+            var image = call.Images[i];
+            contents.Add(new TextContent($"[이미지 {i + 1}] {image.Path}"));
+            var data = new DataContent(image.Data, image.MediaType);
+            if (!string.IsNullOrWhiteSpace(detail)) data.AdditionalProperties = new() { ["detail"] = detail };
+            contents.Add(data);
+        }
+        contents.Add(new TextContent(call.Prompt[split..]));
+        return new ChatMessage(ChatRole.User, contents);
     }
 
     /// <summary>경고 검사. 검사기가 예외를 던져도 응답 전달을 막지 않는다 (경고 없이 넘어가고 로그만 남김).</summary>

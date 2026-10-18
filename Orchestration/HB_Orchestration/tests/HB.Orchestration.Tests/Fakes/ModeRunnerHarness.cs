@@ -70,7 +70,7 @@ public sealed class ModeRunnerHarness : IDisposable
     public const string DefaultReason = "테스트 이유";
 
     public Task<string> Run(string mode, string input = "요청", string? reason = DefaultReason, string? ownReview = null) =>
-        Runner.RunAsync(mode, input, null, null, null, reason, ownReview, CancellationToken.None);
+        Runner.RunAsync(mode, input, null, null, null, null, reason, ownReview, CancellationToken.None);
 
     public List<CallRecord> Records() => CallLog.ReadAll(LogPath).OrderBy(r => r.Timestamp).ThenBy(r => r.Step).ToList();
 

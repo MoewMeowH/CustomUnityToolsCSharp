@@ -84,6 +84,13 @@ public sealed record CallRecord
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyDictionary<string, string>? ContextRoots { get; init; }
 
+    /// <summary>
+    /// 이 단계에 보낸 이미지 (run_mode images). "경로 (WxH, 바이트, sha256:앞 12자)" 형식, 보낸 순서대로. 원문은 남기지 않는다.
+    /// 이미지를 보내지 않은 호출에는 필드 자체를 남기지 않는다.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? Images { get; init; }
+
     /// <summary>에이전트가 받은 지침·설정의 해시. 모든 호출에 남긴다. 5장 이전 기록은 null(대시보드 "기록 없음").</summary>
     public CallProvenance? Provenance { get; init; }
 

@@ -18,11 +18,12 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     /// modes.json은 그대로 두고, 같은 모드를 다른 모델로 한 번 돌려볼 때 쓴다.
     /// </param>
     /// <param name="context">서버가 디스크에서 읽어 프롬프트 맨 앞(input 앞)에 둘 코드 범위. Claude가 코드를 input에 다시 쓰지 않게 한다.</param>
+    /// <param name="images">서버가 읽어 보낼 이미지 경로 (프로젝트 루트 기준, image_prep.py shrink 결과). 입력을 받는 단계에만 붙는다.</param>
     /// <param name="reason">지휘자가 이 모드를 부른 이유 (필수). 기록에만 남고 에이전트에게는 보내지 않는다.</param>
     /// <param name="ownReview">결과를 보기 전의 자체 검토 (RequireOwnReview 모드에서 필수). 기록에만 남는다.</param>
     public async Task<string> RunAsync(
         string modeName, string input, IReadOnlyList<string>? files, IReadOnlyList<string>? agentOverrides,
-        IReadOnlyList<ContextRange>? context, string? reason, string? ownReview, CancellationToken ct)
+        IReadOnlyList<ContextRange>? context, IReadOnlyList<string>? images, string? reason, string? ownReview, CancellationToken ct)
     {
         // ── 1. 실행 전 검증: 여기서 걸리면 토큰을 한 개도 쓰지 않는다 ──────────────
         sessions.ApplyResets();
@@ -56,8 +57,11 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             return $"[입력이 너무 깁니다] input {input.Length:N0}자 + 첨부 코드 {attached.Text.Length:N0}자 / 상한 {maxChars:N0}자. " +
                    "context 범위를 줄여 다시 호출하세요.";
 
+        var (loadedImages, imageError) = ImageLoader.Load(images, Options.Images, Options.Context, Environment.CurrentDirectory, ct);
+        if (imageError is not null) return $"[첨부 이미지 오류] {imageError}";
+
         // 첨부 자료는 input과 따로 들고 다니다가 프롬프트 맨 앞에 둔다 (같은 자료로 다시 물을 때 앞부분이 같아야 캐시에 걸린다).
-        var promptInput = new PromptInput(input, attached!.Text);
+        var promptInput = new PromptInput(input, attached!.Text, loadedImages!);
         var meta = new CallMeta(files, attached.Sources)
         {
             ContextRoots = attached.Roots,
@@ -93,6 +97,9 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             plan.Add(new PlannedStep(step, agent, role.Prompt + Prompts.CommonRules + (role.UseGuidelines ? guidelines.Text : ""),
                 ProvenanceBuilder.ForStep(guidelines, role.UseGuidelines), mode.PromptCache));
         }
+
+        if (loadedImages!.Count > 0 && plan.Where(p => !p.Agent.Options.Vision).Select(p => p.Agent.Name).Distinct().ToList() is { Count: > 0 } blind)
+            return $"[모드 '{modeName}'] 이미지를 받지 않는 에이전트(Vision=false): {string.Join(", ", blind)}. images 없이 호출하거나 agents로 바꾸세요.";
 
         // 비용 상한은 단계별 모델을 알아야 하므로 에이전트를 정한 뒤에 검사한다.
         if (CheckBudget(plan.Select(p => p.Agent)) is { } budgetMessage) return budgetMessage;
@@ -189,13 +196,14 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             Checks = Options.ResponseChecks,
             ContextPrefix = prompt.ContextPrefix,
             ModePromptCache = p.PromptCache,
+            Images = prompt.Images,
         };
 
-    /// <summary>사용자 input과 서버가 읽은 첨부 자료. 프롬프트에서는 첨부가 먼저 온다.</summary>
-    private sealed record PromptInput(string Request, string Context);
+    /// <summary>사용자 input과 서버가 읽은 첨부 자료·이미지. 프롬프트에서는 첨부가 먼저 온다.</summary>
+    private sealed record PromptInput(string Request, string Context, IReadOnlyList<AttachedImage> Images);
 
-    /// <summary>보낼 프롬프트. ContextPrefix는 Text의 앞부분(첨부 자료)이고 없으면 null.</summary>
-    private sealed record BuiltPrompt(string Text, string? ContextPrefix);
+    /// <summary>보낼 프롬프트. ContextPrefix는 Text의 앞부분(첨부 자료)이고 없으면 null. Images는 입력을 받는 단계에만 (없으면 null).</summary>
+    private sealed record BuiltPrompt(string Text, string? ContextPrefix, IReadOnlyList<AttachedImage>? Images = null);
 
     private async Task<List<StepResult>> RunSequentialAsync(
         string runId, string mode, List<PlannedStep> plan,
@@ -290,8 +298,10 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         if (round > 0)
             sb.AppendLine($"(현재 {round}/{rounds}회차{(round == rounds ? " — 마지막 회차" : "")})");
 
-        return new BuiltPrompt(sb.ToString().TrimEnd(), prefix);
+        return new BuiltPrompt(sb.ToString().TrimEnd(), prefix, ImagesOf(input));
     }
+
+    private static IReadOnlyList<AttachedImage>? ImagesOf(PromptInput input) => input.Images.Count > 0 ? input.Images : null;
 
     /// <summary>첨부 자료가 있으면 맨 앞에 쓰고 그 부분(뒤 빈 줄 포함)을 돌려준다. 뒤에 항상 "## 요청"이 오므로 TrimEnd에 잘리지 않는다.</summary>
     private static string? AppendContext(StringBuilder sb, PromptInput input)
@@ -328,7 +338,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
                 sb.AppendLine($"### {r.Step}. {r.Role}").AppendLine(r.Text).AppendLine();
         }
 
-        return new BuiltPrompt(sb.ToString().TrimEnd(), prefix);
+        return new BuiltPrompt(sb.ToString().TrimEnd(), prefix, includeInput ? ImagesOf(input) : null);
     }
 
     /// <summary>"from=to" 목록을 검증된 사전으로. 오류면 메시지 (실행 전이라 토큰 0).</summary>
