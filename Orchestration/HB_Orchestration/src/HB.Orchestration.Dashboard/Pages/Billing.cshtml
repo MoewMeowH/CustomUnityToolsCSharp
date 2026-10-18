@@ -1,0 +1,128 @@
+@page
+@model BillingModel
+@{
+    ViewData["Title"] = "HB Orchestration · 청구 대조";
+    static string N(long v) => v.ToString("N0");
+    string Diff(long ours, long? theirs) => theirs is { } t && t != ours ? $" ({(ours - t >= 0 ? "+" : "")}{N(ours - t)})" : "";
+}
+
+<style>
+    .notice { padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; border: 1px solid var(--line); background: var(--panel); }
+    .notice.ok { border-color: var(--ok); }
+    .notice.err { border-color: var(--err); }
+    .btn { font: inherit; font-size: 12.5px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--line);
+           background: var(--panel); color: var(--text); text-decoration: none; cursor: pointer; }
+    .btn.on { border-color: var(--accent); color: var(--accent); }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }
+    .toolbar form { display: inline-flex; gap: 6px; align-items: center; margin: 0; }
+    .items { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    td.sub { font-size: 12px; }
+    .mismatch { color: var(--warn); }
+</style>
+
+<div class="toolbar">
+    @foreach (var p in BillingModel.Periods)
+    {
+        <a class="btn @(Model.P == p ? "on" : "")" href="/Billing?P=@p">@(p switch { "7d" => "7일", "3d" => "3일", "1d" => "1일", _ => "시간별 (24시간)" })</a>
+    }
+    <span class="muted" style="margin-left:auto">
+        Admin 키: 환경 변수 <span class="mono">@Model.KeyEnv</span> @(Model.HasKey ? "있음" : "없음")
+    </span>
+</div>
+
+<div class="toolbar">
+    @if (Model.HasKey)
+    {
+        <form method="post" asp-page-handler="Fetch" asp-route-P="@Model.P">
+            <button class="btn" type="submit">OpenAI에서 새로 가져오기</button>
+        </form>
+    }
+    <form method="post" asp-page-handler="Upload" asp-route-P="@Model.P" enctype="multipart/form-data">
+        <input type="file" name="file" accept=".csv,.json" />
+        <button class="btn" type="submit">비용 파일 올리기</button>
+    </form>
+    <span class="muted">
+        청구: @(Model.Data.CostSource is { } src ? $"{src} · {Model.Data.CostAt:HH:mm:ss}" : "아직 없음")
+        @if (Model.Data.UsageAt is { } at) { <text>· 토큰: Usage API · @at.ToString("HH:mm:ss")</text> }
+    </span>
+</div>
+
+@if (Model.Message is not null)
+{
+    <div class="notice @(Model.MessageIsError ? "err" : "ok")">@Model.Message</div>
+}
+@if (!Model.HasKey)
+{
+    <div class="notice muted">Admin 키가 없어 비용 파일로만 대조합니다 (7·3·1일 금액). 시간별 보기와 토큰 대조는 환경 변수 <span class="mono">@Model.KeyEnv</span>에 조직 Admin 키(Read Only)를 넣으면 쓸 수 있습니다.</div>
+}
+
+<section class="panel table-scroll">
+    <table>
+        <thead>
+        <tr>
+            <th>@(Model.HourlyView ? "시간" : "날짜") (UTC 기준)</th>
+            @if (!Model.HourlyView) { <th class="num">OpenAI 청구</th> }
+            <th class="num">기록 기준 계산</th>
+            @if (!Model.HourlyView) { <th class="num">차이</th> }
+            <th class="num">요청 (기록 / OpenAI)</th>
+            <th class="num">입력</th>
+            <th class="num">캐시 읽기</th>
+            <th class="num">캐시 쓰기</th>
+            <th class="num">출력</th>
+        </tr>
+        </thead>
+        <tbody>
+        @foreach (var r in Model.Rows)
+        {
+            var o = r.OpenAI;
+            <tr>
+                <td>
+                    @BillingModel.Range(r.Start, r.End, Model.HourlyView)
+                    @if (r.BilledItems.Any(i => i.LineItem is not null))
+                    {
+                        <div class="items">
+                            @foreach (var g in r.BilledItems.GroupBy(i => i.LineItem ?? "(항목 없음)").Where(g => g.Sum(i => i.Amount) != 0))
+                            {
+                                <div>@g.Key: @Model.Money(g.Sum(i => i.Amount))</div>
+                            }
+                        </div>
+                    }
+                </td>
+                @if (!Model.HourlyView) { <td class="num">@Model.Money(r.Billed)</td> }
+                <td class="num">
+                    @Model.Money(r.Computed)
+                    @if (r.UnpricedCalls > 0)
+                    {
+                        <div class="items err" title="모드 화면의 모델 단가 표에 단가가 없는 모델의 호출은 계산에서 빠졌습니다">단가 없음 @(r.UnpricedCalls)건 제외 — 불완전</div>
+                    }
+                    @if (r.UnknownWriteCalls > 0)
+                    {
+                        <div class="items" title="캐시 쓰기를 기록하기 전 호출(@r.UnknownWriteCalls 건)을 OpenAI 기본 동작(캐시에 안 걸린 입력 전부 쓰기)으로 가정한 값">쓰기 가정 @Model.Money(r.ComputedAssumed)</div>
+                    }
+                </td>
+                @if (!Model.HourlyView)
+                {
+                    <td class="num">
+                        @(r.Billed is { } b ? Model.Money(r.Computed - b) : "-")
+                        @if (r.Billed is { } b2 && r.UnknownWriteCalls > 0) { <div class="items">가정 기준 @Model.Money(r.ComputedAssumed - b2)</div> }
+                    </td>
+                }
+                <td class="num @(o is not null && o.Requests != r.Ours.Requests ? "mismatch" : "")">@N(r.Ours.Requests) / @(o is null ? "-" : N(o.Requests))</td>
+                <td class="num sub">@N(r.Ours.Input)@Diff(r.Ours.Input, o?.Input)</td>
+                <td class="num sub">@N(r.Ours.Cached)@Diff(r.Ours.Cached, o?.Cached)</td>
+                <td class="num sub">@N(r.Ours.CacheWrite)@Diff(r.Ours.CacheWrite, o?.CacheWrite)</td>
+                <td class="num sub">@N(r.Ours.Output)@Diff(r.Ours.Output, o?.Output)</td>
+            </tr>
+        }
+        </tbody>
+    </table>
+</section>
+
+@if (Model.HourlyView)
+{
+    <p class="muted">오늘(UTC) 누적 청구: <b>@Model.Money(Model.TodayBilled)</b> — Costs API는 하루 단위라 시간별 금액 청구값은 없습니다. 시간별은 토큰과 기록 기준 계산만 비교합니다.</p>
+}
+<p class="muted">
+    토큰 칸은 기록 값이고, 괄호는 기록 − OpenAI 차이입니다 (같으면 표시 안 함). 기록 밖 호출(대시보드 밖 curl·같은 조직의 다른 도구)은 계산에 없습니다.
+    오늘 행은 진행 중 값이며, OpenAI 반영은 몇 분 늦을 수 있습니다. 비교 대상은 openai 제공사 호출만입니다.
+</p>

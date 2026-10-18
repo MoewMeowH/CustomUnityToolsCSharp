@@ -421,6 +421,14 @@ unity skill install --help
 - 설정: `Dashboard:ClaudeProjectsDir` (비우면 `CLAUDE_CONFIG_DIR/projects` → `%USERPROFILE%\.claude\projects`), `Dashboard:ClaudeSessionLimit` (목록에 보일 최근 세션 수, 기본 50. 연결은 전체 세션으로 계산).
 - `/Sessions`(살아 있는 MCP 서버)와는 다른 화면이다.
 
+**청구 대조** (`/Billing`) — OpenAI 실제 청구와 기록 기준 계산 비교
+- 기간: 7일 · 3일 · 1일(UTC 날짜별 금액·토큰) · 시간별 24시간(토큰과 기록 기준 계산, 오늘 누적 청구는 한 줄로). OpenAI 비용은 UTC 자정 기준 하루 버킷이고, 하루가 끝나기 전에도 몇 분 지연으로 누적값이 갱신된다.
+- 청구값 가져오기:
+  - 조직 Admin 키(`sk-admin-…`, Read Only로 충분)가 환경 변수 `Dashboard:Billing:AdminKeyEnv`(기본 `OPENAI_ADMIN_KEY`)에 있으면 "새로 가져오기" 버튼으로 Costs API(항목별)·Usage API(모델별 토큰, 캐시 쓰기 포함)를 부른다. 버튼을 누를 때만 부르고 자동 새로고침과 묶지 않는다.
+  - 키가 없으면 OpenAI 대시보드에서 받은 비용 파일(CSV·JSON)을 올린다 (메모리에서만 읽고 저장하지 않음). 이때는 날짜별 금액 대조만 된다.
+- 키는 프로세스 환경 변수 → Windows 사용자 환경 변수 순으로 매번 읽는다 (새로 넣어도 재시작 불필요). 화면·로그·설정 파일에 값을 쓰지 않는다.
+- 계산은 openai 제공사 호출만, 서버 비용 상한과 같은 `ModelPrice.CostOf`. 캐시 쓰기를 기록하기 전(2026-10-18 이전) 호출이 있는 날은 "쓰기 가정"(캐시에 안 걸린 입력 전부 쓰기) 값을 함께 보여준다. 기록 밖 호출(curl·같은 조직의 다른 도구)은 계산에 없다.
+
 ## 8. HB_Orchestration.bat (publish · 대시보드 실행)
 
 솔루션 폴더의 `HB_Orchestration.bat`을 더블클릭하면 메뉴가 뜬다.

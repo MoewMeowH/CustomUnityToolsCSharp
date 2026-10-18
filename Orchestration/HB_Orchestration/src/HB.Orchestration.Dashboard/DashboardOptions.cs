@@ -40,5 +40,22 @@ public sealed class DashboardOptions
     /// <summary>'Claude 세션' 화면에서 읽을 최근 세션 기록 수 (수정 시각 순). 기본 50.</summary>
     public int ClaudeSessionLimit { get; set; } = 50;
 
+    /// <summary>'청구 대조' 화면 설정 (Admin 키 환경 변수 이름).</summary>
+    public BillingOptions Billing { get; set; } = new();
+
+    /// <summary>
+    /// Admin 키 값. 프로세스 환경 변수 → (Windows) 사용자 환경 변수 순으로 읽는다.
+    /// 사용자 환경 변수를 직접 읽으므로 키를 새로 넣어도 대시보드를 다시 켜지 않아도 된다. 화면·로그에 쓰지 않는다.
+    /// </summary>
+    public string? ReadAdminKey()
+    {
+        var name = Billing.AdminKeyEnv;
+        if (string.IsNullOrWhiteSpace(name)) return null;
+        var value = Environment.GetEnvironmentVariable(name);
+        if (string.IsNullOrWhiteSpace(value) && OperatingSystem.IsWindows())
+            value = Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.User);
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
     public string ResolvedLogPath => string.IsNullOrWhiteSpace(LogPath) ? CallLog.DefaultPath : LogPath;
 }
