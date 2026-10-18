@@ -23,5 +23,6 @@ Orchestration/HB_Orchestration/docs/
 
 # Orchestration 리뷰 임시폴더
 review_tmp/
+subagent_in/
 # 이미지 첨부 준비 폴더 (기획서 시안, image_prep.py collect)
 docs/image/
