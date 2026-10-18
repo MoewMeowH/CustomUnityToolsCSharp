@@ -41,6 +41,9 @@ public sealed record StepCall(
     /// <summary>이 단계에 보낼 이미지 (run_mode images). 입력을 받는 단계에만 붙는다. 없으면 null.</summary>
     public IReadOnlyList<AttachedImage>? Images { get; init; }
 
+    /// <summary>이 단계의 웹검색 설정 (modes.json 단계의 WebSearch). 없으면 검색 도구를 주지 않는다.</summary>
+    public WebSearchSettings? WebSearch { get; init; }
+
     /// <summary>
     /// 이 호출의 프롬프트 캐시 방식. 제공사가 ProviderDefault(정책 없음)면 그대로 두고, 아니면 모드 설정 → 제공사 설정.
     /// Context인데 첨부가 짧으면 Off (저장 지점은 최소 길이 1,024토큰에 못 미치면 쓰이지 않으므로 블록을 나눌 이유가 없다).
@@ -180,12 +183,15 @@ public sealed class AgentRunner
         try
         {
             // 역할 프롬프트는 단계마다 다르므로 실행 시점에 MAF 에이전트를 만든다 (가벼운 객체).
-            AIAgent agent = new ChatClientAgent(call.Agent.Client, instructions: call.Instructions, name: call.Agent.Name);
+            AIAgent agent = call.WebSearch is null
+                ? new ChatClientAgent(call.Agent.Client, instructions: call.Instructions, name: call.Agent.Name)
+                : new ChatClientAgent(call.Agent.Client, instructions: call.Instructions, name: call.Agent.Name, tools: [new HostedWebSearchTool()]);
 
             // 호출마다 새 스레드: 이전 대화가 섞이지 않는다 (= 쓸데없는 히스토리 토큰 없음).
             // Context면 첨부 자료와 나머지를 text 블록 둘로 나눠 보낸다. 정책이 첫 블록 끝에 저장 지점을 단다.
             var cacheMode = call.CacheMode;
             using var cacheScope = PromptCacheScope.Enter(cacheMode);
+            using var searchScope = WebSearchScope.Enter(call.WebSearch);
             var response = call.Images is { Count: > 0 }
                 ? await agent.RunAsync(WithImages(call), cancellationToken: ct)
                 : cacheMode == PromptCacheMode.Context
@@ -199,6 +205,7 @@ public sealed class AgentRunner
             var cachedTokens = response.Usage?.CachedInputTokenCount ?? UsageExtractor.CachedTokens(usageRaw);
             var cacheWriteTokens = UsageExtractor.CacheWriteTokens(usageRaw);
             var reasoningTokens = response.Usage?.ReasoningTokenCount;
+            var webSearch = call.WebSearch is null ? null : WebSearchExtractor.From(response.Messages, text, response);
 
             // 빈 응답은 실패다 (다시 보내도 같으므로 재시도하지 않는다).
             if (ResponseChecker.EmptyFailure(text, response.FinishReason, outTokens, call.Agent.Options) is { } emptyFailure)
@@ -214,6 +221,7 @@ public sealed class AgentRunner
                     OutputTokens = outTokens,
                     ReasoningTokens = reasoningTokens,
                     UsageRaw = usageRaw,
+                    WebSearch = webSearch,
                     ElapsedMs = sw.ElapsedMilliseconds,
                     Success = false,
                     Error = text,
@@ -221,6 +229,13 @@ public sealed class AgentRunner
             }
 
             var warnings = CheckWarnings(call, text, response.FinishReason, outTokens);
+            if (webSearch is { Unverified.Count: > 0 } searched)
+            {
+                // 출처 대조 경고: 응답은 그대로 전달하고 결과에 한 줄 붙인다 (지휘자가 해당 URL을 근거로 쓰지 않도록).
+                var shown = string.Join(", ", searched.Unverified.Take(5)) + (searched.Unverified.Count > 5 ? $" 외 {searched.Unverified.Count - 5}개" : "");
+                warnings = [.. warnings, $"[경고] 검색 결과에 없는 URL {searched.Unverified.Count}개 (지어냈을 수 있음): {shown}"];
+                _logger.LogWarning("[{Mode}#{Step}] {Role}@{Agent} 검색 결과에 없는 URL {Count}개", call.Mode, call.Step, call.Role, call.Agent.Name, searched.Unverified.Count);
+            }
 
             _logger.LogInformation("[{Mode}#{Step}] {Role}@{Agent} 완료 (시도 {Attempt}) {Elapsed}ms, 입력 {In} / 출력 {Out}, 경고 {Warnings}",
                 call.Mode, call.Step, call.Role, call.Agent.Name, attempt, sw.ElapsedMilliseconds, inTokens, outTokens, warnings.Count);
@@ -233,6 +248,7 @@ public sealed class AgentRunner
                 OutputTokens = outTokens,
                 ReasoningTokens = reasoningTokens,
                 UsageRaw = usageRaw,
+                WebSearch = webSearch,
                 ElapsedMs = sw.ElapsedMilliseconds,
                 Success = true,
                 Warnings = warnings,

@@ -159,6 +159,12 @@ public sealed class ModelPrice
     public decimal OutputPerMillion { get; set; }
 
     /// <summary>
+    /// 웹검색 1,000회당 USD (OpenAI web_search: 10, 2026-10-19 공식 가격표). 비우면 0 — 검색을 켠 에이전트의 모델에는 넣는다.
+    /// 검색으로 가져온 내용 토큰은 입력 토큰에 들어 있어 입력 단가로 계산된다.
+    /// </summary>
+    public decimal? WebSearchPerThousand { get; set; }
+
+    /// <summary>
     /// 한 기록의 USD 비용. 입력 토큰에는 캐시 읽기·쓰기 토큰이 포함되어 있으므로
     /// (입력 - 읽기 - 쓰기) × 입력 단가 + 읽기 × 캐시 단가 + 쓰기 × 캐시 쓰기 단가 + 출력 × 출력 단가.
     /// 쓰기 토큰을 기록하기 전의 호출(CacheWriteTokens null)은 쓰기 0으로 계산한다.
@@ -171,7 +177,8 @@ public sealed class ModelPrice
         return (input - cached - written) / 1_000_000m * InputPerMillion
              + cached / 1_000_000m * (CachedInputPerMillion ?? InputPerMillion)
              + written / 1_000_000m * (CacheWritePerMillion ?? InputPerMillion)
-             + (r.OutputTokens ?? 0) / 1_000_000m * OutputPerMillion;
+             + (r.OutputTokens ?? 0) / 1_000_000m * OutputPerMillion
+             + (r.WebSearch?.Calls ?? 0) / 1_000m * (WebSearchPerThousand ?? 0);
     }
 }
 

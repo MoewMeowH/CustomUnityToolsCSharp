@@ -43,6 +43,10 @@ public static class UsageExtractor
                     case ChatResponse chat: raw = chat.RawRepresentation; break;
                     case ChatCompletion completion:
                         return completion.Usage is null ? null : ModelReaderWriter.Write(completion.Usage).ToString();
+#pragma warning disable OPENAI001 // Responses 형식은 SDK에서 평가용 표시 (웹검색 단계만 씀)
+                    case OpenAI.Responses.ResponseResult result:
+                        return result.Usage is null ? null : ModelReaderWriter.Write(result.Usage).ToString();
+#pragma warning restore OPENAI001
                     default: return null;
                 }
             }

@@ -91,6 +91,13 @@ public sealed record CallRecord
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? Images { get; init; }
 
+    /// <summary>
+    /// 이 호출에서 에이전트가 한 웹검색 (modes.json 단계의 WebSearch). 검색 도구를 주지 않은 호출에는 필드 자체를 남기지 않는다.
+    /// 도구를 줬지만 검색하지 않았으면 Calls = 0.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public WebSearchRecord? WebSearch { get; init; }
+
     /// <summary>에이전트가 받은 지침·설정의 해시. 모든 호출에 남긴다. 5장 이전 기록은 null(대시보드 "기록 없음").</summary>
     public CallProvenance? Provenance { get; init; }
 
@@ -102,4 +109,22 @@ public sealed record CallRecord
     /// 같은 실행의 모든 줄(단계·시도)에 같은 값이 남는다. 넣지 않았으면 null.
     /// </summary>
     public string? OwnReview { get; init; }
+}
+
+/// <summary>
+/// 웹검색 기록. Calls = 검색 도구 호출 수 (search·open_page·find_in_page 동작 모두, 청구 단위로 본다).
+/// Queries = 검색어, Sources = 참고한 URL 전체(web_search_call.action.sources), Citations = 응답 본문에 인용된 URL. 모두 중복 제거, 나온 순서.
+/// </summary>
+public sealed record WebSearchRecord
+{
+    public int Calls { get; init; }
+    public IReadOnlyList<string> Queries { get; init; } = [];
+    public IReadOnlyList<string> Sources { get; init; } = [];
+    public IReadOnlyList<string> Citations { get; init; } = [];
+
+    /// <summary>open_page·find_in_page 동작으로 직접 연 페이지 URL. 예전 기록은 빈 목록.</summary>
+    public IReadOnlyList<string> Opened { get; init; } = [];
+
+    /// <summary>응답 본문에 적혔지만 Sources·Citations·Opened에 없는 URL (지어냈을 수 있음). 비교는 호스트 + 경로, 쿼리·조각 무시.</summary>
+    public IReadOnlyList<string> Unverified { get; init; } = [];
 }

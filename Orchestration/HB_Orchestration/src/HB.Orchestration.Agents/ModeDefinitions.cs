@@ -75,6 +75,39 @@ public sealed class StepDefinition
 
     /// <summary>Sequential에서 이 단계가 볼 내용. Concurrent에서는 항상 Input.</summary>
     public StepSees Sees { get; set; } = StepSees.InputAndPrevious;
+
+    /// <summary>
+    /// 웹검색을 켠다 (없으면 끔). 에이전트 제공사가 openai-responses여야 한다 — 일반 모델의 web_search 도구는 Responses API에만 있다.
+    /// </summary>
+    public WebSearchSettings? WebSearch { get; set; }
+}
+
+/// <summary>단계의 웹검색 설정. 요청 본문에는 WebSearchPolicy가 넣는다 (max_tool_calls, filters.blocked_domains, search_context_size).</summary>
+public sealed class WebSearchSettings
+{
+    /// <summary>한 호출의 검색 도구 호출 상한 (max_tool_calls). 1~<see cref="MaxCallsHardCap"/>.</summary>
+    public int MaxCalls { get; set; } = 5;
+
+    /// <summary>검색에서 뺄 도메인 (프로토콜 없이, 하위 도메인 포함, 최대 100개). 비우면 제한 없음.</summary>
+    public List<string> BlockedDomains { get; set; } = [];
+
+    /// <summary>검색 결과 분량: low · medium · high. 비우면 제공사 기본값(medium).</summary>
+    public string? ContextSize { get; set; }
+
+    /// <summary>설정 실수로 검색이 늘어나는 것을 막는 서버 측 상한.</summary>
+    public const int MaxCallsHardCap = 15;
+
+    /// <summary>설정 문제. 정상이면 null.</summary>
+    public string? Problem()
+    {
+        if (MaxCalls is < 1 or > MaxCallsHardCap) return $"WebSearch.MaxCalls는 1~{MaxCallsHardCap}입니다 (지금 {MaxCalls}).";
+        if (BlockedDomains.Count > 100) return "WebSearch.BlockedDomains는 최대 100개입니다.";
+        if (BlockedDomains.Any(d => string.IsNullOrWhiteSpace(d) || d.Contains("://", StringComparison.Ordinal) || d.Contains('/')))
+            return "WebSearch.BlockedDomains에는 프로토콜·경로 없이 도메인만 씁니다 (예: example.com).";
+        if (ContextSize is { Length: > 0 } size && size is not ("low" or "medium" or "high"))
+            return $"WebSearch.ContextSize는 low · medium · high입니다 (지금 '{size}').";
+        return null;
+    }
 }
 
 public enum ModeFlow

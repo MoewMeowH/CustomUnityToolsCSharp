@@ -222,6 +222,39 @@
     </section>
 }
 
+@if (c.WebSearch is { } ws)
+{
+    <section class="panel files">
+        <span class="muted" style="font-size:12.5px">웹검색 — 검색 도구 호출 @(ws.Calls)회 · 검색어 @ws.Queries.Count · 참고 URL @ws.Sources.Count · 인용 @ws.Citations.Count</span>
+        @if (ws.Unverified.Count > 0)
+        {
+            <div class="err" style="margin-top:6px">검색 결과에 없는 URL @(ws.Unverified.Count)개 — 에이전트가 지어냈을 수 있음</div>
+            <ul>@foreach (var u in ws.Unverified) { <li class="mono err">@u</li> }</ul>
+        }
+        @if (ws.Queries.Count > 0)
+        {
+            <div class="muted" style="margin-top:6px">검색어</div>
+            <ul>@foreach (var q in ws.Queries) { <li class="mono">@q</li> }</ul>
+        }
+        @if (ws.Citations.Count > 0)
+        {
+            <div class="muted" style="margin-top:6px">응답에 인용된 URL</div>
+            <ul>@foreach (var u in ws.Citations) { <li><a class="mono" href="@u" target="_blank" rel="noopener noreferrer">@u</a></li> }</ul>
+        }
+        @if (ws.Opened.Count > 0)
+        {
+            <div class="muted" style="margin-top:6px">직접 연 페이지</div>
+            <ul>@foreach (var u in ws.Opened) { <li><a class="mono" href="@u" target="_blank" rel="noopener noreferrer">@u</a></li> }</ul>
+        }
+        @if (ws.Sources.Count > 0)
+        {
+            <details style="margin-top:6px"><summary class="muted">참고한 URL 전체 (@ws.Sources.Count)</summary>
+                <ul>@foreach (var u in ws.Sources) { <li><a class="mono" href="@u" target="_blank" rel="noopener noreferrer">@u</a></li> }</ul>
+            </details>
+        }
+    </section>
+}
+
 @if (Model.Links.Count > 0)
 {
     <section class="panel files">

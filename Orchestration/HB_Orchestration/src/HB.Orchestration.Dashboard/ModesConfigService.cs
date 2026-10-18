@@ -37,6 +37,9 @@ public sealed class ModesSnapshot
     /// <summary>제공사별 TimeoutSeconds. 에이전트 칸이 비었을 때 실제로 적용되는 값을 안내하는 데 쓴다.</summary>
     public Dictionary<string, int?> ProviderTimeouts { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>제공사별 Type (openai-compatible · openai-responses …). 웹검색 단계가 검색 가능한 에이전트인지 표시할 때 쓴다.</summary>
+    public Dictionary<string, string> ProviderTypes { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>제공사별 ImageDetail (run_mode images의 detail). 비어 있으면 제공사 기본값. 표시 전용.</summary>
     public Dictionary<string, string?> ProviderImageDetails { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 
@@ -215,6 +218,7 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
         var providers = new List<string>();
         var providerTimeouts = new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase);
         var imageDetails = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        var providerTypes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var images = new ImageOptions();
         var defaultRuns = new BudgetOptions().DefaultMaxRunsPerSession;
         var pricing = new PricingOptions();
@@ -246,6 +250,7 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
                 {
                     providerTimeouts[name] = p.TimeoutSeconds;
                     imageDetails[name] = p.ImageDetail;
+                    providerTypes[name] = p.Type;
                 }
                 images = mcp.Images;
                 defaultRuns = mcp.Budget.DefaultMaxRunsPerSession;
@@ -269,6 +274,7 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
             ProviderNames = providers,
             ProviderTimeouts = providerTimeouts,
             ProviderImageDetails = imageDetails,
+            ProviderTypes = providerTypes,
             Images = images,
             DefaultMaxRunsPerSession = defaultRuns,
             Pricing = pricing,

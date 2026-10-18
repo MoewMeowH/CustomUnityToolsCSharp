@@ -367,6 +367,16 @@
             {
                 <div class="meta">보는 내용: @ModesModel.SeesLabel(step.Sees)</div>
             }
+            @if (step.WebSearch is { } search)
+            {
+                <div class="meta" title="@(search.BlockedDomains.Count > 0 ? "막는 도메인: " + string.Join(", ", search.BlockedDomains) : "막는 도메인 없음")">
+                    웹검색: 최대 @(search.MaxCalls)회@(search.BlockedDomains.Count > 0 ? $" · 막는 도메인 {search.BlockedDomains.Count}" : "")@(search.ContextSize is { Length: > 0 } cs ? $" · {cs}" : "")
+                    @if (current is not null && Model.Snapshot!.ProviderTypes.GetValueOrDefault(current.Provider) is { } type && type != HB.Orchestration.Agents.Providers.OpenAIResponsesProvider.TypeName)
+                    {
+                        <span class="err"> (이 에이전트는 검색 불가 — openai-responses 제공사 필요)</span>
+                    }
+                </div>
+            }
         </div>
     }
 }

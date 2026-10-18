@@ -45,7 +45,9 @@ public sealed class ModeRunnerHarness : IDisposable
     public bool FailLoad { get; set; }
     public ModeRunner Runner { get; }
 
-    public ModeRunnerHarness(string? modesJson = null, string guidelines = "# 지침\n- 한글 규칙\n", string settings = """{ "Orchestration": { "Providers": { "fake": { "ApiKeyEnv": "FAKE_KEY" } } } }""")
+    /// <param name="providerType">가짜 제공사의 Type. 제공사 Type을 보는 검사(웹검색 = openai-responses)를 시험할 때 바꾼다.</param>
+    public ModeRunnerHarness(string? modesJson = null, string guidelines = "# 지침\n- 한글 규칙\n", string settings = """{ "Orchestration": { "Providers": { "fake": { "ApiKeyEnv": "FAKE_KEY" } } } }""",
+        string providerType = "fake")
     {
         File.WriteAllText(ModesPath, modesJson ?? DefaultModes);
         if (guidelines is not null) File.WriteAllText(GuidelinesPath, guidelines);
@@ -53,7 +55,7 @@ public sealed class ModeRunnerHarness : IDisposable
 
         Options = new OrchestrationOptions
         {
-            Providers = new(StringComparer.OrdinalIgnoreCase) { ["fake"] = new ProviderOptions { Type = "fake" } },
+            Providers = new(StringComparer.OrdinalIgnoreCase) { ["fake"] = new ProviderOptions { Type = providerType } },
             Agents = [new AgentOptions { Name = "a1", Provider = "fake", Model = "m", MaxAttempts = 1 }],
             ModesPath = ModesPath,
             GuidelinesPath = GuidelinesPath,
@@ -61,7 +63,7 @@ public sealed class ModeRunnerHarness : IDisposable
 
         var catalog = new AgentCatalog(
             new OrchestrationSource(() => FailLoad ? throw new InvalidOperationException("설정 깨짐") : Options, SettingsPath),
-            [new FakeProvider(Client)], NullLogger<AgentCatalog>.Instance);
+            [new FakeProvider(Client, providerType)], NullLogger<AgentCatalog>.Instance);
         Sessions = new SessionTracker(NullLogger<SessionTracker>.Instance, Path.Combine(Root, "sessions"));
         var agentRunner = new AgentRunner(NullLogger<AgentRunner>.Instance, (_, _) => Task.CompletedTask, LogPath);
         Runner = new ModeRunner(new ModeStore(catalog), catalog, agentRunner, Sessions);
@@ -79,9 +81,9 @@ public sealed class ModeRunnerHarness : IDisposable
         try { Directory.Delete(Root, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
 
-    private sealed class FakeProvider(IChatClient client) : IChatClientProvider
+    private sealed class FakeProvider(IChatClient client, string type) : IChatClientProvider
     {
-        public string Type => "fake";
+        public string Type => type;
         public IChatClient Create(string providerName, ProviderOptions options, AgentOptions agent) => client;
     }
 }

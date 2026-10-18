@@ -1,3 +1,4 @@
+using HB.Orchestration.Agents.Providers;
 using System.Text;
 using HB.Orchestration.Shared;
 
@@ -64,7 +65,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         var promptInput = new PromptInput(input, attached!.Text, loadedImages!);
         var meta = new CallMeta(files, attached.Sources)
         {
-            ContextRoots = MergeRoots(attached.Roots, loadedImages),
+            ContextRoots = MergeRoots(attached.Roots, loadedImages!),
             Reason = reason,
             OwnReview = string.IsNullOrWhiteSpace(ownReview) ? null : ownReview,
         };
@@ -93,8 +94,17 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             try { role = ModeStore.ResolveRole(loaded, step.Role); }
             catch (ModeConfigException ex) { return $"[모드 '{modeName}'] {ex.Message}"; }
 
-            // 시스템 프롬프트 = 역할 + 공통 규칙 (+ 지침). 매번 같은 앞부분이라 제공사 프롬프트 캐시에 걸린다.
-            plan.Add(new PlannedStep(step, agent, role.Prompt + Prompts.CommonRules + (role.UseGuidelines ? guidelines.Text : ""),
+            if (step.WebSearch is { } search)
+            {
+                if (search.Problem() is { } searchProblem) return $"[모드 '{modeName}'] {step.Role}@{agentName}: {searchProblem}";
+                if (!string.Equals(agent.ProviderOptions?.Type, OpenAIResponsesProvider.TypeName, StringComparison.OrdinalIgnoreCase))
+                    return $"[모드 '{modeName}'] {step.Role}@{agentName}: WebSearch는 제공사 Type이 '{OpenAIResponsesProvider.TypeName}'인 에이전트에서만 됩니다 " +
+                           $"(지금 '{agent.ProviderOptions?.Type}'). appsettings의 웹검색용 에이전트로 바꾸세요.";
+            }
+
+            // 시스템 프롬프트 = 역할 + 공통 규칙 (+ 웹검색 규칙) (+ 지침). 매번 같은 앞부분이라 제공사 프롬프트 캐시에 걸린다.
+            plan.Add(new PlannedStep(step, agent,
+                role.Prompt + Prompts.CommonRules + (step.WebSearch is null ? "" : Prompts.WebSearchRules) + (role.UseGuidelines ? guidelines.Text : ""),
                 ProvenanceBuilder.ForStep(guidelines, role.UseGuidelines), mode.PromptCache));
         }
 
@@ -197,6 +207,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             ContextPrefix = prompt.ContextPrefix,
             ModePromptCache = p.PromptCache,
             Images = prompt.Images,
+            WebSearch = p.Def.WebSearch,
         };
 
     /// <summary>사용자 input과 서버가 읽은 첨부 자료·이미지. 프롬프트에서는 첨부가 먼저 온다.</summary>
