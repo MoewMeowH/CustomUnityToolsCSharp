@@ -64,7 +64,7 @@ public sealed class PricingService(IOptions<DashboardOptions> options, ModesConf
         : options.Value.Prices.TryGetValue(model, out var legacy) ? legacy
         : null;
 
-    /// <summary>USD 비용 (계산식은 서버 비용 상한과 같은 <see cref="ModelPrice.CostOf"/>). 단가가 없으면 null.</summary>
+    /// <summary>USD 비용 (계산식은 서버와 같은 <see cref="ModelPrice.CostOf"/>). 단가가 없으면 null.</summary>
     public decimal? CostOf(CallRecord r) => PriceOf(r.Model)?.CostOf(r);
 
     /// <summary>합계. 단가가 있는 기록이 하나도 없으면 null.</summary>

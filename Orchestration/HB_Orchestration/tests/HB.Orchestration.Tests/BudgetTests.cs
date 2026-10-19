@@ -4,7 +4,7 @@ using HB.Orchestration.Tests.Fakes;
 
 namespace HB.Orchestration.Tests;
 
-/// <summary>일일 상한에 세는 토큰·비용 (서버 검사와 대시보드 "오늘 … 상한" 칸이 같은 식을 쓴다).</summary>
+/// <summary>오늘 사용량으로 세는 토큰·비용 (대시보드 "오늘 비용·토큰" 칸). 하루 상한은 없다.</summary>
 public sealed class BudgetTests : IDisposable
 {
     private readonly ModeRunnerHarness _h = new();
@@ -76,34 +76,27 @@ public sealed class BudgetTests : IDisposable
     }
 
     [Fact]
-    public async Task CostLimitReached_RejectsBeforeCall()
+    public void UnpricedCalls_CountsRecordsWithTokensButNoPrice_ExcludingFree()
+    {
+        var budget = new BudgetOptions { FreeProviders = ["local"] };
+        var calls = new[]
+        {
+            Call("openai", 100, 10),                    // 단가 있음
+            Call("openai", 100, 10, model: "unknown"),  // 단가 없음
+            Call("local", 100, 10, model: "unknown"),   // 무료 제공사
+            Call("openai", null, null, model: "unknown"), // 실패 기록 (토큰 없음)
+        };
+
+        Assert.Equal(1, budget.UnpricedCalls(calls, Prices()));
+    }
+
+    // 하루 토큰·비용 상한은 없앴다 (계획서 2026-10-20_하루상한-제거): 오늘 많이 썼어도, 단가 없는 모델이어도 실행한다.
+
+    [Fact]
+    public async Task HeavyUsageToday_StillRuns()
     {
         _h.Options.Pricing = Prices();
-        _h.Options.Budget.DailyCostLimitUsd = 1;
-        await CallLog.AppendAsync(Call("fake", 0, 100_000), _h.LogPath); // $1.00
-
-        var result = await _h.Run("seq");
-
-        Assert.StartsWith("[오늘 비용 상한 도달]", result);
-        Assert.Equal(0, _h.Client.Calls);
-    }
-
-    [Fact]
-    public async Task CostLimitOn_UnpricedModel_RejectsBeforeCall()
-    {
-        _h.Options.Budget.DailyCostLimitUsd = 5;
-
-        var result = await _h.Run("seq");
-
-        Assert.StartsWith("[단가 없는 모델] a1(m)", result);
-        Assert.Equal(0, _h.Client.Calls);
-    }
-
-    [Fact]
-    public async Task CostLimitOn_FreeProviderWithoutPrice_Runs()
-    {
-        _h.Options.Budget.DailyCostLimitUsd = 5;
-        _h.Options.Budget.FreeProviders = ["fake"];
+        await CallLog.AppendAsync(Call("fake", 100_000_000, 10_000_000), _h.LogPath); // $300, 1.1억 토큰
 
         await _h.Run("seq");
 
@@ -111,29 +104,10 @@ public sealed class BudgetTests : IDisposable
     }
 
     [Fact]
-    public async Task UnderBothLimits_Runs()
+    public async Task UnpricedModel_Runs()
     {
-        _h.Options.Pricing = Prices();
-        _h.Options.Budget.DailyCostLimitUsd = 5;
-        _h.Options.Budget.DailyTokenLimit = 1_000_000;
-        await CallLog.AppendAsync(Call("fake", 100_000, 10_000), _h.LogPath); // $0.30, 110,000 토큰
-
-        await _h.Run("seq");
+        await _h.Run("seq"); // 가짜 하네스의 모델 m은 단가 없음
 
         Assert.Equal(1, _h.Client.Calls);
-    }
-
-    [Fact]
-    public async Task TokenLimitReached_RejectsEvenWhenCostIsLow()
-    {
-        _h.Options.Pricing = Prices();
-        _h.Options.Budget.DailyCostLimitUsd = 5;
-        _h.Options.Budget.DailyTokenLimit = 1_000;
-        await CallLog.AppendAsync(Call("fake", 1_000, 0), _h.LogPath);
-
-        var result = await _h.Run("seq");
-
-        Assert.StartsWith("[오늘 토큰 상한 도달]", result);
-        Assert.Equal(0, _h.Client.Calls);
     }
 }

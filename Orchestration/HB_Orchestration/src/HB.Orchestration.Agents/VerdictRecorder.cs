@@ -17,7 +17,7 @@ public sealed record VerdictItem(
 
 /// <summary>
 /// /self-review의 self-reviewer 실행 (record_verdicts에 runId 대신 준다). 서버가 calls.jsonl에 실행 1건(단계 1 = self-reviewer)을 만든다.
-/// 토큰은 InputTokens·OutputTokens에 넣지 않는다 — 하루 토큰 상한은 외부 에이전트용 (계획서 2026-10-20_리뷰조건-self-reviewer).
+/// 토큰은 InputTokens·OutputTokens에 넣지 않는다 — 대시보드 오늘 사용량은 외부 에이전트 기준 (계획서 2026-10-20_리뷰조건-self-reviewer).
 /// </summary>
 public sealed record SelfReviewInfo(
     [property: Description("self-reviewer 결과 원문 (## 지적 · ## 자료 부족 · ## 읽은 파일)")] string Review,

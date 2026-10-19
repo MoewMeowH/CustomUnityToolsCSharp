@@ -385,17 +385,12 @@ public sealed class AgentOptions
     public StructuredOutputMode? StructuredOutput { get; set; }
 }
 
+/// <summary>
+/// 입력 상한 · 세션당 실행 한도 · 사용량 집계. 하루 토큰·비용 상한(DailyTokenLimit · DailyCostLimitUsd)은 없앴다
+/// (계획서 2026-10-20_하루상한-제거 — 하루에 몰아 쓰는 사용 방식, 제공사 계정 한도가 마지막 방어선). 예전 appsettings에 키가 남아 있어도 무시된다.
+/// </summary>
 public sealed class BudgetOptions
 {
-    /// <summary>하루(로컬 날짜 기준) 입력+출력 토큰 합계 상한. 0이면 끔. 로컬 제공사는 집계에서 제외.</summary>
-    public long DailyTokenLimit { get; set; }
-
-    /// <summary>
-    /// 하루(로컬 날짜 기준) 비용 상한 (USD, Pricing 단가로 계산). 0이면 끔. 토큰 상한과 함께 쓰면 먼저 닿는 쪽에서 거절한다.
-    /// 켜져 있으면 단가가 없는 모델은 실행하지 않는다 (FreeProviders 제외) — 비용이 집계에서 새지 않게.
-    /// </summary>
-    public decimal DailyCostLimitUsd { get; set; }
-
     /// <summary>
     /// run_mode 입력 최대 글자 수 (input + context로 붙인 코드 합계). 넘으면 실행하지 않고 줄여달라고 돌려준다.
     /// 모드별로 덮어쓸 수 있음. Debate는 토론자가 매 턴 요청 전체를 다시 받으므로 실제 비용은 턴 수만큼 곱해진다.
@@ -405,16 +400,20 @@ public sealed class BudgetOptions
     /// <summary>MaxRunsPerSession을 정하지 않은 모드의 세션당 실행 한도. 0이면 무제한.</summary>
     public int DefaultMaxRunsPerSession { get; set; } = 5;
 
-    /// <summary>예산 집계에서 뺄 제공사 (무료인 로컬 등).</summary>
+    /// <summary>사용량 집계에서 뺄 제공사 (무료인 로컬 등).</summary>
     public List<string> FreeProviders { get; set; } = ["local"];
 
-    /// <summary>상한에 세는 토큰 (입력+출력, FreeProviders 제외). 기간은 호출하는 쪽이 고른다. 서버 검사와 대시보드가 같은 식을 쓴다.</summary>
+    /// <summary>사용량으로 세는 토큰 (입력+출력, FreeProviders 제외). 기간은 호출하는 쪽이 고른다 (대시보드 오늘 사용량).</summary>
     public long CountedTokens(IEnumerable<CallRecord> calls) =>
         Counted(calls).Sum(c => (c.InputTokens ?? 0) + (c.OutputTokens ?? 0));
 
-    /// <summary>상한에 세는 비용 (USD, FreeProviders 제외). 단가가 없는 모델의 기록은 0으로 센다 (상한이 켜져 있으면 애초에 실행되지 않는다).</summary>
+    /// <summary>사용량으로 세는 비용 (USD, FreeProviders 제외). 단가가 없는 모델의 기록은 0으로 센다 — 그 건수는 <see cref="UnpricedCalls"/>.</summary>
     public decimal CountedCost(IEnumerable<CallRecord> calls, PricingOptions pricing) =>
         Counted(calls).Sum(c => pricing.Models.TryGetValue(c.Model, out var p) ? p.CostOf(c) : 0m);
+
+    /// <summary>비용을 셀 수 없는 기록 수 (FreeProviders 제외, 토큰이 있는데 단가가 없는 모델). 대시보드가 "비용 미집계"로 보인다.</summary>
+    public int UnpricedCalls(IEnumerable<CallRecord> calls, PricingOptions pricing) =>
+        Counted(calls).Count(c => c.InputTokens is not null && !pricing.Models.ContainsKey(c.Model));
 
     public bool IsFree(string? provider) =>
         provider is not null && FreeProviders.Contains(provider, StringComparer.OrdinalIgnoreCase);

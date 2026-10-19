@@ -85,9 +85,6 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         if (loadedImages!.Count > 0 && plan.Where(p => !p.Agent.Options.Vision).Select(p => p.Agent.Name).Distinct().ToList() is { Count: > 0 } blind)
             return $"[모드 '{modeName}'] 이미지를 받지 않는 에이전트(Vision=false): {string.Join(", ", blind)}. images 없이 호출하거나 agents로 바꾸세요.";
 
-        // 비용 상한은 단계별 모델을 알아야 하므로 에이전트를 정한 뒤에 검사한다.
-        if (CheckBudget(plan.Select(p => p.Agent)) is { } budgetMessage) return budgetMessage;
-
         // 세션당 실행 한도: 검증을 다 통과한 실행만 센다 (설정 오류로 거절된 호출은 횟수에 안 들어감).
         var limit = RunLimit(mode);
         if (!sessions.TryReserve(modeName, limit))
@@ -242,7 +239,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
 
     /// <summary>
     /// 골든 세트 실행 (--golden run): 고정된 프롬프트 원문을 run_mode와 같은 시스템 프롬프트·에이전트로 보낸다.
-    /// 세션 실행 한도·ownReview·context 첨부는 쓰지 않는다 (첨부는 프롬프트 원문에 이미 들어 있음). 비용 상한은 그대로 본다.
+    /// 세션 실행 한도·ownReview·context 첨부는 쓰지 않는다 (첨부는 프롬프트 원문에 이미 들어 있음).
     /// 호출 기록의 Tool은 <paramref name="tool"/>, Mode는 원래 모드 이름이다.
     /// </summary>
     /// <param name="expectedGuidelines">실행 전 확인 때의 지침. 주면 호출 직전에 다시 읽은 지침(붙음 여부·해시)과 비교해 다르면 호출하지 않는다
@@ -268,7 +265,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
 
     /// <summary>
     /// --golden의 crash 사례: Sequential 모드 전체를 run_mode와 같은 계획·프롬프트 조립(Sees)으로 돌린다 (계획서 2026-10-19_골든-crash사례).
-    /// input은 run_mode의 input과 같고 첨부(context)·이미지는 없다. 세션 한도·ownReview는 쓰지 않고 비용 상한은 본다. 기록 Tool은 tool.
+    /// input은 run_mode의 input과 같고 첨부(context)·이미지는 없다. 세션 한도·ownReview는 쓰지 않는다. 기록 Tool은 tool.
     /// expected를 주면 단계 수 · 단계마다 에이전트와 지침(붙음·해시)을 실행 전 확인과 비교해 다르면 호출하지 않는다
     /// (사례를 차례로 도는 사이 modes.json·지침이 바뀌면 결과 줄의 에이전트·모델과 실제 실행이 어긋나므로).
     /// </summary>
@@ -331,9 +328,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             return (null, $"[입력이 너무 깁니다] {inputLength:N0}자 / 상한 {maxChars:N0}자 (모드 '{modeName}').");
 
         var (plan, error) = BuildPlan(loaded, modeName, mode, agentOverrides, withoutGuidelines);
-        if (error is not null) return (null, error);
-        if (CheckBudget(plan!.Steps.Select(p => p.Agent)) is { } budgetMessage) return (null, budgetMessage);
-        return (plan, null);
+        return error is not null ? (null, error) : (plan, null);
     }
 
     /// <summary>
@@ -427,7 +422,6 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             var total = original.Prompt.Length + previous.Length + prompt.Length;
             if (maxChars > 0 && total > maxChars)
                 return $"[입력이 너무 깁니다] 원래 프롬프트 + 응답 + 보충 {total:N0}자 / 상한 {maxChars:N0}자. 보충 범위를 줄이세요.";
-            if (CheckBudget([step.Agent]) is { } budgetMessage) return budgetMessage;
 
             var newStep = run.Max(r => r.Step ?? 0) + 1;
             var meta = new CallMeta(files, attached.Sources) { ContextRoots = attached.Roots, Reason = reason, Provenance = RunProvenance(plan) };
@@ -465,7 +459,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
 
     /// <summary>
     /// --golden run의 실행 전 확인: 보낼 역할·에이전트·모델. 외부 호출 없음.
-    /// 실행 때와 같은 검사(모드·에이전트·구조화 출력·입력 상한·비용 상한)를 해서, 통과하면 실행도 설정 이유로는 거절되지 않는다.
+    /// 실행 때와 같은 검사(모드·에이전트·구조화 출력·입력 상한)를 해서, 통과하면 실행도 설정 이유로는 거절되지 않는다.
     /// Guidelines는 이 단계에 지침이 붙는지 (골든 실행이 지침 없이 도는 것을 실행 전에 알리려고).
     /// </summary>
     public ((string Role, string Agent, string Model, GuidelinesProvenance Guidelines)? Step, string? Error) PreviewFixedPrompt(
@@ -491,7 +485,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
 
     /// <summary>
     /// 점수는 한 단계의 구조화 지적으로 매기므로 단계가 하나이고 Output이 있는 모드만 받는다 (없으면 비용을 쓰고도 채점하지 못함).
-    /// 입력 상한(MaxInputChars)과 비용 상한은 run_mode와 같다.
+    /// 입력 상한(MaxInputChars)은 run_mode와 같다.
     /// </summary>
     private (PreparedPlan? Plan, string? Error) PlanFixedPrompt(string modeName, IReadOnlyList<string>? agentOverrides, int promptLength,
         bool withoutGuidelines = false)
@@ -513,7 +507,6 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         if (error is not null) return (null, error);
         if (plan!.Steps[0].Output is null)
             return (null, $"[모드 '{modeName}'] 역할 '{plan.Steps[0].Def.Role}'에 구조화 출력(Output)이 없어 채점할 수 없습니다.");
-        if (CheckBudget(plan.Steps.Select(p => p.Agent)) is { } budgetMessage) return (null, budgetMessage);
         return (plan, null);
     }
 
@@ -727,36 +720,6 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     }
 
     private int RunLimit(ModeDefinition mode) => mode.MaxRunsPerSession ?? Options.Budget.DefaultMaxRunsPerSession;
-
-    /// <summary>
-    /// 오늘 쓴 토큰·비용이 상한을 넘었거나, 비용 상한이 켜져 있는데 단가 없는 모델을 쓰려 하면 메시지, 아니면 null.
-    /// 실행 전에 한 번만 본다 (이번 실행이 쓸 양은 미리 알 수 없으므로 실행 중에 넘을 수 있다).
-    /// </summary>
-    private string? CheckBudget(IEnumerable<AgentEntry> agents)
-    {
-        var budget = Options.Budget;
-        if (budget.DailyTokenLimit <= 0 && budget.DailyCostLimitUsd <= 0) return null;
-
-        var pricing = Options.Pricing;
-        if (budget.DailyCostLimitUsd > 0)
-        {
-            var unpriced = agents.Where(a => !budget.IsFree(a.Provider) && !pricing.Models.ContainsKey(a.Model))
-                .Select(a => $"{a.Name}({a.Model})").Distinct().ToList();
-            if (unpriced.Count > 0)
-                return $"[단가 없는 모델] {string.Join(", ", unpriced)}. 비용 상한(Budget.DailyCostLimitUsd)이 켜져 있어 비용을 셀 수 없는 모델은 실행하지 않습니다. " +
-                       "대시보드 '모드' 화면의 모델 단가 표(appsettings.json의 Pricing.Models)에 단가를 넣으세요.";
-        }
-
-        var today = CallLog.ReadSince(new DateTimeOffset(DateTime.Today), runner.LogPath);
-
-        if (budget.DailyTokenLimit > 0 && budget.CountedTokens(today) is var tokens && tokens >= budget.DailyTokenLimit)
-            return $"[오늘 토큰 상한 도달] {tokens:N0} / {budget.DailyTokenLimit:N0}. 외부 에이전트 없이 진행하거나 appsettings.json의 Budget.DailyTokenLimit을 조정하세요.";
-
-        if (budget.DailyCostLimitUsd > 0 && budget.CountedCost(today, pricing) is var cost && cost >= budget.DailyCostLimitUsd)
-            return $"[오늘 비용 상한 도달] ${cost:0.00} / ${budget.DailyCostLimitUsd:0.00}. 외부 에이전트 없이 진행하거나 appsettings.json의 Budget.DailyCostLimitUsd를 조정하세요.";
-
-        return null;
-    }
 
     /// <summary>list_modes용 요약. 짧게 유지할수록 Claude 쪽 토큰 절약.</summary>
     public string Describe()

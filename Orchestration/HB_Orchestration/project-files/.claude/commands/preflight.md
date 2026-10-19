@@ -24,7 +24,7 @@ argument-hint: <요청> [첨부 파일 경로 ...]
 
 ## 공통 규칙
 
-- 시작 전에 대시보드의 오늘 비용·토큰 상한 칸을 사용자에게 확인받는다. preflight 한 번은 일일 상한(`Budget.DailyCostLimitUsd` · `Budget.DailyTokenLimit`)의 상당 부분을 쓴다 (2026-10-18 실측: 약 $1.1 · 37만 토큰). 상한은 실행 전에 검사하므로 중간 단계에서 거절될 수 있다.
+- 시작 전에 예상 비용을 사용자에게 알린다: preflight 한 번은 약 $1.1 · 37만 토큰을 쓴다 (2026-10-18 실측). 하루 상한은 없으니 대시보드의 오늘 비용·토큰 칸은 참고로만 본다.
 - 모든 `run_mode` 호출에 `reason`을 쓴다. `ownReview`가 필수인 단계(P1, P5)는 결과를 보기 전에 ownReview를 작업 로그에 다 쓴 뒤 호출한다.
 - 모델에게 넘기는 원문은 손으로 옮겨 적지 않는다. 산출물을 파일로 저장하고 `context`에 경로로 붙인다. 에이전트 응답은 `save_result`로 저장한다.
 - 각 단계 산출물은 `docs/preflight/<날짜>_<주제>/` 아래에 `request.md`(요청 원문), `attachments/`, `p1_A.md`, `p1_B.md`, `p1_Perf.md`, `p2_A.md`, `p2_B.md`, `p3_A.md`, `p3_B.md`, `p4_report.md`, `final_code/`, `p5_diff/`, `p5a_check.md`, `p5b_perf.md`로 저장한다.

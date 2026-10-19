@@ -92,8 +92,7 @@ dotnet build HB_Orchestration.slnx
 | `Agents[].TimeoutSeconds` | 요청 하나의 네트워크 타임아웃(초). **에이전트 → 제공사 → SDK 기본 100초** 순. 긴 응답을 쓰는 모델(sol 등)만 길게 잡을 때 사용. 대시보드 에이전트 표의 "타임아웃(초)" 칸 |
 | `Agents[].MaxAttempts` | 한 단계의 최대 시도 횟수 (첫 시도 포함, 1~5). **에이전트 → 제공사 → 2**(= 최대 1회 재시도) 순. 아래 "재시도" 참고 |
 | `Agents[].Enabled` | `false`면 끔 (생략 = 켬) |
-| `Budget.DailyTokenLimit` | 하루 입력+출력 토큰 상한 (0 = 끔). `FreeProviders`는 집계 제외 |
-| `Budget.DailyCostLimitUsd` | 하루 비용 상한 USD (0 = 끔). `Pricing.Models` 단가로 계산(캐시 단가 반영), `FreeProviders` 제외. 토큰 상한과 함께 쓰면 먼저 닿는 쪽에서 거절. **켜져 있으면 단가 없는 모델은 실행 거절** |
+| `Budget.FreeProviders` | 대시보드 오늘 사용량(토큰·비용)에서 뺄 제공사. 하루 토큰·비용 상한(`DailyTokenLimit` · `DailyCostLimitUsd`)은 2026-10-20에 없앴다 — 예전 키가 남아 있어도 무시 |
 | `Budget.MaxInputChars` | `run_mode` 입력 최대 글자 수 (input + `context` 첨부 합계, 기본 350,000). Debate는 토론자가 매 턴 요청 전체를 받으므로 비용이 턴 수만큼 곱해짐 |
 | `Context.MaxRanges` | `context` 범위 개수 상한 (기본 30) |
 | `Context.MaxFileBytes` | 읽기 전에 확인하는 파일 크기 상한 (기본 2,000,000바이트) |
@@ -340,7 +339,7 @@ review 계열(`Reviewer` · `PerfReviewer`)의 응답을 JSON으로 받아 지�
 `run_mode(mode, input, context, reason, followUp: { runId, step, requests: ["1-N1", …] })`
 - 그 단계의 에이전트(원래 실행에서 바꿨으면 바꾼 에이전트)에게 `[원래 프롬프트, 원래 응답]`을 앞 대화로 두고, 보충 자료(`context`)·지휘자 메모(`input`)·보충 지시를 이어 보낸다. 앞부분이 원래 호출과 같아 제공사 프롬프트 캐시에 걸린다.
 - 결과는 같은 runId의 **새 단계 번호**(예: 2)로 남는다 — 지적·요청 ID(`2-F1`)와 `save_result`가 원래 응답과 섞이지 않는다. 기록에 `FollowUpOf`·`FollowUpRequests`·`FollowUpSkipped`.
-- 실행마다 **성공한 보충 1회** (실패·취소된 시도는 다시 할 수 있다, 같은 실행의 동시 호출은 서버 안 예약으로 하나만). **세션 실행 한도는 차감하지 않는다** (사용자 결정 — followUp으로 한도가 다 차지 않게). 비용 상한·입력 상한(원래 프롬프트 + 응답 + 보충)은 본다. `reason` 필수. `agents`·`images`·`ownReview`와 함께 쓰면 거절한다.
+- 실행마다 **성공한 보충 1회** (실패·취소된 시도는 다시 할 수 있다, 같은 실행의 동시 호출은 서버 안 예약으로 하나만). **세션 실행 한도는 차감하지 않는다** (사용자 결정 — followUp으로 한도가 다 차지 않게). 입력 상한(원래 프롬프트 + 응답 + 보충)은 본다. `reason` 필수. `agents`·`images`·`ownReview`와 함께 쓰면 거절한다.
 - 계획은 그 단계 하나만, 원래 실행의 에이전트로 다시 조립한다. 시스템 프롬프트 해시가 원래 호출과 다르면 결과에 `(주의: 시스템 프롬프트가 원래 실행 때와 다르다)`.
 - 결과 끝: 원래 단계와 보충 단계 지적의 `겹침 후보`, `(판정은 N단계 지적 기준 — 원래 단계의 같은 지적은 duplicate로 …)`. 보내지 않은 요청은 결과 끝과 에이전트에게 간 메시지에 표시된다. 지휘자는 그 이유를 사용자에게 알린다 (CLAUDE.md "결과 종합" 6번).
 - 판정 화면: followUp으로 보낸 요청은 따로 기록하지 않아도 "보충"으로 센다. 보충 단계가 새로 낸 요청은 다시 보충할 수 없어 "처리 안 함"에 넣지 않고 따로 센다.
@@ -407,7 +406,6 @@ calls.jsonl의 응답 원문을 그대로 저장한다. Claude가 응답을 다�
 | 고정 시스템 프롬프트 앞부분 | 서버 | 역할+규칙+지침이 매번 같아 제공사 프롬프트 캐시 적중 |
 | `UseGuidelines: false` | modes.json | 코드와 무관한 역할에 지침을 안 붙임 |
 | `MaxOutputTokens` | appsettings | 응답 폭주 방지 |
-| `Budget.DailyTokenLimit` · `Budget.DailyCostLimitUsd` | appsettings | 하루 토큰·비용 상한 도달 시 실행 거부 (로컬 제외). 실행 전에만 검사하므로 실행 중에 넘을 수 있음 |
 | `MaxRounds` · `HistoryWindow` · `[합의]` 조기 종료 | modes.json | 다회차 토론의 누적 비용 제한 |
 | `MaxRunsPerSession` | modes.json | 리뷰→수정→재리뷰, 추가 조사 반복 같은 루프를 세션 단위로 차단. 기본값은 `Budget.DefaultMaxRunsPerSession` |
 | `files`는 에이전트에 안 보냄 | 서버 | 경로 목록은 기록·링크 전용 |
@@ -478,7 +476,7 @@ unity skill install --help
 
 **호출 기록** (`/`)
 - 기간 · 모드 · 제공사 필터, 호출 수 · 토큰 · 평균 응답 · 예상 비용 · 실패, 일별 토큰
-- **오늘 비용 상한** · **오늘 토큰 상한** 칸: 오늘 0시부터, `FreeProviders` 제외 / `Budget.DailyCostLimitUsd` · `Budget.DailyTokenLimit` (서버 검사와 같은 식, 필터와 무관. 비용은 MCP appsettings 단가만 사용). 기간 필터의 "최근 24시간"은 어제 호출도 들어가므로 이 값과 다르다
+- **오늘 비용** · **오늘 토큰** 칸: 오늘 0시부터, `FreeProviders` 제외 (필터와 무관. 비용은 MCP appsettings 단가만 사용, 단가 없는 모델은 "단가 없는 모델 N건(비용 미집계)"으로 표시). 상한은 없다. 기간 필터의 "최근 24시간"은 어제 호출도 들어가므로 이 값과 다르다
 - 캐시: `캐시 0`은 미적중, `캐시 정보 없음`은 제공사가 값을 주지 않은 기록(Gemini는 미적중일 때 값이 없음, 예전 기록)
 - 상세: 요청/응답, **같은 실행의 다른 단계와 실행 전체 토큰 합계**
 - **첨부 코드 · 관련 파일**: 이름을 누르면 대시보드 안 보기(`/Attachment`, 줄 번호 + 보낸 줄 범위 강조). 옆 **Rider**는 IDE로 연다
@@ -537,7 +535,7 @@ unity skill install --help
   - 조직 Admin 키(`sk-admin-…`, Read Only로 충분)가 환경 변수 `Dashboard:Billing:AdminKeyEnv`(기본 `OPENAI_ADMIN_KEY`)에 있으면 "새로 가져오기" 버튼으로 Costs API(항목별)·Usage API(모델별 토큰, 캐시 쓰기 포함)를 부른다. 버튼을 누를 때만 부르고 자동 새로고침과 묶지 않는다.
   - 키가 없으면 OpenAI 대시보드에서 받은 비용 파일(CSV·JSON)을 올린다 (메모리에서만 읽고 저장하지 않음). 이때는 날짜별 금액 대조만 된다.
 - 키는 프로세스 환경 변수 → Windows 사용자 환경 변수 순으로 매번 읽는다 (새로 넣어도 재시작 불필요). 화면·로그·설정 파일에 값을 쓰지 않는다.
-- 계산은 openai 제공사 호출만, 서버 비용 상한과 같은 `ModelPrice.CostOf`. 캐시 쓰기를 기록하기 전(2026-10-18 이전) 호출이 있는 날은 "쓰기 가정"(캐시에 안 걸린 입력 전부 쓰기) 값을 함께 보여준다. 기록 밖 호출(curl·같은 조직의 다른 도구)은 계산에 없다.
+- 계산은 OpenAI 조직으로 청구되는 제공사(openai · openai-web 등) 호출만, 서버와 같은 `ModelPrice.CostOf` (웹검색은 search 동작 수, 추정). 캐시 쓰기를 기록하기 전(2026-10-18 이전) 호출이 있는 날은 "쓰기 가정"(캐시에 안 걸린 입력 전부 쓰기) 값을 함께 보여준다. 기록 밖 호출(curl·같은 조직의 다른 도구)은 계산에 없다.
 
 ## 8. HB_Orchestration.bat (publish · 대시보드 실행)
 
@@ -597,7 +595,7 @@ dotnet <publish 폴더>\HB.Orchestration.Mcp.dll --golden score <사례> --from 
 ```
 - `run`은 `--yes`가 없으면 사례·에이전트·입력 글자 수·입력 비용 추정·붙는 지침 파일만 보이고 **외부 호출 없이** 멈춘다.
 - 지침은 run_mode와 같은 순서로 찾는다 (`Orchestration:GuidelinesPath` → `REVIEW_GUIDELINES_PATH` → **현재 폴더**의 `REVIEW_GUIDELINES.md`). 지침을 쓰는 역할인데 못 찾으면 계획을 보인 뒤 거절한다 (외부 호출 없음) — 프로젝트 루트에서 실행하거나 경로를 지정한다. `--no-guidelines`는 파일이 있어도 지침을 빼고 돈다 (지침 있음·없음 비교용, 기록 사유 `골든 --no-guidelines`). 사례를 돌기 직전마다 지침을 다시 읽어 실행 전 확인과 다르면(파일이 바뀜·사라짐) 그 사례부터 멈춘다. 결과 줄에 `guidelinesAttached` · `guidelinesSha256` · `guidelinesReason`.
-- run_mode와 같은 시스템 프롬프트(역할 + 출력 형식 + 공통 규칙 + 지침)·에이전트로 보낸다. 세션 실행 한도·reason·ownReview·context 첨부는 쓰지 않는다 (첨부는 사례의 `input.md`에 이미 들어 있음). 비용 상한(`Budget`)은 그대로 본다. 단계가 하나이고 구조화 출력(`Output`)이 있는 모드만 채점된다.
+- run_mode와 같은 시스템 프롬프트(역할 + 출력 형식 + 공통 규칙 + 지침)·에이전트로 보낸다. 세션 실행 한도·reason·ownReview·context 첨부는 쓰지 않는다 (첨부는 사례의 `input.md`에 이미 들어 있음). 하루 비용 상한은 없으니 실행 전 계획의 예상 비용을 보고 `--yes`로 돌린다. 단계가 하나이고 구조화 출력(`Output`)이 있는 모드만 채점된다.
 - 호출 기록에는 `Tool = golden`, `Mode = 원래 모드`로 남는다 (대시보드·비용 집계에 보임). 세션 상태 파일은 남기지 않는다.
 - `score`는 self-reviewer 결과(마크다운 `- C1 [major] 파일:줄 — 문제`)나 findings JSON(@1·@2)을 채점만 한다 (외부 호출 없음).
 - 폴더: `--dir` 또는 appsettings `Orchestration:Golden:Folder`. 사례 하나라도 형식이 틀리면 아무것도 돌리지 않는다. 종료 코드 0 성공 / 1 일부 사례 실패 / 2 사용법·사례 형식 오류 / 3 크레딧·한도 소진(Quota)으로 남은 사례를 멈춤.

@@ -59,13 +59,13 @@
 </form>
 
 <section class="stats">
-    <div class="panel stat" title="오늘 0시부터 · MCP 단가로 계산 · 무료 제공사 제외 (서버 비용 상한과 같은 기준, 위 필터와 무관)">
-        <div class="label">오늘 비용 상한@(Model.DailyCostLimit > 0 ? $" · {(int)(Model.TodayCost * 100 / Model.DailyCostLimit)}%" : "")</div>
-        <div class="value @(Model.DailyCostLimit > 0 && Model.TodayCost >= Model.DailyCostLimit ? "err" : "")">$@Model.TodayCost.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)@(Model.DailyCostLimit > 0 ? $" / ${Model.DailyCostLimit.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)}" : "")</div>
+    <div class="panel stat" title="오늘 0시부터 · MCP 단가로 계산 · 무료 제공사 제외 (위 필터와 무관). 단가 없는 모델은 비용에 들어가지 않는다">
+        <div class="label">오늘 비용@(Model.TodayUnpriced > 0 ? $" · 단가 없는 모델 {Model.TodayUnpriced}건(비용 미집계)" : "")</div>
+        <div class="value @(Model.TodayUnpriced > 0 ? "err" : "")">$@Model.TodayCost.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)</div>
     </div>
-    <div class="panel stat" title="오늘 0시부터 · 입력+출력 · 무료 제공사 제외 (서버 일일 상한과 같은 기준, 위 필터와 무관)">
-        <div class="label">오늘 토큰 상한@(Model.DailyLimit > 0 ? $" · {Model.TodayCounted * 100 / Model.DailyLimit}%" : "")</div>
-        <div class="value @(Model.DailyLimit > 0 && Model.TodayCounted >= Model.DailyLimit ? "err" : "")">@Model.TodayCounted.ToString("N0")@(Model.DailyLimit > 0 ? $" / {Model.DailyLimit:N0}" : "")</div>
+    <div class="panel stat" title="오늘 0시부터 · 입력+출력 · 무료 제공사 제외 (위 필터와 무관)">
+        <div class="label">오늘 토큰</div>
+        <div class="value">@Model.TodayCounted.ToString("N0")</div>
     </div>
     <div class="panel stat"><div class="label">호출</div><div class="value">@Model.Calls.Count.ToString("N0")</div></div>
     <div class="panel stat"><div class="label" title="캐시 정보 없음 = 제공사가 캐시 값을 주지 않은 기록 (미적중 0과 다름)">입력 토큰 (캐시 @Model.TotalCached.ToString("N0")@(Model.TotalCacheWrite > 0 ? $" · 쓰기 {Model.TotalCacheWrite:N0}" : "")@(Model.CacheUnknown > 0 ? $" · 정보 없음 {Model.CacheUnknown}건" : ""))</div><div class="value">@Model.TotalIn.ToString("N0")</div></div>

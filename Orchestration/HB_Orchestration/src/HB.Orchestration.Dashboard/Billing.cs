@@ -250,7 +250,7 @@ public sealed record BillingRow(
     TokenSum Ours, TokenSum? OpenAI);
 
 /// <summary>
-/// 우리 기록(OpenAI 조직으로 청구되는 제공사의 호출)과 OpenAI 청구·사용량을 UTC 칸별로 맞춘다. 계산식은 서버 비용 상한과 같은 ModelPrice.CostOf.
+/// 우리 기록(OpenAI 조직으로 청구되는 제공사의 호출)과 OpenAI 청구·사용량을 UTC 칸별로 맞춘다. 계산식은 서버와 같은 ModelPrice.CostOf.
 /// </summary>
 public static class BillingComparer
 {

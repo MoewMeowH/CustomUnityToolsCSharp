@@ -227,7 +227,7 @@ public sealed class VerdictTests : IDisposable
         Assert.StartsWith("self-review 실행 기록 runId: ", result);
         var call = Assert.Single(CallLog.ReadAll(Log));
         Assert.Equal((VerdictRecorder.SelfReviewTool, VerdictRecorder.SelfReviewAgent, 1), (call.Mode, call.Agent, call.Step));
-        Assert.Null(call.InputTokens); // 하루 토큰 상한에 섞이지 않게
+        Assert.Null(call.InputTokens); // 외부 에이전트 사용량에 섞이지 않게
         Assert.Null(call.OutputTokens);
         Assert.Contains("84514", call.UsageRaw);
         Assert.Equal(113093, call.ElapsedMs);

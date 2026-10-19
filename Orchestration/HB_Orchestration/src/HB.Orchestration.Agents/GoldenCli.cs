@@ -147,7 +147,7 @@ public static class GoldenCli
     private static async Task<int> RunCasesAsync(Args a, string root, List<GoldenCase> cases, OrchestrationOptions options, ModeRunner runner,
         string? logPath, TextWriter output, TextWriter error, CancellationToken ct)
     {
-        // 실행 전 확인: 모드·에이전트·구조화 출력·입력 상한·비용 상한 오류는 여기서 전부 거절한다 (토큰 0).
+        // 실행 전 확인: 모드·에이전트·구조화 출력·입력 상한 오류는 여기서 전부 거절한다 (토큰 0).
         logPath ??= runner.LogPath; // 실제로 기록하는 파일에서 provenance를 찾는다
         // 리뷰 사례는 단계 하나(구조화 출력), crash 사례는 모드 전체(단계 여럿, 자유 형식 + 웹검색 기록으로 채점).
         var plans = new List<(GoldenCase Case, string Mode, IReadOnlyList<PlanStep> Steps)>();
@@ -326,13 +326,13 @@ public static class GoldenCli
         return exhausted;
     }
 
-    /// <summary>비용·토큰 상한, 지침이 실행 전 확인과 달라짐: 남은 사례도 같은 이유로 거절되거나 다른 조건으로 돈다.</summary>
+    /// <summary>지침이 실행 전 확인과 달라짐: 남은 사례도 다른 조건으로 돈다. (하루 비용·토큰 상한은 없앴다 — 계획서 2026-10-20_하루상한-제거)</summary>
     private static bool StopsRemaining(string? runError) =>
-        runError is not null && (runError.StartsWith("[오늘", StringComparison.Ordinal) || runError.StartsWith(ModeRunner.GuidelinesChanged, StringComparison.Ordinal));
+        runError is not null && runError.StartsWith(ModeRunner.GuidelinesChanged, StringComparison.Ordinal);
 
     /// <summary>
     /// crash 사례 하나: 모드 전체를 돌리고 분류(1단계) · 검색(마지막 단계) 본문과 검색 기록으로 채점한다.
-    /// 점수는 실패면 null, Stop은 비용 상한·지침 변경·Quota처럼 남은 사례도 같은 이유로 막히는 경우, Quota는 크레딧·한도 소진.
+    /// 점수는 실패면 null, Stop은 지침 변경·Quota처럼 남은 사례도 같은 이유로 막히는 경우, Quota는 크레딧·한도 소진.
     /// 실행 전에 단계마다 제공사의 직전 기록을 보고, 하나라도 Quota면 어느 단계도 호출하지 않는다.
     /// </summary>
     private static async Task<(GoldenCrashScore? Score, bool Stop, bool Quota)> RunCrashCaseAsync(Args a, GoldenCase c, string mode, IReadOnlyList<PlanStep> steps,
