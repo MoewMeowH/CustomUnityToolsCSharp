@@ -33,6 +33,7 @@ public sealed record GuidelinesProvenance
 {
     public const string ReasonRoleDisabled = "역할 UseGuidelines=false";
     public const string ReasonNoFile = "지침 파일 없음";
+    public const string ReasonGoldenSkipped = "골든 --no-guidelines";
 
     public bool Attached { get; init; }
     public string? Path { get; init; }

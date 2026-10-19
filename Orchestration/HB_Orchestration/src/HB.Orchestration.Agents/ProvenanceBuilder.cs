@@ -48,8 +48,10 @@ public static partial class ProvenanceBuilder
     }
 
     /// <summary>단계별 지침 표시. 역할이 끈 경우가 파일 없음보다 먼저다.</summary>
-    public static GuidelinesProvenance ForStep(GuidelinesLoader.Result guidelines, bool useGuidelines) =>
+    /// <param name="skipped">골든 --no-guidelines: 역할은 지침을 쓰지만 일부러 뺐다.</param>
+    public static GuidelinesProvenance ForStep(GuidelinesLoader.Result guidelines, bool useGuidelines, bool skipped = false) =>
         !useGuidelines ? new GuidelinesProvenance { Attached = false, Reason = GuidelinesProvenance.ReasonRoleDisabled }
+        : skipped ? new GuidelinesProvenance { Attached = false, Reason = GuidelinesProvenance.ReasonGoldenSkipped }
         : guidelines.Path is null ? new GuidelinesProvenance { Attached = false, Reason = GuidelinesProvenance.ReasonNoFile }
         : new GuidelinesProvenance { Attached = true, Path = guidelines.Path, Sha256 = guidelines.Sha256, Bytes = guidelines.Bytes?.Length };
 

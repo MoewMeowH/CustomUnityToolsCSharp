@@ -9,9 +9,10 @@ namespace HB.Orchestration.Agents;
 
 /// <summary>
 /// 골든 세트 회귀 평가 (MCP dll의 --golden). 서버를 띄우지 않고 실행·채점 후 끝낸다.
-///   --golden run [사례|all] [--mode 모드] [--agents from=to,...] [--dir 폴더] [--label 이름] [--yes]
+///   --golden run [사례|all] [--mode 모드] [--agents from=to,...] [--dir 폴더] [--label 이름] [--no-guidelines] [--yes]
 ///   --golden score &lt;사례&gt; --from &lt;파일&gt; [--dir 폴더] [--label 이름]
 /// run은 --yes가 없으면 사례·에이전트·입력 크기만 보여 주고 외부 호출 없이 멈춘다.
+/// 지침을 쓰는 역할인데 지침 파일을 못 찾으면 실행 전 거절한다. --no-guidelines는 파일이 있어도 지침을 빼고 돈다 (지침 있음·없음 비교용).
 /// 종료 코드: 0 성공 / 1 일부 사례 실패(호출 실패·지적을 못 읽음) / 2 사용법·사례 형식 오류(실행 전 거절).
 /// </summary>
 public static class GoldenCli
@@ -22,7 +23,7 @@ public static class GoldenCli
     public const string Tool = "golden";
 
     private const string Usage =
-        "사용법: HB.Orchestration.Mcp.dll --golden run [사례|all] [--mode 모드] [--agents from=to,...] [--dir 폴더] [--label 이름] [--yes]\n" +
+        "사용법: HB.Orchestration.Mcp.dll --golden run [사례|all] [--mode 모드] [--agents from=to,...] [--dir 폴더] [--label 이름] [--no-guidelines] [--yes]\n" +
         "        HB.Orchestration.Mcp.dll --golden score <사례> --from <파일> [--dir 폴더] [--label 이름]";
 
     private static readonly JsonSerializerOptions ResultJson = new()
@@ -32,14 +33,15 @@ public static class GoldenCli
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
 
-    internal sealed record Args(string Verb, string Which, string? Mode, IReadOnlyList<string>? Agents, string? Dir, string? Label, string? From, bool Yes);
+    internal sealed record Args(string Verb, string Which, string? Mode, IReadOnlyList<string>? Agents, string? Dir, string? Label, string? From, bool Yes,
+        bool NoGuidelines = false);
 
     internal static (Args? Parsed, string? Error) Parse(string[] args)
     {
         if (args.Length < 2 || args[0] != Flag || args[1] is not ("run" or "score")) return (null, null);
         string? which = null, mode = null, dir = null, label = null, from = null;
         List<string>? agents = null;
-        var yes = false;
+        bool yes = false, noGuidelines = false;
 
         for (var i = 2; i < args.Length; i++)
         {
@@ -56,6 +58,7 @@ public static class GoldenCli
                     case "--label": label = Next(); break;
                     case "--from": from = Next(); break;
                     case "--yes": yes = true; break;
+                    case "--no-guidelines": noGuidelines = true; break;
                     default:
                         if (args[i].StartsWith("--", StringComparison.Ordinal)) return (null, $"알 수 없는 옵션 {args[i]}");
                         if (which is not null) return (null, $"사례는 하나만 (또는 all): '{which}', '{args[i]}'");
@@ -69,9 +72,10 @@ public static class GoldenCli
         var verb = args[1];
         if (verb == "run") which ??= "all";
         if (verb == "score" && (which is null or "all" || from is null)) return (null, "score는 사례 하나와 --from <파일>이 필요합니다.");
-        if (verb == "score" && (yes || agents is not null || mode is not null)) return (null, "score는 --yes · --agents · --mode를 받지 않습니다 (외부 호출 없음).");
+        if (verb == "score" && (yes || agents is not null || mode is not null || noGuidelines))
+            return (null, "score는 --yes · --agents · --mode · --no-guidelines를 받지 않습니다 (외부 호출 없음).");
         if (label is not null && label.Any(c => !(char.IsLetterOrDigit(c) || c is '_' or '-' or '.'))) return (null, "--label은 글자·숫자·_-. 만 씁니다.");
-        return (new Args(verb, which!, mode, agents, dir, label, from, yes), null);
+        return (new Args(verb, which!, mode, agents, dir, label, from, yes, noGuidelines), null);
     }
 
     /// <param name="runnerFactory">run에서만 부른다 (score는 에이전트·설정이 필요 없음).</param>
@@ -137,11 +141,11 @@ public static class GoldenCli
     {
         // 실행 전 확인: 모드·에이전트·구조화 출력·입력 상한·비용 상한 오류는 여기서 전부 거절한다 (토큰 0).
         logPath ??= runner.LogPath; // 실제로 기록하는 파일에서 provenance를 찾는다
-        var plans = new List<(GoldenCase Case, string Mode, (string Role, string Agent, string Model) Step)>();
+        var plans = new List<(GoldenCase Case, string Mode, (string Role, string Agent, string Model, GuidelinesProvenance Guidelines) Step)>();
         foreach (var c in cases)
         {
             var mode = a.Mode ?? c.Info.Mode;
-            var (step, previewError) = runner.PreviewFixedPrompt(mode, a.Agents, c.Input.Length);
+            var (step, previewError) = runner.PreviewFixedPrompt(mode, a.Agents, c.Input.Length, a.NoGuidelines);
             if (previewError is not null)
             {
                 error.WriteLine($"[{c.Info.Id}] {previewError}");
@@ -152,7 +156,7 @@ public static class GoldenCli
 
         output.WriteLine($"[골든 실행 계획] 사례 {plans.Count}개 · 폴더 {root}");
         foreach (var (c, mode, step) in plans)
-            output.WriteLine($"  {c.Info.Id} ({c.Info.Kind}) · {mode}: {step.Role}@{step.Agent}({step.Model}) · 입력 {c.Input.Length:N0}자 · 기대 {c.Expected.Count} · 함정 {c.Traps.Count}");
+            output.WriteLine($"  {c.Info.Id} ({c.Info.Kind}) · {mode}: {step.Role}@{step.Agent}({step.Model}) · 입력 {c.Input.Length:N0}자 · 기대 {c.Expected.Count} · 함정 {c.Traps.Count} · {GuidelinesText(step.Guidelines)}");
         var chars = plans.Sum(p => p.Case.Input.Length);
         output.WriteLine($"  입력 합계 {chars:N0}자 (시스템 프롬프트 제외). 입력 토큰 추정 ≈ {chars / 3:N0} (글자 수 ÷ 3, 대략값)");
         foreach (var model in plans.Select(p => p.Step.Model).Distinct())
@@ -160,6 +164,17 @@ public static class GoldenCli
             if (!options.Pricing.Models.TryGetValue(model, out var price)) { output.WriteLine($"  {model}: 단가 없음"); continue; }
             var modelChars = plans.Where(p => p.Step.Model == model).Sum(p => p.Case.Input.Length);
             output.WriteLine($"  {model}: 입력만 ≈ ${modelChars / 3 / 1_000_000m * price.InputPerMillion:0.000} (출력 단가 ${price.OutputPerMillion}/1M은 응답 길이에 따라 더해짐)");
+        }
+
+        // 지침을 쓰는 역할인데 파일을 못 찾았으면 실제 run_mode와 다른 조건이다 (2026-10-19: 셸 현재 폴더가 프로젝트 루트가 아니어서 5회가 지침 없이 돎).
+        // 계획은 먼저 보인 뒤 거절한다 (미리보기에서도 사례·비용을 볼 수 있게). --no-guidelines면 파일이 있어도 빼므로 이 경우가 생기지 않는다.
+        var missing = plans.Where(p => p.Step.Guidelines.Reason == GuidelinesProvenance.ReasonNoFile).Select(p => p.Case.Info.Id).ToList();
+        if (missing.Count > 0)
+        {
+            error.WriteLine($"[리뷰 지침 없음] 지침을 쓰는 역할인데 지침 파일을 찾지 못했습니다: {string.Join(", ", missing)}. " +
+                            $"현재 폴더 {Environment.CurrentDirectory}에 REVIEW_GUIDELINES.md가 없고 REVIEW_GUIDELINES_PATH · Orchestration:GuidelinesPath도 없거나 파일이 없습니다. " +
+                            $"프로젝트 루트에서 실행하거나 경로를 지정하세요. 일부러 지침 없이 비교할 때만 --no-guidelines (파일이 있어도 뺌).");
+            return 2;
         }
 
         if (!a.Yes)
@@ -181,7 +196,7 @@ public static class GoldenCli
             if (ct.IsCancellationRequested) { error.WriteLine("[취소] 남은 사례는 돌리지 않았습니다."); failed = true; break; }
 
             string? runId; StepResult? result; string? runError;
-            try { (runId, result, runError) = await runner.RunFixedPromptAsync(mode, c.Input, a.Agents, Tool, $"golden {c.Info.Id}", ct); }
+            try { (runId, result, runError) = await runner.RunFixedPromptAsync(mode, c.Input, a.Agents, Tool, $"golden {c.Info.Id}", ct, a.NoGuidelines, step.Guidelines); }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 error.WriteLine($"[취소] {c.Info.Id} 실행 중 취소. 남은 사례는 돌리지 않았습니다.");
@@ -190,14 +205,16 @@ public static class GoldenCli
             }
 
             var baseLine = new ResultRecord { CaseId = c.Info.Id, Kind = c.Info.Kind, Mode = mode, RunId = runId, Agent = step.Agent, Model = step.Model,
-                InputSha256 = Sha(c.Input), KeySha256 = c.KeySha256 };
+                InputSha256 = Sha(c.Input), KeySha256 = c.KeySha256,
+                GuidelinesAttached = step.Guidelines.Attached, GuidelinesSha256 = step.Guidelines.Sha256, GuidelinesReason = step.Guidelines.Reason };
             if (runError is not null || result is null || !result.Success)
             {
                 var why = runError ?? result?.Text ?? "결과 없음";
                 error.WriteLine($"[{c.Info.Id}] 실행 실패: {Short(why)}");
                 Save(baseLine with { Error = Short(why) });
                 failed = true;
-                if (runError is not null && runError.StartsWith("[오늘", StringComparison.Ordinal)) break; // 비용·토큰 상한: 나머지도 같은 이유로 거절된다
+                // 비용·토큰 상한, 지침이 실행 전 확인과 달라짐: 나머지도 같은 이유로 거절되거나 다른 조건으로 돈다
+                if (runError is not null && (runError.StartsWith("[오늘", StringComparison.Ordinal) || runError.StartsWith(ModeRunner.GuidelinesChanged, StringComparison.Ordinal))) break;
                 continue;
             }
 
@@ -225,6 +242,7 @@ public static class GoldenCli
                 Mode = mode, RunId = runId, Agent = result.Agent, Model = record?.Model ?? step.Model, OutputState = structured.State,
                 InputTokens = result.InputTokens, OutputTokens = result.OutputTokens, ElapsedMs = result.ElapsedMs,
                 Source = "run", Provenance = record?.Provenance,
+                GuidelinesAttached = baseLine.GuidelinesAttached, GuidelinesSha256 = baseLine.GuidelinesSha256, GuidelinesReason = baseLine.GuidelinesReason,
             });
         }
 
@@ -324,7 +342,17 @@ public static class GoldenCli
 
         /// <summary>그 호출의 지침·시스템 프롬프트·modes.json 해시 (호출 기록에서 가져옴).</summary>
         public CallProvenance? Provenance { get; init; }
+
+        /// <summary>
+        /// 실행 전 확인 때의 지침 (붙음 여부·원본 해시·안 붙은 사유). Provenance는 호출 기록을 다시 읽어 붙이므로 실패 줄에는 없을 수 있어,
+        /// 지침 있음·없음 실행을 결과 파일만으로 구분하려고 따로 남긴다.
+        /// </summary>
+        public bool? GuidelinesAttached { get; init; }
+        public string? GuidelinesSha256 { get; init; }
+        public string? GuidelinesReason { get; init; }
     }
+
+    private static string GuidelinesText(GuidelinesProvenance g) => g.Attached ? $"지침 붙음: {g.Path}" : $"지침 없음 ({g.Reason})";
 
     private static ResultRecord ResultLine(GoldenCase c, GoldenScore s, IReadOnlyList<GoldenFinding> findings)
     {

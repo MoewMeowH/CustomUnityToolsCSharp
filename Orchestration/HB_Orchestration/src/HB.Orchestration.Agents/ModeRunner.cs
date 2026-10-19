@@ -172,13 +172,15 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     /// 단계마다 에이전트(교체 반영)·시스템 프롬프트를 정한다. run_mode와 --golden이 같은 조립을 쓴다
     /// (평가가 실제 실행과 다른 프롬프트로 돌면 의미가 없으므로). 문제가 있으면 Plan은 null, Error는 '['로 시작하는 문구.
     /// </summary>
-    private (PreparedPlan? Plan, string? Error) BuildPlan(ModeStore.Loaded loaded, string modeName, ModeDefinition mode, IReadOnlyList<string>? agentOverrides)
+    /// <param name="withoutGuidelines">골든 --no-guidelines: 지침을 쓰는 역할이어도 붙이지 않는다 (지침 있음·없음 비교용).</param>
+    private (PreparedPlan? Plan, string? Error) BuildPlan(ModeStore.Loaded loaded, string modeName, ModeDefinition mode, IReadOnlyList<string>? agentOverrides,
+        bool withoutGuidelines = false)
     {
         var (swap, swapError) = ParseOverrides(agentOverrides, mode);
         if (swapError is not null) return (null, $"[모드 '{modeName}'] {swapError}");
 
         GuidelinesLoader.Result guidelines;
-        try { guidelines = GuidelinesLoader.Load(Options); }
+        try { guidelines = LoadGuidelines(Options); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // 지침이 빠진 채 보내면 리뷰 결과가 달라지므로 조용히 넘어가지 않고 거절한다 (실행 횟수 차감 전).
@@ -211,9 +213,10 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
                 return (null, $"[모드 '{modeName}'] {step.Role}@{agentName}: 구조화 출력(Output)과 WebSearch는 함께 쓸 수 없습니다 (웹검색 경로는 구조화 출력을 지원하지 않음).");
 
             // 시스템 프롬프트 = 역할 + 출력 형식(구조화 출력) + 공통 규칙 (+ 웹검색 규칙) (+ 지침). 매번 같은 앞부분이라 제공사 프롬프트 캐시에 걸린다.
+            var attach = role.UseGuidelines && !withoutGuidelines;
             plan.Add(new PlannedStep(step, agent,
-                role.Prompt + (role.Output?.PromptText ?? "") + Prompts.CommonRules + (step.WebSearch is null ? "" : Prompts.WebSearchRules) + (role.UseGuidelines ? guidelines.Text : ""),
-                ProvenanceBuilder.ForStep(guidelines, role.UseGuidelines), mode.PromptCache, role.Output));
+                role.Prompt + (role.Output?.PromptText ?? "") + Prompts.CommonRules + (step.WebSearch is null ? "" : Prompts.WebSearchRules) + (attach ? guidelines.Text : ""),
+                ProvenanceBuilder.ForStep(guidelines, role.UseGuidelines, skipped: withoutGuidelines), mode.PromptCache, role.Output));
         }
         return (new PreparedPlan(loaded, guidelines, swap, plan), null);
     }
@@ -238,17 +241,37 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     /// 세션 실행 한도·ownReview·context 첨부는 쓰지 않는다 (첨부는 프롬프트 원문에 이미 들어 있음). 비용 상한은 그대로 본다.
     /// 호출 기록의 Tool은 <paramref name="tool"/>, Mode는 원래 모드 이름이다.
     /// </summary>
+    /// <param name="expectedGuidelines">실행 전 확인 때의 지침. 주면 호출 직전에 다시 읽은 지침(붙음 여부·해시)과 비교해 다르면 호출하지 않는다
+    /// (사례를 차례로 도는 수 분 사이에 지침 파일이 바뀌거나 사라지면 뒤쪽 사례가 말없이 다른 조건으로 돌지 않게).</param>
     public async Task<(string? RunId, StepResult? Result, string? Error)> RunFixedPromptAsync(
-        string modeName, string prompt, IReadOnlyList<string>? agentOverrides, string tool, string reason, CancellationToken ct)
+        string modeName, string prompt, IReadOnlyList<string>? agentOverrides, string tool, string reason, CancellationToken ct,
+        bool withoutGuidelines = false, GuidelinesProvenance? expectedGuidelines = null)
     {
-        var (plan, error) = PlanFixedPrompt(modeName, agentOverrides, prompt.Length);
+        var (plan, error) = PlanFixedPrompt(modeName, agentOverrides, prompt.Length, withoutGuidelines);
         if (error is not null) return (null, null, error);
+
+        var now = plan!.Steps[0].Guidelines;
+        if (expectedGuidelines is not null && (now.Attached != expectedGuidelines.Attached || now.Sha256 != expectedGuidelines.Sha256))
+            return (null, null, $"{GuidelinesChanged} 실행 전 확인: {Describe(expectedGuidelines)} / 지금: {Describe(now)}");
 
         var runId = Guid.NewGuid().ToString("N")[..10];
         var meta = new CallMeta(null, []) { Reason = reason, Provenance = RunProvenance(plan!) };
         var step = plan!.Steps[0];
-        var call = NewCall(runId, modeName, 1, step, step.Instructions, new BuiltPrompt(prompt, null), meta) with { Tool = tool };
+        // 골든은 같은 입력을 몇 분 간격으로 되풀이하므로 저장 지점을 둔다 (제공사 PromptCache가 Context일 때만 효과, 짧으면 AgentRunner가 Off).
+        var call = NewCall(runId, modeName, 1, step, step.Instructions, new BuiltPrompt(prompt, RepeatCachePrefix(prompt)), meta) with { Tool = tool };
         return (runId, await runner.RunStepAsync(call, ct), null);
+    }
+
+    /// <summary>
+    /// 같은 프롬프트를 통째로 되풀이할 때의 저장 지점: 마지막 줄 앞까지 (줄이 하나뿐이면 null).
+    /// 골든 input.md는 형식이 둘이다 (첨부가 앞 · 요청이 앞인 예전 기록). 회차마다 전체가 같으므로 어디서 나눠도 캐시에 걸리고,
+    /// 끝 가까이에서 나눠야 캐시되는 부분이 가장 크다. 두 블록을 이어 붙이면 원문 그대로다 (AgentRunner가 Prompt[prefix.Length..]로 자름).
+    /// </summary>
+    internal static string? RepeatCachePrefix(string prompt)
+    {
+        var body = prompt.TrimEnd();
+        var lastBreak = body.LastIndexOf('\n');
+        return lastBreak <= 0 ? null : prompt[..(lastBreak + 1)];
     }
 
     /// <summary>
@@ -369,12 +392,25 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     /// <summary>
     /// --golden run의 실행 전 확인: 보낼 역할·에이전트·모델. 외부 호출 없음.
     /// 실행 때와 같은 검사(모드·에이전트·구조화 출력·입력 상한·비용 상한)를 해서, 통과하면 실행도 설정 이유로는 거절되지 않는다.
+    /// Guidelines는 이 단계에 지침이 붙는지 (골든 실행이 지침 없이 도는 것을 실행 전에 알리려고).
     /// </summary>
-    public ((string Role, string Agent, string Model)? Step, string? Error) PreviewFixedPrompt(string modeName, IReadOnlyList<string>? agentOverrides, int promptLength)
+    public ((string Role, string Agent, string Model, GuidelinesProvenance Guidelines)? Step, string? Error) PreviewFixedPrompt(
+        string modeName, IReadOnlyList<string>? agentOverrides, int promptLength, bool withoutGuidelines = false)
     {
-        var (plan, error) = PlanFixedPrompt(modeName, agentOverrides, promptLength);
-        return error is not null ? (null, error) : ((plan!.Steps[0].Def.Role, plan.Steps[0].Agent.Name, plan.Steps[0].Agent.Model), null);
+        var (plan, error) = PlanFixedPrompt(modeName, agentOverrides, promptLength, withoutGuidelines);
+        if (error is not null) return (null, error);
+        var s = plan!.Steps[0];
+        return ((s.Def.Role, s.Agent.Name, s.Agent.Model, s.Guidelines), null);
     }
+
+    /// <summary>RunFixedPromptAsync가 지침이 실행 전 확인과 달라 호출하지 않았을 때 오류 문구의 머리.</summary>
+    public const string GuidelinesChanged = "[지침이 실행 전 확인과 다름]";
+
+    private static string Describe(GuidelinesProvenance g) =>
+        g.Attached ? $"붙음 {g.Path} (sha256 {g.Sha256?[..Math.Min(12, g.Sha256.Length)]})" : $"없음 ({g.Reason})";
+
+    /// <summary>지침 읽기. 테스트가 바꿔 끼운다 (기본 로더는 환경 변수·현재 폴더까지 찾아 테스트 결과가 PC 환경에 따라 달라지므로).</summary>
+    internal Func<OrchestrationOptions, GuidelinesLoader.Result> LoadGuidelines { get; set; } = GuidelinesLoader.Load;
 
     /// <summary>호출 기록 파일 (골든 결과에 provenance를 붙일 때 같은 파일을 읽도록).</summary>
     public string LogPath => runner.LogPath;
@@ -383,7 +419,8 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     /// 점수는 한 단계의 구조화 지적으로 매기므로 단계가 하나이고 Output이 있는 모드만 받는다 (없으면 비용을 쓰고도 채점하지 못함).
     /// 입력 상한(MaxInputChars)과 비용 상한은 run_mode와 같다.
     /// </summary>
-    private (PreparedPlan? Plan, string? Error) PlanFixedPrompt(string modeName, IReadOnlyList<string>? agentOverrides, int promptLength)
+    private (PreparedPlan? Plan, string? Error) PlanFixedPrompt(string modeName, IReadOnlyList<string>? agentOverrides, int promptLength,
+        bool withoutGuidelines = false)
     {
         ModeStore.Loaded loaded;
         try { loaded = store.Load(); }
@@ -398,7 +435,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         if (maxChars > 0 && promptLength > maxChars)
             return (null, $"[입력이 너무 깁니다] {promptLength:N0}자 / 상한 {maxChars:N0}자 (모드 '{modeName}').");
 
-        var (plan, error) = BuildPlan(loaded, modeName, mode, agentOverrides);
+        var (plan, error) = BuildPlan(loaded, modeName, mode, agentOverrides, withoutGuidelines);
         if (error is not null) return (null, error);
         if (plan!.Steps[0].Output is null)
             return (null, $"[모드 '{modeName}'] 역할 '{plan.Steps[0].Def.Role}'에 구조화 출력(Output)이 없어 채점할 수 없습니다.");

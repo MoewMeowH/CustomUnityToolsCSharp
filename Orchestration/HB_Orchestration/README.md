@@ -591,10 +591,11 @@ unity skill install --help
 정답이 알려진 사례 묶음을 같은 입력으로 다시 돌려, **찾아야 할 지적을 몇 개 찾았는지**와 **과거에 기각된 지적을 다시 내는지**를 숫자로 비교한다. 역할 프롬프트·modes.json·모델을 바꾼 뒤에 쓴다. MCP 서버를 띄우지 않는 일회성 실행이다.
 
 ```
-dotnet <publish 폴더>\HB.Orchestration.Mcp.dll --golden run [사례|all] [--mode 모드] [--agents from=to,...] [--dir 폴더] [--label 이름] [--yes]
+dotnet <publish 폴더>\HB.Orchestration.Mcp.dll --golden run [사례|all] [--mode 모드] [--agents from=to,...] [--dir 폴더] [--label 이름] [--no-guidelines] [--yes]
 dotnet <publish 폴더>\HB.Orchestration.Mcp.dll --golden score <사례> --from <파일> [--dir 폴더] [--label 이름]
 ```
-- `run`은 `--yes`가 없으면 사례·에이전트·입력 글자 수·입력 비용 추정만 보이고 **외부 호출 없이** 멈춘다.
+- `run`은 `--yes`가 없으면 사례·에이전트·입력 글자 수·입력 비용 추정·붙는 지침 파일만 보이고 **외부 호출 없이** 멈춘다.
+- 지침은 run_mode와 같은 순서로 찾는다 (`Orchestration:GuidelinesPath` → `REVIEW_GUIDELINES_PATH` → **현재 폴더**의 `REVIEW_GUIDELINES.md`). 지침을 쓰는 역할인데 못 찾으면 계획을 보인 뒤 거절한다 (외부 호출 없음) — 프로젝트 루트에서 실행하거나 경로를 지정한다. `--no-guidelines`는 파일이 있어도 지침을 빼고 돈다 (지침 있음·없음 비교용, 기록 사유 `골든 --no-guidelines`). 사례를 돌기 직전마다 지침을 다시 읽어 실행 전 확인과 다르면(파일이 바뀜·사라짐) 그 사례부터 멈춘다. 결과 줄에 `guidelinesAttached` · `guidelinesSha256` · `guidelinesReason`.
 - run_mode와 같은 시스템 프롬프트(역할 + 출력 형식 + 공통 규칙 + 지침)·에이전트로 보낸다. 세션 실행 한도·reason·ownReview·context 첨부는 쓰지 않는다 (첨부는 사례의 `input.md`에 이미 들어 있음). 비용 상한(`Budget`)은 그대로 본다. 단계가 하나이고 구조화 출력(`Output`)이 있는 모드만 채점된다.
 - 호출 기록에는 `Tool = golden`, `Mode = 원래 모드`로 남는다 (대시보드·비용 집계에 보임). 세션 상태 파일은 남기지 않는다.
 - `score`는 self-reviewer 결과(마크다운 `- C1 [major] 파일:줄 — 문제`)나 findings JSON(@1·@2)을 채점만 한다 (외부 호출 없음).

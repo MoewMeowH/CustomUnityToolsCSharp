@@ -1,5 +1,7 @@
+using System.Text;
 using System.Text.Json;
 using HB.Orchestration.Agents;
+using HB.Orchestration.Shared;
 using HB.Orchestration.Tests.Fakes;
 
 namespace HB.Orchestration.Tests;
@@ -384,6 +386,145 @@ public sealed class GoldenTests
         Assert.Contains("--yes", output);
         Assert.Equal(0, h.Client.Calls);
         Assert.False(Directory.Exists(Path.Combine(d.Root, "results")));
+    }
+
+    [Fact]
+    public async Task Plan_shows_which_guidelines_file_is_attached()
+    {
+        using var h = new ModeRunnerHarness(Modes);
+        using var d = new GoldenDir();
+        d.Add("a");
+
+        var (code, output, _) = await Cli(h, "run", "--dir", d.Root);
+
+        Assert.Equal(0, code);
+        Assert.Contains($"지침 붙음: {Path.GetFullPath(h.GuidelinesPath)}", output);
+    }
+
+    /// <summary>지침 파일을 못 찾은 로더. 기본 로더는 환경 변수·현재 폴더까지 찾아 PC 환경에 따라 결과가 달라지므로 바꿔 끼운다.</summary>
+    private static readonly Func<OrchestrationOptions, GuidelinesLoader.Result> NoFile = _ => new GuidelinesLoader.Result("", null, null, null);
+
+    private static GuidelinesLoader.Result FileWith(string text) =>
+        new(GuidelinesLoader.Header + text, @"C:\proj\REVIEW_GUIDELINES.md", Encoding.UTF8.GetBytes(text), BlobStore.Sha256Hex(Encoding.UTF8.GetBytes(text)));
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Missing_guidelines_shows_plan_then_refuses_without_calls(bool yes)
+    {
+        using var h = new ModeRunnerHarness(Modes);
+        h.Runner.LoadGuidelines = NoFile;
+        using var d = new GoldenDir();
+        d.Add("a");
+        h.Client.Script = [ScriptedChatClient.Reply(Answer)];
+
+        var (code, output, err) = await Cli(h, yes ? ["run", "--dir", d.Root, "--yes"] : ["run", "--dir", d.Root]);
+
+        Assert.Equal(2, code);
+        Assert.Contains("[골든 실행 계획]", output);                       // 미리보기·실행 모두 계획은 먼저 보임
+        Assert.Contains($"지침 없음 ({GuidelinesProvenance.ReasonNoFile})", output);
+        Assert.Contains("[리뷰 지침 없음]", err);
+        Assert.Contains(Environment.CurrentDirectory, err);                // 어디서 찾았는지
+        Assert.Contains("--no-guidelines", err);
+        Assert.Equal(0, h.Client.Calls);
+    }
+
+    [Fact]
+    public async Task No_guidelines_flag_strips_guidelines_even_when_the_file_exists()
+    {
+        using var h = new ModeRunnerHarness(Modes);
+        using var d = new GoldenDir();
+        d.Add("a");
+        h.Client.Script = [ScriptedChatClient.Reply(Answer)];
+
+        var (code, output, err) = await Cli(h, "run", "--dir", d.Root, "--no-guidelines", "--yes", "--label", "ng");
+
+        Assert.True(code == 0, err);
+        Assert.Contains($"지침 없음 ({GuidelinesProvenance.ReasonGoldenSkipped})", output);
+        Assert.DoesNotContain("한글 규칙", ScriptedChatClient.SystemText(h.Client.Received[0])); // 파일이 있어도 안 붙음
+        Assert.Equal(GuidelinesProvenance.ReasonGoldenSkipped, h.Records()[0].Provenance!.Guidelines!.Reason);
+
+        var line = File.ReadAllLines(Directory.GetFiles(Path.Combine(d.Root, "results"), "*_ng.jsonl").Single()).Single();
+        Assert.Contains("\"guidelinesAttached\":false", line);
+        Assert.Contains($"\"guidelinesReason\":\"{GuidelinesProvenance.ReasonGoldenSkipped}\"", line);
+    }
+
+    [Fact]
+    public async Task Result_line_records_attached_guidelines_hash()
+    {
+        using var h = new ModeRunnerHarness(Modes);
+        using var d = new GoldenDir();
+        d.Add("a");
+        h.Client.Script = [ScriptedChatClient.Reply(Answer)];
+
+        var (code, _, err) = await Cli(h, "run", "--dir", d.Root, "--yes", "--label", "g");
+
+        Assert.True(code == 0, err);
+        var line = File.ReadAllLines(Directory.GetFiles(Path.Combine(d.Root, "results"), "*_g.jsonl").Single()).Single();
+        Assert.Contains("\"guidelinesAttached\":true", line);
+        Assert.Contains($"\"guidelinesSha256\":\"{BlobStore.Sha256Hex(File.ReadAllBytes(h.GuidelinesPath))}\"", line);
+    }
+
+    [Fact]
+    public async Task Guidelines_changed_after_the_check_stops_before_calling()
+    {
+        using var h = new ModeRunnerHarness(Modes);
+        var loads = 0;
+        // 확인 2번(사례 a·b) + a 실행 1번은 같은 파일, b 실행 직전에 내용이 바뀜
+        h.Runner.LoadGuidelines = _ => ++loads <= 3 ? FileWith("- 처음 규칙\n") : FileWith("- 바뀐 규칙\n");
+        using var d = new GoldenDir();
+        d.Add("a");
+        d.Add("b");
+        h.Client.Script = [ScriptedChatClient.Reply(Answer), ScriptedChatClient.Reply(Answer)];
+
+        var (code, output, err) = await Cli(h, "run", "all", "--dir", d.Root, "--yes", "--label", "chg");
+
+        Assert.Equal(1, code);
+        Assert.Contains("[a] 찾음", output);
+        Assert.Contains($"[b] 실행 실패: {ModeRunner.GuidelinesChanged}", err);
+        Assert.Equal(1, h.Client.Calls); // b는 호출하지 않음
+    }
+
+    [Theory]
+    [InlineData("\n## 첨부 코드\n코드\n\n## 요청\n봐 줘", "\n## 첨부 코드\n코드\n\n## 요청\n")] // 첨부가 앞인 형식
+    [InlineData("## 요청\n목적\n\n## 첨부 코드\n코드\n```", "## 요청\n목적\n\n## 첨부 코드\n코드\n")] // 요청이 앞인 예전 기록
+    [InlineData("한 줄\n\n", null)]                                                            // 끝 빈 줄은 마지막 줄로 안 셈
+    [InlineData("한 줄", null)]
+    public void Repeat_cache_prefix_is_everything_before_the_last_line(string prompt, string? expected) =>
+        Assert.Equal(expected, ModeRunner.RepeatCachePrefix(prompt));
+
+    [Fact]
+    public async Task Golden_run_puts_cache_point_before_last_line_when_provider_uses_context_cache()
+    {
+        using var h = new ModeRunnerHarness(Modes);
+        h.Options.Providers["fake"].PromptCache = PromptCacheMode.Context;
+        using var d = new GoldenDir();
+        var attachment = "\n## 첨부 코드 (서버가 디스크에서 읽음, 줄 번호 포함)\n\n### a.cs:1-1\n" + new string('x', StepCall.MinContextCacheChars) + "\n";
+        d.Add("a", input: attachment + "\n## 요청\n봐 줘");
+        h.Client.Script = [ScriptedChatClient.Reply(Answer)];
+
+        var (code, _, err) = await Cli(h, "run", "--dir", d.Root, "--yes");
+
+        Assert.True(code == 0, err);
+        var texts = h.Client.Received.Single().Messages.Single(m => m.Role == Microsoft.Extensions.AI.ChatRole.User)
+            .Contents.OfType<Microsoft.Extensions.AI.TextContent>().ToList();
+        Assert.Equal(2, texts.Count);
+        Assert.Equal(attachment + "\n## 요청\n", texts[0].Text);
+        Assert.Equal("봐 줘", texts[1].Text);
+        Assert.Equal(attachment + "\n## 요청\n봐 줘", texts[0].Text + texts[1].Text); // 이어 붙이면 원문 그대로
+    }
+
+    [Fact]
+    public async Task Score_rejects_no_guidelines_flag()
+    {
+        using var h = new ModeRunnerHarness(Modes);
+        using var d = new GoldenDir();
+        d.Add("a");
+
+        var (code, _, err) = await Cli(h, "score", "a", "--from", "x", "--no-guidelines", "--dir", d.Root);
+
+        Assert.Equal(2, code);
+        Assert.Contains("--no-guidelines", err);
     }
 
     [Fact]

@@ -156,6 +156,20 @@ public sealed class StructuredOutputTests
     }
 
     [Fact]
+    public async Task Reviewer_checks_guideline_items_one_by_one_before_the_guidelines()
+    {
+        // 골든 5회 비교(2026-10-19): 지침만 붙이면 지침에 있는 항목(UnityEngine.Object ?.)을 10회 모두 놓쳤고, 이 문장을 넣자 5회 모두 찾음
+        using var h = new ModeRunnerHarness("""{ "Modes": { "v": { "Steps": [ { "Role": "Reviewer", "Agent": "a1" } ] } } }""");
+        h.Client.Script = [ScriptedChatClient.Reply("""{"findings":[],"needsInfo":[]}""")];
+        await h.Run("v");
+
+        var system = ScriptedChatClient.SystemText(h.Client.Received[0]);
+        var checklist = system.IndexOf("'프로젝트 지침'의 항목을 하나씩", StringComparison.Ordinal);
+        Assert.True(checklist >= 0);
+        Assert.True(checklist < system.IndexOf(GuidelinesLoader.Header.Trim(), StringComparison.Ordinal)); // 지침은 그 뒤에 붙는다
+    }
+
+    [Fact]
     public void Schema_v2_needs_info_is_an_object_array()
     {
         var schema = FindingFormat.Findings.Schema();
