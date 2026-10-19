@@ -140,6 +140,16 @@
   * 이유: 셸의 현재 폴더가 지울 폴더 안이면 Claude Code가 "Dangerous rm operation on working directory or its ancestor"로 승인을 띄우고, 자리를 비운 세션이면 자동 거절된다 (2026-10-19).
   * Git Bash에서 "Device or resource busy"면 현재 폴더가 그 안이라는 뜻이다 → 다른 폴더에서 다시 하거나 PowerShell `Remove-Item`.
 
+## 훅이 막는 규칙 (`.claude/settings.json` PreToolUse)
+
+규칙을 어기면 훅이 이유와 함께 막는다. 메시지대로 고쳐 다시 한다. 우회하지 않는다 (사람이 직접 할 때는 `!` 명령). 검사 중 오류도 막는다.
+* H1 `cleanup_guard.py`: 재귀 삭제가 다른 명령과 묶였거나 `cd`·명령 치환과 함께 있거나, 대상이 절대 경로가 아니거나 루트이거나, **셸의 현재 폴더가 대상 안**이면 ("명령 실행"). `git rm -r`은 해당 없음.
+* H2 `push_guard.py`: `git push`는 **단독 명령**으로 `git [-C 경로] push [--dry-run] [-u] [원격 [브랜치]]` 형식만 (commit과 묶으면 훅이 그 커밋을 못 본다). 대상 원격에 없는 커밋의 추가된 줄에 비밀 값 모양, 또는 `docs/image/`·`GoldenSet/`·`subagent_in/`·`review_tmp/` 아래 파일이 있으면 막는다. 커밋이 300개를 넘으면 사람이 확인한다.
+  * 개인 값(이메일·로컬 사용자 경로)은 `.claude/push_guard.local.txt`(한 줄에 정규식, `allow:`는 예외)에만 둔다. 프로젝트마다 `.gitignore`에 등록한다. 파일이 저장소에 추적되면 그 자체로 막는다.
+* H3 `run_mode_guard.py`: review·panel 전에 `docs/plans/`에 오늘 날짜 이름이거나 오늘 고친 계획서가 없으면 ("계획서와 작업 로그").
+* H4 `run_mode_guard.py`: reason이 `[ownReview:self-reviewer]`인데 ownReview가 self-reviewer 결과 원문 형식(`## 지적`·`## 읽은 파일`, 읽은 파일은 `subagent_in/` 안)이 아니면. 재호출 때도 원문 그대로 넣는다.
+* 훅 등록은 `python -I .claude/scripts/check_agents.py`, 동작은 `python -I .claude/scripts/test_hooks.py`로 검사한다. settings.json을 고치면 새 세션에서 반영된다.
+
 ## 계획서와 작업 로그
 
 * 대상:

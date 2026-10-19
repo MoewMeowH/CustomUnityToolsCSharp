@@ -407,8 +407,10 @@ calls.jsonl의 응답 원문을 그대로 저장한다. Claude가 응답을 다�
 **처음 설치 (폴더째 붙여넣지 않는다)**
 1. 스크립트 `-Apply`로 규칙서·명령을 복사한다 (아래).
 2. `project-files/.mcp.example.json`을 Unity 프로젝트 루트에 **`.mcp.json`으로** 복사하고, `<publish 폴더>`를 실제 publish 폴더로 고친다.
-3. `project-files/.claude/settings.example.json`을 `.claude/settings.json`으로 복사한다. 이미 있으면 `allow` 항목만 합친다.
-4. Unity 프로젝트 `.gitignore`에 `.mcp.json`을 넣는다 (기기별 절대 경로가 들어 있다).
+3. `project-files/.claude/settings.example.json`을 `.claude/settings.json`으로 복사한다. 이미 있으면 `allow` 항목과 `hooks`를 합친다.
+4. Unity 프로젝트 `.gitignore`에 `.mcp.json`과 `.claude/push_guard.local.txt`를 넣는다 (기기별 절대 경로 · 개인 값).
+5. `.claude/push_guard.local.txt`를 만들고 공개되면 안 되는 개인 값(이메일·로컬 사용자 경로 등)을 한 줄에 정규식 하나로 넣는다 (H2 훅, 없으면 내장 패턴만 검사).
+6. `python -I .claude/scripts/check_agents.py`(훅 등록) · `python -I .claude/scripts/test_hooks.py`(훅 동작)가 통과하는지 본다. 훅은 새 세션부터 걸린다.
 
 설정 템플릿은 실제 설정과 이름이 다르다(`*.example.json`). 폴더째 붙여넣어도 Unity 쪽 `.mcp.json` · `.claude/settings.json`이 덮이지 않게 하기 위해서다. 예전에 같은 이름이던 때 폴더째 붙여넣었다가 `.mcp.json`이 `<publish 폴더>` 자리표시로 덮여 MCP 연결이 끊긴 적이 있다.
 
@@ -431,7 +433,8 @@ powershell -ExecutionPolicy Bypass -File tools\Sync-ProjectFiles.ps1 -UnityProje
 - `.claude/commands/work-order.md` — `/work-order <요청> [첨부]`: 오케스트레이션에 맡길 작업 지시서를 만든다. 조사 → 초안 → `work_order` 모드(luna | flash 동시 검토) → `그외 이상사항` 정리 → `WorkOrders.Folder`(없으면 `docs/work-orders/`)에 저장 + 대화에 출력. 코드는 고치지 않는다. 모드별 지침은 CLAUDE.md가 아니라 이 명령 파일에 둔다 (CLAUDE.md는 세션마다 컨텍스트에 올라감)
 - `.claude/commands/preflight.md` — `/preflight <요청> [첨부]`: 큰 작업의 실행 전 점검. `preflight_p1`(A 반박 · B 위험 · 성능 동시 검토) → `preflight_p2`(상호 판정) → 사용자 확정 → `preflight_p3`(최종 수정안) → 지휘자 종합 → `preflight_check`(전체, astra) · `preflight_perf`(성능, sol). 단계마다 멈추고, P5에는 앞 단계 논의를 붙이지 않는다. 산출물은 `docs/preflight/<날짜>_<주제>/`. 첨부 xlsx·csv는 `xlsx_dump.py`로 Markdown을 만들어 `context`로 붙인다. 성능만 볼 때는 `/mode perf_sol …`(기본) · `perf_astra`(중요한 핫패스) · `perf_argon`(Gemini)
 - `.claude/scripts/xlsx_dump.py` — `/work-order`의 첨부 읽기 도우미. 기획서 xlsx·csv를 Markdown 표로 뽑고(병합 셀·메모·텍스트 상자 글 포함) 이미지는 `review_tmp/work-order/<파일>/`에 붙은 셀 이름으로 저장. 필요: Python 3.9+, `openpyxl` (`python -m pip install openpyxl`). `.xls`는 지원하지 않음
-- `.claude/settings.example.json` → Unity의 `.claude/settings.json` — Unity CLI 조회·테스트 명령은 매번 승인 없이 실행 (기존 파일이 있으면 `allow` 항목만 합치기)
+- `.claude/scripts/cleanup_guard.py` · `push_guard.py` · `run_mode_guard.py` — 규칙 강제 훅 H1~H4 (CLAUDE.md "훅이 막는 규칙"), 시험은 `test_hooks.py`
+- `.claude/settings.example.json` → Unity의 `.claude/settings.json` — Unity CLI 조회·테스트 명령은 매번 승인 없이 실행 + PreToolUse 훅 등록 (기존 파일이 있으면 `allow` 항목과 `hooks`를 합치기)
 - `.mcp.example.json` → Unity의 `.mcp.json` — dll 경로를 publish 폴더로 (JSON 안에서는 경로를 `/`로 쓸 것. `\`는 JSON에서 특수 문자)
 
 API 키는 시스템 환경 변수로만. 각 제공사 대시보드에서도 월 한도 설정.

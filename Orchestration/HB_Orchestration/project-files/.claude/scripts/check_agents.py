@@ -42,10 +42,43 @@ def check(path: str) -> list:
     return errors
 
 
+REQUIRED_HOOKS = {  # 계획서 2026-10-19_훅-규칙-강제: matcher → 반드시 걸려 있어야 하는 스크립트
+    'Bash|PowerShell': ['cleanup_guard.py', 'push_guard.py'],
+    'mcp__hb-orchestration__run_mode': ['run_mode_guard.py'],
+}
+
+
+def check_settings(path: str) -> list:
+    """settings.json의 PreToolUse 훅 등록. 실패 시 막는 형식(`|| exit 2`)인지도 본다."""
+    import json
+    errors = []
+    data = json.load(open(path, encoding='utf-8-sig'))
+    entries = (data.get('hooks') or {}).get('PreToolUse') or []
+    for matcher, scripts in REQUIRED_HOOKS.items():
+        commands = [h.get('command', '') for e in entries if e.get('matcher') == matcher for h in e.get('hooks') or []]
+        for s in scripts:
+            found = [c for c in commands if s in c]
+            if not found:
+                errors.append(f'훅 없음: {matcher} → {s}')
+            elif not all(c.rstrip().endswith('|| exit 2') for c in found):
+                errors.append(f'{s} 훅이 실패 시 막지 않는다 (명령 끝에 `|| exit 2`)')
+    return errors
+
+
 def main() -> int:
     sys.stdout.reconfigure(encoding='utf-8')
-    dirs = sys.argv[1:] or [os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'agents')]
+    here = os.path.dirname(os.path.abspath(__file__))
+    dirs = sys.argv[1:] or [os.path.join(here, '..', 'agents')]
     failed = 0
+    # 훅 등록: 인자가 없을 때만 (스크립트 옆 settings.json, 없으면 settings.example.json — project-files 쪽)
+    if not sys.argv[1:]:
+        for name in ('settings.json', 'settings.example.json'):
+            path = os.path.join(here, '..', name)
+            if os.path.isfile(path):
+                errs = check_settings(path)
+                print(f'{"[실패]" if errs else "[통과]"} {name} 훅' + ''.join(f'\n  - {e}' for e in errs))
+                failed += bool(errs)
+                break
     for d in dirs:
         for name in sorted(os.listdir(d)):
             if not name.endswith('.md'):

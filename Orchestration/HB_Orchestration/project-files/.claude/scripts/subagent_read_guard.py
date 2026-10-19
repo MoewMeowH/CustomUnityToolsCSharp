@@ -91,7 +91,7 @@ def check(data: dict) -> None:
 def main() -> None:
     try:
         sys.stderr.reconfigure(encoding='utf-8')  # Windows 콘솔 기본(cp949)이면 한글 이유가 깨진다
-        check(json.load(sys.stdin))
+        check(json.loads(sys.stdin.buffer.read().decode('utf-8-sig')))  # cp949 기본 stdin이면 한글이 깨진다
     except SystemExit:
         raise
     except Exception as ex:  # 실패하면 막는다

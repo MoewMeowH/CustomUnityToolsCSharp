@@ -10,5 +10,32 @@
       "WebFetch(domain:docs.unity.com)",
       "mcp__hb-orchestration__list_modes"
     ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -I \"$CLAUDE_PROJECT_DIR/.claude/scripts/cleanup_guard.py\" || exit 2"
+          },
+          {
+            "type": "command",
+            "command": "python -I \"$CLAUDE_PROJECT_DIR/.claude/scripts/push_guard.py\" || exit 2",
+            "timeout": 120
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__hb-orchestration__run_mode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -I \"$CLAUDE_PROJECT_DIR/.claude/scripts/run_mode_guard.py\" || exit 2"
+          }
+        ]
+      }
+    ]
   }
 }

@@ -27,3 +27,5 @@ subagent_in/
 # 이미지 첨부 준비 폴더 (기획서 시안, image_prep.py collect)
 docs/image/
 /GoldenSet/
+# push_guard 개인 값 (훅 H2, 이 PC에만)
+.claude/push_guard.local.txt
