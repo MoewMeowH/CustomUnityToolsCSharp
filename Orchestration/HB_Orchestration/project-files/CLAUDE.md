@@ -120,6 +120,26 @@
 
 에이전트가 틀렸다고 판단되면 근거와 함께 기각한다. `[`로 시작하는 실패·상한 메시지가 오면 한 줄로 알리고 네 판단만으로 진행한다.
 
+## 서브에이전트 (Claude Code)
+
+외부 에이전트를 대신하지 않는다 (교차 리뷰의 가치는 다른 회사 모델의 시선). 계획서 `Orchestration/HB_Orchestration/docs/plans/2026-10-19_서브에이전트-도입-검토.md` (ToolWithCS).
+
+* 정의: `.claude/agents/` — `self-reviewer`(`/cross-review` 2단계 ownReview), `evidence-collector`(`/preflight` P4 근거 수집). 둘 다 Opus.
+  * 모델: 맥락 편향 없이 봐야 하는 자리는 `opus`, 지휘자 컨텍스트 보호·반복 작업(조사·수집·추출)은 `sonnet`.
+  * 정의 파일에는 `tools` 허용 목록이 반드시 있어야 한다 (생략하면 MCP 도구까지 상속 → `run_mode`를 부를 수 있음). `python -I .claude/scripts/check_agents.py`로 검사한다. `permissionMode` bypass 계열 금지.
+  * 정의 파일을 고치면 이 세션에는 반영되지 않는다 (관찰: 처음 읽은 내용을 유지). 새 세션에서 확인한다.
+* 입력: 대상 파일을 `subagent_in/<날짜>_<주제>/`에 **명령으로 복사**하고 SHA-256을 확인한 뒤 그 경로만 넘긴다. 리뷰 지침이 필요하면 `REVIEW_GUIDELINES.md`도 복사한다 (`omitClaudeMd`라 CLAUDE.md·지침이 자동으로 들어가지 않음).
+  * 읽기 차단 훅(`.claude/scripts/subagent_read_guard.py`)이 `subagent_in/` 밖을 막는다. 이전 리뷰·작업 로그·호출 기록을 넣지 않는다.
+  * 위임 메시지에는 대상·의도·제약만 쓴다. 너의 결론·의심 지점은 넣지 않는다 (`run_mode` input 규칙과 같다).
+  * `subagent_in/`은 프로젝트마다 `.gitignore`에 등록한다. 끝나면 지운다.
+* 결과가 정해진 형식을 어겼거나, 중단됐거나, `## 읽은 파일`에 폴더 밖 경로가 있으면 그 단계에서 멈추고 사용자에게 알린다. 다시 부르거나 대신 쓸지는 사용자가 정한다. 서브에이전트 결과를 판정·승인으로 쓰지 않는다.
+
+## 명령 실행
+
+* 폴더 삭제(`rm -rf` 등) 같은 정리 명령은 복구·빌드·테스트 명령에 이어 붙이지 않는다. 별도 호출로, 셸의 현재 폴더 밖(프로젝트 루트 등)에서 절대 경로로 실행한다.
+  * 이유: 셸의 현재 폴더가 지울 폴더 안이면 Claude Code가 "Dangerous rm operation on working directory or its ancestor"로 승인을 띄우고, 자리를 비운 세션이면 자동 거절된다 (2026-10-19).
+  * Git Bash에서 "Device or resource busy"면 현재 폴더가 그 안이라는 뜻이다 → 다른 폴더에서 다시 하거나 PowerShell `Remove-Item`.
+
 ## 계획서와 작업 로그
 
 * 대상:

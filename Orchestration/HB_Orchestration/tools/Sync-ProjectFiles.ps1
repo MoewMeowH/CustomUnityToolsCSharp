@@ -6,7 +6,7 @@
     원본 방향: project-files가 원본이고 Unity 프로젝트 쪽은 복사본이다. 규칙을 고칠 때는 원본을 고친 뒤 이 스크립트로 복사한다.
 
     파일 구분
-      동기화   CLAUDE.md, REVIEW_GUIDELINES.md, .claude/commands/*.md, .claude/scripts/*.py (원본 폴더에 있는 것)  바이트 동일해야 한다
+      동기화   CLAUDE.md, REVIEW_GUIDELINES.md, .claude/commands/*.md, .claude/scripts/*.py, .claude/agents/*.md (원본 폴더에 있는 것)  바이트 동일해야 한다
       확인만   .claude/settings.example.json → .claude/settings.json   덮지 않는다. 해시만 비교 (기존 파일이 있으면 allow 항목만 손으로 합친다)
       확인만   .mcp.example.json → .mcp.json                         덮지 않는다. 기기마다 경로가 달라 해시는 비교하지 않고 없음 · 자리표시 남음만 알린다
 
@@ -18,7 +18,10 @@
 
     이스케이프 잔재(줄 맨 앞 \---, \_, \[, 1\. 등)가 보이면 경고만 한다 (.md 파일만). 종료 코드에는 영향이 없다.
 
-    종료 코드: 0 동기화 대상이 모두 같음 / 1 다른 것이 있음(또는 -Apply가 멈춤) / 2 실행 오류
+    서브에이전트 정의(.claude/agents/*.md)는 비교 전에 원본을 check_agents.py로 검사한다. tools가 없거나(MCP 도구까지 상속) 허용 밖 도구가 있으면
+    아무것도 비교·복사하지 않고 2로 끝낸다 (경고가 아니다, 계획서 2026-10-19_서브에이전트-도입-검토 공통 규칙 8).
+
+    종료 코드: 0 동기화 대상이 모두 같음 / 1 다른 것이 있음(또는 -Apply가 멈춤) / 2 실행 오류(정의 파일 검사 실패 포함)
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File tools\Sync-ProjectFiles.ps1 -UnityProject F:\MyGame
@@ -102,8 +105,22 @@ foreach ($f in $syncFiles) {
 # 폴더 단위 대상: 원본 폴더에 있는 파일 전부. Unity 쪽에만 있는 파일은 '추가분'으로 보여 주기만 한다.
 $syncDirs = @(
     @{ Dir = '.claude/commands'; Filter = '*.md' },   # 슬래시 명령
-    @{ Dir = '.claude/scripts';  Filter = '*.py' }    # 명령이 부르는 도우미 (예: /work-order의 xlsx_dump.py)
+    @{ Dir = '.claude/scripts';  Filter = '*.py' },   # 명령이 부르는 도우미 (예: /work-order의 xlsx_dump.py, 서브에이전트 읽기 차단 훅)
+    @{ Dir = '.claude/agents';   Filter = '*.md' }    # 서브에이전트 정의 (self-reviewer, evidence-collector)
 )
+
+# 서브에이전트 정의 검사: 원본에 정의가 있으면 비교·복사 전에 검사한다. 실패하면 Unity 쪽은 건드리지 않는다.
+$agentsSrc = Join-Path $Source '.claude\agents'
+if (Test-Path -LiteralPath $agentsSrc -PathType Container) {
+    $checker = Join-Path $Source '.claude\scripts\check_agents.py'
+    if (-not (Test-Path -LiteralPath $checker -PathType Leaf)) { Fail "서브에이전트 정의가 있는데 검사 스크립트가 없습니다: $checker" }
+    $python = Get-Command python -ErrorAction SilentlyContinue
+    if ($null -eq $python) { Fail 'python을 찾을 수 없어 서브에이전트 정의를 검사하지 못했습니다. 아무것도 비교·복사하지 않았습니다.' }
+    $out = & $python.Source -I $checker $agentsSrc 2>&1
+    $out | ForEach-Object { Write-Host $_ }
+    if ($LASTEXITCODE -ne 0) { Fail '서브에이전트 정의 검사 실패 (위 [실패] 줄). 아무것도 비교·복사하지 않았습니다.' }
+    Write-Host ''
+}
 $dirNames = @{}
 foreach ($d in $syncDirs) {
     $src = Join-Path $Source ($d.Dir -replace '/', '\')
