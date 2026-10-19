@@ -217,8 +217,9 @@ for %%F in (appsettings.json modes.json) do (
     )
 )
 if defined RESTORE_FAILED (
-    echo [ERROR] Could not restore the config files in %PUBLISH_DIR%.
-    echo         Copy them back by hand from: %CFG_BACKUP%
+    rem Paths are quoted: inside a ( ) block an unquoted ')' in a path (e.g. "Program Files (x86)") would close the block early.
+    echo [ERROR] Could not restore the config files in "%PUBLISH_DIR%".
+    echo         Copy them back by hand from: "%CFG_BACKUP%"
     exit /b 1
 )
 echo [Info] Config kept in place. Backup of this run: %CFG_BACKUP%
@@ -233,7 +234,8 @@ echo [OK] Publish complete.
 rem Tell which modes / roles / fields exist only in the source config. Files are not changed.
 echo.
 dotnet "%MCP_DLL%" --config-drift "%MCP_SRC%" "%PUBLISH_DIR%"
-if errorlevel 1 echo [WARN] The config comparison did not finish for every file - see above. Publish itself succeeded.
+rem Not "if errorlevel 1": an unhandled .NET exception exits with 0xE0434352, which is negative and would skip the warning.
+if not "%errorlevel%"=="0" echo [WARN] The config comparison did not finish for every file - see above. Publish itself succeeded.
 
 if defined STOPPED (
     echo.
