@@ -10,6 +10,7 @@ namespace HB.Orchestration.Mcp;
 /// save_result는 설명이 컨텍스트에 늘 올라가는 비용을 감수하고 추가했다: 지휘자가 응답을 다시 출력해 옮겨 적는
 /// 토큰과 옮겨 적기 오류를 없애고, 저장 위치를 기록의 프로젝트 폴더로 고정한다.
 /// record_verdicts도 같은 비용을 감수했다: 지적마다 채택·기각을 남겨야 에이전트·모드의 가치를 데이터로 볼 수 있다 (대시보드 판정 화면).
+/// /self-review 판정도 새 도구 없이 record_verdicts의 selfReview 인자로 남긴다 (도구 설명 비용을 늘리지 않게).
 /// </summary>
 [McpServerToolType]
 public sealed class ModeTools(ModeRunner modes)
@@ -55,10 +56,18 @@ public sealed class ModeTools(ModeRunner modes)
 
     [McpServerTool(Name = "record_verdicts")]
     [Description("결과 종합 뒤 지적마다 판정(채택·부분 채택·기각·보류·중복)과 근거를 기록한다. Claude만 지적한 것은 steps 없이.")]
-    public string RecordVerdicts(
-        [Description("run_mode 결과 첫 줄의 runId")] string runId,
-        [Description("지적별 판정")] VerdictItem[] items)
-        => modes.RecordVerdicts(runId, items);
+    public async Task<string> RecordVerdicts(
+        // 셋 다 스키마에서 선택으로 둔다 (기본값이 있어야 선택): 누락은 도구 오류 대신 "[판정 기록 불가] …" 안내로 돌려준다.
+        [Description("지적별 판정")] VerdictItem[]? items = null,
+        [Description("run_mode 결과 첫 줄의 runId. /self-review는 빼고 selfReview를 준다")] string? runId = null,
+        [Description("/self-review 전용: self-reviewer 실행을 새로 기록 (runId 없이). self-reviewer 지적은 steps [1]")] SelfReviewInfo? selfReview = null)
+    {
+        if (selfReview is not null && !string.IsNullOrWhiteSpace(runId))
+            return "[판정 기록 불가] runId와 selfReview는 함께 쓸 수 없습니다 (selfReview는 새 실행을 만든다).";
+        return selfReview is not null
+            ? await modes.RecordSelfReviewAsync(selfReview, items)
+            : modes.RecordVerdicts(runId ?? "", items);
+    }
 
     [McpServerTool(Name = "server_info")]
     [Description("이 MCP 서버의 빌드 시각·PID·설정 로드 시각을 본다. 사용자가 서버 상태나 publish 반영 여부를 물을 때만 호출.")]

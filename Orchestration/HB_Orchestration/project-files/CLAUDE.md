@@ -10,7 +10,9 @@
 
 ### 언제 부르나 — 기본은 부르지 않는다
 
-* `review`: 50줄 이상 변경, 스레딩/비동기/메모리 관련 변경, 사용자가 교차 리뷰를 요청했을 때
+* 리뷰 (`/self-review` · `/cross-review`): 50줄 이상 변경, 스레딩/비동기/메모리 관련 변경, 사용자가 교차 리뷰를 요청했을 때 — **자동으로 부르지 않고 사용자에게 묻는다** (계획서 `Orchestration/HB_Orchestration/docs/plans/2026-10-20_리뷰조건-self-reviewer.md`).
+  * 선택지: `/self-review`(지휘자 + self-reviewer, 외부 없음) · `/cross-review`(+ 외부 `review` 모드) · 리뷰 없음. 변경 성격(단순 이동·이름 변경·문서·테스트만 / 비용 계산·보안·직렬화·스레딩 같은 위험 영역)을 한 줄로 보이고 추천을 붙인다.
+  * 사용자가 명령을 직접 입력했으면 묻지 않는다. `review` 모드는 `/cross-review`로만 부른다.
 * `panel`: 사용자가 명시적으로 요청했거나 되돌리기 어려운 구조 변경일 때만
 * `critique` / `debate`: 설계 결정, 두 가지 이상 방식 중 선택할 때. 가벼운 건 critique, 중요한 건 debate
 * `research`: 사용자가 기능·도구 조사를 요청했을 때
@@ -89,7 +91,7 @@
 2. **한 에이전트만 지적** — 코드를 다시 확인하고 타당/부당 판정과 이유
 3. **Claude만 지적** — 그대로 유지
 4. **의견 충돌** — 양쪽 근거를 나란히 두고 사용자에게 판단 요청
-5. **판정 기록** — 종합을 마치면 `record_verdicts`로 지적마다 판정을 남긴다 (대시보드 판정 화면의 채택률·채택 1건당 비용 원본).
+5. **판정 기록** — 종합을 마치면 `record_verdicts`로 지적마다 판정을 남긴다 (대시보드 판정 화면의 채택률·채택 1건당 비용 원본). `/self-review`는 runId 대신 `selfReview` (명령 파일 4단계).
    * `verdict`: `adopted`(채택) · `partial`(부분 채택) · `rejected`(기각) · `deferred`(보류) · `duplicate`(중복). 채택이 아니면 `reason` 필수.
    * `steps`: 그 지적을 낸 단계 번호들 (`### N.`). 여럿이 같이 지적했으면 모두 넣는다. **Claude만 지적한 것도 `steps` 없이 남긴다** (에이전트가 놓친 것).
    * `claudeAlsoFound`: ownReview에도 있던 지적이면 true.
@@ -130,9 +132,9 @@ Quota(`[실패] Quota` — 크레딧·한도 소진)나 429 실패 뒤에는 바
 
 ## 서브에이전트 (Claude Code)
 
-외부 에이전트를 대신하지 않는다 (교차 리뷰의 가치는 다른 회사 모델의 시선). 계획서 `Orchestration/HB_Orchestration/docs/plans/2026-10-19_서브에이전트-도입-검토.md` (ToolWithCS).
+외부 에이전트를 대신하지 않는다 (교차 리뷰의 가치는 다른 회사 모델의 시선). 사용자가 `/self-review`를 고른 경우만 외부 리뷰 없이 끝낸다. 계획서 `Orchestration/HB_Orchestration/docs/plans/2026-10-19_서브에이전트-도입-검토.md` (ToolWithCS).
 
-* 정의: `.claude/agents/` — `self-reviewer`(`/cross-review` 2단계 ownReview), `evidence-collector`(`/preflight` P4 근거 수집). 둘 다 Opus.
+* 정의: `.claude/agents/` — `self-reviewer`(`/self-review` · `/cross-review` 2단계), `evidence-collector`(`/preflight` P4 근거 수집). 둘 다 Opus.
   * 모델: 맥락 편향 없이 봐야 하는 자리는 `opus`, 지휘자 컨텍스트 보호·반복 작업(조사·수집·추출)은 `sonnet`.
   * 정의 파일에는 `tools` 허용 목록이 반드시 있어야 한다 (생략하면 MCP 도구까지 상속 → `run_mode`를 부를 수 있음). `python -I .claude/scripts/check_agents.py`로 검사한다. `permissionMode` bypass 계열 금지.
   * 정의 파일을 고치면 이 세션에는 반영되지 않는다 (관찰: 처음 읽은 내용을 유지). 새 세션에서 확인한다.

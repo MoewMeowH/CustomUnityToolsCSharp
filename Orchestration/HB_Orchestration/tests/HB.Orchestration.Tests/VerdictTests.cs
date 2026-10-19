@@ -208,4 +208,116 @@ public sealed class VerdictTests : IDisposable
         VerdictRecord[] verdicts = [new() { Id = "c", Timestamp = DateTimeOffset.Now, RunId = "r1", FindingKey = "c", Summary = "s", Verdict = Verdicts.Adopted }];
         Assert.Empty(VerdictStats.ForRun(verdicts, [], "r1"));
     }
+
+    // ── /self-review (계획서 2026-10-20_리뷰조건-self-reviewer) ─────────────────
+
+    private const string SelfReviewText = "## 지적\n- C1 [minor] a.cs:1 — x\n\n## 자료 부족\n- 없음\n\n## 읽은 파일\n- subagent_in/x/a.cs:1-10\n";
+
+    private static SelfReviewInfo Info(string review = SelfReviewText) =>
+        new(review, "변경 의도", ["a.cs"], SubagentTokens: 84514, ToolUses: 15, DurationMs: 113093, Reason: "50줄 이상");
+
+    [Fact]
+    public async Task SelfReview_creates_run_and_verdicts_counted_for_self_reviewer()
+    {
+        var result = await VerdictRecorder.RecordSelfReviewAsync(Info(), [
+            new VerdictItem("C1", "x", "adopted", Steps: [1]),
+            new VerdictItem("K1", "지휘자만", "adopted"),
+        ], 500, Log);
+
+        Assert.StartsWith("self-review 실행 기록 runId: ", result);
+        var call = Assert.Single(CallLog.ReadAll(Log));
+        Assert.Equal((VerdictRecorder.SelfReviewTool, VerdictRecorder.SelfReviewAgent, 1), (call.Mode, call.Agent, call.Step));
+        Assert.Null(call.InputTokens); // 하루 토큰 상한에 섞이지 않게
+        Assert.Null(call.OutputTokens);
+        Assert.Contains("84514", call.UsageRaw);
+        Assert.Equal(113093, call.ElapsedMs);
+        Assert.Equal(SelfReviewText, call.Response);
+        Assert.Contains(call.RunId!, result);
+
+        var verdicts = VerdictLog.Latest(VerdictLog.ReadAll(VerdictPath));
+        Assert.Equal(2, verdicts.Count);
+        var row = VerdictStats.Build(verdicts, CallLog.ReadAll(Log), _ => null).ByAgent.Single(r => r.Key == VerdictRecorder.SelfReviewAgent);
+        Assert.Equal((1, 1), (row.Adopted, row.Missed)); // 지휘자만 찾은 것 = self-reviewer가 놓친 것
+    }
+
+    [Theory]
+    [InlineData("## 읽은 파일\n- a")] // 지적 절 없음
+    [InlineData("## 지적\n- a")]      // 읽은 파일 절 없음
+    [InlineData("")]
+    public async Task SelfReview_bad_review_writes_nothing(string review)
+    {
+        var result = await VerdictRecorder.RecordSelfReviewAsync(Info(review), [new VerdictItem("C1", "x", "adopted", Steps: [1])], 500, Log);
+
+        Assert.StartsWith("[판정 기록 불가]", result);
+        Assert.Empty(CallLog.ReadAll(Log));
+    }
+
+    [Fact]
+    public async Task SelfReview_invalid_verdict_leaves_no_empty_run()
+    {
+        var result = await VerdictRecorder.RecordSelfReviewAsync(Info(), [
+            new VerdictItem("C1", "x", "adopted", Steps: [1]),
+            new VerdictItem("C2", "y", "rejected", Steps: [2]), // 단계 2 없음 + reason 없음
+        ], 500, Log);
+
+        Assert.Contains("이 실행에 없는 단계 2", result);
+        Assert.Empty(CallLog.ReadAll(Log));
+        Assert.Empty(VerdictLog.ReadAll(VerdictPath));
+    }
+
+    [Fact]
+    public async Task SelfReview_with_no_reviewer_findings_still_counts_missed()
+    {
+        // self-reviewer가 "문제 없음"이고 지휘자만 찾은 것이 채택되면 self-reviewer의 놓침이다.
+        await VerdictRecorder.RecordSelfReviewAsync(Info("## 지적\n- 없음\n\n## 읽은 파일\n- subagent_in/x/a.cs\n"),
+            [new VerdictItem("K1", "지휘자만", "adopted")], 500, Log);
+
+        var row = VerdictStats.Build(VerdictLog.Latest(VerdictLog.ReadAll(VerdictPath)), CallLog.ReadAll(Log), _ => null)
+            .ByAgent.Single(r => r.Key == VerdictRecorder.SelfReviewAgent);
+        Assert.Equal((0, 1), (row.Findings, row.Missed));
+    }
+
+    [Fact]
+    public async Task SelfReview_same_review_twice_is_rejected_with_existing_run_id()
+    {
+        await VerdictRecorder.RecordSelfReviewAsync(Info(), [new VerdictItem("C1", "x", "adopted", Steps: [1])], 500, Log);
+        var runId = CallLog.ReadAll(Log).Single().RunId!;
+
+        var again = await VerdictRecorder.RecordSelfReviewAsync(Info(), [new VerdictItem("C1", "x", "adopted", Steps: [1])], 500, Log);
+
+        Assert.Contains($"runId {runId}", again);
+        Assert.Single(CallLog.ReadAll(Log));
+        Assert.Single(VerdictLog.ReadAll(VerdictPath));
+    }
+
+    [Fact]
+    public async Task SelfReview_too_long_review_is_rejected()
+    {
+        var result = await VerdictRecorder.RecordSelfReviewAsync(Info(SelfReviewText + new string('x', 100)),
+            [new VerdictItem("C1", "x", "adopted", Steps: [1])], 500, Log, maxReviewChars: 50);
+
+        Assert.Contains("이내입니다", result);
+        Assert.Empty(CallLog.ReadAll(Log));
+    }
+
+    [Fact]
+    public async Task SelfReview_timestamp_is_start_of_subagent_run()
+    {
+        var before = DateTimeOffset.Now;
+        await VerdictRecorder.RecordSelfReviewAsync(Info(), [new VerdictItem("C1", "x", "adopted", Steps: [1])], 500, Log);
+
+        Assert.True(CallLog.ReadAll(Log).Single().Timestamp <= before.AddMilliseconds(-100_000)); // DurationMs 113,093
+    }
+
+    [Fact]
+    public async Task SelfReview_run_can_be_rejudged_with_its_run_id()
+    {
+        Assert.StartsWith("self-review 실행", await VerdictRecorder.RecordSelfReviewAsync(Info(), [new VerdictItem("C1", "x", "deferred", Steps: [1], Reason: "다음 대조 때")], 500, Log));
+        var runId = CallLog.ReadAll(Log).Single().RunId!;
+
+        var again = Record(runId, new VerdictItem("C1", "x", "adopted", Steps: [1]));
+
+        Assert.Contains("앞 판정 대체 1", again);
+        Assert.Equal(Verdicts.Adopted, VerdictLog.Latest(VerdictLog.ReadAll(VerdictPath)).Single().Verdict);
+    }
 }

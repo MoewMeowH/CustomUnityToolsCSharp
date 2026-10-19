@@ -16,6 +16,20 @@ public sealed record VerdictItem(
     [property: Description("구조화 결과의 지적 ID (예: 1-F2). 주면 steps·summary·file·severity를 채운다")] string[]? FindingIds = null);
 
 /// <summary>
+/// /self-review의 self-reviewer 실행 (record_verdicts에 runId 대신 준다). 서버가 calls.jsonl에 실행 1건(단계 1 = self-reviewer)을 만든다.
+/// 토큰은 InputTokens·OutputTokens에 넣지 않는다 — 하루 토큰 상한은 외부 에이전트용 (계획서 2026-10-20_리뷰조건-self-reviewer).
+/// </summary>
+public sealed record SelfReviewInfo(
+    [property: Description("self-reviewer 결과 원문 (## 지적 · ## 자료 부족 · ## 읽은 파일)")] string Review,
+    [property: Description("위임 메시지의 변경 의도·제약 (요약 가능)")] string Intent,
+    [property: Description("대상 파일 (프로젝트 루트 기준, 선택)")] string[]? Files = null,
+    [property: Description("서브에이전트 모델 (기본 opus)")] string? Model = null,
+    [property: Description("작업 완료 알림의 subagent_tokens (선택)")] long? SubagentTokens = null,
+    [property: Description("작업 완료 알림의 tool_uses (선택)")] int? ToolUses = null,
+    [property: Description("작업 완료 알림의 duration_ms (선택)")] long? DurationMs = null,
+    [property: Description("리뷰를 한 이유 한 줄 (선택)")] string? Reason = null);
+
+/// <summary>
 /// record_verdicts: 결과 종합 뒤 지적마다 판정을 verdicts.jsonl에 남긴다 (에이전트·모드별 채택률의 원본).
 /// 하나라도 틀리면 아무것도 쓰지 않는다. 실패는 예외가 아니라 "[판정 기록 불가] …" 문자열.
 /// </summary>
@@ -25,17 +39,24 @@ public static class VerdictRecorder
     public const int MaxKeyChars = 80;
     public const int MaxSummaryChars = 300;
 
+    public const string SelfReviewTool = "self_review";
+    public const string SelfReviewRole = "SelfReviewer";
+    public const string SelfReviewAgent = "self-reviewer";
+    public const string SelfReviewProvider = "claude-subagent";
+
+    /// <summary>같은 self-reviewer 원문을 중복으로 보는 기간 (일).</summary>
+    public const int DuplicateWindowDays = 7;
+
+    private const string Fail = "[판정 기록 불가] ";
     private static readonly string[] Severities = ["high", "medium", "low"];
 
     /// <param name="maxReasonChars">Reason 글자 수 상한 (Records.MaxReasonChars, 0 = 무제한).</param>
     /// <param name="logPath">호출 기록 파일. null이면 기본 경로. 판정 파일은 그 옆 (<see cref="VerdictLog.PathFor"/>).</param>
     public static string Record(string? runId, IReadOnlyList<VerdictItem>? items, int maxReasonChars, string? logPath = null)
     {
-        const string Fail = "[판정 기록 불가] ";
-        if (string.IsNullOrWhiteSpace(runId)) return Fail + "runId가 비어 있습니다. run_mode 결과 첫 줄의 runId를 넘기세요.";
+        if (string.IsNullOrWhiteSpace(runId)) return Fail + "runId가 비어 있습니다. run_mode 결과 첫 줄의 runId를 넘기세요 (/self-review는 runId 대신 selfReview).";
         runId = runId.Trim();
-        if (items is null || items.Count == 0) return Fail + "items가 비어 있습니다.";
-        if (items.Count > MaxItems) return Fail + $"한 번에 {MaxItems}건까지입니다 ({items.Count}건). 나눠서 호출하세요.";
+        if (CheckCount(items) is { } countError) return countError;
 
         List<CallRecord> runCalls;
         try
@@ -48,6 +69,102 @@ public static class VerdictRecorder
         }
         if (runCalls.Count == 0) return Fail + $"runId '{runId}'의 기록이 없습니다.";
 
+        var prepared = Prepare(runId, runCalls, items!, maxReasonChars, logPath);
+        return prepared.Error ?? Commit(prepared, null);
+    }
+
+    /// <summary>
+    /// /self-review: self-reviewer 실행 기록을 만들고 판정을 남긴다. 판정 검사를 먼저 하고, 통과할 때만 실행 기록과 판정을 쓴다
+    /// (판정 없는 빈 실행이 남지 않게). self-reviewer 지적은 steps [1], 지휘자 추가는 steps 없음.
+    /// </summary>
+    /// <param name="maxReviewChars">review·intent 글자 수 상한 (Records.MaxOwnReviewChars — run_mode ownReview와 같은 기준, 0 = 무제한).</param>
+    public static async Task<string> RecordSelfReviewAsync(SelfReviewInfo? info, IReadOnlyList<VerdictItem>? items, int maxReasonChars,
+        string? logPath = null, int maxReviewChars = 0)
+    {
+        if (info is null || string.IsNullOrWhiteSpace(info.Review)) return Fail + "selfReview.review(self-reviewer 결과 원문)가 비어 있습니다.";
+        if (SelfReviewFormatProblem(info.Review) is { } problem) return Fail + $"selfReview.review가 self-reviewer 결과 원문 형식이 아닙니다: {problem}.";
+        if (string.IsNullOrWhiteSpace(info.Intent)) return Fail + "selfReview.intent(변경 의도)가 비어 있습니다.";
+        if (maxReviewChars > 0 && (info.Review.Length > maxReviewChars || info.Intent.Length > maxReviewChars))
+            return Fail + $"selfReview.review·intent는 각각 {maxReviewChars:N0}자 이내입니다 (review {info.Review.Length:N0}자 · intent {info.Intent.Length:N0}자).";
+        if (info.Reason is { } r && maxReasonChars > 0 && r.Length > maxReasonChars)
+            return Fail + $"selfReview.reason은 {maxReasonChars:N0}자 이내입니다 ({r.Length:N0}자).";
+        if (CheckCount(items) is { } countError) return countError;
+
+        // 응답을 못 받아 같은 원문으로 다시 부르면 같은 리뷰가 두 번 세진다 → 최근 기록에 같은 원문이 있으면 그 runId로 안내.
+        try
+        {
+            if (CallLog.ReadSince(DateTimeOffset.Now.AddDays(-DuplicateWindowDays), logPath)
+                    .FirstOrDefault(c => c.Tool == SelfReviewTool && c.Response == info.Review) is { RunId: { } dup })
+                return Fail + $"같은 self-reviewer 원문이 이미 기록돼 있습니다 (runId {dup}). 판정을 다시 쓰려면 selfReview 없이 runId {dup}로 부르세요.";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return Fail + $"호출 기록을 읽지 못했습니다 ({ex.GetType().Name}: {ex.Message}).";
+        }
+
+        var runId = Guid.NewGuid().ToString("N")[..10];
+        var now = DateTimeOffset.Now;
+        var usage = new System.Text.Json.Nodes.JsonObject
+        {
+            ["subagent_tokens"] = info.SubagentTokens,
+            ["tool_uses"] = info.ToolUses,
+        };
+        var call = new CallRecord
+        {
+            Id = Guid.NewGuid().ToString("N")[..12],
+            // 실행 시작 시각 ≈ 기록 시각 − 서브에이전트 실행 시간 (판정 화면의 기간 기준이 실행 시작 시각이라).
+            Timestamp = info.DurationMs is > 0 and var ms ? now.AddMilliseconds(-ms) : now,
+            Tool = SelfReviewTool,
+            RunId = runId,
+            Mode = SelfReviewTool,
+            Role = SelfReviewRole,
+            Step = 1,
+            Attempt = 1,
+            Agent = SelfReviewAgent,
+            Provider = SelfReviewProvider,
+            Model = string.IsNullOrWhiteSpace(info.Model) ? "opus" : info.Model.Trim(),
+            ProjectDir = Environment.CurrentDirectory,
+            Prompt = info.Intent,
+            Response = info.Review,
+            UsageRaw = usage.ToJsonString(),
+            ElapsedMs = info.DurationMs ?? 0,
+            Success = true,
+            Files = info.Files?.Where(f => !string.IsNullOrWhiteSpace(f)).ToList() ?? [],
+            Reason = string.IsNullOrWhiteSpace(info.Reason) ? null : info.Reason.Trim(),
+        };
+
+        var prepared = Prepare(runId, [call], items!, maxReasonChars, logPath);
+        if (prepared.Error is not null) return prepared.Error;
+        try
+        {
+            await CallLog.AppendAsync(call, logPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return Fail + $"실행 기록 쓰기 실패 ({ex.GetType().Name}: {ex.Message}).";
+        }
+        return Commit(prepared, "self-review 실행");
+    }
+
+    /// <summary>self-reviewer 결과 원문 형식 (H4 훅과 같은 기준: ## 지적 · ## 읽은 파일 절). 맞으면 null.</summary>
+    internal static string? SelfReviewFormatProblem(string review)
+    {
+        var headings = review.Split('\n').Select(l => l.Trim()).ToHashSet(StringComparer.Ordinal);
+        if (!headings.Contains("## 지적")) return "'## 지적' 절이 없습니다";
+        if (!headings.Contains("## 읽은 파일")) return "'## 읽은 파일' 절이 없습니다";
+        return null;
+    }
+
+    private static string? CheckCount(IReadOnlyList<VerdictItem>? items) =>
+        items is null || items.Count == 0 ? Fail + "items가 비어 있습니다."
+        : items.Count > MaxItems ? Fail + $"한 번에 {MaxItems}건까지입니다 ({items.Count}건). 나눠서 호출하세요."
+        : null;
+
+    private sealed record Prepared(string? Error, string RunId, List<VerdictRecord> Records, HashSet<string> Existing, string Path);
+
+    private static Prepared Prepare(string runId, List<CallRecord> runCalls, IReadOnlyList<VerdictItem> items, int maxReasonChars, string? logPath)
+    {
+        Prepared Failed(string error) => new(error, runId, [], [], "");
         var steps = runCalls.Where(r => r.Step is not null).Select(r => r.Step!.Value).ToHashSet();
 
         // 구조화 출력의 지적 (단계의 대표 호출 = 성공한 마지막 시도). ID는 실행 안에서 유일하다.
@@ -94,7 +211,7 @@ public static class VerdictRecorder
             if (it.Steps?.Where(s => !steps.Contains(s)).ToList() is { Count: > 0 } missing)
                 errors.Add($"{at}: 이 실행에 없는 단계 {string.Join(", ", missing)} (있는 단계: {string.Join(", ", steps.Order())}).");
         }
-        if (errors.Count > 0) return Fail + "아무것도 기록하지 않았습니다.\n- " + string.Join("\n- ", errors);
+        if (errors.Count > 0) return Failed(Fail + "아무것도 기록하지 않았습니다.\n- " + string.Join("\n- ", errors));
 
         HashSet<string> existing;
         string path;
@@ -105,7 +222,7 @@ public static class VerdictRecorder
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
-            return Fail + $"판정 기록을 읽지 못했습니다 ({ex.GetType().Name}: {ex.Message}).";
+            return Failed(Fail + $"판정 기록을 읽지 못했습니다 ({ex.GetType().Name}: {ex.Message}).");
         }
 
         var now = DateTimeOffset.Now;
@@ -129,14 +246,20 @@ public static class VerdictRecorder
                 Kind = kinds[index] ? Verdicts.RequestKind : null,
             };
         }).ToList();
+        return new Prepared(null, runId, records, existing, path);
+    }
 
+    /// <param name="created">새로 만든 실행이면 결과 앞에 붙일 이름 (runId를 지휘자에게 알려 줌).</param>
+    private static string Commit(Prepared p, string? created)
+    {
+        var (runId, records, existing) = (p.RunId, p.Records, p.Existing);
         try
         {
-            VerdictLog.Append(records, path);
+            VerdictLog.Append(records, p.Path);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
-            return Fail + $"쓰기 실패 ({ex.GetType().Name}: {ex.Message}).";
+            return Fail + $"쓰기 실패 ({ex.GetType().Name}: {ex.Message})." + (created is null ? "" : $" {created} 기록(runId {runId})은 남았습니다 — 같은 runId로 다시 기록하세요.");
         }
 
         var linked = records.Count(r => r.FindingIds is not null);
@@ -147,7 +270,8 @@ public static class VerdictRecorder
         var claudeOnly = records.Count(r => r.IsClaudeOnly && !r.IsRequest);
         var requestCount = records.Count(r => r.IsRequest);
         var replaced = records.Count(r => existing.Contains(r.FindingKey));
-        return $"판정 {records.Count}건 기록 — {counts}" +
+        return (created is null ? "" : $"{created} 기록 runId: {runId}\n") +
+               $"판정 {records.Count}건 기록 — {counts}" +
                (claudeOnly > 0 ? $" (Claude만 지적 {claudeOnly})" : "") +
                (replaced > 0 ? $" · 앞 판정 대체 {replaced}" : "") +
                (linked > 0 ? $" · 지적 ID 연결 {linked}" : "") +

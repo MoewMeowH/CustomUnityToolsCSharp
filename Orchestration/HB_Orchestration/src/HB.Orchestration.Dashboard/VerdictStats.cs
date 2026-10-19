@@ -129,11 +129,12 @@ public static class VerdictStats
 
         // 놓침은 지적을 내는 단계에만 매긴다 (판정자·검증 역할 제외 — review 453bc0e4fe 1-F1·2-F3):
         // 구조화 출력을 낸 단계, 또는 그 실행에서 지적을 하나라도 낸 단계. 단계마다 대표 호출 하나만 본다.
+        // self-review 실행의 단계(self-reviewer)는 지적이 0개여도 리뷰어다 — 안 그러면 다 놓친 리뷰일수록 놓침에서 빠진다.
         var findingSteps = verdicts.GroupBy(v => v.RunId).ToDictionary(g => g.Key, g => g.SelectMany(v => v.Steps).ToHashSet());
         List<CallRecord> Reviewers(string runId, List<CallRecord> run) =>
             run.Where(c => c.Step is not null).Select(c => c.Step!.Value).Distinct()
                 .Select(s => StepCall(run, s)).OfType<CallRecord>()
-                .Where(c => c.Success && (c.Structured is not null || findingSteps[runId].Contains(c.Step!.Value)))
+                .Where(c => c.Success && (c.Structured is not null || c.Tool == Agents.VerdictRecorder.SelfReviewTool || findingSteps[runId].Contains(c.Step!.Value)))
                 .ToList();
 
         foreach (var v in verdicts)

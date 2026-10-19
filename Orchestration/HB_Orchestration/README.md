@@ -442,6 +442,7 @@ powershell -ExecutionPolicy Bypass -File tools\Sync-ProjectFiles.ps1 -UnityProje
 - `CLAUDE.md` — 언제 어떤 모드를 쓰고, input을 어떻게 줄이고, 결과를 어떻게 종합할지
 - `REVIEW_GUIDELINES.md` — 공통 리뷰 기준 (서버가 자동으로 찾아 주입)
 - `.claude/commands/cross-review.md` — `/cross-review`, `/cross-review panel`
+- `.claude/commands/self-review.md` — `/self-review`: 지휘자 + self-reviewer만 (외부 에이전트 없음). CLAUDE.md 리뷰 조건에 걸리면 지휘자가 `/self-review` · `/cross-review` · 리뷰 없음 중에서 묻는다. 판정은 `record_verdicts`의 `selfReview`(runId 비움)로 남기면 서버가 self-review 실행(Tool·Mode `self_review`, 에이전트 `self-reviewer`, 제공사 `claude-subagent`, 토큰은 하루 상한에 넣지 않고 UsageRaw에)을 만든다 → 판정 화면에 self-reviewer 채택률·놓침
 - `.claude/commands/mode.md` — `/mode debate ...`, `/mode deliberate ...`, `/mode research ...`, `/mode parallel ...`
 - `.claude/commands/unity-test.md` — `/unity-test`, `/unity-test PlayMode MyGame.Combat`
 - `.claude/commands/work-order.md` — `/work-order <요청> [첨부]`: 오케스트레이션에 맡길 작업 지시서를 만든다. 조사 → 초안 → `work_order` 모드(luna | flash 동시 검토) → `그외 이상사항` 정리 → `WorkOrders.Folder`(없으면 `docs/work-orders/`)에 저장 + 대화에 출력. 코드는 고치지 않는다. 모드별 지침은 CLAUDE.md가 아니라 이 명령 파일에 둔다 (CLAUDE.md는 세션마다 컨텍스트에 올라감)

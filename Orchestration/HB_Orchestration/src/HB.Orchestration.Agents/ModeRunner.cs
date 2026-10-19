@@ -165,6 +165,10 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     public string RecordVerdicts(string runId, IReadOnlyList<VerdictItem>? items) =>
         VerdictRecorder.Record(runId, items, Options.Records.MaxReasonChars, runner.LogPath);
 
+    /// <summary>/self-review: self-reviewer 실행 기록을 만들고 판정을 남긴다 (record_verdicts에 runId 대신 selfReview).</summary>
+    public Task<string> RecordSelfReviewAsync(SelfReviewInfo? info, IReadOnlyList<VerdictItem>? items) =>
+        VerdictRecorder.RecordSelfReviewAsync(info, items, Options.Records.MaxReasonChars, runner.LogPath, Options.Records.MaxOwnReviewChars);
+
     /// <summary>모드 하나의 실행 계획: 읽은 modes.json · 지침 · 에이전트 교체 · 단계별 에이전트와 시스템 프롬프트.</summary>
     private sealed record PreparedPlan(ModeStore.Loaded Loaded, GuidelinesLoader.Result Guidelines, Dictionary<string, string> Swap, List<PlannedStep> Steps);
 
