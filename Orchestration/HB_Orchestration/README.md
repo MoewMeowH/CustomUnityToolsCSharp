@@ -307,8 +307,9 @@ runId: dfa393514b
 ### 구조화 출력 (역할 `Output`)
 review 계열(`Reviewer` · `PerfReviewer`)의 응답을 JSON으로 받아 지적마다 ID를 매긴다. 계획서 `docs/plans/2026-10-19_리뷰-구조화-출력.md`.
 
-- 형식 (코드 내장 `FindingFormat`, 스키마 버전은 기록의 `Structured.Format`에 `findings@1`처럼 남음)
+- 형식 (코드 내장 `FindingFormat`, 스키마 버전은 기록의 `Structured.Format`에 `findings@2`처럼 남음)
   - `findings`: `findings[]`(`severity` critical·major·minor·nit, `file`, `line`, `problem`, `detail`, `suggestion`, `confidence` high·medium·low) + `needsInfo[]`
+  - `needsInfo[]` (@2부터 객체): `what`(필요한 것) · `path`(첨부에 없던 파일, 모르면 null) · `symbol`(타입·메서드·검색어, 모르면 null) · `why`(판단이 어떻게 달라지는지). 서버가 `단계-N순번` ID를 매겨 `자료 요청 1-N1: …`으로 그린다. 해석은 @1 문자열도 받는다 (예전 기록·골든 세트 다시 채점)
   - `perf_findings`: 위 + 지적마다 `frequency`·`scaling`·`measurement`, severity는 high·medium·low, 최상위 `specDependent[]`·`fixDirection[]`·`measurePriority[]`
 - 해석 순서: 종료 사유 → JSON(코드 펜스·앞뒤 문장은 첫 `{`~마지막 `}`로 벗김) → 타입·값 검증 → ID. 항목 하나라도 틀리면 응답 전체를 해석 실패로 본다.
 
@@ -323,7 +324,7 @@ review 계열(`Reviewer` · `PerfReviewer`)의 응답을 JSON으로 받아 지�
 - 1-F1 [major] src/A.cs:42 — 문제 / 제안 / 확신도(high)
   상세: 발생 조건·원인·영향
   빈도: 매 프레임 · 증가: O(N) · 측정: …     ← perf_findings만
-자료 부족: …
+자료 요청 1-N1: Calls 수집부 (path src/Reader.cs · symbol RunCalls) — 중복 id 처리 확인
 사양 의존: / 수정 방향: / 측정 우선순위:      ← perf_findings만, 있을 때
 총 1건(critical 0 / major 1 / minor 0 / nit 0)
 ```
@@ -332,6 +333,18 @@ review 계열(`Reviewer` · `PerfReviewer`)의 응답을 JSON으로 받아 지�
 - 기록: `Response`는 원문(JSON) 그대로, `Structured`에 해석 결과(상태·지적·ID·요청 방식 `schema`/`prompt`). 언어 이탈 검사는 그린 텍스트에 돌린다.
 - `save_result`는 해석된 기록이면 **그린 텍스트**를 저장한다 (원문 JSON은 대시보드 호출 상세의 "응답 원문"에서 본다).
 - 대시보드 호출 상세: 형식·요청 방식·상태 한 줄, 그린 목록, 접힌 원문.
+
+### 자료 보충 재질문 (`run_mode`의 `followUp`)
+계획서 `docs/plans/2026-10-19_자료요청-왕복.md`. 에이전트가 직접 코드를 읽는 도구는 두지 않는다 (경로 검사를 통과해도 외부 전송 허가는 아니다 — critique bd33879c06). 대신 지휘자가 요청을 보고 로컬에서 찾아 **승인한 범위만** 보낸다.
+
+`run_mode(mode, input, context, reason, followUp: { runId, step, requests: ["1-N1", …] })`
+- 그 단계의 에이전트(원래 실행에서 바꿨으면 바꾼 에이전트)에게 `[원래 프롬프트, 원래 응답]`을 앞 대화로 두고, 보충 자료(`context`)·지휘자 메모(`input`)·보충 지시를 이어 보낸다. 앞부분이 원래 호출과 같아 제공사 프롬프트 캐시에 걸린다.
+- 결과는 같은 runId의 **새 단계 번호**(예: 2)로 남는다 — 지적·요청 ID(`2-F1`)와 `save_result`가 원래 응답과 섞이지 않는다. 기록에 `FollowUpOf`·`FollowUpRequests`·`FollowUpSkipped`.
+- 실행마다 **성공한 보충 1회** (실패·취소된 시도는 다시 할 수 있다, 같은 실행의 동시 호출은 서버 안 예약으로 하나만). **세션 실행 한도는 차감하지 않는다** (사용자 결정 — followUp으로 한도가 다 차지 않게). 비용 상한·입력 상한(원래 프롬프트 + 응답 + 보충)은 본다. `reason` 필수. `agents`·`images`·`ownReview`와 함께 쓰면 거절한다.
+- 계획은 그 단계 하나만, 원래 실행의 에이전트로 다시 조립한다. 시스템 프롬프트 해시가 원래 호출과 다르면 결과에 `(주의: 시스템 프롬프트가 원래 실행 때와 다르다)`.
+- 결과 끝: 원래 단계와 보충 단계 지적의 `겹침 후보`, `(판정은 N단계 지적 기준 — 원래 단계의 같은 지적은 duplicate로 …)`. 보내지 않은 요청은 결과 끝과 에이전트에게 간 메시지에 표시된다. 지휘자는 그 이유를 사용자에게 알린다 (CLAUDE.md "결과 종합" 6번).
+- 판정 화면: followUp으로 보낸 요청은 따로 기록하지 않아도 "보충"으로 센다. 보충 단계가 새로 낸 요청은 다시 보충할 수 없어 "처리 안 함"에 넣지 않고 따로 센다.
+- 거절: 이미 보충한 실행, 진행 중, 없는·빈 요청 ID, 모드가 다름, Debate, 골든 평가 실행, 이미지를 받은 단계, 보충할 자료 없음.
 
 ### save_result — 응답 원문을 파일로
 `save_result(runId, step, path, codeBlock?, overwrite?)`
@@ -362,6 +375,7 @@ calls.jsonl의 응답 원문을 그대로 저장한다. Claude가 응답을 다�
 - `verdict`: `adopted`(채택) · `partial`(부분 채택) · `rejected`(기각) · `deferred`(보류) · `duplicate`(중복). 채택이 아니면 `reason` 필수 (`Records.MaxReasonChars` 이내).
 - `steps`: 그 지적을 낸 단계 번호. 그 실행에 없는 번호는 거절. 비우면 **Claude만 지적**(에이전트가 놓친 것)으로 기록하고 `claudeAlsoFound`는 true가 된다.
 - `findingIds`(구조화 출력의 지적 ID, 예: `["1-F2","2-F1"]`): 주면 `steps`를 ID에서 채우고(같이 주면 일치해야 함), 비어 있는 `summary`·`file`·`severity`를 **첫 ID**의 지적에서 채운다. severity는 여러 ID 중 가장 높은 것을 high·medium·low로 바꿔 쓴다. 이 실행에 없는 ID는 거절. 판정 줄에 `FindingIds`로 남는다.
+- **자료 요청 ID**(`1-N1`)를 `findingIds`로 주면 요청 처리 기록이 된다 (`Kind: request`): `supplied`(보충) · `declined`(보내지 않음, `reason` 필수) · `deferred`. 지적 ID와 한 판정에 섞을 수 없다. 채택률·놓침에는 들어가지 않고 판정 화면 "자료 요청 처리"에 따로 모인다 (처리 안 한 요청 목록 포함).
 - 하나라도 틀리면 아무것도 쓰지 않는다 (`[판정 기록 불가] …`에 틀린 항목을 모두 적음). 한 번에 50건까지.
 - 저장: `calls.jsonl`과 같은 폴더의 `verdicts.jsonl` (환경 변수 `HB_ORCH_VERDICTS_PATH`로 바꿀 수 있음). 한 줄 = 판정 1회, 한 호출의 줄은 한 번에 쓴다.
 - 같은 `runId`·`findingKey`로 다시 쓰면 마지막 판정이 이긴다 (보류 → 결론, 사용자가 뒤집은 판정). 이전 줄은 지우지 않는다.
@@ -583,7 +597,7 @@ dotnet <publish 폴더>\HB.Orchestration.Mcp.dll --golden score <사례> --from 
 - `run`은 `--yes`가 없으면 사례·에이전트·입력 글자 수·입력 비용 추정만 보이고 **외부 호출 없이** 멈춘다.
 - run_mode와 같은 시스템 프롬프트(역할 + 출력 형식 + 공통 규칙 + 지침)·에이전트로 보낸다. 세션 실행 한도·reason·ownReview·context 첨부는 쓰지 않는다 (첨부는 사례의 `input.md`에 이미 들어 있음). 비용 상한(`Budget`)은 그대로 본다. 단계가 하나이고 구조화 출력(`Output`)이 있는 모드만 채점된다.
 - 호출 기록에는 `Tool = golden`, `Mode = 원래 모드`로 남는다 (대시보드·비용 집계에 보임). 세션 상태 파일은 남기지 않는다.
-- `score`는 self-reviewer 결과(마크다운 `- C1 [major] 파일:줄 — 문제`)나 findings@1 JSON을 채점만 한다 (외부 호출 없음).
+- `score`는 self-reviewer 결과(마크다운 `- C1 [major] 파일:줄 — 문제`)나 findings JSON(@1·@2)을 채점만 한다 (외부 호출 없음).
 - 폴더: `--dir` 또는 appsettings `Orchestration:Golden:Folder`. 사례 하나라도 형식이 틀리면 아무것도 돌리지 않는다. 종료 코드 0 성공 / 1 일부 사례 실패 / 2 사용법·사례 형식 오류.
 
 **사례 폴더** (`<골든 폴더>/<사례 id>/`, `results/`와 `_`로 시작하는 폴더는 사례가 아님)

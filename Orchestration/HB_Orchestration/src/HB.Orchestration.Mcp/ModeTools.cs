@@ -30,9 +30,15 @@ public sealed class ModeTools(ModeRunner modes)
         // 필수 여부는 서버가 검사한다: 스키마에서 필수로 두면 누락이 '['로 시작하는 안내 대신 도구 오류로 나간다.
         [Description("이 모드를 부른 이유 한 줄. 필수. 기록용이며 에이전트에게 전달되지 않음.")] string? reason = null,
         [Description("결과를 보기 전에 완성한 자체 검토 원문. [ownReview 필수] 모드에서 필수. 기록용이며 에이전트에게 전달되지 않음.")] string? ownReview = null,
+        [Description("자료 보충 재질문 (선택). 앞 결과의 '자료 요청 1-N1'에 대해 찾은 코드를 context로, 메모를 input으로 같은 에이전트에게 1회 다시 묻는다. 실행 한도 차감 없음, 실행마다 1회.")] FollowUpRequest? followUp = null,
         CancellationToken cancellationToken = default)
     {
-        var result = await modes.RunAsync(mode, input, files, agents, context, images, reason, ownReview, cancellationToken);
+        // followUp은 원래 단계의 에이전트로 보내고 이미지·ownReview를 받지 않는다 — 같이 오면 말없이 버리지 않고 거절한다.
+        var result = followUp is not null && (agents is { Length: > 0 } || images is { Length: > 0 } || !string.IsNullOrWhiteSpace(ownReview))
+            ? "[followUp 불가] followUp에는 agents · images · ownReview를 함께 쓸 수 없습니다 (원래 단계의 에이전트로 보내고, 이미지는 보충하지 않습니다)."
+            : followUp is not null
+            ? await modes.RunFollowUpAsync(mode, followUp, input, files, context, reason, cancellationToken)
+            : await modes.RunAsync(mode, input, files, agents, context, images, reason, ownReview, cancellationToken);
         modes.DumpToolResult("run_mode", mode, result); // Debug.DumpToolResults가 켜졌을 때만 (반환 직전 문자열 그대로)
         return result;
     }

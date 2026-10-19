@@ -35,6 +35,19 @@ public sealed record StepCall(
     /// <summary>호출 기록의 Tool. null이면 Mode (run_mode). 골든 세트 실행은 "golden".</summary>
     public string? Tool { get; init; }
 
+    /// <summary>
+    /// 앞 대화 (followUp: 원래 프롬프트 + 원래 응답). 있으면 [History…, User(Prompt)]로 보낸다.
+    /// 자동 접두 캐시 제공사(OpenAI·Gemini 호환)는 앞부분이 원래 호출과 같으면 저장 지점 없이도 캐시에 걸릴 수 있다.
+    /// 저장 지점을 직접 다는 Context 방식은 쓰지 않는다 (ContextPrefix가 없어 Off) — 원래 호출이 두 블록으로 나갔으면 접두도 바이트 단위로 같지 않다.
+    /// 이미지와는 함께 쓰지 않는다.
+    /// </summary>
+    public IReadOnlyList<ChatMessage>? History { get; init; }
+
+    /// <summary>followUp 기록용 (CallRecord.FollowUpOf · FollowUpRequests · FollowUpSkipped). 보통 호출은 null.</summary>
+    public int? FollowUpOf { get; init; }
+    public IReadOnlyList<string>? FollowUpRequests { get; init; }
+    public IReadOnlyList<string>? FollowUpSkipped { get; init; }
+
     /// <summary>Prompt의 앞부분 중 첨부 자료 (Prompt가 이 문자열로 시작한다). 첨부가 없거나 이 단계에 입력을 안 보내면 null.</summary>
     public string? ContextPrefix { get; init; }
 
@@ -211,7 +224,9 @@ public sealed class AgentRunner
             var cacheMode = call.CacheMode;
             using var cacheScope = PromptCacheScope.Enter(cacheMode);
             using var searchScope = WebSearchScope.Enter(call.WebSearch);
-            var response = call.Images is { Count: > 0 }
+            var response = call.History is { Count: > 0 } history
+                ? await agent.RunAsync([.. history, new ChatMessage(ChatRole.User, call.Prompt)], cancellationToken: ct)
+                : call.Images is { Count: > 0 }
                 ? await agent.RunAsync(WithImages(call), cancellationToken: ct)
                 : cacheMode == PromptCacheMode.Context
                 ? await agent.RunAsync(new ChatMessage(ChatRole.User,
@@ -342,6 +357,9 @@ public sealed class AgentRunner
             Provenance = provenance,
             Reason = call.Meta.Reason,
             OwnReview = call.Meta.OwnReview,
+            FollowUpOf = call.FollowUpOf,
+            FollowUpRequests = call.FollowUpRequests,
+            FollowUpSkipped = call.FollowUpSkipped,
         };
     }
 

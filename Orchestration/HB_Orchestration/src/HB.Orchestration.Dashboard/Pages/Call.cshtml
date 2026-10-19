@@ -88,6 +88,10 @@
         <h2>에이전트 응답 (@(c.Agent ?? c.Tool))</h2>
         @if (c.Success)
         {
+            @if (c.FollowUpOf is { } fu)
+            {
+                <p class="muted" style="font-size:12.5px">자료 보충 재질문: @(fu)단계 응답에 이어 · 보충한 요청 <span class="mono">@string.Join(", ", c.FollowUpRequests ?? [])</span>@if (c.FollowUpSkipped is { Count: > 0 } sk) { <span> · 보내지 않은 요청 <span class="mono">@string.Join(", ", sk)</span></span> }</p>
+            }
             @if (c.Structured is { } so)
             {
                 <p class="muted" style="font-size:12.5px">구조화 출력 <span class="mono">@so.Format</span> · @so.RequestedBy · 상태 <span class="@(so.State == "failed" ? "err" : so.State == "complete" ? "ok" : null)">@so.State</span>@(so.Error is { } se ? $" ({se})" : "")</p>

@@ -45,7 +45,13 @@ public sealed record VerdictRecord
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? FindingIds { get; init; }
 
+    /// <summary>"request"면 자료 요청(1-N1)의 처리 기록 (supplied · declined · deferred) — 채택률에 넣지 않는다. 지적 판정은 null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Kind { get; init; }
+
     public bool IsClaudeOnly => Steps.Count == 0;
+
+    public bool IsRequest => Kind == Verdicts.RequestKind;
 }
 
 /// <summary>판정 값. 채택률 = (채택 + 부분 채택 × 0.5) / (채택 + 부분 채택 + 기각). 보류·중복은 분모에서 뺀다.</summary>
@@ -59,6 +65,12 @@ public static class Verdicts
 
     public static readonly IReadOnlyList<string> All = [Adopted, Partial, Rejected, Deferred, Duplicate];
 
+    /// <summary>자료 요청 처리: 보충함 · 보내지 않음(이유 필수) · 보류.</summary>
+    public const string Supplied = "supplied";
+    public const string Declined = "declined";
+    public static readonly IReadOnlyList<string> ForRequests = [Supplied, Declined, Deferred];
+    public const string RequestKind = "request";
+
     /// <summary>부분 채택의 채택률 가중치.</summary>
     public const double PartialWeight = 0.5;
 
@@ -69,6 +81,8 @@ public static class Verdicts
         Rejected => "기각",
         Deferred => "보류",
         Duplicate => "중복",
+        Supplied => "보충",
+        Declined => "보내지 않음",
         _ => verdict,
     };
 }

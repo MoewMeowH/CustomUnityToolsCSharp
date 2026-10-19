@@ -92,6 +92,26 @@ else
     </section>
 }
 
+@if (s.Requests is { Total: > 0 } q)
+{
+    <section class="panel block">
+        <h2>자료 요청 처리</h2>
+        <p class="muted note">에이전트가 낸 자료 요청(<span class="mono">1-N1</span>)을 지휘자가 어떻게 처리했는지. 채택률에는 넣지 않는다. 보충 = followUp으로 보냄, 보내지 않음 = 전송 불가·불필요(이유 기록).</p>
+        <p>요청 @q.Total · 보충 @q.Supplied · 보내지 않음 @q.Declined · 보류 @q.Deferred · <span class="@(q.Open.Count > 0 ? "err" : null)">처리 안 함 @q.Open.Count</span>@if (q.FromFollowUps > 0) { <span class="muted"> · 보충 단계가 낸 요청 @q.FromFollowUps (다시 보충 불가)</span> }</p>
+        <p class="muted note">followUp으로 보낸 요청은 따로 기록하지 않아도 보충으로 센다.</p>
+        @if (q.Open.Count > 0)
+        {
+            <ul>
+                @foreach (var o in q.Open.Take(30))
+                {
+                    <li>@if (o.CallId is { } cid) { <a href="/Call/@cid" class="mono">@o.Id</a> } else { <span class="mono">@o.Id</span> } <span class="mono muted">@o.Mode · @o.RunId</span> @o.What</li>
+                }
+            </ul>
+            @if (q.Open.Count > 30) { <p class="muted note">외 @(q.Open.Count - 30)건</p> }
+        }
+    </section>
+}
+
 @if (s.Unjudged.Count > 0)
 {
     <section class="panel block">

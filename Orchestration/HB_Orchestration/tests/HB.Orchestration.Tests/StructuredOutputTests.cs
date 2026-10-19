@@ -89,9 +89,47 @@ public sealed class StructuredOutputTests
         var s = Parse("""{"findings":[],"needsInfo":["호출부 코드"]}""");
         Assert.Equal(OutputStates.NeedsInfo, s.State);
         var text = FindingRenderer.Render(s);
-        Assert.Contains("자료 부족: 호출부 코드", text);
+        Assert.Contains("자료 요청 1-N1: 호출부 코드", text); // @1 문자열도 요청 ID를 받는다
         Assert.Contains("검토 불완전: 자료 부족 1건", text);
         Assert.DoesNotContain("문제 없음", text);
+    }
+
+    [Fact]
+    public void Needs_info_objects_become_requests_with_ids()
+    {
+        var s = Parse("""
+            {"findings":[],"needsInfo":[
+              {"what":"Calls 수집부","path":"src/Reader.cs","symbol":null,"why":"중복 id 처리 확인"},
+              {"what":"자료 부족: 생성 코드","path":null,"symbol":"RunCalls","why":""}
+            ]}
+            """, step: 2);
+
+        Assert.Equal(["2-N1", "2-N2"], s.Requests.Select(r => r.Id));
+        Assert.Equal(("Calls 수집부", "src/Reader.cs", (string?)null, "중복 id 처리 확인"), (s.Requests[0].What, s.Requests[0].Path, s.Requests[0].Symbol, s.Requests[0].Why));
+        Assert.Equal(("생성 코드", "RunCalls", (string?)null), (s.Requests[1].What, s.Requests[1].Symbol, s.Requests[1].Why)); // 접두어·빈 why 정리
+        Assert.Equal(["Calls 수집부", "생성 코드"], s.NeedsInfo);
+        var text = FindingRenderer.Render(s);
+        Assert.Contains("자료 요청 2-N1: Calls 수집부 (path src/Reader.cs) — 중복 id 처리 확인", text);
+        Assert.Contains("자료 요청 2-N2: 생성 코드 (symbol RunCalls)", text);
+    }
+
+    [Theory]
+    [InlineData("""{"findings":[],"needsInfo":[3]}""", "문자열·객체가 아님")]
+    [InlineData("""{"findings":[],"needsInfo":[{"what":"x","path":5}]}""", "path이(가) 문자열이 아님")]
+    public void Bad_needs_info_items_fail_the_parse(string json, string message)
+    {
+        var s = Parse(json);
+        Assert.Equal(OutputStates.Failed, s.State);
+        Assert.Contains(message, s.Error);
+    }
+
+    [Fact]
+    public void Schema_v2_needs_info_is_an_object_array()
+    {
+        var schema = FindingFormat.Findings.Schema();
+        var items = schema.GetProperty("properties").GetProperty("needsInfo").GetProperty("items");
+        Assert.Equal(["what", "path", "symbol", "why"], items.GetProperty("required").EnumerateArray().Select(e => e.GetString()));
+        Assert.Equal("findings@2", FindingFormat.Findings.Tag);
     }
 
     [Fact]
@@ -264,7 +302,7 @@ public sealed class StructuredOutputTests
         Assert.DoesNotContain("\"findings\"", result);
         var rec = Assert.Single(h.Records());
         Assert.Equal(json, rec.Response);
-        Assert.Equal("findings@1", rec.Structured!.Format);
+        Assert.Equal("findings@2", rec.Structured!.Format);
         Assert.Equal("prompt", rec.Structured.RequestedBy);
         Assert.Equal("1-F1", rec.Structured.Findings[0].Id);
         Assert.Contains("## 출력 형식 (JSON)", ScriptedChatClient.SystemText(h.Client.Received[0]));

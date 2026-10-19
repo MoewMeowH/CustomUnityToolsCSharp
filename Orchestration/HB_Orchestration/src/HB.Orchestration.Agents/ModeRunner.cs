@@ -1,8 +1,16 @@
+using System.ComponentModel;
 using HB.Orchestration.Agents.Providers;
 using System.Text;
 using HB.Orchestration.Shared;
+using Microsoft.Extensions.AI;
 
 namespace HB.Orchestration.Agents;
+
+/// <summary>run_mode followUp: 앞 실행의 자료 요청에 보충 자료를 붙여 같은 에이전트에게 1회 다시 묻는다. MCP 스키마에 그대로 나간다.</summary>
+public sealed record FollowUpRequest(
+    [property: Description("보충할 실행의 runId")] string RunId,
+    [property: Description("자료 요청을 낸 단계 번호 (결과의 '### N.')")] int Step,
+    [property: Description("보충하는 요청 ID들 (예: 1-N1). 보내지 않은 요청은 결과에 표시된다")] string[] Requests);
 
 /// <summary>
 /// modes.json의 모드를 실행한다.
@@ -242,6 +250,121 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         var call = NewCall(runId, modeName, 1, step, step.Instructions, new BuiltPrompt(prompt, null), meta) with { Tool = tool };
         return (runId, await runner.RunStepAsync(call, ct), null);
     }
+
+    /// <summary>
+    /// 자료 보충 재질문 (run_mode followUp, 계획서 2026-10-19_자료요청-왕복): 원래 단계의 에이전트에게
+    /// [원래 프롬프트, 원래 응답]을 앞 대화로 두고 지휘자가 찾은 보충 자료(context + input)를 이어 보낸다.
+    /// - 같은 runId에 성공한 보충 1회만 (실패·취소는 다시 할 수 있음, 동시 호출은 예약으로 막음). 세션 실행 한도는 차감하지 않는다 (사용자 결정: 원래 실행에 포함). reason은 필수, ownReview는 받지 않는다.
+    /// - 결과는 같은 runId의 새 단계 번호로 남는다 (지적·요청 ID와 save_result가 원래 응답과 섞이지 않게).
+    /// - 보충하지 않은 요청은 결과 끝과 기록(FollowUpSkipped)에 남는다 — 지휘자는 그 이유를 사용자에게 알린다.
+    /// </summary>
+    public async Task<string> RunFollowUpAsync(
+        string modeName, FollowUpRequest followUp, string input, IReadOnlyList<string>? files,
+        IReadOnlyList<ContextRange>? context, string? reason, CancellationToken ct)
+    {
+        const string Fail = "[followUp 불가] ";
+        var records = Options.Records;
+        if (string.IsNullOrWhiteSpace(reason))
+            return "[reason 필요] 보충 재질문을 부른 이유를 reason에 한 줄로 넣어 다시 호출하세요.";
+        if (records.MaxReasonChars > 0 && reason.Length > records.MaxReasonChars)
+            return $"[reason이 너무 깁니다] {reason.Length:N0}자 / 상한 {records.MaxReasonChars:N0}자.";
+        var ids = (followUp.Requests ?? []).Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (string.IsNullOrWhiteSpace(followUp.RunId) || ids.Count == 0)
+            return Fail + "followUp에는 runId, step, requests(보충하는 요청 ID, 예: 1-N1 — 빈 값 제외 하나 이상)가 필요합니다.";
+        var runId = followUp.RunId.Trim();
+
+        // 같은 실행의 followUp이 동시에 들어오면 둘 다 1회 검사를 통과한다 (기록은 응답 뒤에 써지므로) → 프로세스 안에서 예약한다.
+        if (!_followUpsInFlight.TryAdd(runId, 0))
+            return Fail + "이 실행의 보충 재질문이 이미 진행 중입니다.";
+        try
+        {
+            List<CallRecord> run;
+            try { run = CallLog.ReadAll(runner.LogPath).Where(r => r.RunId == runId).ToList(); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return Fail + $"호출 기록을 읽지 못했습니다 ({ex.Message})."; }
+            if (run.Count == 0) return Fail + $"runId '{runId}'의 기록이 없습니다.";
+            if (run.Any(r => r.Tool == GoldenCli.Tool)) return Fail + "골든 평가 실행에는 보충 재질문을 하지 않습니다 (평가 기록에 run_mode 보충이 섞이지 않게).";
+            // 1회 = 성공한 보충만 센다 (실패·취소된 시도는 응답을 받지 못했으므로 다시 할 수 있다).
+            if (run.Any(r => r.FollowUpOf is not null && r.Success))
+                return Fail + "이 실행은 이미 보충 재질문을 했습니다 (실행마다 1회). 더 필요하면 context를 넓혀 새로 run_mode를 부르세요.";
+            var original = run.Where(r => r.Step == followUp.Step && r.Success && r.FollowUpOf is null).MaxBy(r => r.Attempt ?? 1);
+            if (original is null) return Fail + $"runId '{runId}'에 성공한 {followUp.Step}단계가 없습니다.";
+            if (!string.Equals(original.Mode, modeName, StringComparison.OrdinalIgnoreCase))
+                return Fail + $"그 실행의 모드는 '{original.Mode}'입니다 (mode에 같은 이름을 넣으세요).";
+            if (original.Images is { Count: > 0 }) return Fail + "이미지를 받은 단계는 보충 재질문을 하지 않습니다.";
+            if (original.Response is not { Length: > 0 } previous) return Fail + "원래 응답 원문이 기록에 없습니다.";
+
+            var known = original.Structured?.Requests ?? [];
+            if (ids.FirstOrDefault(id => !known.Any(q => string.Equals(q.Id, id, StringComparison.OrdinalIgnoreCase))) is { } unknown)
+                return Fail + $"{followUp.Step}단계에 없는 요청 ID '{unknown}' (있는 요청: {(known.Count == 0 ? "없음" : string.Join(", ", known.Select(q => q.Id)))}).";
+            var requested = known.Where(q => ids.Contains(q.Id, StringComparer.OrdinalIgnoreCase)).ToList();
+            var skipped = known.Where(q => !ids.Contains(q.Id, StringComparer.OrdinalIgnoreCase)).Select(q => q.Id).ToList();
+
+            ModeStore.Loaded loaded;
+            try { loaded = store.Load(); }
+            catch (ModeConfigException ex) { return $"[모드 설정 오류] {ex.Message}"; }
+            if (!loaded.File.Modes.TryGetValue(modeName, out var mode)) return $"[알 수 없는 모드 '{modeName}']";
+            if (mode.Flow == ModeFlow.Debate) return Fail + "Debate 모드는 보충 재질문을 하지 않습니다 (턴 번호가 단계와 다름).";
+            if (followUp.Step < 1 || followUp.Step > mode.Steps.Count || !string.Equals(mode.Steps[followUp.Step - 1].Role, original.Role, StringComparison.OrdinalIgnoreCase))
+                return Fail + $"modes.json의 {followUp.Step}단계가 원래 실행의 역할('{original.Role}')과 다릅니다.";
+            // 그 단계 하나만, 원래 실행의 에이전트로 계획한다 (다른 단계·기본 에이전트가 지금 쓸 수 없어도 막히지 않게).
+            var single = new ModeDefinition { Flow = ModeFlow.Sequential, PromptCache = mode.PromptCache, Steps = [mode.Steps[followUp.Step - 1]] };
+            var (plan, planError) = BuildPlan(loaded, modeName, single, original.Agent is { } a ? [$"*={a}"] : null);
+            if (planError is not null) return planError;
+            var step = plan!.Steps[0];
+
+            var maxChars = mode.MaxInputChars ?? Options.Budget.MaxInputChars;
+            var (attached, contextError) = ContextLoader.Load(context, Options.Context, Environment.CurrentDirectory, maxChars, ct);
+            if (contextError is not null) return $"[첨부 코드 오류] {contextError}";
+            if (attached!.Text.Trim().Length == 0 && string.IsNullOrWhiteSpace(input))
+                return Fail + "보충할 자료가 없습니다 (context나 input).";
+
+            var sb = new StringBuilder();
+            sb.AppendLine("## 보충 자료").AppendLine($"앞 응답의 자료 요청 {string.Join(", ", requested.Select(q => $"{q.Id}({q.What})"))}에 대해 지휘자가 찾은 것이다.").AppendLine();
+            if (attached.Text.Trim().Length > 0) sb.AppendLine(attached.Text.Trim()).AppendLine();
+            var hasMemo = !string.IsNullOrWhiteSpace(input);
+            if (hasMemo) sb.AppendLine("## 지휘자 메모").AppendLine(input.Trim()).AppendLine();
+            if (skipped.Count > 0) sb.AppendLine($"보내지 않은 요청: {string.Join(", ", skipped)} (지휘자 판단{(hasMemo ? " — 이유는 메모 참고" : "")}).").AppendLine();
+            sb.Append(Prompts.FollowUpRules);
+            var prompt = sb.ToString();
+
+            var total = original.Prompt.Length + previous.Length + prompt.Length;
+            if (maxChars > 0 && total > maxChars)
+                return $"[입력이 너무 깁니다] 원래 프롬프트 + 응답 + 보충 {total:N0}자 / 상한 {maxChars:N0}자. 보충 범위를 줄이세요.";
+            if (CheckBudget([step.Agent]) is { } budgetMessage) return budgetMessage;
+
+            var newStep = run.Max(r => r.Step ?? 0) + 1;
+            var meta = new CallMeta(files, attached.Sources) { ContextRoots = attached.Roots, Reason = reason, Provenance = RunProvenance(plan) };
+            var call = NewCall(runId, modeName, newStep, step, step.Instructions, new BuiltPrompt(prompt, null), meta) with
+            {
+                History = [new ChatMessage(ChatRole.User, original.Prompt), new ChatMessage(ChatRole.Assistant, previous)],
+                FollowUpOf = followUp.Step,
+                FollowUpRequests = [.. requested.Select(q => q.Id)],
+                FollowUpSkipped = skipped.Count > 0 ? skipped : null,
+            };
+            var result = await runner.RunStepAsync(call, ct);
+
+            var notes = new List<string>();
+            // 보충 응답은 원래 지적을 다시 쓴 전체본이다 → 원래 단계와 겹치는 지적을 보이고, 판정 기준을 알린다 (같은 지적의 이중 채택 방지).
+            if (result.Structured is { Parsed: true } fresh && original.Structured is { Parsed: true } before)
+                notes.AddRange(FindingOverlap.Lines([.. before.Findings, .. fresh.Findings]));
+            notes.Add($"(보충 재질문: {followUp.Step}단계 → {newStep}단계 · 보충한 요청 {string.Join(", ", requested.Select(q => q.Id))}" +
+                      (skipped.Count > 0 ? $" · 보내지 않은 요청 {string.Join(", ", skipped)}" : "") + ")");
+            notes.Add($"(판정은 {newStep}단계 지적 기준 — {followUp.Step}단계의 같은 지적은 duplicate로. record_verdicts에 보충한 요청은 supplied" +
+                      (skipped.Count > 0 ? ", 보내지 않은 요청은 이유와 함께 declined·deferred로 남기고 사용자에게 알린다)" : ")"));
+            // 시스템 프롬프트를 지금 설정으로 다시 조립했으므로 원래 호출과 다르면 알린다 (역할 프롬프트·지침이 그 사이 바뀜).
+            var rec = CallLog.ReadAll(runner.LogPath).LastOrDefault(r => r.RunId == runId && r.Step == newStep);
+            if (original.Provenance?.InstructionsSha256 is { } was && rec?.Provenance?.InstructionsSha256 is { } now && was != now)
+                notes.Add("(주의: 시스템 프롬프트가 원래 실행 때와 다르다 — 그 사이 역할 프롬프트·지침이 바뀌었다)");
+            return ResultFormatter.Format(runId, [result], returnAll: true, string.Join("\n", notes));
+        }
+        finally
+        {
+            _followUpsInFlight.TryRemove(runId, out _);
+        }
+    }
+
+    /// <summary>진행 중인 followUp의 runId (동시 호출 예약).</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _followUpsInFlight = new(StringComparer.Ordinal);
 
     /// <summary>
     /// --golden run의 실행 전 확인: 보낼 역할·에이전트·모델. 외부 호출 없음.

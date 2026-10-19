@@ -72,7 +72,8 @@ public static class FindingParser
                 }, i));
             }
 
-            var needsInfo = Strings(obj, "needsInfo", errors);
+            var requests = Requests(obj, step, errors);
+            var needsInfo = requests.Select(r => r.What).ToList();
             var spec = format.Perf ? Strings(obj, "specDependent", errors) : null;
             var fix = format.Perf ? Strings(obj, "fixDirection", errors) : null;
             var measure = format.Perf ? Strings(obj, "measurePriority", errors) : null;
@@ -91,6 +92,7 @@ public static class FindingParser
                 RequestedBy = requestedBy,
                 Findings = ordered,
                 NeedsInfo = needsInfo,
+                Requests = requests,
                 SpecDependent = spec,
                 FixDirection = fix,
                 MeasurePriority = measure,
@@ -165,6 +167,45 @@ public static class FindingParser
         return t;
     }
 
+    /// <summary>
+    /// needsInfo → 자료 요청. 원소는 객체(@2: what · path · symbol · why)나 문자열(@1, what만) 둘 다 받는다
+    /// (Prompt 방식이나 예전 응답을 다시 채점할 때). what이 비면 그 원소는 버린다. ID는 "단계-N순번".
+    /// </summary>
+    private static List<InfoRequest> Requests(JsonElement o, int step, List<string> errors)
+    {
+        var result = new List<InfoRequest>();
+        if (!o.TryGetProperty("needsInfo", out var v) || v.ValueKind == JsonValueKind.Null) return result;
+        if (v.ValueKind != JsonValueKind.Array) { errors.Add("needsInfo 배열이 아님"); return result; }
+        var i = 0;
+        foreach (var e in v.EnumerateArray())
+        {
+            i++;
+            string? what, path = null, symbol = null, why = null;
+            if (e.ValueKind == JsonValueKind.String) what = e.GetString();
+            else if (e.ValueKind == JsonValueKind.Object)
+            {
+                // what이 없거나 비면 조용히 버리지 않는다 — 요청이 다 사라지면 '문제 없음'으로 보일 수 있다.
+                what = Str(e, "what");
+                if (string.IsNullOrWhiteSpace(StripNeedsInfoPrefix(what))) { errors.Add($"needsInfo[{i}].what이 비었거나 문자열이 아님"); continue; }
+                path = NullIfBlank(ReqOpt(e, "path", i, errors));
+                symbol = NullIfBlank(ReqOpt(e, "symbol", i, errors));
+                why = NullIfBlank(ReqOpt(e, "why", i, errors));
+            }
+            else { errors.Add($"needsInfo[{i}]가 문자열·객체가 아님"); continue; }
+            if (NullIfBlank(StripNeedsInfoPrefix(what)) is not { } w) continue;
+            result.Add(new InfoRequest { Id = $"{step}-N{result.Count + 1}", What = w, Path = path, Symbol = symbol, Why = why });
+        }
+        return result;
+    }
+
+    private static string? ReqOpt(JsonElement o, string name, int index, List<string> errors)
+    {
+        if (!o.TryGetProperty(name, out var v) || v.ValueKind == JsonValueKind.Null) return null;
+        if (v.ValueKind == JsonValueKind.String) return v.GetString();
+        errors.Add($"needsInfo[{index}].{name}이(가) 문자열이 아님");
+        return null;
+    }
+
     /// <summary>문자열 배열. 키가 없거나 null이면 빈 목록 (Prompt 방식에서 빠뜨린 경우), 배열이 아니거나 문자열이 아닌 원소가 있으면 오류.</summary>
     private static List<string> Strings(JsonElement o, string name, List<string> errors)
     {
@@ -199,7 +240,19 @@ public static class FindingRenderer
                   .Append(" · 측정: ").Append(f.Measurement ?? "-").Append('\n');
         }
 
-        foreach (var n in s.NeedsInfo) sb.Append("자료 부족: ").Append(OneLine(n)).Append('\n');
+        // 자료 요청은 ID와 함께 (지휘자가 followUp으로 보충하거나 record_verdicts에 처리를 남긴다). 예전 기록(Requests 없음)은 문장만.
+        if (s.Requests.Count > 0)
+        {
+            foreach (var r in s.Requests)
+            {
+                sb.Append("자료 요청 ").Append(r.Id).Append(": ").Append(OneLine(r.What));
+                var where = string.Join(" · ", new[] { r.Path is null ? null : $"path {r.Path}", r.Symbol is null ? null : $"symbol {r.Symbol}" }.Where(x => x is not null));
+                if (where.Length > 0) sb.Append(" (").Append(where).Append(')');
+                if (r.Why is { } why) sb.Append(" — ").Append(OneLine(why));
+                sb.Append('\n');
+            }
+        }
+        else foreach (var n in s.NeedsInfo) sb.Append("자료 부족: ").Append(OneLine(n)).Append('\n');
         Section(sb, "사양 의존", s.SpecDependent);
         Section(sb, "수정 방향", s.FixDirection);
         Section(sb, "측정 우선순위", s.MeasurePriority);

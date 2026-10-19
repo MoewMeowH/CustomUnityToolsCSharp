@@ -84,7 +84,21 @@ public sealed record VerdictSummary(
     IReadOnlyList<VerdictRow> ClaudeOnlyByMode,
     IReadOnlyList<VerdictView> Recent,
     IReadOnlyList<UnjudgedRun> Unjudged,
-    int JudgedRuns);
+    int JudgedRuns,
+    RequestSummary? Requests = null);
+
+/// <summary>처리 안 한 자료 요청 하나 (판정 화면 목록).</summary>
+public sealed record OpenRequest(string RunId, string Id, string What, string Mode, string? CallId);
+
+/// <summary>
+/// 자료 요청(1-N1) 처리 집계 — 채택률과 따로 (계획서 2026-10-19_자료요청-왕복, 사용자 결정 "응 그러자").
+/// Total = 기간 안 실행의 구조화 결과에 나온 요청 수, Open = 처리 판정(supplied·declined·deferred)이 없는 요청.
+/// </summary>
+public sealed record RequestSummary(int Total, int Supplied, int Declined, int Deferred, IReadOnlyList<OpenRequest> Open)
+{
+    /// <summary>보충 단계(followUp)가 새로 낸 요청 — 실행마다 1회라 다시 보충할 수 없어 Open에 넣지 않는다.</summary>
+    public int FromFollowUps { get; init; }
+}
 
 /// <summary>
 /// 판정 집계. 에이전트·역할은 판정에 저장하지 않으므로 RunId + 단계 번호로 호출 기록에서 찾는다
@@ -102,8 +116,10 @@ public static class VerdictStats
         var firsts = runs.ToDictionary(kv => kv.Key, kv => kv.Value.MinBy(c => c.Timestamp)!);
         bool InPeriod(string runId) => since is null || firsts[runId].Timestamp >= since;
 
-        var verdicts = latest.Where(v => runs.ContainsKey(v.RunId) && InPeriod(v.RunId)).ToList();
-        var judged = verdicts.Select(v => v.RunId).ToHashSet();
+        var all = latest.Where(v => runs.ContainsKey(v.RunId) && InPeriod(v.RunId)).ToList();
+        var verdicts = all.Where(v => !v.IsRequest).ToList(); // 자료 요청 처리는 채택률·비용·판정 여부에 넣지 않는다
+        var judged = verdicts.Select(v => v.RunId).ToHashSet(); // 요청 처리만 있는 실행은 "판정 없는 실행"에 남는다
+        var requestSummary = Requests(all.Where(v => v.IsRequest).ToList(), runs, firsts, InPeriod);
 
         var byAgent = new Dictionary<string, VerdictRow>();
         var byModeRole = new Dictionary<string, VerdictRow>();
@@ -159,7 +175,47 @@ public static class VerdictStats
             byAgent.Values.OrderByDescending(r => r.Findings + r.Missed).ThenBy(r => r.Key).ToList(),
             byModeRole.Values.OrderBy(r => r.Key).ToList(),
             claudeOnly.Values.OrderBy(r => r.Key).ToList(),
-            views, unjudged, judged.Count);
+            views, unjudged, judged.Count, requestSummary);
+    }
+
+    private static RequestSummary Requests(List<VerdictRecord> handled, Dictionary<string, List<CallRecord>> runs,
+        Dictionary<string, CallRecord> firsts, Func<string, bool> inPeriod)
+    {
+        var done = handled.SelectMany(v => (v.FindingIds ?? []).Select(id => (v.RunId, Id: id, v.Verdict)))
+            .GroupBy(x => (x.RunId, x.Id.ToUpperInvariant())).ToDictionary(g => g.Key, g => g.Last().Verdict);
+        int total = 0, supplied = 0, declined = 0, deferred = 0, fromFollowUps = 0;
+        var open = new List<OpenRequest>();
+        foreach (var (runId, run) in runs)
+        {
+            if (!inPeriod(runId)) continue;
+            // followUp으로 보낸 요청은 지휘자가 따로 기록하지 않아도 보충한 것이다 (서버가 이미 안다).
+            var sentByServer = run.Where(c => c.Success && c.FollowUpRequests is not null).SelectMany(c => c.FollowUpRequests!)
+                .Select(id => id.ToUpperInvariant()).ToHashSet();
+            foreach (var step in run.Where(c => c.Step is not null).Select(c => c.Step!.Value).Distinct())
+            {
+                if (StepCall(run, step) is not { Success: true, Structured.Requests: { Count: > 0 } reqs } call) continue;
+                foreach (var q in reqs)
+                {
+                    total++;
+                    var key = (runId, q.Id.ToUpperInvariant());
+                    var verdict = done.TryGetValue(key, out var v) ? v : sentByServer.Contains(key.Item2) ? Verdicts.Supplied : null;
+                    switch (verdict)
+                    {
+                        case Verdicts.Supplied: supplied++; break;
+                        case Verdicts.Declined: declined++; break;
+                        case Verdicts.Deferred: deferred++; break;
+                        default:
+                            if (call.FollowUpOf is not null) fromFollowUps++;
+                            else open.Add(new OpenRequest(runId, q.Id, q.What, ModeOf(run), call.Id));
+                            break;
+                    }
+                }
+            }
+        }
+        return new RequestSummary(total, supplied, declined, deferred, [.. open.OrderByDescending(o => firsts[o.RunId].Timestamp)])
+        {
+            FromFollowUps = fromFollowUps,
+        };
     }
 
     /// <summary>한 실행의 판정 (호출 상세 화면용). 단계 순서, Claude만 지적은 맨 뒤.</summary>

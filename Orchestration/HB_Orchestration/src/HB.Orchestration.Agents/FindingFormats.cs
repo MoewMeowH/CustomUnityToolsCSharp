@@ -12,11 +12,13 @@ public sealed record FindingFormat(string Name, int Version, IReadOnlyList<strin
 {
     public string Tag => $"{Name}@{Version}";
 
+    // 2: needsInfo가 문자열에서 객체(what · path · symbol · why)로 (계획서 2026-10-19_자료요청-왕복). 해석은 @1 문자열도 받는다.
+
     /// <summary>Reviewer: 일반 코드 리뷰.</summary>
-    public static readonly FindingFormat Findings = new("findings", 1, ["critical", "major", "minor", "nit"], Perf: false);
+    public static readonly FindingFormat Findings = new("findings", 2, ["critical", "major", "minor", "nit"], Perf: false);
 
     /// <summary>PerfReviewer: 성능 검토 (빈도·증가·측정과 끝 절 3개).</summary>
-    public static readonly FindingFormat PerfFindings = new("perf_findings", 1, ["high", "medium", "low"], Perf: true);
+    public static readonly FindingFormat PerfFindings = new("perf_findings", 2, ["high", "medium", "low"], Perf: true);
 
     public static readonly IReadOnlyList<string> Confidences = ["high", "medium", "low"];
 
@@ -47,7 +49,11 @@ public sealed record FindingFormat(string Name, int Version, IReadOnlyList<strin
           - detail: 발생 조건 · 원인 · 영향. problem을 반복하지 않는다.
           - suggestion: 제안. 없으면 null.
           - confidence: high · medium · low 중 하나.
-        - needsInfo: 자료가 부족해 판단하지 못한 것마다 필요한 코드나 정보를 한 줄로. 없으면 [].
+        - needsInfo: 자료가 부족해 판단하지 못한 것마다 객체 하나. 없으면 []. 지휘자가 이 요청을 보고 코드를 찾아 보충해 다시 묻는다.
+          - what: 필요한 코드나 정보 한 줄.
+          - path: 첨부에 없던 파일의 경로. 모르면 null (추측해서 쓰지 않는다).
+          - symbol: 찾을 타입·메서드·필드 이름이나 검색어. 모르면 null.
+          - why: 그 자료가 있으면 어떤 판단이 어떻게 달라지는지.
         - 총 건수 요약은 쓰지 않는다 (서버가 계산한다).
         """;
 
@@ -66,7 +72,11 @@ public sealed record FindingFormat(string Name, int Version, IReadOnlyList<strin
           - frequency: 매 프레임 · 매 요청 · 매 호출 · 초기화 1회 등.
           - scaling: 데이터 규모(N)가 커질 때 어떻게 늘어나는지.
           - measurement: 무엇을 어떻게 측정하면 확인되는지.
-        - needsInfo: 자료가 부족해 판단하지 못한 것마다 필요한 코드나 정보를 한 줄로. 없으면 [].
+        - needsInfo: 자료가 부족해 판단하지 못한 것마다 객체 하나. 없으면 []. 지휘자가 이 요청을 보고 코드를 찾아 보충해 다시 묻는다.
+          - what: 필요한 코드나 정보 한 줄.
+          - path: 첨부에 없던 파일의 경로. 모르면 null (추측해서 쓰지 않는다).
+          - symbol: 찾을 타입·메서드·필드 이름이나 검색어. 모르면 null.
+          - why: 그 자료가 있으면 어떤 판단이 어떻게 달라지는지.
         - specDependent: 사양에 따라 달라지는 항목 (예: 데이터 규모, 대상 플랫폼). 없으면 [].
         - fixDirection: 수정 방향 (핵심 변경만). 없으면 [].
         - measurePriority: 무엇부터 재야 하는지 최대 3개. 없으면 [].
@@ -105,10 +115,17 @@ public sealed record FindingFormat(string Name, int Version, IReadOnlyList<strin
             item["measurement"] = Str();
         }
 
+        var request = new JsonObject
+        {
+            ["what"] = Str(),
+            ["path"] = NullableStr(),
+            ["symbol"] = NullableStr(),
+            ["why"] = Str(),
+        };
         var root = new JsonObject
         {
             ["findings"] = new JsonObject { ["type"] = "array", ["items"] = Obj(item) },
-            ["needsInfo"] = StrArray(),
+            ["needsInfo"] = new JsonObject { ["type"] = "array", ["items"] = Obj(request) },
         };
         if (Perf)
         {

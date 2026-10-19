@@ -55,13 +55,21 @@ public static class VerdictRecorder
             .GroupBy(r => r.Step!.Value).Select(g => g.MaxBy(r => r.Attempt ?? 1)!)
             .SelectMany(r => r.Structured!.Findings)
             .ToDictionary(f => f.Id, StringComparer.OrdinalIgnoreCase);
+        // 자료 요청 (1-N1). 판정은 채택률과 따로 — 보충함 · 보내지 않음 · 보류.
+        var requests = runCalls.Where(r => r.Step is not null && r.Success && r.Structured is { Parsed: true })
+            .GroupBy(r => r.Step!.Value).Select(g => g.MaxBy(r => r.Attempt ?? 1)!)
+            .SelectMany(r => r.Structured!.Requests)
+            .ToDictionary(q => q.Id, StringComparer.OrdinalIgnoreCase);
         var resolved = new VerdictItem[items.Count];
+        var kinds = new bool[items.Count];
         var errors = new List<string>();
         var keys = new HashSet<string>(StringComparer.Ordinal);
         for (var i = 0; i < items.Count; i++)
         {
             if (items[i] is not { } original) { errors.Add($"{i + 1}번: 항목이 비어 있습니다 (null)."); continue; }
-            var it = resolved[i] = Resolve(original, findings, errors, i + 1);
+            var isRequest = IsRequestItem(original, requests, errors, i + 1);
+            var it = resolved[i] = isRequest ? ResolveRequest(original, requests, errors, i + 1) : Resolve(original, findings, errors, i + 1);
+            kinds[i] = isRequest;
             var at = $"{i + 1}번({it.FindingKey})";
             if (string.IsNullOrWhiteSpace(it.FindingKey)) { errors.Add($"{i + 1}번: findingKey가 비어 있습니다."); continue; }
             if (it.FindingKey.Trim().Length > MaxKeyChars || it.FindingKey.Contains('\n'))
@@ -71,9 +79,11 @@ public static class VerdictRecorder
             else if (it.Summary.Length > MaxSummaryChars) errors.Add($"{at}: summary는 {MaxSummaryChars}자 이내입니다 ({it.Summary.Length}자).");
 
             var verdict = it.Verdict?.Trim().ToLowerInvariant();
-            if (verdict is null || !Verdicts.All.Contains(verdict))
-                errors.Add($"{at}: verdict '{it.Verdict}'는 {string.Join(" · ", Verdicts.All)} 중 하나여야 합니다.");
-            else if (verdict != Verdicts.Adopted && string.IsNullOrWhiteSpace(it.Reason))
+            var allowed = kinds[i] ? Verdicts.ForRequests : Verdicts.All;
+            var free = kinds[i] ? Verdicts.Supplied : Verdicts.Adopted; // reason 없이 쓸 수 있는 판정
+            if (verdict is null || !allowed.Contains(verdict))
+                errors.Add($"{at}: {(kinds[i] ? "자료 요청의 " : "")}verdict '{it.Verdict}'는 {string.Join(" · ", allowed)} 중 하나여야 합니다.");
+            else if (verdict != free && string.IsNullOrWhiteSpace(it.Reason))
                 errors.Add($"{at}: {Verdicts.Label(verdict)}({verdict})은 reason이 필수입니다.");
             if (it.Reason is not null && maxReasonChars > 0 && it.Reason.Length > maxReasonChars)
                 errors.Add($"{at}: reason은 {maxReasonChars:N0}자 이내입니다 ({it.Reason.Length:N0}자).");
@@ -99,7 +109,7 @@ public static class VerdictRecorder
         }
 
         var now = DateTimeOffset.Now;
-        var records = resolved.Select(it =>
+        var records = resolved.Select((it, index) =>
         {
             var stepList = (it.Steps ?? []).Distinct().Order().ToList();
             return new VerdictRecord
@@ -116,6 +126,7 @@ public static class VerdictRecorder
                 ClaudeAlsoFound = stepList.Count == 0 || it.ClaudeAlsoFound,
                 File = string.IsNullOrWhiteSpace(it.File) ? null : it.File.Trim(),
                 FindingIds = it.FindingIds is { Length: > 0 } ids ? ids : null,
+                Kind = kinds[index] ? Verdicts.RequestKind : null,
             };
         }).ToList();
 
@@ -129,17 +140,47 @@ public static class VerdictRecorder
         }
 
         var linked = records.Count(r => r.FindingIds is not null);
-        var counts = string.Join(" · ", Verdicts.All
+        var counts = string.Join(" · ", Verdicts.All.Concat(Verdicts.ForRequests).Distinct()
             .Select(v => (v, n: records.Count(r => r.Verdict == v)))
             .Where(x => x.n > 0)
             .Select(x => $"{Verdicts.Label(x.v)} {x.n}"));
-        var claudeOnly = records.Count(r => r.IsClaudeOnly);
+        var claudeOnly = records.Count(r => r.IsClaudeOnly && !r.IsRequest);
+        var requestCount = records.Count(r => r.IsRequest);
         var replaced = records.Count(r => existing.Contains(r.FindingKey));
         return $"판정 {records.Count}건 기록 — {counts}" +
                (claudeOnly > 0 ? $" (Claude만 지적 {claudeOnly})" : "") +
                (replaced > 0 ? $" · 앞 판정 대체 {replaced}" : "") +
                (linked > 0 ? $" · 지적 ID 연결 {linked}" : "") +
+               (requestCount > 0 ? $" · 자료 요청 처리 {requestCount}" : "") +
                $" (runId {runId})";
+    }
+
+    /// <summary>findingIds가 모두 자료 요청 ID면 true. 지적 ID와 섞이면 오류 (판정 종류가 다르다).</summary>
+    private static bool IsRequestItem(VerdictItem it, IReadOnlyDictionary<string, InfoRequest> requests, List<string> errors, int n)
+    {
+        if (it.FindingIds is not { Length: > 0 } ids) return false;
+        var asRequest = ids.Count(id => id is not null && requests.ContainsKey(id.Trim()));
+        if (asRequest > 0 && asRequest < ids.Length)
+            errors.Add($"{n}번: 지적 ID와 자료 요청 ID(…-N…)를 한 판정에 섞을 수 없습니다.");
+        return asRequest > 0 && asRequest == ids.Length;
+    }
+
+    /// <summary>요청 ID를 풀어 steps·summary·file을 채운다 (severity 없음).</summary>
+    private static VerdictItem ResolveRequest(VerdictItem it, IReadOnlyDictionary<string, InfoRequest> requests, List<string> errors, int n)
+    {
+        var found = it.FindingIds!.Select(id => requests[id.Trim()]).ToList();
+        var idSteps = found.Select(q => int.Parse(q.Id.Split('-', 2)[0])).Distinct().Order().ToArray();
+        if (it.Steps is { Length: > 0 } given && !given.Distinct().Order().SequenceEqual(idSteps))
+            errors.Add($"{n}번: steps({string.Join(", ", given)})가 요청 ID의 단계({string.Join(", ", idSteps)})와 다릅니다.");
+        var first = found[0];
+        return it with
+        {
+            Steps = idSteps,
+            Summary = string.IsNullOrWhiteSpace(it.Summary) ? first.What[..Math.Min(first.What.Length, MaxSummaryChars)] : it.Summary,
+            File = string.IsNullOrWhiteSpace(it.File) ? first.Path : it.File,
+            FindingIds = [.. found.Select(q => q.Id)],
+            ClaudeAlsoFound = false,
+        };
     }
 
     /// <summary>

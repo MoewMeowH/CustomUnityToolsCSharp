@@ -38,7 +38,12 @@ public sealed record StructuredOutputRecord
     public required string RequestedBy { get; init; }
 
     public IReadOnlyList<FindingRecord> Findings { get; init; } = [];
+
+    /// <summary>자료 부족 문장 (요청마다 What). 예전 기록·대시보드 호환용으로 남긴다.</summary>
     public IReadOnlyList<string> NeedsInfo { get; init; } = [];
+
+    /// <summary>자료 요청 (findings@2부터 구조화, @1은 문장만). ID "단계-N순번". 예전 기록은 빈 목록.</summary>
+    public IReadOnlyList<InfoRequest> Requests { get; init; } = [];
 
     /// <summary>perf_findings 전용: 사양에 따라 달라지는 항목 · 수정 방향 · 측정 우선순위.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -51,6 +56,27 @@ public sealed record StructuredOutputRecord
     public IReadOnlyList<string>? MeasurePriority { get; init; }
 
     public bool Parsed => State != OutputStates.Failed;
+}
+
+/// <summary>
+/// 에이전트의 자료 요청 하나 (계획서 2026-10-19_자료요청-왕복). Id는 서버가 매긴 "단계-N순번" (예: 1-N1).
+/// 위치를 모르면 Path·Symbol이 비어 있다 — 지휘자가 로컬에서 찾아 승인한 범위만 followUp으로 보충한다.
+/// </summary>
+public sealed record InfoRequest
+{
+    public required string Id { get; init; }
+    public required string What { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Path { get; init; }
+
+    /// <summary>타입·메서드·검색어.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Symbol { get; init; }
+
+    /// <summary>그 자료로 판단이 어떻게 달라지는지.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Why { get; init; }
 }
 
 /// <summary>지적 하나. Id는 서버가 매긴 "단계-F순번" (예: 1-F2). 실행(RunId) 안에서만 유일하다.</summary>

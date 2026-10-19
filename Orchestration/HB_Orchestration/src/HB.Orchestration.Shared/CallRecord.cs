@@ -116,6 +116,20 @@ public sealed record CallRecord
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public StructuredOutputRecord? Structured { get; init; }
+
+    /// <summary>
+    /// 자료 보충 재질문(run_mode followUp)이면 보충한 원래 단계 번호. 이 호출은 같은 RunId의 새 단계 번호로 남는다
+    /// (save_result·지적 ID가 원래 응답과 섞이지 않게). 보통 호출은 null.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? FollowUpOf { get; init; }
+
+    /// <summary>followUp에서 보충한 요청 ID (예: 1-N1). 보충하지 않은 요청은 FollowUpSkipped.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? FollowUpRequests { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? FollowUpSkipped { get; init; }
 }
 
 /// <summary>
