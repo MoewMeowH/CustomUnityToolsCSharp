@@ -68,6 +68,18 @@ def inside_subagent_in(item: str) -> bool:
     return bool(after)
 
 
+SEARCH_LINE = re.compile(r'^(grep|glob)\s*:', re.IGNORECASE)
+
+
+def read_item_ok(item: str) -> bool:
+    """읽은 파일 항목 하나. 'Grep: …'·'Glob: …' 검색 기록 줄은 경로 모양 토큰(/·\\ 포함)이 있으면 모두 subagent_in/ 안이어야 하고,
+    없으면 통과 (검색 기록은 폴더 밖 접근의 증거가 아님 — 읽기 차단 훅이 Grep·Glob path도 막는다. 계획서 2026-10-19_H4-검색기록줄)."""
+    if not SEARCH_LINE.match(item):
+        return inside_subagent_in(item)
+    paths = [t.strip('`\'",;()') for t in re.split(r'\s+', SEARCH_LINE.sub('', item)) if '/' in t or '\\' in t]
+    return all(inside_subagent_in(p) for p in paths)
+
+
 def self_review_problem(own: str) -> str | None:
     lines = own.replace('\r\n', '\n').split('\n')
     heads = [i for i, l in enumerate(lines) if l.startswith('## ')]
@@ -81,7 +93,7 @@ def self_review_problem(own: str) -> str | None:
     items = [l.strip()[2:].strip() for l in lines[start:end] if l.strip().startswith('- ')]
     if not items:
         return "'## 읽은 파일'에 항목이 없다"
-    outside = [p for p in items if not inside_subagent_in(p)]
+    outside = [p for p in items if not read_item_ok(p)]
     if outside:
         return f"읽은 파일 중 subagent_in/ 밖이 있다: {outside[0][:120]} (서브에이전트 결과를 그대로 쓰지 말고 사용자에게 알린다)"
     return None

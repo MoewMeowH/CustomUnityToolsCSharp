@@ -65,7 +65,7 @@ public sealed record CallRecord
     /// <summary>같은 단계 안에서 몇 번째 시도인지 (1부터). 같은 RunId·Step의 시도는 각각 한 줄씩 남는다. 예전 기록은 null(= 1).</summary>
     public int? Attempt { get; init; }
 
-    /// <summary>실패 종류: Timeout · RateLimit · Server · Client · Network, 사용자 취소는 Canceled. 성공이거나 분류할 수 없는 실패면 null.</summary>
+    /// <summary>실패 종류: Timeout · RateLimit · Server · Client · Network · Quota(크레딧·한도 소진, 재시도 안 함), 사용자 취소는 Canceled. 성공이거나 분류할 수 없는 실패면 null.</summary>
     public string? ErrorKind { get; init; }
 
     /// <summary>응답 검사기 경고 ("[경고] 응답 언어 이탈 감지 …" 등). 경고는 실패가 아니라 응답은 그대로 전달됐다.</summary>

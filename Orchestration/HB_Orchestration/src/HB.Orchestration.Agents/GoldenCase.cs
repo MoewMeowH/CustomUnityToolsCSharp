@@ -13,12 +13,19 @@ public sealed record GoldenCase(GoldenCaseInfo Info, string Folder, string Input
     public string KeySha256 { get; init; } = "";
 }
 
-/// <summary>case.json. Kind는 "record"(판정 기록에서 옴) 또는 "seeded"(고친 결함을 되돌린 코드).</summary>
+/// <summary>
+/// case.json. Kind는 "record"(판정 기록에서 옴) · "seeded"(고친 결함을 되돌린 코드) · "crash"(원인이 알려진 크래시, 다단계 모드 전체를 돌림).
+/// crash 사례의 input.md는 run_mode input (서버가 "## 요청"으로 감쌈), 리뷰 사례는 보낼 프롬프트 원문이다.
+/// </summary>
 public sealed record GoldenCaseInfo
 {
+    public const string Crash = "crash";
+
     public string Id { get; init; } = "";
     public string Kind { get; init; } = "";
     public string Mode { get; init; } = "review";
+
+    [JsonIgnore] public bool IsCrash => Kind == Crash;
 
     /// <summary>출처: runId, 커밋 등 (기록용).</summary>
     public string? Source { get; init; }
@@ -40,6 +47,15 @@ public sealed record GoldenItem
 
     /// <summary>함정만: 왜 틀린 지적으로 판정됐는지 (결과에 함께 보여 "다른 관점에서 타당한지" 검토하게 한다).</summary>
     public string? Why { get; init; }
+
+    /// <summary>crash 사례만: 어느 단계 본문에서 찾는지 — "triage"(분류) 또는 "search"(검색). 함정은 비우면 두 단계 모두.</summary>
+    public string? Step { get; init; }
+
+    /// <summary>crash search 항목: 정답 이슈 URL의 일부 (예: "issuetracker.unity.com/issues/11844"). 검색 단계가 실제로 본 URL에 있어야 찾음.</summary>
+    public IReadOnlyList<string> Urls { get; init; } = [];
+
+    public const string StepTriage = "triage";
+    public const string StepSearch = "search";
 
     [JsonIgnore] public int? From => Lines.Count > 0 ? Lines[0] : null;
     [JsonIgnore] public int? To => Lines.Count > 1 ? Lines[1] : From;
@@ -109,11 +125,14 @@ public static class GoldenCaseLoader
             var name = Path.GetFileName(dir.TrimEnd('/', '\\'));
             if (info is null || string.IsNullOrWhiteSpace(info.Id)) return (null, $"{CaseFile}에 id가 없습니다.");
             if (!string.Equals(info.Id, name, StringComparison.OrdinalIgnoreCase)) return (null, $"{CaseFile}의 id '{info.Id}'가 폴더 이름 '{name}'과 다릅니다.");
-            if (info.Kind is not ("record" or "seeded")) return (null, $"{CaseFile}의 kind는 record 또는 seeded여야 합니다 (지금 '{info.Kind}').");
+            if (info.Kind is not ("record" or "seeded" or GoldenCaseInfo.Crash)) return (null, $"{CaseFile}의 kind는 record · seeded · crash 중 하나여야 합니다 (지금 '{info.Kind}').");
             if (string.IsNullOrWhiteSpace(info.Mode)) return (null, $"{CaseFile}의 mode가 비어 있습니다 (생략하면 review).");
             if (string.IsNullOrWhiteSpace(input)) return (null, $"{InputFile}이(가) 비어 있습니다.");
             if (expected.Count == 0) return (null, $"{ExpectedFile}에 기대 지적이 없습니다.");
-            if ((ItemProblem(expected, ExpectedFile) ?? ItemProblem(traps, TrapsFile)) is { } problem) return (null, problem);
+            var problem = info.IsCrash
+                ? CrashItemProblem(expected, ExpectedFile, isTrap: false) ?? CrashItemProblem(traps, TrapsFile, isTrap: true)
+                : ItemProblem(expected, ExpectedFile) ?? ItemProblem(traps, TrapsFile);
+            if (problem is not null) return (null, problem);
 
             return (new GoldenCase(info, dir, input, [.. expected!], [.. traps!]) { KeySha256 = KeyHash(dir) }, null);
         }
@@ -160,6 +179,29 @@ public static class GoldenCaseLoader
             if (item.Lines.Count > 0 && item.Files.Count == 0) return $"{file}: '{item.Id}'는 lines가 있는데 files가 없습니다.";
             if (item.Lines.Count == 0 && item.Keywords.All(string.IsNullOrWhiteSpace))
                 return $"{file}: '{item.Id}'는 lines도 keywords도 없어 짝을 지을 수 없습니다.";
+        }
+        return null;
+    }
+
+    /// <summary>crash 항목: step은 triage·search (함정은 비워도 됨), triage는 keywords 필수, search는 urls나 keywords 중 하나. files·lines는 쓰지 않는다.</summary>
+    private static string? CrashItemProblem(IReadOnlyList<GoldenItem?> items, string file, bool isTrap)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < items.Count; i++)
+        {
+            if (items[i] is not { } item) return $"{file}: {i + 1}번째 항목이 null입니다.";
+            if (item.Keywords is null || item.Urls is null || item.Files is null || item.Lines is null || item.Keywords.Any(k => k is null) || item.Urls.Any(u => u is null))
+                return $"{file}: '{item.Id}'의 keywords·urls는 null일 수 없습니다 (비우려면 []).";
+            if (string.IsNullOrWhiteSpace(item.Id)) return $"{file}: id가 빈 항목이 있습니다.";
+            if (!seen.Add(item.Id)) return $"{file}: id '{item.Id}'가 두 번 나옵니다.";
+            if (item.Files.Count > 0 || item.Lines.Count > 0) return $"{file}: '{item.Id}' — crash 사례는 files·lines를 쓰지 않습니다.";
+            if (item.Step is not (GoldenItem.StepTriage or GoldenItem.StepSearch) && !(isTrap && item.Step is null))
+                return $"{file}: '{item.Id}'의 step은 triage 또는 search여야 합니다{(isTrap ? " (함정은 비우면 두 단계 모두)" : "")}.";
+            if (item.Urls.Any(string.IsNullOrWhiteSpace)) return $"{file}: '{item.Id}'의 urls에 빈 조각이 있습니다 (모든 URL에 맞게 됨).";
+            var hasKeyword = item.Keywords.Any(k => !string.IsNullOrWhiteSpace(k));
+            var hasUrl = item.Urls.Count > 0;
+            if (item.Step == GoldenItem.StepSearch && !isTrap ? !hasKeyword && !hasUrl : !hasKeyword)
+                return $"{file}: '{item.Id}'에 짝을 지을 단서가 없습니다 ({(item.Step == GoldenItem.StepSearch && !isTrap ? "urls나 keywords" : "keywords")} 필요).";
         }
         return null;
     }

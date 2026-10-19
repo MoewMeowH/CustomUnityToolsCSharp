@@ -599,13 +599,14 @@ dotnet <publish 폴더>\HB.Orchestration.Mcp.dll --golden score <사례> --from 
 - run_mode와 같은 시스템 프롬프트(역할 + 출력 형식 + 공통 규칙 + 지침)·에이전트로 보낸다. 세션 실행 한도·reason·ownReview·context 첨부는 쓰지 않는다 (첨부는 사례의 `input.md`에 이미 들어 있음). 비용 상한(`Budget`)은 그대로 본다. 단계가 하나이고 구조화 출력(`Output`)이 있는 모드만 채점된다.
 - 호출 기록에는 `Tool = golden`, `Mode = 원래 모드`로 남는다 (대시보드·비용 집계에 보임). 세션 상태 파일은 남기지 않는다.
 - `score`는 self-reviewer 결과(마크다운 `- C1 [major] 파일:줄 — 문제`)나 findings JSON(@1·@2)을 채점만 한다 (외부 호출 없음).
-- 폴더: `--dir` 또는 appsettings `Orchestration:Golden:Folder`. 사례 하나라도 형식이 틀리면 아무것도 돌리지 않는다. 종료 코드 0 성공 / 1 일부 사례 실패 / 2 사용법·사례 형식 오류.
+- 폴더: `--dir` 또는 appsettings `Orchestration:Golden:Folder`. 사례 하나라도 형식이 틀리면 아무것도 돌리지 않는다. 종료 코드 0 성공 / 1 일부 사례 실패 / 2 사용법·사례 형식 오류 / 3 크레딧·한도 소진(Quota)으로 남은 사례를 멈춤.
+- **Quota**: 429 중 `insufficient_quota`·`credit_balance_exhausted`(메시지나 응답 본문)는 `ErrorKind.Quota`로 분류해 재시도하지 않는다 (`[실패] Quota — 크레딧/한도 소진, 충전 전까지 재실행 금지`). 골든은 Quota가 나오면 남은 사례를 돌리지 않고, 다단계(crash) 사례는 단계 제공사 중 하나라도 **가장 최근 판정 가능한 호출 기록(7일, 성공 또는 Quota — Timeout·Network 등은 건너뜀)이 Quota**면 앞 단계도 호출하지 않는다. 충전 뒤 **그 제공사로 가는** 작은 호출 1회(그 제공사 에이전트의 리뷰 사례, 또는 `--agents`로 연결)로 성공 기록을 남기면 풀린다. 판정은 OpenAI 문구 기준이다 — Gemini 한도 소진(RESOURCE_EXHAUSTED)은 지금도 RateLimit으로 재시도된다.
 
 **사례 폴더** (`<골든 폴더>/<사례 id>/`, `results/`와 `_`로 시작하는 폴더는 사례가 아님)
 
 | 파일 | 내용 |
 |---|---|
-| `case.json` | `id`(폴더 이름과 같게), `kind`(`record` 판정 기록 · `seeded` 고친 결함을 되돌린 코드), `mode`(기본 review), `source`, `description` |
+| `case.json` | `id`(폴더 이름과 같게), `kind`(`record` 판정 기록 · `seeded` 고친 결함을 되돌린 코드 · `crash` 원인이 알려진 크래시, 아래), `mode`(기본 review), `source`, `description` |
 | `input.md` | 에이전트에게 보낼 프롬프트 원문 (그대로 보냄) |
 | `expected.json` | 기대 지적 `[{ id, summary, files, lines: [시작, 끝], keywords, severity }]` |
 | `traps.json` | (선택) 과거에 기각된 지적, 같은 형식 + `why`(기각 이유) |
@@ -616,6 +617,14 @@ dotnet <publish 폴더>\HB.Orchestration.Mcp.dll --golden score <사례> --from 
 - 기대 지적 하나에 짝 하나, 지적 하나도 한 번만 쓴다. 강도 2 이상 짝의 수가 최대가 되게 정하고(빈 지적 먼저, 맞바꾸면 강도 합이 커지면 바꿈), 그다음 남은 지적을 함정과 대조하고(강도 2 이상), 마지막으로 남은 기대 지적에 줄만 맞은 빈 지적을 붙인다 (함정에 걸릴 지적을 줄만 맞은 짝이 가져가지 않게).
 - 함정 걸림은 감점하지 않고 **"검토 필요"**로 따로 보인다 (다른 관점에서 타당할 수 있음). 짝 없는 지적은 새 지적 후보로 기록만 한다.
 - 결과: 화면 표 + `<골든 폴더>/results/<날짜>_<라벨>.jsonl` (사례별 점수·짝 근거·runId·모델·토큰·입력 해시·provenance). 자동 짝은 틀릴 수 있으니 근거를 보고 확인한다.
+
+**crash 사례** (`kind: crash`, `mode: crash` — 계획서 `2026-10-19_골든-crash사례`)
+- 모드 전체(Sequential, 분류 → 웹검색)를 run_mode와 같은 프롬프트 조립으로 돌린다. `input.md`는 run_mode의 `input`이다 (서버가 `## 요청`으로 감쌈, 첨부 없음). `score` 명령은 안 된다 (검색 기록이 필요).
+- 모드는 단계 2개 이상 + 마지막 단계에 WebSearch가 있어야 한다 (1단계 = 분류, 마지막 = 검색으로 채점). 아니면 실행 전 거절 — case.json에 `mode: crash`를 꼭 적는다 (빠뜨리면 기본값 review라 거절됨). 실행 전 확인과 단계 수 · 에이전트 · 지침이 달라지면 그 사례부터 멈춘다.
+- `expected.json` 항목: `{ id, step: triage|search, summary, keywords, urls?, severity }` (files·lines 없음, urls에 빈 조각 금지). `traps.json`은 `step`을 비우면 두 단계 모두.
+- 채점 (`GoldenCrashScorer`): triage = 분류(1단계) 본문 키워드. search = 검색 단계가 **실제로 본 URL**(참고 · 인용 · 직접 연 페이지)에 `urls` 조각이 있으면 찾음 — 근거에 "인용·열람한 URL"인지 "검색 결과에만 있던 URL"인지 남긴다. 조각 뒤가 영숫자면 안 맞는다 (`issues/8932` ≠ `issues/89321`). `urls`가 있는데 본문 키워드만 맞거나 조각이 검색 결과에 없는 URL에만 있으면 "확인 필요"(찾음에 안 셈, 놓침에 듦), `urls`가 없는 항목은 키워드로 찾음. 함정은 키워드가 확신 표기(높음 · 확인됨 · 유력 · high · confirmed)와 **같은 줄**에 있을 때만 걸린다. 키워드는 부정 문맥에서도 맞으니 근거를 본다.
+- 검색 단계 호출 기록(WebSearch)을 못 읽으면 점수 대신 채점 실패로 남긴다 ("검색 0회"와 구분).
+- 결과 줄에 검색 수 · 본 URL 수 · 검색 결과에 없는 URL 목록. 합계는 리뷰와 따로 `[crash 합계] 분류 찾음 · 검색 찾음`.
 
 ## 빌드 에러가 나면
 - `AsIChatClient` / `AsBuilder` / `ConfigureOptions` 없음 → `Microsoft.Extensions.AI`, `Microsoft.Extensions.AI.OpenAI`를 `--prerelease`로 다시 추가

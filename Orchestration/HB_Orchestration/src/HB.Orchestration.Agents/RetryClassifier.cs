@@ -17,6 +17,8 @@ public enum ErrorKind
     Client,
     /// <summary>응답을 받기 전 연결 실패 (DNS, 연결 끊김 등).</summary>
     Network,
+    /// <summary>429 중 크레딧·한도 소진 (insufficient_quota · credit_balance_exhausted). 충전 전까지 다시 보내도 같으므로 재시도하지 않는다.</summary>
+    Quota,
 }
 
 /// <param name="Kind">분류할 수 없는 예외면 null (재시도 안 함).</param>
@@ -51,6 +53,9 @@ public static class RetryClassifier
             // 응답 없이 실패하면 SDK가 Status 0으로 감싼다 (전송 계층 오류)
             case ClientResultException { Status: 0 }:
                 return new FailureInfo(ErrorKind.Network, true, null, null);
+
+            case ClientResultException { Status: 429 } cre when IsQuota(cre):
+                return new FailureInfo(ErrorKind.Quota, false, 429, null);
 
             case ClientResultException cre:
                 return ClassifyStatus(cre.Status, RetryAfterOf(cre));
@@ -99,6 +104,24 @@ public static class RetryClassifier
             else break;
         }
         return e;
+    }
+
+    /// <summary>OpenAI가 크레딧·한도 소진에 쓰는 오류 코드. 같은 429라도 일시 제한(rate_limit_exceeded)과 달리 기다려도 풀리지 않는다.</summary>
+    private static readonly string[] QuotaCodes = ["insufficient_quota", "credit_balance_exhausted"];
+
+    /// <summary>429의 메시지(SDK가 "HTTP 429 (code: …)"로 붙임)나 응답 본문에 소진 코드가 있는지. 본문을 못 읽으면 메시지로만 본다.</summary>
+    private static bool IsQuota(ClientResultException ex)
+    {
+        if (QuotaCodes.Any(c => ex.Message.Contains(c, StringComparison.OrdinalIgnoreCase))) return true;
+        try
+        {
+            var body = ex.GetRawResponse()?.Content?.ToString();
+            return body is not null && QuotaCodes.Any(c => body.Contains(c, StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception)
+        {
+            return false; // 본문은 부가 정보 — 못 읽으면 일반 429(재시도)로 둔다
+        }
     }
 
     private static TimeSpan? RetryAfterOf(ClientResultException ex)

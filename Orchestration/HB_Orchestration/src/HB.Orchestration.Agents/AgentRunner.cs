@@ -407,6 +407,9 @@ public sealed class AgentRunner
         }
     }
 
+    /// <summary>크레딧·한도 소진 실패 문구의 머리. 골든 일괄 실행이 이 머리로 남은 사례를 멈춘다.</summary>
+    public const string QuotaFailurePrefix = "[실패] Quota";
+
     /// <summary>"Timeout · " / "Client 402 · " 처럼 실패 문구 앞에 붙는 분류.</summary>
     private static string Describe(FailureInfo failure) =>
         failure.Kind is null ? "" : $"{failure.Kind}{(failure.Status is { } s ? $" {s}" : "")} · ";
@@ -417,6 +420,12 @@ public sealed class AgentRunner
     /// </summary>
     private static string FinalFailureText(StepCall call, AttemptOutcome last, int attempts, int maxAttempts)
     {
+        if (last.Failure?.Kind == ErrorKind.Quota)
+        {
+            // last.Text는 "[실패] Quota 429 · 예외: 메시지" — 머리를 다시 붙이지 않도록 예외 부분만
+            var detail = last.Text.IndexOf(" · ", StringComparison.Ordinal) is var at and >= 0 ? last.Text[(at + 3)..] : last.Text;
+            return $"{QuotaFailurePrefix} — 크레딧/한도 소진, 충전 전까지 재실행 금지 ({call.Agent.Provider}). 마지막 오류: {detail}";
+        }
         if (last.Failure is not { Retryable: true } failure) return last.Text;
 
         var timeout = AgentSettings.ResolveTimeout(call.Agent.Options, call.Agent.ProviderOptions);

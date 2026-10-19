@@ -263,6 +263,76 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     }
 
     /// <summary>
+    /// --golden의 crash 사례: Sequential 모드 전체를 run_mode와 같은 계획·프롬프트 조립(Sees)으로 돌린다 (계획서 2026-10-19_골든-crash사례).
+    /// input은 run_mode의 input과 같고 첨부(context)·이미지는 없다. 세션 한도·ownReview는 쓰지 않고 비용 상한은 본다. 기록 Tool은 tool.
+    /// expected를 주면 단계 수 · 단계마다 에이전트와 지침(붙음·해시)을 실행 전 확인과 비교해 다르면 호출하지 않는다
+    /// (사례를 차례로 도는 사이 modes.json·지침이 바뀌면 결과 줄의 에이전트·모델과 실제 실행이 어긋나므로).
+    /// </summary>
+    public async Task<(string? RunId, List<StepResult>? Results, string? Error)> RunFixedModeAsync(
+        string modeName, string input, IReadOnlyList<string>? agentOverrides, string tool, string reason, CancellationToken ct,
+        bool withoutGuidelines = false, IReadOnlyList<(string Agent, GuidelinesProvenance Guidelines)>? expected = null, bool requireSearchLast = false)
+    {
+        var (plan, error) = PlanFixedMode(modeName, agentOverrides, input.Length, withoutGuidelines, requireSearchLast);
+        if (error is not null) return (null, null, error);
+
+        if (expected is not null)
+        {
+            if (expected.Count != plan!.Steps.Count)
+                return (null, null, $"{GuidelinesChanged} 단계 수: 실행 전 확인 {expected.Count} / 지금 {plan.Steps.Count} (modes.json이 바뀜)");
+            for (var i = 0; i < expected.Count; i++)
+            {
+                var (was, now) = (expected[i], plan.Steps[i]);
+                if (was.Agent != now.Agent.Name)
+                    return (null, null, $"{GuidelinesChanged} 단계 {i + 1} 에이전트: 실행 전 확인 {was.Agent} / 지금 {now.Agent.Name} (modes.json이 바뀜)");
+                if (now.Guidelines.Attached != was.Guidelines.Attached || now.Guidelines.Sha256 != was.Guidelines.Sha256)
+                    return (null, null, $"{GuidelinesChanged} 단계 {i + 1}: 실행 전 확인: {Describe(was.Guidelines)} / 지금: {Describe(now.Guidelines)}");
+            }
+        }
+
+        var runId = Guid.NewGuid().ToString("N")[..10];
+        var meta = new CallMeta(null, []) { Reason = reason, Provenance = RunProvenance(plan!) };
+        var results = await RunSequentialAsync(runId, modeName, plan!.Steps, new PromptInput(input, "", []), meta, ct, tool);
+        return (runId, results, null);
+    }
+
+    /// <summary>RunFixedModeAsync의 실행 전 확인: 단계마다 역할·에이전트·모델·지침. 외부 호출 없음.</summary>
+    public (IReadOnlyList<(string Role, string Agent, string Model, GuidelinesProvenance Guidelines)>? Steps, string? Error) PreviewFixedMode(
+        string modeName, IReadOnlyList<string>? agentOverrides, int inputLength, bool withoutGuidelines = false, bool requireSearchLast = false)
+    {
+        var (plan, error) = PlanFixedMode(modeName, agentOverrides, inputLength, withoutGuidelines, requireSearchLast);
+        return error is not null ? (null, error) : ([.. plan!.Steps.Select(s => (s.Def.Role, s.Agent.Name, s.Agent.Model, s.Guidelines))], null);
+    }
+
+    /// <summary>
+    /// Sequential 모드만 (crash처럼 단계마다 앞 결과를 받는 흐름). 구조화 출력은 요구하지 않는다 (텍스트·웹검색 기록으로 채점).
+    /// requireSearchLast: 단계 2개 이상이고 마지막 단계에 WebSearch가 있어야 한다 (crash 채점은 1단계 = 분류, 마지막 = 검색으로 읽으므로).
+    /// </summary>
+    private (PreparedPlan? Plan, string? Error) PlanFixedMode(string modeName, IReadOnlyList<string>? agentOverrides, int inputLength, bool withoutGuidelines,
+        bool requireSearchLast)
+    {
+        ModeStore.Loaded loaded;
+        try { loaded = store.Load(); }
+        catch (ModeConfigException ex) { return (null, $"[모드 설정 오류] {ex.Message}"); }
+
+        if (!loaded.File.Modes.TryGetValue(modeName, out var mode))
+            return (null, $"[알 수 없는 모드 '{modeName}'] 사용 가능: {string.Join(", ", loaded.File.Modes.Keys)}");
+        if (mode.Steps.Count == 0 || mode.Flow != ModeFlow.Sequential)
+            return (null, $"[모드 '{modeName}'] 골든 다단계 실행은 Sequential 모드만 됩니다 (지금 {mode.Steps.Count}단계, {mode.Flow}).");
+        if (requireSearchLast && (mode.Steps.Count < 2 || mode.Steps[^1].WebSearch is null))
+            return (null, $"[모드 '{modeName}'] crash 사례는 단계가 2개 이상이고 마지막 단계에 WebSearch가 있는 모드여야 합니다 " +
+                          $"(1단계 = 분류, 마지막 = 검색으로 채점. 지금 {mode.Steps.Count}단계, 마지막 WebSearch {(mode.Steps[^1].WebSearch is null ? "없음" : "있음")}). case.json의 mode·--mode를 확인하세요.");
+
+        var maxChars = mode.MaxInputChars ?? Options.Budget.MaxInputChars;
+        if (maxChars > 0 && inputLength > maxChars)
+            return (null, $"[입력이 너무 깁니다] {inputLength:N0}자 / 상한 {maxChars:N0}자 (모드 '{modeName}').");
+
+        var (plan, error) = BuildPlan(loaded, modeName, mode, agentOverrides, withoutGuidelines);
+        if (error is not null) return (null, error);
+        if (CheckBudget(plan!.Steps.Select(p => p.Agent)) is { } budgetMessage) return (null, budgetMessage);
+        return (plan, null);
+    }
+
+    /// <summary>
     /// 같은 프롬프트를 통째로 되풀이할 때의 저장 지점: 마지막 줄 앞까지 (줄이 하나뿐이면 null).
     /// 골든 input.md는 형식이 둘이다 (첨부가 앞 · 요청이 앞인 예전 기록). 회차마다 전체가 같으므로 어디서 나눠도 캐시에 걸리고,
     /// 끝 가까이에서 나눠야 캐시되는 부분이 가장 크다. 두 블록을 이어 붙이면 원문 그대로다 (AgentRunner가 Prompt[prefix.Length..]로 자름).
@@ -465,9 +535,10 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     /// <summary>보낼 프롬프트. ContextPrefix는 Text의 앞부분(첨부 자료)이고 없으면 null. Images는 입력을 받는 단계에만 (없으면 null).</summary>
     private sealed record BuiltPrompt(string Text, string? ContextPrefix, IReadOnlyList<AttachedImage>? Images = null);
 
+    /// <param name="tool">호출 기록의 Tool (골든 crash 실행이면 "golden"). null이면 run_mode.</param>
     private async Task<List<StepResult>> RunSequentialAsync(
         string runId, string mode, List<PlannedStep> plan,
-        PromptInput input, CallMeta meta, CancellationToken ct)
+        PromptInput input, CallMeta meta, CancellationToken ct, string? tool = null)
     {
         var results = new List<StepResult>();
         for (var i = 0; i < plan.Count; i++)
@@ -475,7 +546,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             var p = plan[i];
             var prompt = BuildPrompt(input, results, i == 0 ? StepSees.Input : p.Def.Sees);
 
-            var result = await runner.RunStepAsync(NewCall(runId, mode, i + 1, p, p.Instructions, prompt, meta), ct);
+            var result = await runner.RunStepAsync(NewCall(runId, mode, i + 1, p, p.Instructions, prompt, meta) with { Tool = tool }, ct);
             results.Add(result);
 
             // 앞 단계가 실패하면 뒤 단계는 의미가 없으므로 토큰을 쓰지 않고 멈춘다.

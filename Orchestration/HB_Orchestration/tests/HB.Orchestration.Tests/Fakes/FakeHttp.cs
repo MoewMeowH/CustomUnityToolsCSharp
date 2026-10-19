@@ -4,12 +4,12 @@ using System.ClientModel.Primitives;
 namespace HB.Orchestration.Tests.Fakes;
 
 /// <summary>ClientResultException을 상태 코드·헤더와 함께 만들기 위한 최소 응답.</summary>
-public sealed class FakeResponse(int status, Dictionary<string, string>? headers = null) : PipelineResponse
+public sealed class FakeResponse(int status, Dictionary<string, string>? headers = null, string body = "") : PipelineResponse
 {
     public override int Status => status;
     public override string ReasonPhrase => "";
     public override Stream? ContentStream { get; set; }
-    public override BinaryData Content => BinaryData.FromString("");
+    public override BinaryData Content => BinaryData.FromString(body);
     protected override PipelineResponseHeaders HeadersCore { get; } = new FakeHeaders(headers ?? []);
     public override BinaryData BufferContent(CancellationToken cancellationToken = default) => Content;
     public override ValueTask<BinaryData> BufferContentAsync(CancellationToken cancellationToken = default) => new(Content);

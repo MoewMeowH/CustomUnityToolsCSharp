@@ -225,6 +225,10 @@ try:
     expect('H4 비슷한 폴더 이름', h3('review', tag, good.replace('subagent_in/', 'not_subagent_in/')), 2, 'subagent_in/ 밖')
     expect('H4 .. 로 나감', h3('review', tag, good.replace('subagent_in/2026-10-19_x/a.cs', 'subagent_in/../docs/worklog.md')), 2, 'subagent_in/ 밖')
     expect('H4 Windows 절대 경로', h3('review', tag, good.replace('subagent_in/2026-10-19_x/a.cs:1-10', 'F:\\AI\\subagent_in\\x\\a.cs:1-44 (첨부 포함)')), 0)
+    expect('H4 검색 기록 줄 (경로 없음)', h3('review', tag, good + '- Grep: 폴더 전체에서 `Tool` 사용처\n'), 0)
+    expect('H4 검색 기록 줄 (폴더 안 경로)', h3('review', tag, good + '- Glob: subagent_in/2026-10-19_x/*.cs\n'), 0)
+    expect('H4 검색 기록 줄 (폴더 밖 경로)', h3('review', tag, good + '- Grep: F:\\AI\\ToolWithCS\\docs 에서 Tool\n'), 2, 'subagent_in/ 밖')
+    expect('H4 검색 줄 아닌 자유 문장', h3('review', tag, good + '- 폴더 전체를 훑어봄\n'), 2, 'subagent_in/ 밖')
     expect('H4 태그 없으면 형식 검사 안 함', h3('critique', '이유', '자유 형식'), 0)
     expect('H4 지적 없음', h3('review', tag, '## 읽은 파일\n- subagent_in/x\n'), 2, "'## 지적'")
 finally:
