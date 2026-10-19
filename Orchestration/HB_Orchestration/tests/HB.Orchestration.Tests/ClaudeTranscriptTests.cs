@@ -137,12 +137,158 @@ public sealed class ClaudeTranscriptTests : IDisposable
             RunModeUse(1, "u1", "review"),
             ToolResult(2, "u1", "### 1. Reviewer · gpt\n본문\nrunId: 9999999999\n끝"),
             RunModeUse(3, "u2", "cross_p3"),
-            ToolResult(4, "u2", "moved to the background as task kbg2"),
+            ToolResult(4, "u2", "MCP tool \"hb-orchestration/run_mode\" was moved to the background as task kbg2 so that a message that arrived while it was running can reach you"),
             UserText(9, "<task-notification>\n<task-id>kbg2</task-id>\n<summary>runId: 8888888888</summary>\n<result>\n### 1. …\nrunId: 7777777777\n</result>\n</task-notification>"),
             RunModeUse(10, "u3", "panel"),
             ToolResult(11, "u3", "<persisted-output>\nrunId: 6666666666\nPreview (first 2KB):\n### 1. …\nrunId: 5555555555\n"));
 
         Assert.All(ClaudeTranscriptReader.Read(path).RunCalls, c => Assert.Null(c.RunId));
+    }
+
+    // ── 백그라운드 판별 (계획서 2026-10-19_세션연결-백그라운드-판별) ─────────────
+
+    private const string NewBackground = "MCP tool \"hb-orchestration/run_mode\" was moved to the background as task kxu568pwf so that a message that arrived while it was running can reach you; it was not interrupted and keeps running";
+
+    private static string Notification(string task, string runId) =>
+        $"<task-notification>\n<task-id>{task}</task-id>\n<status>completed</status>\n<summary>MCP task {task} (hb-orchestration/run_mode) completed.</summary>\n<result>\nrunId: {runId}\n### 1. …\n</result>\n</task-notification>";
+
+    [Fact]
+    public void Background_phrase_inside_result_body_is_not_background()
+    {
+        // 리뷰 응답 본문이 이 안내 문구를 인용 (세션 연결 코드를 리뷰받는 경우 등)
+        var path = Write(
+            RunModeUse(1, "u1", "review"),
+            ToolResult(2, "u1", "runId: 1111111111\n### 1. Reviewer · sol\n- 결과에 \"moved to the background as task abc\" 문구가 있으면 …"),
+            RunModeUse(3, "u2", "review"),
+            ToolResult(4, "u2", "### 1. Reviewer · sol\n본문 중간에 MCP tool \"hb-orchestration/run_mode\" was moved to the background as task zzz"));
+
+        var calls = ClaudeTranscriptReader.Read(path).RunCalls;
+        Assert.Equal("1111111111", calls[0].RunId);
+        Assert.Equal("result", calls[0].ResultSource);
+        Assert.Null(calls[1].RunId);
+        Assert.Equal("result", calls[1].ResultSource); // 백그라운드로 등록되지 않음
+    }
+
+    [Fact]
+    public void Both_real_background_phrasings_are_recognized()
+    {
+        var path = Write(
+            RunModeUse(1, "u1", "panel"),
+            ToolResult(2, "u1", NewBackground),                               // 2026-10-19 세션 기록의 실제 문구
+            RunModeUse(3, "u2", "cross_p3"),
+            ToolResult(4, "u2", "  MCP tool \"hb-orchestration/run_mode\" is still running after 120s. It was moved to the background as task kold and keeps running"),
+            UserText(9, Notification("kxu568pwf", "2222222222")),
+            UserText(10, Notification("kold", "3333333333")));
+
+        var calls = ClaudeTranscriptReader.Read(path).RunCalls;
+        Assert.Equal(["2222222222", "3333333333"], calls.Select(c => c.RunId));
+        Assert.All(calls, c => Assert.Equal("task-notification", c.ResultSource));
+    }
+
+    [Fact]
+    public void Two_notifications_in_one_string_each_resolve_their_own_run()
+    {
+        var path = Write(
+            RunModeUse(1, "u1", "review"),
+            ToolResult(2, "u1", NewBackground.Replace("kxu568pwf", "ka")),
+            RunModeUse(3, "u2", "perf_sol"),
+            ToolResult(4, "u2", NewBackground.Replace("kxu568pwf", "kb")),
+            UserText(9, Notification("ka", "aaaaaaaaaa") + "\n" + Notification("kb", "bbbbbbbbbb")));
+
+        Assert.Equal(["aaaaaaaaaa", "bbbbbbbbbb"], ClaudeTranscriptReader.Read(path).RunCalls.Select(c => c.RunId));
+    }
+
+    [Fact]
+    public void Notification_without_result_does_not_borrow_next_blocks_result()
+    {
+        var path = Write(
+            RunModeUse(1, "u1", "review"),
+            ToolResult(2, "u1", NewBackground.Replace("kxu568pwf", "ka")),
+            UserText(9, "<task-notification>\n<task-id>ka</task-id>\n<status>failed</status>\n</task-notification>\n" + Notification("kother", "cccccccccc")));
+
+        var call = Assert.Single(ClaudeTranscriptReader.Read(path).RunCalls);
+        Assert.Null(call.RunId);
+    }
+
+    [Fact]
+    public void Notification_text_inside_tool_result_is_ignored()
+    {
+        // 2026-10-19 세션 기록: grep 출력 같은 도구 결과에 알림 문자열이 그대로 섞여 들어옴
+        var path = Write(
+            RunModeUse(1, "u1", "review"),
+            ToolResult(2, "u1", NewBackground.Replace("kxu568pwf", "ka")),
+            ToolUse(3, "toolu_bash", "Bash"),
+            ToolResult(4, "toolu_bash", "grep 결과: " + Notification("ka", "dddddddddd")));
+
+        var call = Assert.Single(ClaudeTranscriptReader.Read(path).RunCalls);
+        Assert.Null(call.RunId);
+    }
+
+    // ── /cross-review 2e59bbb0db 반영 (sol 1-F1 · self-reviewer C1·C3 · 지휘자 K1·K2·K3) ─────
+
+    [Fact]
+    public void Notification_quoted_inside_result_does_not_link_other_run()
+    {
+        // ka의 실제 알림 결과 본문이 kb의 알림 문자열을 인용한다. kb는 나중에 진짜 알림으로 연결돼야 한다.
+        var quoted = Notification("kb", "eeeeeeeeee");
+        var kaNotification = "<task-notification>\n<task-id>ka</task-id>\n<status>completed</status>\n<result>\nrunId: aaaaaaaaaa\n### 1. Reviewer\n인용:\n" + quoted + "\n끝\n</result>\n</task-notification>";
+        var path = Write(
+            RunModeUse(1, "u1", "review"),
+            ToolResult(2, "u1", NewBackground.Replace("kxu568pwf", "ka")),
+            RunModeUse(3, "u2", "review"),
+            ToolResult(4, "u2", NewBackground.Replace("kxu568pwf", "kb")),
+            UserText(9, kaNotification),
+            UserText(10, Notification("kb", "bbbbbbbbbb")));
+
+        Assert.Equal(["aaaaaaaaaa", "bbbbbbbbbb"], ClaudeTranscriptReader.Read(path).RunCalls.Select(c => c.RunId));
+    }
+
+    [Fact]
+    public void Quoted_closing_tag_inside_result_does_not_end_block()
+    {
+        // 결과 본문이 닫는 태그와 다른 task-id를 인용 (뒤에 본문이 더 이어짐) → 블록이 거기서 끝나지 않고, 인용된 task-id를 쓰지 않는다
+        var text = "<task-notification>\n<task-id>ka</task-id>\n<result>\nrunId: aaaaaaaaaa\n본문 </task-notification> <task-id>kb</task-id> 계속\n</result>\n</task-notification>";
+        var path = Write(
+            RunModeUse(1, "u1", "review"),
+            ToolResult(2, "u1", NewBackground.Replace("kxu568pwf", "ka")),
+            RunModeUse(3, "u2", "review"),
+            ToolResult(4, "u2", NewBackground.Replace("kxu568pwf", "kb")),
+            UserText(9, text));
+
+        var calls = ClaudeTranscriptReader.Read(path).RunCalls;
+        Assert.Equal("aaaaaaaaaa", calls[0].RunId);
+        Assert.Null(calls[1].RunId);
+    }
+
+    [Fact]
+    public void Notification_text_inside_run_mode_own_result_is_ignored()
+    {
+        // run_mode 자신의 (백그라운드가 아닌) 결과 본문에 대기 중인 작업 ka의 알림 문자열이 있어도 ka를 연결하지 않는다
+        var path = Write(
+            RunModeUse(1, "u1", "review"),
+            ToolResult(2, "u1", NewBackground.Replace("kxu568pwf", "ka")),
+            RunModeUse(3, "u2", "critique"),
+            ToolResult(4, "u2", "runId: 1212121212\n### 1. Critic\n" + Notification("ka", "ffffffffff")));
+
+        var calls = ClaudeTranscriptReader.Read(path).RunCalls;
+        Assert.Null(calls[0].RunId);
+        Assert.Equal("1212121212", calls[1].RunId);
+    }
+
+    [Fact]
+    public void Notification_without_closing_tag_reads_to_end()
+    {
+        var path = Write(
+            RunModeUse(1, "u1", "review"),
+            ToolResult(2, "u1", NewBackground.Replace("kxu568pwf", "ka")),
+            UserText(9, "<task-notification>\n<task-id>ka</task-id>\n<result>\nrunId: abababababab\n"),
+            RunModeUse(10, "u2", "review"),
+            ToolResult(11, "u2", NewBackground.Replace("kxu568pwf", "kc")),
+            UserText(12, "<task-notification>\n<task-id>kc</task-id>\n<result>\nrunId: cdcdcdcdcd\n### 1."));
+
+        var calls = ClaudeTranscriptReader.Read(path).RunCalls;
+        Assert.Null(calls[0].RunId);                 // 12자리라 머리말 모양이 아님
+        Assert.Equal("cdcdcdcdcd", calls[1].RunId);  // 닫는 태그 없이 끝까지 한 블록
     }
 
     [Fact]

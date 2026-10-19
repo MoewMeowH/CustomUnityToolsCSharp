@@ -256,15 +256,18 @@ public static partial class ClaudeTranscriptReader
         if (!root.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object) return;
         if (!message.TryGetProperty("content", out var content)) return;
 
-        // 백그라운드로 넘어간 도구의 결과: user 메시지 문자열의 <task-notification>
+        // 백그라운드로 넘어간 도구의 결과: user 메시지 문자열의 <task-notification>. 블록마다 자기 task-id와 <result>를 짝짓는다
+        // (한 문자열에 알림이 여럿이어도 첫 task-id·첫 <result>를 섞지 않도록). tool_result 안의 알림 문구는 보지 않는다:
+        // grep 출력처럼 그 문자열이 도구 결과에 그냥 섞여 들어온다 (2026-10-19 세션 기록 조사).
         if (content.ValueKind == JsonValueKind.String)
         {
-            var text = content.GetString()!;
-            if (text.Contains("<task-notification>", StringComparison.Ordinal)
-                && TaskIdRegex().Match(text) is { Success: true } task
-                && s.ByTask.TryGetValue(task.Groups[1].Value, out var bg) && bg.RunId is null)
+            foreach (var notification in NotificationBlocks(content.GetString()!))
             {
-                Resolve(bg, text, "task-notification");
+                if (NotificationTaskId(notification) is { Success: true } task
+                    && s.ByTask.TryGetValue(task.Groups[1].Value, out var bg) && bg.RunId is null)
+                {
+                    Resolve(bg, notification, "task-notification");
+                }
             }
             return;
         }
@@ -275,7 +278,9 @@ public static partial class ClaudeTranscriptReader
             if (!s.ByToolUse.TryGetValue(useId, out var call)) continue;
 
             var text = ResultText(block);
-            if (BackgroundRegex().Match(text) is { Success: true } moved)
+            // 백그라운드 안내는 결과 맨 앞의 Claude Code 문구일 때만 (결과 본문에 같은 문구가 인용돼도 오분류하지 않도록).
+            // 머리말(runId:) 검사는 지금 정규식(\A 고정)에서는 겹치는 방어다 — 정규식이 나중에 느슨해져도 실행 결과를 백그라운드로 보지 않게 둔다.
+            if (!StartsWithRunIdHeader(text) && BackgroundRegex().Match(text) is { Success: true } moved)
             {
                 s.ByTask[moved.Groups[1].Value] = call;
                 continue;
@@ -306,6 +311,42 @@ public static partial class ClaudeTranscriptReader
         if (body is null) return;
         var firstLine = body.Split('\n', 2)[0];
         if (RunIdRegex().Match(firstLine) is { Success: true } m) call.RunId = m.Groups[1].Value;
+    }
+
+    private static bool StartsWithRunIdHeader(string text) => RunIdRegex().IsMatch(text.Split('\n', 2)[0]);
+
+    /// <summary>
+    /// 문자열 안의 최상위 &lt;task-notification&gt; 블록들. 결과 본문(&lt;result&gt; 안)이 알림 태그를 인용해도 블록으로 세지 않는다
+    /// (인용된 알림이 아직 연결 안 된 다른 백그라운드 호출에 틀린 runId를 붙이지 않도록 — /cross-review 2e59bbb0db 공통 지적).
+    /// 블록 끝 = 닫는 태그 중 그 뒤가 공백뿐이거나 공백 뒤 다음 알림이 시작하는 첫 곳. 그런 곳이 없으면 문자열 끝까지 한 블록.
+    /// </summary>
+    private static IEnumerable<string> NotificationBlocks(string text)
+    {
+        const string Open = "<task-notification>", Close = "</task-notification>";
+        var start = text.IndexOf(Open, StringComparison.Ordinal);
+        while (start >= 0)
+        {
+            var end = text.Length;
+            var next = -1;
+            for (var close = text.IndexOf(Close, start + Open.Length, StringComparison.Ordinal); close >= 0;
+                 close = text.IndexOf(Close, close + Close.Length, StringComparison.Ordinal))
+            {
+                var after = close + Close.Length;
+                var rest = after;
+                while (rest < text.Length && char.IsWhiteSpace(text[rest])) rest++;
+                if (rest == text.Length) { end = after; break; }
+                if (string.CompareOrdinal(text, rest, Open, 0, Open.Length) == 0) { end = after; next = rest; break; }
+            }
+            yield return text[start..end];
+            start = next;
+        }
+    }
+
+    /// <summary>알림 블록의 task-id. &lt;result&gt; 앞(머리 부분)에서만 찾는다 — 결과 본문에 인용된 task-id를 쓰지 않도록.</summary>
+    private static Match NotificationTaskId(string block)
+    {
+        var head = ResultStartRegex().Match(block) is { Success: true } r ? block[..r.Index] : block;
+        return TaskIdRegex().Match(head);
     }
 
     private static string? After(string text, Regex start) =>
@@ -352,7 +393,11 @@ public static partial class ClaudeTranscriptReader
     [GeneratedRegex(@"^runId: ([0-9a-f]{10})\r?$")]
     private static partial Regex RunIdRegex();
 
-    [GeneratedRegex(@"moved to the background as task (\w+)")]
+    /// <summary>
+    /// Claude Code가 도구를 백그라운드로 넘길 때 결과 자리에 쓰는 안내. 맨 앞이 'MCP tool "…run_mode"'이고 그 첫 줄 안에 문구가 있을 때만.
+    /// 판마다 문구가 다르다: 'is still running after 120s. It was moved to the background as task X' / 'was moved to the background as task X so that …'.
+    /// </summary>
+    [GeneratedRegex(@"\A\s*MCP tool ""[^""\r\n]*run_mode""[^\r\n]*?moved to the background as task (\w+)")]
     private static partial Regex BackgroundRegex();
 
     [GeneratedRegex(@"<task-id>(\w+)</task-id>")]
