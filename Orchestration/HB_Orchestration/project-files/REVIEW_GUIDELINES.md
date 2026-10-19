@@ -15,6 +15,11 @@
 - `Resources.Load` 남용, Addressables 핸들 `Release` 누락
 - 에디터 전용 코드가 `#if UNITY_EDITOR` / Editor 어셈블리로 분리돼 있는지
 
+## Unity 테스트 코드
+- `LogAssert.ignoreFailingMessages`는 `[SetUp]`이 아니라 그게 필요한 테스트 본문에서 켠다 (의도한 예외 로그를 실패로 보지 않게 할 때)
+- 테스트용 MonoBehaviour는 클래스 이름과 같은 이름의 파일에 둔다
+- 확장 메서드는 그 namespace를 `using`하거나 정적 메서드로 직접 호출한다
+
 ## C++
 - 소유권이 명확한지 (raw `new`/`delete` 대신 스마트 포인터, RAII)
 - 댕글링 참조·이터레이터 무효화
