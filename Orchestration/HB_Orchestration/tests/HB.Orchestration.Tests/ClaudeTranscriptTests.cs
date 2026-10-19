@@ -410,6 +410,83 @@ public sealed class ClaudeTranscriptTests : IDisposable
         Assert.Equal(RunLinkKind.Confirmed, links[b].Single().Kind);
     }
 
+    // ── 추정 배타 (계획서 2026-10-19_세션연결-추정-배타) ────────────────────────
+
+    [Fact]
+    public void Linker_two_calls_in_same_session_estimating_one_run_are_contested()
+    {
+        // self-reviewer 예: 머리말 없는 같은 모드 호출 A(0초)·B(5초), 실제 실행은 6초에 하나
+        var path = Write(
+            RunModeUse(0, "uA", "review"), ToolResult(1, "uA", "### 머리말 없음"),
+            RunModeUse(5, "uB", "review"), ToolResult(6, "uB", "### 머리말 없음"),
+            RunModeUse(40, "uC", "critique"), ToolResult(41, "uC", "### 머리말 없음"));
+        var s = ClaudeTranscriptReader.Read(path);
+        var at = DateTimeOffset.Parse("2026-10-16T07:37:00Z");
+
+        var links = RunLinker.LinkAll([s], [
+            Rec("aaaaaaaaaa", "review", at.AddSeconds(6)),
+            Rec("cccccccccc", "critique", at.AddSeconds(40.5)),   // 겹침과 무관한 추정은 그대로
+        ])[s];
+
+        Assert.Equal((RunLinkKind.Contested, (string?)null, 2), (links[0].Kind, links[0].RunId, links[0].Candidates));
+        Assert.Equal((RunLinkKind.Contested, (string?)null, 2), (links[1].Kind, links[1].RunId, links[1].Candidates));
+        Assert.Equal((RunLinkKind.Estimated, "cccccccccc"), (links[2].Kind, links[2].RunId));
+    }
+
+    [Fact]
+    public void Linker_calls_in_different_sessions_estimating_one_run_are_contested()
+    {
+        var at = DateTimeOffset.Parse("2026-10-16T07:37:00Z");
+        var a = ClaudeTranscriptReader.Read(Write(RunModeUse(0, "u1", "review"), ToolResult(1, "u1", "### 머리말 없음")));
+        var bPath = Path.Combine(_dir, "99999999-2222-3333-4444-555555555555.jsonl");
+        File.WriteAllText(bPath, RunModeUse(1, "u9", "review") + "\n" + ToolResult(2, "u9", "### 머리말 없음") + "\n");
+        var b = ClaudeTranscriptReader.Read(bPath);
+
+        var links = RunLinker.LinkAll([a, b], [Rec("dddddddddd", "review", at.AddSeconds(3))]);
+
+        Assert.Equal((RunLinkKind.Contested, 2), (links[a].Single().Kind, links[a].Single().Candidates));
+        Assert.Equal((RunLinkKind.Contested, 2), (links[b].Single().Kind, links[b].Single().Candidates));
+    }
+
+    [Fact]
+    public void Linker_same_call_copied_into_two_files_is_not_contested()
+    {
+        // 세션을 이어 열면 앞 대화가 새 파일로 복사된다 — 같은 tool_use id가 두 파일에 (실측: 기록 47개 중 7건)
+        var at = DateTimeOffset.Parse("2026-10-16T07:37:00Z");
+        var a = ClaudeTranscriptReader.Read(Write(RunModeUse(0, "u1", "review"), ToolResult(1, "u1", "### 머리말 없음")));
+        var bPath = Path.Combine(_dir, "99999999-2222-3333-4444-555555555555.jsonl");
+        File.WriteAllText(bPath, RunModeUse(0, "u1", "review") + "\n" + ToolResult(1, "u1", "### 머리말 없음") + "\n");
+        var b = ClaudeTranscriptReader.Read(bPath);
+
+        var links = RunLinker.LinkAll([a, b], [Rec("ffffffffff", "review", at.AddSeconds(3))]);
+
+        Assert.Equal((RunLinkKind.Estimated, "ffffffffff"), (links[a].Single().Kind, links[a].Single().RunId));
+        Assert.Equal((RunLinkKind.Estimated, "ffffffffff"), (links[b].Single().Kind, links[b].Single().RunId));
+    }
+
+    [Fact]
+    public void Linker_same_call_repeated_in_one_file_is_not_contested()
+    {
+        var s = ClaudeTranscriptReader.Read(Write(
+            RunModeUse(0, "u1", "review"), RunModeUse(0, "u1", "review"), ToolResult(1, "u1", "### 머리말 없음")));
+        var at = DateTimeOffset.Parse("2026-10-16T07:37:00Z");
+
+        var links = RunLinker.LinkAll([s], [Rec("abababab12", "review", at.AddSeconds(2))])[s];
+
+        Assert.All(links, l => Assert.Equal(RunLinkKind.Estimated, l.Kind));
+    }
+
+    [Fact]
+    public void Linker_single_estimate_is_unchanged()
+    {
+        var s = ClaudeTranscriptReader.Read(Write(RunModeUse(0, "u1", "review"), ToolResult(1, "u1", "### 머리말 없음")));
+        var at = DateTimeOffset.Parse("2026-10-16T07:37:00Z");
+
+        var link = RunLinker.LinkAll([s], [Rec("eeeeeeeeee", "review", at.AddSeconds(2))])[s].Single();
+
+        Assert.Equal((RunLinkKind.Estimated, "eeeeeeeeee", 1), (link.Kind, link.RunId, link.Candidates));
+    }
+
     // ── 알 수 없는 형식 ───────────────────────────────────────────────────
 
     [Fact]

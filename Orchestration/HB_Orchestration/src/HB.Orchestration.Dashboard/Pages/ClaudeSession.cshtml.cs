@@ -33,6 +33,7 @@ public sealed class ClaudeSessionModel(CallLogCache log, ClaudeSessionsService s
         RunLinkKind.Confirmed => "확정",
         RunLinkKind.Estimated => "추정(시각·모드)",
         RunLinkKind.Ambiguous => $"후보 {l.Candidates}개",
+        RunLinkKind.Contested => $"겹침 (같은 실행을 {l.Candidates}개 호출이 추정)",
         _ when l.Call.ResultSource == ClaudeTranscriptReader.RejectedSource => "실행 전 거절",
         _ => "연결 없음",
     };

@@ -457,6 +457,11 @@ public enum RunLinkKind
     Ambiguous,
     /// <summary>후보 없음.</summary>
     None,
+    /// <summary>
+    /// 후보는 하나였지만 같은 실행을 다른 호출(같은 세션이든 다른 세션이든)도 추정해서 연결하지 않음.
+    /// RunLink.Candidates = 그 실행을 추정한 호출 수. 어느 쪽인지 고르지 않는다 (틀린 연결보다 연결 없음).
+    /// </summary>
+    Contested,
 }
 
 public sealed record RunLink(TranscriptRunCall Call, RunLinkKind Kind, string? RunId, int Candidates);
@@ -512,6 +517,27 @@ public static class RunLinker
                 });
             }
             result[s] = links;
+        }
+
+        // 2단계: 같은 실행을 둘 이상의 호출이 추정했으면 그 호출들을 모두 겹침으로 내린다 (세션을 가리지 않음).
+        // 호출은 tool_use id로 센다: 세션을 이어 열면 앞 대화가 새 기록 파일로 복사돼 같은 호출이 두 파일에 나온다
+        // (2026-10-19 실측: 기록 47개 중 run_mode id 7개가 두 파일에) — 그건 겹침이 아니다 (/cross-review 1341a362bd self-reviewer C1).
+        // 후보 여럿(Ambiguous)인 호출은 실행을 가져간 것으로 치지 않는다 — 기존 규칙 유지 (사용자 결정, C2는 알려진 한계).
+        var estimatedBy = result.Values.SelectMany(l => l).Where(l => l.Kind == RunLinkKind.Estimated)
+            .GroupBy(l => l.RunId!, StringComparer.Ordinal)
+            .Select(g => (RunId: g.Key, Calls: g.Select(l => l.Call.ToolUseId).Distinct(StringComparer.Ordinal).Count()))
+            .Where(x => x.Calls > 1)
+            .ToDictionary(x => x.RunId, x => x.Calls, StringComparer.Ordinal);
+        if (estimatedBy.Count > 0)
+        {
+            foreach (var links in result.Values)
+            {
+                for (var i = 0; i < links.Count; i++)
+                {
+                    if (links[i] is { Kind: RunLinkKind.Estimated, RunId: { } runId } l && estimatedBy.TryGetValue(runId, out var count))
+                        links[i] = new RunLink(l.Call, RunLinkKind.Contested, null, count);
+                }
+            }
         }
         return result;
     }

@@ -54,6 +54,8 @@
                         var estimated = Model.Count(s, RunLinkKind.Estimated);
                         if (confirmed > 0) { <span class="badge">확정 @confirmed</span> }
                         if (estimated > 0) { <span class="badge warn">추정 @estimated</span> }
+                        var contested = Model.Count(s, RunLinkKind.Contested);
+                        if (contested > 0) { <span class="badge warn" title="같은 실행을 여러 호출이 추정해 연결하지 않음">겹침 @contested</span> }
                         if (s.UnknownLines > 0) { <span class="badge warn" title="JSON이 아니거나 필드 모양이 다른 줄">알 수 없는 줄 @s.UnknownLines</span> }
                     }
                 </td>

@@ -95,7 +95,7 @@ else
                             if (l.RunId is not null) { <span class="muted"> (호출 기록 없음)</span> }
                         }
                     </td>
-                    <td><span class="badge @(l.Kind == RunLinkKind.Estimated || l.Kind == RunLinkKind.Ambiguous ? "warn" : null)">@ClaudeSessionModel.KindLabel(l)</span></td>
+                    <td><span class="badge @(l.Kind is RunLinkKind.Estimated or RunLinkKind.Ambiguous or RunLinkKind.Contested ? "warn" : null)">@ClaudeSessionModel.KindLabel(l)</span></td>
                     <td class="muted">@(l.Call.ResultSource ?? "결과 없음")</td>
                 </tr>
             }
