@@ -83,8 +83,12 @@ public sealed class ModeStore(AgentCatalog catalog)
             }
         }
 
+        // 내장 역할: modes.json에 프롬프트 없이 같은 이름 역할을 두면 Output·UseGuidelines만 바꾼다
+        // (예: "Reviewer": { "Output": "findings@1" } — 골든 세트로 출력 형식 판끼리 비교할 때).
         if (Prompts.BuiltInRoles.TryGetValue(role, out var builtIn))
-            return (builtIn, true, Prompts.BuiltInOutputs.GetValueOrDefault(role));
+            return loaded.File.Roles.TryGetValue(role, out var overlay)
+                ? (builtIn, overlay.UseGuidelines, string.IsNullOrWhiteSpace(overlay.Output) ? Prompts.BuiltInOutputs.GetValueOrDefault(role) : overlay.Output)
+                : (builtIn, true, Prompts.BuiltInOutputs.GetValueOrDefault(role));
         throw new ModeConfigException($"역할 '{role}'이(가) 정의되지 않았습니다.");
     }
 }

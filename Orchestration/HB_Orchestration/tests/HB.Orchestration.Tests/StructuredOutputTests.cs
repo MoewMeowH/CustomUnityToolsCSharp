@@ -123,6 +123,38 @@ public sealed class StructuredOutputTests
         Assert.Contains(message, s.Error);
     }
 
+    [Theory]
+    [InlineData("findings@1", 1, "string")]
+    [InlineData("perf_findings@1", 1, "string")]
+    [InlineData("findings", 2, "object")]
+    [InlineData("findings@2", 2, "object")]
+    public void Format_version_can_be_chosen_for_comparison(string name, int version, string itemType)
+    {
+        var f = FindingFormat.Find(name)!;
+        Assert.Equal(version, f.Version);
+        var items = f.Schema().GetProperty("properties").GetProperty("needsInfo").GetProperty("items");
+        Assert.Equal(itemType, items.GetProperty("type").GetString());
+        Assert.Equal(version == 1, f.PromptText.Contains("필요한 코드나 정보를 한 줄로"));
+        Assert.Equal(version == 2, f.PromptText.Contains("- what: 필요한 코드나 정보 한 줄."));
+    }
+
+    [Fact]
+    public async Task Built_in_role_output_can_be_overridden_without_a_prompt()
+    {
+        using var h = new ModeRunnerHarness("""
+            { "Roles": { "Reviewer": { "Output": "findings@1" } },
+              "Modes": { "v1": { "Steps": [ { "Role": "Reviewer", "Agent": "a1" } ] } } }
+            """);
+        h.Client.Script = [ScriptedChatClient.Reply("""{"findings":[],"needsInfo":["호출부"]}""")];
+        await h.Run("v1");
+
+        var system = ScriptedChatClient.SystemText(h.Client.Received[0]);
+        Assert.Contains(Prompts.BuiltInRoles["Reviewer"].Trim()[..20], system); // 내장 프롬프트 그대로
+        Assert.Contains("필요한 코드나 정보를 한 줄로", system);                 // @1 형식 설명
+        Assert.Contains("한글 규칙", system);                                   // 지침도 그대로
+        Assert.Equal("findings@1", h.Records()[0].Structured!.Format);
+    }
+
     [Fact]
     public void Schema_v2_needs_info_is_an_object_array()
     {

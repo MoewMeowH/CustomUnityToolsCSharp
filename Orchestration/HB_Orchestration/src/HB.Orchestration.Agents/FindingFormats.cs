@@ -22,20 +22,41 @@ public sealed record FindingFormat(string Name, int Version, IReadOnlyList<strin
 
     public static readonly IReadOnlyList<string> Confidences = ["high", "medium", "low"];
 
+    /// <summary>예전 판 (needsInfo 문자열). 골든 세트로 판끼리 비교할 때 역할 Output에 "findings@1"처럼 고른다.</summary>
+    public static readonly FindingFormat FindingsV1 = Findings with { Version = 1 };
+    public static readonly FindingFormat PerfFindingsV1 = PerfFindings with { Version = 1 };
+
     private static readonly IReadOnlyDictionary<string, FindingFormat> ByName =
         new Dictionary<string, FindingFormat>(StringComparer.OrdinalIgnoreCase)
         {
             [Findings.Name] = Findings,
             [PerfFindings.Name] = PerfFindings,
+            [FindingsV1.Tag] = FindingsV1,
+            [PerfFindingsV1.Tag] = PerfFindingsV1,
+            [Findings.Tag] = Findings,
+            [PerfFindings.Tag] = PerfFindings,
         };
 
+    /// <summary>"findings"는 최신 판, "findings@1"처럼 판을 붙이면 그 판.</summary>
     public static FindingFormat? Find(string? name) =>
         name is not null && ByName.TryGetValue(name.Trim(), out var f) ? f : null;
 
     public static string KnownNames => string.Join(", ", ByName.Keys);
 
     /// <summary>시스템 프롬프트 끝에 붙는 출력 형식 설명. Schema·Prompt 방식 모두 붙인다 (강제가 안 되는 제공사도 따르도록).</summary>
-    public string PromptText => Perf ? PerfPrompt : FindingsPrompt;
+    public string PromptText => Version >= 2 ? (Perf ? PerfPrompt : FindingsPrompt) : (Perf ? PerfPrompt : FindingsPrompt).Replace(NeedsInfoV2, NeedsInfoV1);
+
+    private const string NeedsInfoV2 = """
+        - needsInfo: 자료가 부족해 판단하지 못한 것마다 객체 하나. 없으면 []. 지휘자가 이 요청을 보고 코드를 찾아 보충해 다시 묻는다.
+          - what: 필요한 코드나 정보 한 줄.
+          - path: 첨부에 없던 파일의 경로. 모르면 null (추측해서 쓰지 않는다).
+          - symbol: 찾을 타입·메서드·필드 이름이나 검색어. 모르면 null.
+          - why: 그 자료가 있으면 어떤 판단이 어떻게 달라지는지.
+        """;
+
+    private const string NeedsInfoV1 = """
+        - needsInfo: 자료가 부족해 판단하지 못한 것마다 필요한 코드나 정보를 한 줄로. 없으면 [].
+        """;
 
     private const string FindingsPrompt = """
 
@@ -125,7 +146,7 @@ public sealed record FindingFormat(string Name, int Version, IReadOnlyList<strin
         var root = new JsonObject
         {
             ["findings"] = new JsonObject { ["type"] = "array", ["items"] = Obj(item) },
-            ["needsInfo"] = new JsonObject { ["type"] = "array", ["items"] = Obj(request) },
+            ["needsInfo"] = Version >= 2 ? new JsonObject { ["type"] = "array", ["items"] = Obj(request) } : StrArray(),
         };
         if (Perf)
         {
