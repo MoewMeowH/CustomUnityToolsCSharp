@@ -42,6 +42,16 @@ public sealed class OrchestrationOptions
 
     /// <summary>/work-order 명령이 작업 지시서를 남길 폴더. 비우면 list_modes 출력이 이전과 같다.</summary>
     public WorkOrdersOptions WorkOrders { get; set; } = new();
+
+    /// <summary>골든 세트(--golden) 설정. 서버(run_mode)는 쓰지 않는다.</summary>
+    public GoldenOptions Golden { get; set; } = new();
+}
+
+/// <summary>appsettings.json의 "Orchestration:Golden".</summary>
+public sealed class GoldenOptions
+{
+    /// <summary>사례 폴더 (절대 경로 권장). --dir가 없을 때 쓴다. 비우면 --dir가 필수.</summary>
+    public string? Folder { get; set; }
 }
 
 /// <summary>

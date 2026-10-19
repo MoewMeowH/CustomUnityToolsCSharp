@@ -569,6 +569,36 @@ unity skill install --help
 **기타**
 - 대시보드 창을 닫으면 대시보드가 꺼진다.
 
+## 9. 골든 세트 (`--golden`) — 프롬프트·모드·모델 변경 회귀 평가
+
+정답이 알려진 사례 묶음을 같은 입력으로 다시 돌려, **찾아야 할 지적을 몇 개 찾았는지**와 **과거에 기각된 지적을 다시 내는지**를 숫자로 비교한다. 역할 프롬프트·modes.json·모델을 바꾼 뒤에 쓴다. MCP 서버를 띄우지 않는 일회성 실행이다.
+
+```
+dotnet <publish 폴더>\HB.Orchestration.Mcp.dll --golden run [사례|all] [--mode 모드] [--agents from=to,...] [--dir 폴더] [--label 이름] [--yes]
+dotnet <publish 폴더>\HB.Orchestration.Mcp.dll --golden score <사례> --from <파일> [--dir 폴더] [--label 이름]
+```
+- `run`은 `--yes`가 없으면 사례·에이전트·입력 글자 수·입력 비용 추정만 보이고 **외부 호출 없이** 멈춘다.
+- run_mode와 같은 시스템 프롬프트(역할 + 출력 형식 + 공통 규칙 + 지침)·에이전트로 보낸다. 세션 실행 한도·reason·ownReview·context 첨부는 쓰지 않는다 (첨부는 사례의 `input.md`에 이미 들어 있음). 비용 상한(`Budget`)은 그대로 본다. 단계가 하나이고 구조화 출력(`Output`)이 있는 모드만 채점된다.
+- 호출 기록에는 `Tool = golden`, `Mode = 원래 모드`로 남는다 (대시보드·비용 집계에 보임). 세션 상태 파일은 남기지 않는다.
+- `score`는 self-reviewer 결과(마크다운 `- C1 [major] 파일:줄 — 문제`)나 findings@1 JSON을 채점만 한다 (외부 호출 없음).
+- 폴더: `--dir` 또는 appsettings `Orchestration:Golden:Folder`. 사례 하나라도 형식이 틀리면 아무것도 돌리지 않는다. 종료 코드 0 성공 / 1 일부 사례 실패 / 2 사용법·사례 형식 오류.
+
+**사례 폴더** (`<골든 폴더>/<사례 id>/`, `results/`와 `_`로 시작하는 폴더는 사례가 아님)
+
+| 파일 | 내용 |
+|---|---|
+| `case.json` | `id`(폴더 이름과 같게), `kind`(`record` 판정 기록 · `seeded` 고친 결함을 되돌린 코드), `mode`(기본 review), `source`, `description` |
+| `input.md` | 에이전트에게 보낼 프롬프트 원문 (그대로 보냄) |
+| `expected.json` | 기대 지적 `[{ id, summary, files, lines: [시작, 끝], keywords, severity }]` |
+| `traps.json` | (선택) 과거에 기각된 지적, 같은 형식 + `why`(기각 이유) |
+
+**채점 규칙** (`GoldenScorer`, LLM 판정자 없음)
+- 짝 후보: (같은 **파일 이름** + 줄이 범위 ±5) 또는 (**키워드**가 문제·상세에 있음, 대소문자 무시, 단 지적이 다른 파일을 가리키면 제외). 둘 다면 강도 3, 키워드만 2, 줄만 1.
+- **찾음은 강도 2 이상만** 센다. 줄만 맞은 짝(강도 1)은 같은 줄 범위의 다른 결함과 구분하지 못해 "줄만 맞음 — 확인 필요"로만 보인다 (맞는 지적이면 정답지 키워드를 보강).
+- 기대 지적 하나에 짝 하나, 지적 하나도 한 번만 쓴다. 강도 2 이상 짝의 수가 최대가 되게 정하고(빈 지적 먼저, 맞바꾸면 강도 합이 커지면 바꿈), 그다음 남은 지적을 함정과 대조하고(강도 2 이상), 마지막으로 남은 기대 지적에 줄만 맞은 빈 지적을 붙인다 (함정에 걸릴 지적을 줄만 맞은 짝이 가져가지 않게).
+- 함정 걸림은 감점하지 않고 **"검토 필요"**로 따로 보인다 (다른 관점에서 타당할 수 있음). 짝 없는 지적은 새 지적 후보로 기록만 한다.
+- 결과: 화면 표 + `<골든 폴더>/results/<날짜>_<라벨>.jsonl` (사례별 점수·짝 근거·runId·모델·토큰·입력 해시·provenance). 자동 짝은 틀릴 수 있으니 근거를 보고 확인한다.
+
 ## 빌드 에러가 나면
 - `AsIChatClient` / `AsBuilder` / `ConfigureOptions` 없음 → `Microsoft.Extensions.AI`, `Microsoft.Extensions.AI.OpenAI`를 `--prerelease`로 다시 추가
 - `response.Usage` 없음 → `AgentRunner.cs`의 `InputTokens` / `OutputTokens` 두 줄 삭제

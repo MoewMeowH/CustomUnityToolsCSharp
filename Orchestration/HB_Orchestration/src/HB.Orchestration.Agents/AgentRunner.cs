@@ -32,6 +32,9 @@ public sealed record StepCall(
     /// <summary>응답 검사기 설정. 실행 시점의 appsettings 값을 넘긴다.</summary>
     public ResponseChecksOptions Checks { get; init; } = new();
 
+    /// <summary>호출 기록의 Tool. null이면 Mode (run_mode). 골든 세트 실행은 "golden".</summary>
+    public string? Tool { get; init; }
+
     /// <summary>Prompt의 앞부분 중 첨부 자료 (Prompt가 이 문자열로 시작한다). 첨부가 없거나 이 단계에 입력을 안 보내면 null.</summary>
     public string? ContextPrefix { get; init; }
 
@@ -321,7 +324,7 @@ public sealed class AgentRunner
         {
             Id = Guid.NewGuid().ToString("N")[..12],
             Timestamp = startedAt,
-            Tool = call.Mode,
+            Tool = call.Tool ?? call.Mode,
             RunId = call.RunId,
             Mode = call.Mode,
             Role = call.Role,

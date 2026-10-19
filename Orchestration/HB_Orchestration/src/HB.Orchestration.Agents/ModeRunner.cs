@@ -70,46 +70,9 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             OwnReview = string.IsNullOrWhiteSpace(ownReview) ? null : ownReview,
         };
 
-        var (swap, swapError) = ParseOverrides(agentOverrides, mode);
-        if (swapError is not null) return $"[모드 '{modeName}'] {swapError}";
-
-        GuidelinesLoader.Result guidelines;
-        try { guidelines = GuidelinesLoader.Load(Options); }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // 지침이 빠진 채 보내면 리뷰 결과가 달라지므로 조용히 넘어가지 않고 거절한다 (실행 횟수 차감 전).
-            return $"[리뷰 지침 읽기 실패] {ex.GetType().Name}: {ex.Message} 파일을 닫거나 확인한 뒤 다시 호출하세요.";
-        }
-        var plan = new List<PlannedStep>();
-        foreach (var step in mode.Steps)
-        {
-            var agentName = swap.TryGetValue(step.Agent, out var to) ? to
-                          : swap.TryGetValue("*", out var all) ? all
-                          : step.Agent;
-
-            if (!catalog.TryGet(agentName, out var agent))
-                return $"[모드 '{modeName}'] 에이전트 '{agentName}' 사용 불가: {catalog.WhyUnavailable(agentName)}";
-
-            (string Prompt, bool UseGuidelines, FindingFormat? Output) role;
-            try { role = ModeStore.ResolveRole(loaded, step.Role); }
-            catch (ModeConfigException ex) { return $"[모드 '{modeName}'] {ex.Message}"; }
-
-            if (step.WebSearch is { } search)
-            {
-                if (search.Problem() is { } searchProblem) return $"[모드 '{modeName}'] {step.Role}@{agentName}: {searchProblem}";
-                if (!string.Equals(agent.ProviderOptions?.Type, OpenAIResponsesProvider.TypeName, StringComparison.OrdinalIgnoreCase))
-                    return $"[모드 '{modeName}'] {step.Role}@{agentName}: WebSearch는 제공사 Type이 '{OpenAIResponsesProvider.TypeName}'인 에이전트에서만 됩니다 " +
-                           $"(지금 '{agent.ProviderOptions?.Type}'). appsettings의 웹검색용 에이전트로 바꾸세요.";
-            }
-
-            if (role.Output is not null && step.WebSearch is not null)
-                return $"[모드 '{modeName}'] {step.Role}@{agentName}: 구조화 출력(Output)과 WebSearch는 함께 쓸 수 없습니다 (웹검색 경로는 구조화 출력을 지원하지 않음).";
-
-            // 시스템 프롬프트 = 역할 + 출력 형식(구조화 출력) + 공통 규칙 (+ 웹검색 규칙) (+ 지침). 매번 같은 앞부분이라 제공사 프롬프트 캐시에 걸린다.
-            plan.Add(new PlannedStep(step, agent,
-                role.Prompt + (role.Output?.PromptText ?? "") + Prompts.CommonRules + (step.WebSearch is null ? "" : Prompts.WebSearchRules) + (role.UseGuidelines ? guidelines.Text : ""),
-                ProvenanceBuilder.ForStep(guidelines, role.UseGuidelines), mode.PromptCache, role.Output));
-        }
+        var (prepared, planError) = BuildPlan(loaded, modeName, mode, agentOverrides);
+        if (planError is not null) return planError;
+        var (swap, plan) = (prepared!.Swap, prepared.Steps);
 
         if (loadedImages!.Count > 0 && plan.Where(p => !p.Agent.Options.Vision).Select(p => p.Agent.Name).Distinct().ToList() is { Count: > 0 } blind)
             return $"[모드 '{modeName}'] 이미지를 받지 않는 에이전트(Vision=false): {string.Join(", ", blind)}. images 없이 호출하거나 agents로 바꾸세요.";
@@ -128,19 +91,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         // ── 2. 실행 ──────────────────────────────────────────────────────────
         var runId = Guid.NewGuid().ToString("N")[..10];
 
-        // 이 실행의 modes.json · 서버 설정 · 지침 해시와 원문 저장. 실패는 기록에만 남기고 실행은 계속한다.
-        CallProvenance runProvenance;
-        try
-        {
-            runProvenance = ProvenanceBuilder.ForRun(
-                loaded, guidelines, plan.Any(p => p.Guidelines.Attached),
-                catalog.SettingsPath, catalog.SettingsBytes, catalog.ReloadError, Options.Records, runner.LogPath);
-        }
-        catch (Exception ex)
-        {
-            runProvenance = new CallProvenance { StoreErrors = [$"provenance: {ex.GetType().Name}: {ex.Message}"] };
-        }
-        meta = meta with { Provenance = runProvenance };
+        meta = meta with { Provenance = RunProvenance(prepared) };
 
         string? note = null;
         List<StepResult> results;
@@ -205,6 +156,132 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     /// <summary>record_verdicts: 지적마다 판정을 호출 기록 옆 verdicts.jsonl에. reason 상한은 run_mode reason과 같다.</summary>
     public string RecordVerdicts(string runId, IReadOnlyList<VerdictItem>? items) =>
         VerdictRecorder.Record(runId, items, Options.Records.MaxReasonChars, runner.LogPath);
+
+    /// <summary>모드 하나의 실행 계획: 읽은 modes.json · 지침 · 에이전트 교체 · 단계별 에이전트와 시스템 프롬프트.</summary>
+    private sealed record PreparedPlan(ModeStore.Loaded Loaded, GuidelinesLoader.Result Guidelines, Dictionary<string, string> Swap, List<PlannedStep> Steps);
+
+    /// <summary>
+    /// 단계마다 에이전트(교체 반영)·시스템 프롬프트를 정한다. run_mode와 --golden이 같은 조립을 쓴다
+    /// (평가가 실제 실행과 다른 프롬프트로 돌면 의미가 없으므로). 문제가 있으면 Plan은 null, Error는 '['로 시작하는 문구.
+    /// </summary>
+    private (PreparedPlan? Plan, string? Error) BuildPlan(ModeStore.Loaded loaded, string modeName, ModeDefinition mode, IReadOnlyList<string>? agentOverrides)
+    {
+        var (swap, swapError) = ParseOverrides(agentOverrides, mode);
+        if (swapError is not null) return (null, $"[모드 '{modeName}'] {swapError}");
+
+        GuidelinesLoader.Result guidelines;
+        try { guidelines = GuidelinesLoader.Load(Options); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // 지침이 빠진 채 보내면 리뷰 결과가 달라지므로 조용히 넘어가지 않고 거절한다 (실행 횟수 차감 전).
+            return (null, $"[리뷰 지침 읽기 실패] {ex.GetType().Name}: {ex.Message} 파일을 닫거나 확인한 뒤 다시 호출하세요.");
+        }
+
+        var plan = new List<PlannedStep>();
+        foreach (var step in mode.Steps)
+        {
+            var agentName = swap.TryGetValue(step.Agent, out var to) ? to
+                          : swap.TryGetValue("*", out var all) ? all
+                          : step.Agent;
+
+            if (!catalog.TryGet(agentName, out var agent))
+                return (null, $"[모드 '{modeName}'] 에이전트 '{agentName}' 사용 불가: {catalog.WhyUnavailable(agentName)}");
+
+            (string Prompt, bool UseGuidelines, FindingFormat? Output) role;
+            try { role = ModeStore.ResolveRole(loaded, step.Role); }
+            catch (ModeConfigException ex) { return (null, $"[모드 '{modeName}'] {ex.Message}"); }
+
+            if (step.WebSearch is { } search)
+            {
+                if (search.Problem() is { } searchProblem) return (null, $"[모드 '{modeName}'] {step.Role}@{agentName}: {searchProblem}");
+                if (!string.Equals(agent.ProviderOptions?.Type, OpenAIResponsesProvider.TypeName, StringComparison.OrdinalIgnoreCase))
+                    return (null, $"[모드 '{modeName}'] {step.Role}@{agentName}: WebSearch는 제공사 Type이 '{OpenAIResponsesProvider.TypeName}'인 에이전트에서만 됩니다 " +
+                                  $"(지금 '{agent.ProviderOptions?.Type}'). appsettings의 웹검색용 에이전트로 바꾸세요.");
+            }
+
+            if (role.Output is not null && step.WebSearch is not null)
+                return (null, $"[모드 '{modeName}'] {step.Role}@{agentName}: 구조화 출력(Output)과 WebSearch는 함께 쓸 수 없습니다 (웹검색 경로는 구조화 출력을 지원하지 않음).");
+
+            // 시스템 프롬프트 = 역할 + 출력 형식(구조화 출력) + 공통 규칙 (+ 웹검색 규칙) (+ 지침). 매번 같은 앞부분이라 제공사 프롬프트 캐시에 걸린다.
+            plan.Add(new PlannedStep(step, agent,
+                role.Prompt + (role.Output?.PromptText ?? "") + Prompts.CommonRules + (step.WebSearch is null ? "" : Prompts.WebSearchRules) + (role.UseGuidelines ? guidelines.Text : ""),
+                ProvenanceBuilder.ForStep(guidelines, role.UseGuidelines), mode.PromptCache, role.Output));
+        }
+        return (new PreparedPlan(loaded, guidelines, swap, plan), null);
+    }
+
+    /// <summary>이 실행의 modes.json · 서버 설정 · 지침 해시와 원문 저장. 실패는 기록에만 남기고 실행은 계속한다.</summary>
+    private CallProvenance RunProvenance(PreparedPlan plan)
+    {
+        try
+        {
+            return ProvenanceBuilder.ForRun(
+                plan.Loaded, plan.Guidelines, plan.Steps.Any(p => p.Guidelines.Attached),
+                catalog.SettingsPath, catalog.SettingsBytes, catalog.ReloadError, Options.Records, runner.LogPath);
+        }
+        catch (Exception ex)
+        {
+            return new CallProvenance { StoreErrors = [$"provenance: {ex.GetType().Name}: {ex.Message}"] };
+        }
+    }
+
+    /// <summary>
+    /// 골든 세트 실행 (--golden run): 고정된 프롬프트 원문을 run_mode와 같은 시스템 프롬프트·에이전트로 보낸다.
+    /// 세션 실행 한도·ownReview·context 첨부는 쓰지 않는다 (첨부는 프롬프트 원문에 이미 들어 있음). 비용 상한은 그대로 본다.
+    /// 호출 기록의 Tool은 <paramref name="tool"/>, Mode는 원래 모드 이름이다.
+    /// </summary>
+    public async Task<(string? RunId, StepResult? Result, string? Error)> RunFixedPromptAsync(
+        string modeName, string prompt, IReadOnlyList<string>? agentOverrides, string tool, string reason, CancellationToken ct)
+    {
+        var (plan, error) = PlanFixedPrompt(modeName, agentOverrides, prompt.Length);
+        if (error is not null) return (null, null, error);
+
+        var runId = Guid.NewGuid().ToString("N")[..10];
+        var meta = new CallMeta(null, []) { Reason = reason, Provenance = RunProvenance(plan!) };
+        var step = plan!.Steps[0];
+        var call = NewCall(runId, modeName, 1, step, step.Instructions, new BuiltPrompt(prompt, null), meta) with { Tool = tool };
+        return (runId, await runner.RunStepAsync(call, ct), null);
+    }
+
+    /// <summary>
+    /// --golden run의 실행 전 확인: 보낼 역할·에이전트·모델. 외부 호출 없음.
+    /// 실행 때와 같은 검사(모드·에이전트·구조화 출력·입력 상한·비용 상한)를 해서, 통과하면 실행도 설정 이유로는 거절되지 않는다.
+    /// </summary>
+    public ((string Role, string Agent, string Model)? Step, string? Error) PreviewFixedPrompt(string modeName, IReadOnlyList<string>? agentOverrides, int promptLength)
+    {
+        var (plan, error) = PlanFixedPrompt(modeName, agentOverrides, promptLength);
+        return error is not null ? (null, error) : ((plan!.Steps[0].Def.Role, plan.Steps[0].Agent.Name, plan.Steps[0].Agent.Model), null);
+    }
+
+    /// <summary>호출 기록 파일 (골든 결과에 provenance를 붙일 때 같은 파일을 읽도록).</summary>
+    public string LogPath => runner.LogPath;
+
+    /// <summary>
+    /// 점수는 한 단계의 구조화 지적으로 매기므로 단계가 하나이고 Output이 있는 모드만 받는다 (없으면 비용을 쓰고도 채점하지 못함).
+    /// 입력 상한(MaxInputChars)과 비용 상한은 run_mode와 같다.
+    /// </summary>
+    private (PreparedPlan? Plan, string? Error) PlanFixedPrompt(string modeName, IReadOnlyList<string>? agentOverrides, int promptLength)
+    {
+        ModeStore.Loaded loaded;
+        try { loaded = store.Load(); }
+        catch (ModeConfigException ex) { return (null, $"[모드 설정 오류] {ex.Message}"); }
+
+        if (!loaded.File.Modes.TryGetValue(modeName, out var mode))
+            return (null, $"[알 수 없는 모드 '{modeName}'] 사용 가능: {string.Join(", ", loaded.File.Modes.Keys)}");
+        if (mode.Steps.Count != 1 || mode.Flow == ModeFlow.Debate)
+            return (null, $"[모드 '{modeName}'] 골든 실행은 단계가 하나인 모드만 됩니다 (지금 {mode.Steps.Count}단계, {mode.Flow}).");
+
+        var maxChars = mode.MaxInputChars ?? Options.Budget.MaxInputChars;
+        if (maxChars > 0 && promptLength > maxChars)
+            return (null, $"[입력이 너무 깁니다] {promptLength:N0}자 / 상한 {maxChars:N0}자 (모드 '{modeName}').");
+
+        var (plan, error) = BuildPlan(loaded, modeName, mode, agentOverrides);
+        if (error is not null) return (null, error);
+        if (plan!.Steps[0].Output is null)
+            return (null, $"[모드 '{modeName}'] 역할 '{plan.Steps[0].Def.Role}'에 구조화 출력(Output)이 없어 채점할 수 없습니다.");
+        if (CheckBudget(plan.Steps.Select(p => p.Agent)) is { } budgetMessage) return (null, budgetMessage);
+        return (plan, null);
+    }
 
     /// <summary>실행 계획의 한 단계. Guidelines는 이 단계 역할에 지침을 붙였는지 (기록용).</summary>
     private sealed record PlannedStep(StepDefinition Def, AgentEntry Agent, string Instructions, GuidelinesProvenance Guidelines, PromptCacheMode? PromptCache, FindingFormat? Output);

@@ -11,7 +11,8 @@ namespace HB.Orchestration.Agents;
 public sealed class SessionTracker
 {
     private readonly ILogger<SessionTracker> _logger;
-    private readonly string _folder;
+    /// <summary>null이면 상태 파일을 남기지 않는다 (<see cref="Unsaved"/>).</summary>
+    private readonly string? _folder;
     private readonly Dictionary<string, int> _runs = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _gate = new();
 
@@ -21,8 +22,14 @@ public sealed class SessionTracker
 
     public SessionTracker(ILogger<SessionTracker> logger) : this(logger, SessionFiles.DefaultFolder) { }
 
-    /// <param name="folder">세션 상태 파일 폴더. 테스트에서 실제 폴더를 건드리지 않도록 바꿔 끼운다.</param>
-    internal SessionTracker(ILogger<SessionTracker> logger, string folder)
+    /// <summary>
+    /// 상태 파일을 쓰지 않는 추적기. MCP 서버가 아닌 일회성 실행(--golden)용이다.
+    /// 대시보드 '세션' 화면에 Claude Code 세션처럼 보이지 않게 한다.
+    /// </summary>
+    public static SessionTracker Unsaved(ILogger<SessionTracker> logger) => new(logger, folder: null);
+
+    /// <param name="folder">세션 상태 파일 폴더. 테스트에서 실제 폴더를 건드리지 않도록 바꿔 끼운다. null이면 파일을 쓰지 않는다.</param>
+    internal SessionTracker(ILogger<SessionTracker> logger, string? folder)
     {
         _logger = logger;
         _folder = folder;
@@ -37,6 +44,7 @@ public sealed class SessionTracker
     /// <summary>대시보드가 남긴 초기화 요청을 반영한다. 실행·조회 전에 매번 부른다.</summary>
     public void ApplyResets()
     {
+        if (_folder is null) return;
         var requests = SessionFiles.TakeResetRequests(_folder, Pid);
         if (requests.Count == 0) return;
 
@@ -71,11 +79,15 @@ public sealed class SessionTracker
     }
 
     /// <summary>서버 종료 시 상태 파일을 지운다 (강제 종료로 남은 파일은 대시보드가 정리).</summary>
-    public void Remove() => SessionFiles.Delete(_folder, Pid);
+    public void Remove()
+    {
+        if (_folder is not null) SessionFiles.Delete(_folder, Pid);
+    }
 
     // _gate 안에서만 호출
     private void Save()
     {
+        if (_folder is null) return;
         try
         {
             SessionFiles.Write(_folder, new SessionState
