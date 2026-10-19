@@ -19,6 +19,7 @@ import re
 import subprocess
 import sys
 
+sys.dont_write_bytecode = True  # 훅 폴더에 __pycache__를 남기지 않는다 (저장소에 섞이지 않게)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # -I는 스크립트 폴더를 경로에 넣지 않는다
 from hook_common import CD, CHAIN, has_substitution, native_path, read_input, scan, shell_of, strip_bodies, tokenize  # noqa: E402
 
