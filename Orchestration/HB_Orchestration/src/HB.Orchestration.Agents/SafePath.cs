@@ -20,10 +20,16 @@ public static class SafePath
 
     /// <param name="rootDir">프로젝트 루트. 정규화는 여기서 한다.</param>
     /// <returns>실제 경로, 또는 오류 메시지 (경로 이름은 붙이지 않음 — 호출부가 붙인다).</returns>
-    public static (string? FullPath, string? Error) Resolve(string? raw, string rootDir, IEnumerable<string> denyPatterns, Access access)
+    /// <param name="writeDenyPatterns">
+    /// 쓰기에만 적용하는 금지 목록 (save_result: ContextOptions.AllWriteDenyPatterns). 읽기에서는 무시한다.
+    /// 쓰기에서 null이면 내장 목록(ContextOptions.BuiltInWriteDenyPatterns)을 쓴다 — 넘기는 것을 잊어도 막는 쪽으로 (/cross-review 1b661e26fe).
+    /// </param>
+    public static (string? FullPath, string? Error) Resolve(string? raw, string rootDir, IEnumerable<string> denyPatterns, Access access,
+        IEnumerable<string>? writeDenyPatterns = null)
     {
+        if (access == Access.Write) writeDenyPatterns ??= ContextOptions.BuiltInWriteDenyPatterns;
         // 권한 없는 폴더 열거·잠긴 항목 같은 파일 시스템 오류도 예외가 아니라 오류 메시지로 돌려준다.
-        try { return Check(raw, rootDir, denyPatterns, access); }
+        try { return Check(raw, rootDir, denyPatterns, access, access == Access.Write ? writeDenyPatterns : null); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         { return (null, $"경로 확인 실패 ({ex.GetType().Name}: {ex.Message})"); }
     }
@@ -54,7 +60,8 @@ public static class SafePath
         return null;
     }
 
-    private static (string? FullPath, string? Error) Check(string? raw, string rootDir, IEnumerable<string> denyPatterns, Access access)
+    private static (string? FullPath, string? Error) Check(string? raw, string rootDir, IEnumerable<string> denyPatterns, Access access,
+        IEnumerable<string>? writeDenyPatterns)
     {
         if (string.IsNullOrWhiteSpace(raw)) return (null, "경로가 비어 있습니다.");
         if (Path.IsPathRooted(raw)) return (null, "프로젝트 루트 기준 상대 경로만 받습니다.");
@@ -98,6 +105,9 @@ public static class SafePath
                 ? $"외부 전송 금지 파일입니다 (DenyPatterns '{denied}')."
                 : $"보호된 파일이라 쓸 수 없습니다 (DenyPatterns '{denied}').");
         }
+
+        if (writeDenyPatterns?.FirstOrDefault(p => GlobToRegex(p).IsMatch(relative)) is { } writeDenied)
+            return (null, $"쓰기 금지 파일입니다 (WriteDenyPatterns '{writeDenied}'). 외부 응답은 실행·설정 파일에 쓰지 않습니다 — docs/·review_tmp/ 등에 저장한 뒤 옮기세요.");
 
         return (full, null);
     }

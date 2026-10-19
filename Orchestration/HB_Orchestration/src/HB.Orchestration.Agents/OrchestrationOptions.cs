@@ -207,6 +207,40 @@ public sealed class ContextOptions
     public IEnumerable<string> AllDenyPatterns => BuiltInDenyPatterns.Concat(DenyPatterns);
 
     /// <summary>
+    /// save_result가 쓰지 않을 파일을 추가한다 (쓰기에만 적용, 형식은 DenyPatterns와 같음).
+    /// <see cref="BuiltInWriteDenyPatterns"/>와 DenyPatterns(비밀 파일)는 항상 함께 적용된다.
+    /// </summary>
+    public List<string> WriteDenyPatterns { get; set; } = [];
+
+    /// <summary>
+    /// 쓰기 전용 내장 금지 목록: 외부 LLM 응답이 실행·설정에 영향을 주는 파일로 들어가지 않게 한다 (계획서 2026-10-19_save_result-쓰기-보강).
+    /// Claude Code·에이전트 설정, 저장소·CI, IDE 실행 설정, 빌드·패키지, 실행 파일·스크립트, Unity 컴파일 대상.
+    /// 응답 코드는 docs/·review_tmp/ 등에 저장한 뒤 지휘자·사람이 합친다.
+    /// </summary>
+    /// 폴더 기준 패턴은 "**/"로 시작해 프로젝트 루트 아래 어느 깊이에서든 걸린다 (Unity 프로젝트가 작업 폴더의 하위 폴더일 수 있음 — /cross-review 1b661e26fe).
+    public static readonly IReadOnlyList<string> BuiltInWriteDenyPatterns =
+    [
+        // Claude Code·에이전트 설정과 지침
+        "**/.claude/**", ".mcp.json", "CLAUDE.md", "CLAUDE.local.md", "REVIEW_GUIDELINES.md", "hb-modes.json",
+        "AGENTS.md", "GEMINI.md", "**/.cursor/**",
+        // 저장소·CI·git 훅
+        "**/.github/**", ".gitattributes", ".gitmodules", "**/.husky/**", "**/.githooks/**", ".pre-commit-config.yaml",
+        // IDE 실행 설정
+        "**/.vscode/**", "**/.idea/**",
+        // 빌드·패키지
+        "*.csproj", "*.sln", "*.slnx", "*.props", "*.targets", "global.json", "nuget.config", "package.json",
+        "**/Packages/manifest.json", "**/Packages/packages-lock.json", "**/ProjectSettings/**",
+        // 실행 파일·스크립트 (Windows Script Host 포함)
+        "*.ps1", "*.psm1", "*.psd1", "*.bat", "*.cmd", "*.sh", "*.py", "*.exe", "*.dll", "*.com", "*.scr", "*.msi",
+        "*.vbs", "*.vbe", "*.js", "*.jse", "*.wsf", "*.wsh", "*.hta", "*.reg", "*.lnk",
+        // Unity 컴파일 대상 (csc.rsp는 컴파일러 인수)
+        "**/Assets/**/*.cs", "**/Packages/**/*.cs", "**/Assets/**/*.asmdef", "**/Assets/**/*.asmref",
+        "**/Packages/**/*.asmdef", "**/Packages/**/*.asmref", "*.rsp",
+    ];
+
+    public IEnumerable<string> AllWriteDenyPatterns => BuiltInWriteDenyPatterns.Concat(WriteDenyPatterns);
+
+    /// <summary>
     /// 프로젝트 루트 밖에서 context로 읽을 수 있는 추가 루트 (이름 → 절대 경로). 기본은 비어 있음 = 기존 동작.
     /// context에서 "@이름/상대경로"로 지정한다. 루트마다 같은 검사(루트 밖·링크·DenyPatterns)를 적용하고, 읽기 전용이다
     /// (save_result는 추가 루트에 쓰지 않음). 이름은 대소문자를 구분하지 않는다 — 설정 시스템이 키를 대소문자 무시로 다루므로.

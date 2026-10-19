@@ -198,9 +198,9 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         }
     }
 
-    /// <summary>save_result: 기록의 응답 원문을 파일로. 쓰기 금지 패턴은 context 전송 금지 목록과 같다.</summary>
+    /// <summary>save_result: 기록의 응답 원문을 파일로. 쓰기 금지 = context 전송 금지 목록(비밀) + 쓰기 전용 금지 목록(실행·설정 파일).</summary>
     public string SaveResult(string runId, int step, string path, int? codeBlock, bool overwrite) =>
-        ResultSaver.Save(runId, step, path, codeBlock, overwrite, Options.Context.AllDenyPatterns);
+        ResultSaver.Save(runId, step, path, codeBlock, overwrite, Options.Context.AllDenyPatterns, writeDenyPatterns: Options.Context.AllWriteDenyPatterns);
 
     /// <summary>record_verdicts: 지적마다 판정을 호출 기록 옆 verdicts.jsonl에. reason 상한은 run_mode reason과 같다.</summary>
     public string RecordVerdicts(string runId, IReadOnlyList<VerdictItem>? items) =>

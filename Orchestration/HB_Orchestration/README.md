@@ -98,6 +98,7 @@ dotnet build HB_Orchestration.slnx
 | `Context.MaxRanges` | `context` 범위 개수 상한 (기본 30) |
 | `Context.MaxFileBytes` | 읽기 전에 확인하는 파일 크기 상한 (기본 2,000,000바이트) |
 | `Context.DenyPatterns` | 외부로 보내지 않을 파일 glob **추가분**. 내장 목록(`.env`, `*.pem`, `*.key`, `*.keystore`, `*.jks`, `*.p12`, `*.pfx`, `*.mobileprovision`, `credentials*`, `secrets*`, `.git/**` 등)은 항상 적용 |
+| `Context.WriteDenyPatterns` | save_result가 쓰지 않을 파일 glob **추가분** (쓰기에만 적용). 내장 쓰기 금지 목록(실행·설정 파일, 아래 save_result 절)과 `DenyPatterns`는 항상 적용 |
 | `Context.ExtraRoots` | 프로젝트 루트 밖에서 `context`로 **읽을** 수 있는 추가 루트 (`이름 → 절대 경로`, 기본 비어 있음). 아래 "추가 루트" 참고 |
 | `Images.MaxCount` · `Images.MaxBytes` · `Images.MaxDimension` | `run_mode` `images` 상한: 장수(기본 20), 장당 바이트(기본 2,000,000), 긴 변 px(기본 1024). 서버는 이미지를 줄이지 않고 넘으면 거절한다 (축소는 `image_prep.py shrink`). 이미지는 `MaxInputChars`에 들어가지 않고, 토큰은 실제 사용량으로 일일 한도·비용에 잡힌다 |
 | `Providers.<이름>.ImageDetail` | 이미지 부분에 실을 `detail` 값 (OpenAI: `auto`·`low`·`high`·`original`). 비우면 보내지 않음 (= 제공사 기본값). Gemini OpenAI 호환 엔드포인트는 이 필드를 문서화하지 않아 제공사 단위로 둔다 |
@@ -339,8 +340,18 @@ calls.jsonl의 응답 원문을 그대로 저장한다. Claude가 응답을 다�
 - 같은 단계에 시도가 여럿이면 성공한 시도를 쓴다.
 - `path`는 그 기록의 프로젝트 폴더(`ProjectDir`) 기준 상대 경로다. `context`와 같은 규칙으로 절대 경로·루트 밖·링크 경유·`DenyPatterns`를 거절한다. 없는 하위 폴더는 만든다.
 - 추가 루트(`@이름/…`)에는 쓰지 않는다. `@`로 시작하는 경로는 등록 여부와 관계없이 `[저장 불가]`.
-- `codeBlock: N`이면 응답 안 N번째 코드 블록(```` ``` ```` · `~~~`)의 내용만 저장한다.
+- `codeBlock: N`이면 응답 안 N번째 코드 블록(```` ``` ```` · `~~~`)의 내용만 저장한다. 닫히지 않은 블록(응답 끝까지)이면 저장은 하고 결과에 `— 닫히지 않은 블록 (응답이 잘렸을 수 있음)`을 붙인다.
 - 이미 있는 파일은 `overwrite: true`일 때만 덮어쓴다.
+- **쓰기 전용 금지 목록** (외부 응답이 실행·설정에 영향을 주는 파일로 들어가지 않게, 비밀 파일 목록에 더해 쓰기에만 적용). 폴더 기준 패턴은 **어느 깊이에서든** 걸린다 (Unity 프로젝트가 작업 폴더의 하위 폴더여도):
+  - Claude Code·에이전트 설정과 지침: `**/.claude/**`, `.mcp.json`, `CLAUDE.md`, `CLAUDE.local.md`, `REVIEW_GUIDELINES.md`, `hb-modes.json`, `AGENTS.md`, `GEMINI.md`, `**/.cursor/**`
+  - 저장소·CI·git 훅: `**/.github/**`, `.gitattributes`, `.gitmodules`, `**/.husky/**`, `**/.githooks/**`, `.pre-commit-config.yaml`
+  - IDE: `**/.vscode/**`, `**/.idea/**`
+  - 빌드·패키지: `*.csproj`, `*.sln`, `*.slnx`, `*.props`, `*.targets`, `global.json`, `nuget.config`, `package.json`, `**/Packages/manifest.json`, `**/Packages/packages-lock.json`, `**/ProjectSettings/**`
+  - 실행 파일·스크립트(어디서든, `docs/`·`review_tmp/` 포함): `*.ps1` `*.psm1` `*.psd1` `*.bat` `*.cmd` `*.sh` `*.py` `*.exe` `*.dll` `*.com` `*.scr` `*.msi` `*.vbs` `*.vbe` `*.js` `*.jse` `*.wsf` `*.wsh` `*.hta` `*.reg` `*.lnk`
+  - Unity 컴파일 대상: `**/Assets/**/*.cs`, `**/Packages/**/*.cs`, `*.asmdef`·`*.asmref`(Assets·Packages 아래), `*.rsp`(csc.rsp 컴파일러 인수)
+  - 거절 문구 `쓰기 금지 파일입니다 (WriteDenyPatterns '…')`. 응답 코드는 `docs/`·`review_tmp/` 등에 `.md`·`.cs`·`.txt`로 저장한 뒤 합친다. 추가분은 `Context.WriteDenyPatterns`. 호출부가 목록을 넘기지 않으면 내장 목록이 적용된다 (열리는 쪽이 아니라 막는 쪽).
+- 쓰기는 같은 폴더의 짧은 임시 파일(`.<guid>.tmp`)에 다 쓴 뒤 이동으로 교체한다. 실패해도 잘린 파일이 남지 않고 `overwrite: true`의 원래 내용은 그대로다. `overwrite: false`이고 대상이 있으면 쓰기 전에 "이미 있습니다"로 거절하고, 확인과 이동 사이에 생긴 경우도 이동 단계에서 같은 문구로 막는다. 쓰기 단계의 실패는 "쓰기 실패".
+  - 이동 방식이라 원래 파일의 속성·생성 시각·대체 데이터 스트림은 이어지지 않고, 다른 프로그램이 삭제 공유 없이 열고 있으면 덮어쓰기가 "쓰기 실패"가 된다 (의도된 동작).
 - UTF-8(BOM 없음)으로 저장하고 `저장: <경로> (n바이트, SHA-256 …)`을 돌려준다. 실패는 `[저장 불가] …`.
 - 이 도구로 MCP 도구는 4개가 된다. 도구 설명이 컨텍스트에 늘 올라가므로 설명은 한 문장으로 짧게 두었다.
 

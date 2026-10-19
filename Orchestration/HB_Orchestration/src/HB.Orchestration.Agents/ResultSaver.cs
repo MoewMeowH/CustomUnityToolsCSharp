@@ -14,11 +14,12 @@ public static class ResultSaver
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
     /// <param name="codeBlock">응답 안 N번째 코드 블록만 저장 (1부터). null이면 응답 전체.</param>
-    /// <param name="denyPatterns">쓰기 금지 패턴 (context 전송 금지 목록과 같다).</param>
+    /// <param name="denyPatterns">쓰기 금지 패턴 (context 전송 금지 목록과 같다 — 비밀 파일).</param>
     /// <param name="logPath">호출 기록 파일. null이면 기본 경로.</param>
+    /// <param name="writeDenyPatterns">쓰기 전용 금지 패턴 (실행·설정 파일, ContextOptions.AllWriteDenyPatterns).</param>
     public static string Save(
         string? runId, int step, string? path, int? codeBlock, bool overwrite,
-        IEnumerable<string> denyPatterns, string? logPath = null)
+        IEnumerable<string> denyPatterns, string? logPath = null, IEnumerable<string>? writeDenyPatterns = null)
     {
         if (string.IsNullOrWhiteSpace(runId)) return "[저장 불가] runId가 비어 있습니다. run_mode 결과 첫 줄의 runId를 넘기세요.";
         if (step < 1) return "[저장 불가] step은 1부터입니다.";
@@ -56,33 +57,58 @@ public static class ResultSaver
         var blockNote = "";
         if (codeBlock is { } n)
         {
-            var count = CodeFences.Find(content).Count;
-            if (CodeFences.Content(content, n) is not { } block)
-                return $"[저장 불가] 응답에 코드 블록이 {count}개라 {n}번째가 없습니다.";
-            content = block;
-            blockNote = $", 코드 블록 {n}/{count}";
+            var blocks = CodeFences.Find(content);
+            if (n > blocks.Count)
+                return $"[저장 불가] 응답에 코드 블록이 {blocks.Count}개라 {n}번째가 없습니다.";
+            var b = blocks[n - 1];
+            content = content[b.ContentStart..b.ContentEnd];
+            // 닫히지 않은 펜스는 응답 끝까지를 블록으로 본다 — 출력 상한에서 잘린 응답일 수 있으니 저장은 하되 알린다.
+            blockNote = $", 코드 블록 {n}/{blocks.Count}" + (b.Closed ? "" : " — 닫히지 않은 블록 (응답이 잘렸을 수 있음)");
         }
 
-        // ── 경로 검사 (context와 같은 규칙, 루트는 기록의 ProjectDir) ───────────
-        var (full, error) = SafePath.Resolve(path, record.ProjectDir, denyPatterns, SafePath.Access.Write);
+        // ── 경로 검사 (context와 같은 규칙 + 쓰기 전용 금지 목록, 루트는 기록의 ProjectDir) ───────────
+        var (full, error) = SafePath.Resolve(path, record.ProjectDir, denyPatterns, SafePath.Access.Write, writeDenyPatterns);
         if (error is not null) return $"[저장 불가] '{path}': {error}";
 
+        // ── 원자적 쓰기: 같은 폴더의 임시 파일에 다 쓴 뒤 이동으로 교체한다 ──────────
+        // 실패해도 잘린 파일이 남지 않고, overwrite=true의 원래 내용은 이동이 성공할 때까지 그대로다.
+        // overwrite=false의 이동은 대상이 있으면 실패하므로 확인과 생성 사이에 생긴 파일도 덮지 않는다.
         var bytes = Utf8NoBom.GetBytes(content);
+        var exists = $"[저장 불가] '{path}'이(가) 이미 있습니다. 덮어쓰려면 overwrite=true로 다시 호출하세요.";
+        // 미리 확인해 쓸 필요 없는 쓰기·flush를 하지 않는다. 확인과 이동 사이에 생긴 파일은 이동(overwrite=false)이 막는다.
+        if (!overwrite && File.Exists(full)) return exists;
+
+        string? temp = null;
+        var moving = false;
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(full!)!);
-
-            // overwrite=false면 CreateNew: 존재 확인과 생성이 한 번에 일어나 그 사이에 생긴 파일도 덮지 않는다.
-            using var fs = new FileStream(full!, overwrite ? FileMode.Create : FileMode.CreateNew, FileAccess.Write, FileShare.None);
-            fs.Write(bytes);
+            // 대상 이름에 덧붙이지 않는다: 긴 파일 이름에서 구성 요소 길이 제한(255)을 넘기지 않도록 (/cross-review 1b661e26fe).
+            temp = Path.Combine(Path.GetDirectoryName(full!)!, $".{Guid.NewGuid():N}.tmp");
+            using (var fs = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                fs.Write(bytes);
+                fs.Flush(flushToDisk: true);
+            }
+            moving = true;
+            File.Move(temp, full!, overwrite);
+            temp = null;
         }
-        catch (IOException) when (!overwrite && File.Exists(full))
+        catch (IOException) when (moving && !overwrite && File.Exists(full))
         {
-            return $"[저장 불가] '{path}'이(가) 이미 있습니다. 덮어쓰려면 overwrite=true로 다시 호출하세요.";
+            // 임시 파일은 다 썼고 이동만 대상이 생겨서 실패 — 진짜 "이미 있음" (쓰기 단계의 실패는 아래 "쓰기 실패")
+            return exists;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return $"[저장 불가] '{path}': 쓰기 실패 ({ex.GetType().Name}: {ex.Message}).";
+        }
+        finally
+        {
+            if (temp is not null)
+            {
+                try { File.Delete(temp); } catch (Exception) { /* 임시 파일 정리 실패는 결과를 바꾸지 않는다 */ }
+            }
         }
 
         var relative = Path.GetRelativePath(record.ProjectDir, full!).Replace('\\', '/');

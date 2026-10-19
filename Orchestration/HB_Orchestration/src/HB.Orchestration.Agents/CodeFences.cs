@@ -12,7 +12,8 @@ public static class CodeFences
     /// <param name="ContentStart">내용 시작 (여는 펜스 줄 다음).</param>
     /// <param name="ContentEnd">내용 끝 (닫는 펜스 줄 시작, 닫히지 않았으면 텍스트 끝). 내용은 원문 그대로 [ContentStart, ContentEnd).</param>
     /// <param name="FenceEnd">블록 끝 (닫는 펜스 줄 다음).</param>
-    public readonly record struct Block(int FenceStart, int ContentStart, int ContentEnd, int FenceEnd);
+    /// <param name="Closed">닫는 펜스가 있었는지. false면 응답 끝까지를 블록으로 본 것이다 (출력 상한에서 잘린 응답일 수 있음).</param>
+    public readonly record struct Block(int FenceStart, int ContentStart, int ContentEnd, int FenceEnd, bool Closed = true);
 
     public static List<Block> Find(string text)
     {
@@ -55,7 +56,7 @@ public static class CodeFences
             pos = next;
         }
 
-        if (fenceLength > 0) blocks.Add(new Block(fenceStart, contentStart, text.Length, text.Length));
+        if (fenceLength > 0) blocks.Add(new Block(fenceStart, contentStart, text.Length, text.Length, Closed: false));
         return blocks;
     }
 
