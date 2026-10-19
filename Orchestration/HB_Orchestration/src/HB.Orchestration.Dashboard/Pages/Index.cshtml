@@ -147,7 +147,7 @@
                         @if (c.Files.Count > 0) { <span class="muted"> · 파일 @c.Files.Count</span> }
                         @if (c.Context.Count > 0) { <span class="muted"> · 첨부 @c.Context.Count</span> }
                         @if (c.Images is { Count: > 0 } imgs) { <span class="muted"> · 이미지 @imgs.Count</span> }
-                        @if (c.WebSearch is { } search) { <span class="@(search.Unverified.Count > 0 ? "err" : "muted")"> · 검색 @search.Calls@(search.Unverified.Count > 0 ? $" (출처 의심 {search.Unverified.Count})" : "")</span> }
+                        @if (c.WebSearch is { } search) { <span class="@(search.Unverified.Count > 0 ? "err" : "muted")"> · 검색 @search.Calls@(search.SearchActions is { } billed && billed != search.Calls ? $" (청구 추정 {billed})" : "")@(search.Unverified.Count > 0 ? $" (출처 의심 {search.Unverified.Count})" : "")</span> }
                     </td>
                     <td class="num">@(c.InputTokens?.ToString("N0") ?? "-")</td>
                     <td class="num">@(c.OutputTokens?.ToString("N0") ?? "-")</td>

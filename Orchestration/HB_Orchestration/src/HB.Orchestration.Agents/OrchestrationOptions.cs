@@ -178,6 +178,7 @@ public sealed class ModelPrice
     /// 한 기록의 USD 비용. 입력 토큰에는 캐시 읽기·쓰기 토큰이 포함되어 있으므로
     /// (입력 - 읽기 - 쓰기) × 입력 단가 + 읽기 × 캐시 단가 + 쓰기 × 캐시 쓰기 단가 + 출력 × 출력 단가.
     /// 쓰기 토큰을 기록하기 전의 호출(CacheWriteTokens null)은 쓰기 0으로 계산한다.
+    /// 웹검색은 search 동작 수(WebSearchRecord.BilledCalls, 없으면 모든 동작 수)로 계산한다.
     /// </summary>
     public decimal CostOf(CallRecord r)
     {
@@ -188,7 +189,7 @@ public sealed class ModelPrice
              + cached / 1_000_000m * (CachedInputPerMillion ?? InputPerMillion)
              + written / 1_000_000m * (CacheWritePerMillion ?? InputPerMillion)
              + (r.OutputTokens ?? 0) / 1_000_000m * OutputPerMillion
-             + (r.WebSearch?.Calls ?? 0) / 1_000m * (WebSearchPerThousand ?? 0);
+             + (r.WebSearch?.BilledCalls ?? 0) / 1_000m * (WebSearchPerThousand ?? 0);
     }
 }
 

@@ -263,7 +263,7 @@
 @if (c.WebSearch is { } ws)
 {
     <section class="panel files">
-        <span class="muted" style="font-size:12.5px">웹검색 — 검색 도구 호출 @(ws.Calls)회 · 검색어 @ws.Queries.Count · 참고 URL @ws.Sources.Count · 인용 @ws.Citations.Count</span>
+        <span class="muted" style="font-size:12.5px">웹검색 — 검색 도구 호출 @(ws.Calls)회@(ws.SearchActions is { } billed && billed != ws.Calls ? $" (청구 추정 {billed}회)" : "") · 검색어 @ws.Queries.Count · 참고 URL @ws.Sources.Count · 인용 @ws.Citations.Count</span>
         @if (ws.Unverified.Count > 0)
         {
             <div class="err" style="margin-top:6px">검색 결과에 없는 URL @(ws.Unverified.Count)개 — 에이전트가 지어냈을 수 있음</div>

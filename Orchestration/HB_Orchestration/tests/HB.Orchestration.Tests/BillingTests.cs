@@ -114,6 +114,55 @@ public sealed class BillingTests
         Assert.Equal(1, r18.Ours.Requests);      // gemini 제외
     }
 
+    private static readonly Dictionary<string, ProviderOptions> Providers = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["openai"] = new() { Type = "openai-compatible" },
+        ["openai-web"] = new() { Type = "openai-responses" },
+        ["azure"] = new() { Type = "openai-compatible", Endpoint = "https://api.openai.com/v1/" },
+        ["gemini"] = new() { Type = "openai-compatible", Endpoint = "https://generativelanguage.googleapis.com/v1beta/openai/" },
+        ["local"] = new() { Type = "openai-compatible", Endpoint = "http://localhost:11434/v1" },
+        ["eu"] = new() { Type = "OpenAI-Responses", Endpoint = "https://eu.api.openai.com/v1/" }, // 서버처럼 Type 대소문자 무시 · 지역 엔드포인트
+        ["openai-proxy"] = new() { Type = "openai-compatible", Endpoint = "https://proxy.example/v1/" },
+    };
+
+    [Theory]
+    [InlineData("openai", true)]
+    [InlineData("openai-web", true)]
+    [InlineData("azure", true)]         // 이름이 아니라 Endpoint로 판정
+    [InlineData("eu", true)]
+    [InlineData("gemini", false)]
+    [InlineData("local", false)]
+    [InlineData("openai-proxy", false)] // 설정에 있으면 설정이 이름 규칙보다 먼저
+    [InlineData("unknown", false)]
+    [InlineData("openai-old", true)]    // 설정에서 지운·바꾼 제공사의 예전 기록은 이름 규칙
+    [InlineData(null, true)]            // 제공사 없는 예전 기록 = openai
+    [InlineData("", true)]
+    public void OpenAIBilled_ByTypeAndEndpoint(string? provider, bool expected) =>
+        Assert.Equal(expected, BillingComparer.OpenAIBilled(Providers)(provider));
+
+    [Theory]
+    [InlineData("openai", true)]
+    [InlineData("openai-web", true)]
+    [InlineData("gemini", false)]
+    public void OpenAIBilled_WithoutSettings_ByName(string provider, bool expected) =>
+        Assert.Equal(expected, BillingComparer.OpenAIBilled(null)(provider));
+
+    [Fact]
+    public void Daily_IncludesWebSearchProvider_CountsSearchActions()
+    {
+        var luna = new ModelPrice { InputPerMillion = 1, OutputPerMillion = 1, WebSearchPerThousand = 10 };
+        var calls = new[]
+        {
+            Call("2026-10-18T10:00:00+09:00", 0, 0, 0, provider: "openai-web") with { WebSearch = new WebSearchRecord { Calls = 5, SearchActions = 3 } },
+            Call("2026-10-18T11:00:00+09:00", 0, 0, 0, provider: "openai-web") with { WebSearch = new WebSearchRecord { Calls = 2 } }, // 예전 기록
+        };
+
+        var row = Assert.Single(BillingComparer.Daily(calls, _ => luna, D18, 1, [], [], BillingComparer.OpenAIBilled(Providers)));
+
+        Assert.Equal(2, row.Ours.Requests);
+        Assert.Equal(0.05m, row.Computed); // (3 + 2) / 1000 × 10
+    }
+
     [Fact]
     public void Hourly_BucketsCallsAndUsage()
     {

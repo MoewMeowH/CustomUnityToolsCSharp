@@ -10,7 +10,7 @@ namespace HB.Orchestration.Dashboard.Pages;
 /// 청구·사용량은 버튼(Admin 키) 또는 비용 파일 업로드로만 가져온다 (자동 새로고침과 묶지 않음).
 /// </summary>
 public sealed class BillingModel(
-    IOptions<DashboardOptions> options, CallLogCache log, PricingService pricing, BillingStore store, BillingApi api) : PageModel
+    IOptions<DashboardOptions> options, CallLogCache log, PricingService pricing, BillingStore store, BillingApi api, ModesConfigService modes) : PageModel
 {
     public static readonly string[] Periods = ["7d", "3d", "1d", "1h"];
 
@@ -99,15 +99,16 @@ public sealed class BillingModel(
         var calls = log.All;
         Func<string, Agents.ModelPrice?> price = pricing.PriceOf;
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var billed = BillingComparer.OpenAIBilled(modes.McpOptionsOrDefault().Providers);
         if (HourlyView)
         {
-            Rows = BillingComparer.Hourly(calls, price, DateTimeOffset.UtcNow, Hours, Data.UsageHourly);
+            Rows = BillingComparer.Hourly(calls, price, DateTimeOffset.UtcNow, Hours, Data.UsageHourly, billed);
             var todayLines = Data.Costs.Where(c => c.Day == today).ToList();
             TodayBilled = todayLines.Count > 0 ? todayLines.Sum(c => c.Amount) : null;
         }
         else
         {
-            Rows = BillingComparer.Daily(calls, price, today, Days, Data.Costs, Data.UsageDaily);
+            Rows = BillingComparer.Daily(calls, price, today, Days, Data.Costs, Data.UsageDaily, billed);
         }
     }
 

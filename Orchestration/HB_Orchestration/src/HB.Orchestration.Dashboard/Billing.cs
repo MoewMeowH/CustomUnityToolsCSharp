@@ -249,14 +249,44 @@ public sealed record BillingRow(
     decimal Computed, decimal ComputedAssumed, int UnknownWriteCalls, int UnpricedCalls,
     TokenSum Ours, TokenSum? OpenAI);
 
-/// <summary>우리 기록(openai 호출)과 OpenAI 청구·사용량을 UTC 칸별로 맞춘다. 계산식은 서버 비용 상한과 같은 ModelPrice.CostOf.</summary>
+/// <summary>
+/// 우리 기록(OpenAI 조직으로 청구되는 제공사의 호출)과 OpenAI 청구·사용량을 UTC 칸별로 맞춘다. 계산식은 서버 비용 상한과 같은 ModelPrice.CostOf.
+/// </summary>
 public static class BillingComparer
 {
+    /// <summary>
+    /// OpenAI 조직으로 청구되는 제공사 판정. MCP appsettings의 Providers 중 Type이 openai-compatible·openai-responses이고
+    /// Endpoint가 비었거나 호스트가 api.openai.com(지역 엔드포인트 *.api.openai.com 포함)인 것 (예: openai, 검색 단계 openai-web).
+    /// Gemini·로컬처럼 Endpoint가 다른 OpenAI 호환은 뺀다. 같은 조직의 키인지(ApiKeyEnv)는 보지 않는다 — 단일 조직 사용 전제.
+    /// 설정에 없는 이름(설정을 못 읽었거나, 이름을 바꾸거나 지운 제공사의 예전 기록)은 이름이 openai이거나 openai-로 시작하면 청구 대상.
+    /// 제공사가 비어 있는(null·"") 예전 기록은 openai로 본다.
+    /// </summary>
+    public static Func<string?, bool> OpenAIBilled(IReadOnlyDictionary<string, ProviderOptions>? providers)
+    {
+        var configured = providers ?? new Dictionary<string, ProviderOptions>();
+        var billed = configured.Where(p => IsOpenAIBilled(p.Value)).Select(p => p.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return name =>
+        {
+            if (string.IsNullOrEmpty(name)) name = "openai";
+            if (configured.ContainsKey(name)) return billed.Contains(name);
+            return string.Equals(name, "openai", StringComparison.OrdinalIgnoreCase)
+                || name.StartsWith("openai-", StringComparison.OrdinalIgnoreCase);
+        };
+    }
+
+    private static bool IsOpenAIBilled(ProviderOptions p) =>
+        (string.Equals(p.Type, "openai-compatible", StringComparison.OrdinalIgnoreCase)
+         || string.Equals(p.Type, "openai-responses", StringComparison.OrdinalIgnoreCase))
+        && (string.IsNullOrWhiteSpace(p.Endpoint)
+            || Uri.TryCreate(p.Endpoint, UriKind.Absolute, out var uri)
+               && (string.Equals(uri.Host, "api.openai.com", StringComparison.OrdinalIgnoreCase)
+                   || uri.Host.EndsWith(".api.openai.com", StringComparison.OrdinalIgnoreCase)));
+
     public static List<BillingRow> Daily(IEnumerable<CallRecord> calls, Func<string, ModelPrice?> price,
-        DateOnly lastDayUtc, int days, IReadOnlyList<CostLine> costs, IReadOnlyList<UsageRow> usage)
+        DateOnly lastDayUtc, int days, IReadOnlyList<CostLine> costs, IReadOnlyList<UsageRow> usage, Func<string?, bool>? billedProvider = null)
     {
         var rows = new List<BillingRow>();
-        var openai = OpenAICalls(calls);
+        var openai = OpenAICalls(calls, billedProvider);
         for (var i = days - 1; i >= 0; i--)
         {
             var day = lastDayUtc.AddDays(-i);
@@ -268,10 +298,10 @@ public static class BillingComparer
     }
 
     public static List<BillingRow> Hourly(IEnumerable<CallRecord> calls, Func<string, ModelPrice?> price,
-        DateTimeOffset nowUtc, int hours, IReadOnlyList<UsageRow> usage)
+        DateTimeOffset nowUtc, int hours, IReadOnlyList<UsageRow> usage, Func<string?, bool>? billedProvider = null)
     {
         var rows = new List<BillingRow>();
-        var openai = OpenAICalls(calls);
+        var openai = OpenAICalls(calls, billedProvider);
         var last = new DateTimeOffset(nowUtc.UtcDateTime.Year, nowUtc.UtcDateTime.Month, nowUtc.UtcDateTime.Day, nowUtc.UtcDateTime.Hour, 0, 0, TimeSpan.Zero);
         for (var i = hours - 1; i >= 0; i--)
         {
@@ -281,8 +311,11 @@ public static class BillingComparer
         return rows;
     }
 
-    private static List<CallRecord> OpenAICalls(IEnumerable<CallRecord> calls) =>
-        calls.Where(c => string.Equals(c.Provider, "openai", StringComparison.OrdinalIgnoreCase)).ToList();
+    private static List<CallRecord> OpenAICalls(IEnumerable<CallRecord> calls, Func<string?, bool>? billedProvider)
+    {
+        var billed = billedProvider ?? OpenAIBilled(null);
+        return calls.Where(c => billed(c.Provider)).ToList();
+    }
 
     private static BillingRow Row(DateTimeOffset start, DateTimeOffset end, List<CallRecord> calls, Func<string, ModelPrice?> price,
         decimal? billed, IReadOnlyList<CostLine> items, IReadOnlyList<UsageRow> usage)

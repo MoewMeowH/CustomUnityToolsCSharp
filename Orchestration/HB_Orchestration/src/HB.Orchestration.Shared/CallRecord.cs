@@ -133,12 +133,23 @@ public sealed record CallRecord
 }
 
 /// <summary>
-/// 웹검색 기록. Calls = 검색 도구 호출 수 (search·open_page·find_in_page 동작 모두, 청구 단위로 본다).
+/// 웹검색 기록. Calls = 검색 도구 호출 수 (search·open_page·find_in_page 동작 모두).
 /// Queries = 검색어, Sources = 참고한 URL 전체(web_search_call.action.sources), Citations = 응답 본문에 인용된 URL. 모두 중복 제거, 나온 순서.
 /// </summary>
 public sealed record WebSearchRecord
 {
     public int Calls { get; init; }
+
+    /// <summary>
+    /// search 동작 수 = 청구 단위 (추정: 2026-10-19 기록 71 대 청구 50). 응답 원본을 못 읽었거나 예전 기록이면 null — 비용은 Calls로 계산한다.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? SearchActions { get; init; }
+
+    /// <summary>비용 계산에 쓰는 검색 횟수.</summary>
+    [JsonIgnore]
+    public int BilledCalls => SearchActions ?? Calls;
+
     public IReadOnlyList<string> Queries { get; init; } = [];
     public IReadOnlyList<string> Sources { get; init; } = [];
     public IReadOnlyList<string> Citations { get; init; } = [];

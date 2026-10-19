@@ -37,20 +37,24 @@ public static partial class WebSearchExtractor
                 if (annotation is CitationAnnotation { Url: { } url }) AddDistinct(citations, url.ToString());
         }
 
-        var opened = OpenedPages(raw);
+        var (opened, searchActions, rawCalls) = RawActions(raw);
+        // 원본에서 web_search_call을 하나도 못 찾았는데 메시지에는 검색이 있으면 원본이 응답 일부만 담은 것 — 적게 세지 않게 Calls로 계산.
+        if (rawCalls == 0 && calls > 0) searchActions = null;
         return new WebSearchRecord
         {
-            Calls = calls, Queries = queries, Sources = sources, Citations = citations, Opened = opened,
+            Calls = calls, SearchActions = searchActions, Queries = queries, Sources = sources, Citations = citations, Opened = opened,
             Unverified = Unverified(responseText, sources.Concat(citations).Concat(opened)),
         };
     }
 
     /// <summary>
-    /// 응답 원본(OpenAI ResponseResult)의 web_search_call 중 open_page·find_in_page 동작의 URL.
+    /// 응답 원본(OpenAI ResponseResult)의 web_search_call에서 open_page·find_in_page 동작의 URL과 search 동작 수.
     /// 연 페이지는 Sources에 없을 수 있어, 그 URL을 인용하면 출처 대조가 잘못 경고한다 (2026-10-19 실제 호출에서
     /// 원인을 가리지 못한 경고 1건 — 검색 6회 중 연 페이지 URL을 기록하지 않고 있었음).
+    /// search 동작 수는 청구 단위로 본다 (추정, 계획서 2026-10-20_청구대조-openai-web-검색횟수). 원본을 못 읽으면 null.
+    /// open_page·find_in_page가 아닌 동작은 search로 센다 — SDK에 새 동작 타입이 생겨도 적게 세지 않게.
     /// </summary>
-    public static IReadOnlyList<string> OpenedPages(object? raw)
+    public static (IReadOnlyList<string> Opened, int? SearchActions, int RawCalls) RawActions(object? raw)
     {
         var list = new List<string>();
         try
@@ -63,27 +67,28 @@ public static partial class WebSearchExtractor
                     case ChatResponse chat: raw = chat.RawRepresentation; break;
 #pragma warning disable OPENAI001 // Responses 형식은 SDK에서 평가용 표시 (웹검색 단계만 씀)
                     case OpenAI.Responses.ResponseResult result:
+                        int searches = 0, items = 0;
                         foreach (var item in result.OutputItems.OfType<OpenAI.Responses.WebSearchCallResponseItem>())
                         {
-                            var uri = item.Action switch
+                            items++;
+                            switch (item.Action)
                             {
-                                OpenAI.Responses.WebSearchOpenPageAction open => open.Uri,
-                                OpenAI.Responses.WebSearchFindInPageAction find => find.Uri,
-                                _ => null,
-                            };
-                            if (uri is not null) AddDistinct(list, uri.ToString());
+                                case OpenAI.Responses.WebSearchOpenPageAction open: AddDistinct(list, open.Uri?.ToString()); break;
+                                case OpenAI.Responses.WebSearchFindInPageAction find: AddDistinct(list, find.Uri?.ToString()); break;
+                                default: searches++; break;
+                            }
                         }
-                        return list;
+                        return (list, searches, items);
 #pragma warning restore OPENAI001
-                    default: return list;
+                    default: return (list, null, 0);
                 }
             }
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            // 기록용 정보라 실패해도 무시한다 (대조에서 연 페이지만 빠진다).
+            // 기록용 정보라 실패해도 무시한다 (대조에서 연 페이지만 빠지고, 비용은 Calls로 계산된다).
         }
-        return list;
+        return (list, null, 0);
     }
 
     /// <summary>
