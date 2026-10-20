@@ -11,7 +11,8 @@ using Microsoft.Extensions.Options;
 
 namespace HB.Orchestration.Dashboard;
 
-public sealed record AgentInfo(string Name, string Provider, string Model, int? MaxOutputTokens, bool Enabled, int? TimeoutSeconds = null, bool Vision = true);
+public sealed record AgentInfo(string Name, string Provider, string Model, int? MaxOutputTokens, bool Enabled, int? TimeoutSeconds = null, bool Vision = true,
+    string? ReasoningEffort = null);
 
 /// <summary>디스크에서 읽은 MCP 설정(modes.json + appsettings.json) 한 시점의 상태.</summary>
 public sealed class ModesSnapshot
@@ -63,7 +64,8 @@ public sealed class ModesSnapshot
 public sealed record ModeEdit(string Mode, IReadOnlyList<string> StepAgents, IReadOnlyDictionary<string, string> Settings);
 
 /// <summary>에이전트 표의 한 줄. OriginalName이 비어 있으면 새 에이전트.</summary>
-public sealed record AgentEdit(string? OriginalName, string Name, string Provider, string Model, string MaxOutputTokens, bool Enabled, bool Delete, string TimeoutSeconds = "");
+public sealed record AgentEdit(string? OriginalName, string Name, string Provider, string Model, string MaxOutputTokens, bool Enabled, bool Delete, string TimeoutSeconds = "",
+    string ReasoningEffort = "");
 
 /// <summary>모델 단가 표의 한 줄 (USD / 1M 토큰). 셋 다 비우면 그 모델의 단가를 지운다.</summary>
 public sealed record PriceEdit(string Model, string InputPrice, string CachedInputPrice, string OutputPrice);
@@ -242,7 +244,7 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
             if (ReadMcpOptions(settingsPath) is { } mcp)
             {
                 foreach (var a in mcp.Agents)
-                    agents.Add(new AgentInfo(a.Name, a.Provider, a.Model, a.MaxOutputTokens, a.Enabled, a.TimeoutSeconds, a.Vision));
+                    agents.Add(new AgentInfo(a.Name, a.Provider, a.Model, a.MaxOutputTokens, a.Enabled, a.TimeoutSeconds, a.Vision, a.ReasoningEffort));
                 providers.AddRange(mcp.Providers.Keys.Order(StringComparer.OrdinalIgnoreCase));
                 foreach (var (name, p) in mcp.Providers)
                 {
@@ -433,6 +435,10 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
                 else errors.Add($"[{label}] 타임아웃은 1 이상의 초이거나 비워야 합니다.");
             }
 
+            var (effort, effortError) = AgentSettings.ParseEffort(row.ReasoningEffort);
+            if (effortError is not null) errors.Add($"[{label}] {effortError}");
+            var effortName = effort is { } e ? AgentSettings.EffortName(e) : null;
+
             var obj = original.Length > 0 && originals.TryGetValue(original, out var source)
                 ? (JsonObject)source.DeepClone()
                 : new JsonObject();
@@ -444,11 +450,13 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
             else obj.Remove(KeyOf(obj, "MaxOutputTokens"));
             if (timeout is { } timeoutValue) obj[KeyOf(obj, "TimeoutSeconds")] = JsonValue.Create(timeoutValue);
             else obj.Remove(KeyOf(obj, "TimeoutSeconds"));    // 비우면 제공사 값 → SDK 기본값
+            if (effortName is not null) obj[KeyOf(obj, "ReasoningEffort")] = JsonValue.Create(effortName);
+            else obj.Remove(KeyOf(obj, "ReasoningEffort"));   // 비우면 보내지 않음 (제공사·모델 기본값)
             if (row.Enabled) obj.Remove(KeyOf(obj, "Enabled"));      // 기본값 true는 적지 않는다
             else obj[KeyOf(obj, "Enabled")] = JsonValue.Create(false);
 
             newArray.Add(obj);
-            finalAgents.Add(new AgentInfo(name, row.Provider, model, max, row.Enabled, timeout));
+            finalAgents.Add(new AgentInfo(name, row.Provider, model, max, row.Enabled, timeout, ReasoningEffort: effortName));
 
             if (original.Length > 0 && !string.Equals(original, name, StringComparison.Ordinal))
                 renames[original] = name;

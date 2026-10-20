@@ -68,7 +68,8 @@ public sealed class ModesModel(ModesConfigService service, CallLogCache log) : P
                 MaxOutputTokens: F("max"),
                 Enabled: F("enabled") == "true",
                 Delete: F("del") == "true",
-                TimeoutSeconds: F("timeout")));
+                TimeoutSeconds: F("timeout"),
+                ReasoningEffort: F("effort")));
         }
 
         return Finish(() => service.SaveAgents(settingsStamp ?? "", stamp ?? "", rows), "agents");

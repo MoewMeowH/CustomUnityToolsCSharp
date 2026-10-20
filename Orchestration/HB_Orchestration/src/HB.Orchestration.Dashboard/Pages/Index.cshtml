@@ -131,7 +131,7 @@
                             <span class="badge warn" title="이 단계는 재시도가 있었습니다@(c.ErrorKind is { } k ? $" · 이 시도 {k}" : "")">시도 @at.Attempt/@at.Total</span>
                         }
                     </td>
-                    <td><span class="badge">@IndexModel.ProviderOf(c)</span> <span class="mono">@c.Model</span></td>
+                    <td><span class="badge">@IndexModel.ProviderOf(c)</span> <span class="mono">@c.Model</span>@if (c.ReasoningEffort is { } effort) {<span class="muted" title="보낸 추론 강도"> · @effort</span>}</td>
                     <td>@IndexModel.ProjectName(c.ProjectDir)</td>
                     <td>
                         @if (c.Warnings.Count > 0)

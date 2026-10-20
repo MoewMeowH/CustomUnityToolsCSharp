@@ -66,6 +66,15 @@ public sealed record StepCall(
     /// <summary>구조화 출력 요청 방식 (에이전트 → 제공사 → Prompt). Output이 없으면 의미 없다.</summary>
     public StructuredOutputMode OutputMode => AgentSettings.ResolveStructuredOutput(Agent.Options, Agent.ProviderOptions);
 
+    /// <summary>이번 실행만 바꾼 추론 강도 (run_mode reasoning · 골든 --reasoning · followUp은 원래 호출 값). null이면 에이전트 설정.</summary>
+    public ReasoningEffort? ReasoningOverride { get; init; }
+
+    /// <summary>true면 추론 강도를 보내지 않는다 (덮어쓰기·에이전트 설정 무시). followUp에서 원래 호출이 보내지 않았을 때 같은 조건으로 묻는다.</summary>
+    public bool OmitReasoning { get; init; }
+
+    /// <summary>실제로 보낼 추론 강도: 생략 → 덮어쓰기 → 에이전트 설정. null이면 보내지 않는다 (제공사 기본값).</summary>
+    public ReasoningEffort? Reasoning => OmitReasoning ? null : ReasoningOverride ?? Agent.Reasoning;
+
     /// <summary>
     /// 이 호출의 프롬프트 캐시 방식. 제공사가 ProviderDefault(정책 없음)면 그대로 두고, 아니면 모드 설정 → 제공사 설정.
     /// Context인데 첨부가 짧으면 Off (저장 지점은 최소 길이 1,024토큰에 못 미치면 쓰이지 않으므로 블록을 나눌 이유가 없다).
@@ -224,14 +233,18 @@ public sealed class AgentRunner
             var cacheMode = call.CacheMode;
             using var cacheScope = PromptCacheScope.Enter(cacheMode);
             using var searchScope = WebSearchScope.Enter(call.WebSearch);
+            // 추론 강도는 실행 옵션으로 얹는다 (에이전트 ChatOptions — Schema 모드의 응답 형식 — 위에 합쳐진다).
+            var runOptions = call.Reasoning is { } effort
+                ? new ChatClientAgentRunOptions(new ChatOptions { Reasoning = new ReasoningOptions { Effort = effort } })
+                : null;
             var response = call.History is { Count: > 0 } history
-                ? await agent.RunAsync([.. history, new ChatMessage(ChatRole.User, call.Prompt)], cancellationToken: ct)
+                ? await agent.RunAsync([.. history, new ChatMessage(ChatRole.User, call.Prompt)], options: runOptions, cancellationToken: ct)
                 : call.Images is { Count: > 0 }
-                ? await agent.RunAsync(WithImages(call), cancellationToken: ct)
+                ? await agent.RunAsync(WithImages(call), options: runOptions, cancellationToken: ct)
                 : cacheMode == PromptCacheMode.Context
                 ? await agent.RunAsync(new ChatMessage(ChatRole.User,
-                    [new TextContent(call.ContextPrefix), new TextContent(call.Prompt[call.ContextPrefix!.Length..])]), cancellationToken: ct)
-                : await agent.RunAsync(call.Prompt, cancellationToken: ct);
+                    [new TextContent(call.ContextPrefix), new TextContent(call.Prompt[call.ContextPrefix!.Length..])]), options: runOptions, cancellationToken: ct)
+                : await agent.RunAsync(call.Prompt, options: runOptions, cancellationToken: ct);
             var text = response.Text;
             var inTokens = response.Usage?.InputTokenCount;
             var outTokens = response.Usage?.OutputTokenCount;
@@ -348,6 +361,7 @@ public sealed class AgentRunner
             Agent = call.Agent.Name,
             Provider = call.Agent.Provider,
             Model = call.Agent.Model,
+            ReasoningEffort = call.Reasoning is { } sent ? AgentSettings.EffortName(sent) : null,
             ProjectDir = Environment.CurrentDirectory,
             Prompt = call.Prompt,
             Files = call.Meta.Files ?? [],

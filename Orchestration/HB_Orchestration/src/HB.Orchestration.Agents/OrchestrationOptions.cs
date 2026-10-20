@@ -383,6 +383,13 @@ public sealed class AgentOptions
 
     /// <summary>구조화 출력 요청 방식. 비우면 제공사 값 → Prompt 순 (같은 제공사라도 모델마다 지원이 다를 수 있어 에이전트 단위로 둔다).</summary>
     public StructuredOutputMode? StructuredOutput { get; set; }
+
+    /// <summary>
+    /// 추론 강도: none · low · medium · high · xhigh (대소문자 무시). 비우면 보내지 않는다 (제공사·모델 기본값).
+    /// 제공사 단위 기본값은 두지 않는다 — 같은 제공사라도 모델마다 받는 값이 다르다 (계획서 2026-10-20_추론강도-설정).
+    /// 실행마다 run_mode reasoning · 골든 --reasoning으로 덮어쓸 수 있다.
+    /// </summary>
+    public string? ReasoningEffort { get; set; }
 }
 
 /// <summary>

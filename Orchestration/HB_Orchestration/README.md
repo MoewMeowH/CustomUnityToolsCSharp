@@ -103,6 +103,7 @@ dotnet build HB_Orchestration.slnx
 | `Providers.<이름>.ImageDetail` | 이미지 부분에 실을 `detail` 값 (OpenAI: `auto`·`low`·`high`·`original`). 비우면 보내지 않음 (= 제공사 기본값). Gemini OpenAI 호환 엔드포인트는 이 필드를 문서화하지 않아 제공사 단위로 둔다 |
 | `Agents[].Vision` | 이미지 입력을 받는 모델인지 (기본 `true`). `false`인 에이전트가 낀 모드에 `images`가 오면 실행 전에 거절 |
 | `Agents[].StructuredOutput` · `Providers.<이름>.StructuredOutput` | 구조화 출력(역할 `Output`) 요청 방식. **에이전트 → 제공사 → `Prompt`** 순. `Prompt` = 시스템 프롬프트에만 JSON 형식을 적음. `Schema` = 거기에 `response_format: json_schema`(strict)까지 보내 강제. 모델이 미지원이면 400 → 그 단계 실패 (자동으로 `Prompt`로 다시 보내지 않음, 이 값을 `Prompt`로 바꿀 것). 기본 설정은 `openai`만 `Schema` (아래 "구조화 출력") |
+| `Agents[].ReasoningEffort` | 추론 강도 `none` · `low` · `medium` · `high` · `xhigh` (대소문자 무시). **에이전트 전용** (같은 제공사라도 모델마다 받는 값이 달라 제공사 기본값은 없음). 비우면 보내지 않음 = 제공사·모델 기본값. 다른 값이면 그 에이전트를 건너뛴다. Chat Completions는 `reasoning_effort`, Responses(openai-web)는 `reasoning.effort`로 나간다. 실행마다 `run_mode`의 `reasoning`(`"에이전트=강도"` · `"*=강도"`, 에이전트는 `agents` 교체 뒤 이름) · 골든 `--reasoning`으로 덮어쓴다. followUp은 원래 호출 값을 그대로 쓴다. 추론 토큰도 `MaxOutputTokens` 안에 들어가므로 강도를 올리면 상한에 닿아 본문 없이 끝날 수 있다 (2026-10-20 sol·argon·deepseek 64,000으로 올림). 호출 기록 `ReasoningEffort`에 실제로 보낸 값이 남고, `list_modes` 에이전트 줄에 설정 값이 보인다. 대시보드 에이전트 편집에서도 고친다. 제공사별 받는 값: OpenAI gpt-6.1-sol은 low~xhigh(none·minimal 400, 기본 medium) · Gemini OpenAI 호환은 low~high(xhigh 매핑 없음, 3.x·4는 끌 수 없음) · Fireworks는 low~xhigh·none (모델별 기본값 문서 없음). 계획서 `docs/plans/2026-10-20_추론강도-설정.md` |
 | `Budget.FreeProviders` | 비용 집계에서 뺄 제공사 (기본 `local`) |
 | `ResponseChecks.ExpectedLanguage` | 기대하는 응답 언어. 지금은 `ko`만 지원. **키가 없으면 `ko`(검사 켬), `""`이면 끔** (아래 "응답 검사기") |
 | `ResponseChecks.ForeignScriptRatio` | 코드 블록을 뺀 본문에서 일본어 가나 비율이 이 값 이상이면 경고 (기본 0.02 = 2%) |
@@ -601,7 +602,7 @@ unity skill install --help
 정답이 알려진 사례 묶음을 같은 입력으로 다시 돌려, **찾아야 할 지적을 몇 개 찾았는지**와 **과거에 기각된 지적을 다시 내는지**를 숫자로 비교한다. 역할 프롬프트·modes.json·모델을 바꾼 뒤에 쓴다. MCP 서버를 띄우지 않는 일회성 실행이다.
 
 ```
-dotnet <publish 폴더>\HB.Orchestration.Mcp.dll --golden run [사례|all] [--mode 모드] [--agents from=to,...] [--dir 폴더] [--label 이름] [--no-guidelines] [--yes]
+dotnet <publish 폴더>\HB.Orchestration.Mcp.dll --golden run [사례|all] [--mode 모드] [--agents from=to,...] [--reasoning 에이전트=강도,...] [--dir 폴더] [--label 이름] [--no-guidelines] [--yes]
 dotnet <publish 폴더>\HB.Orchestration.Mcp.dll --golden score <사례> --from <파일> [--dir 폴더] [--label 이름]
 ```
 - `run`은 `--yes`가 없으면 사례·에이전트·입력 글자 수·입력 비용 추정·붙는 지침 파일만 보이고 **외부 호출 없이** 멈춘다.

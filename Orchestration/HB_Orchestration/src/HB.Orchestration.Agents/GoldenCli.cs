@@ -4,7 +4,7 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using HB.Orchestration.Shared;
-using PlanStep = (string Role, string Agent, string Model, HB.Orchestration.Shared.GuidelinesProvenance Guidelines);
+using PlanStep = (string Role, string Agent, string Model, HB.Orchestration.Shared.GuidelinesProvenance Guidelines, string? Effort);
 
 namespace HB.Orchestration.Agents;
 
@@ -25,7 +25,7 @@ public static class GoldenCli
     public const string Tool = "golden";
 
     private const string Usage =
-        "사용법: HB.Orchestration.Mcp.dll --golden run [사례|all] [--mode 모드] [--agents from=to,...] [--dir 폴더] [--label 이름] [--no-guidelines] [--yes]\n" +
+        "사용법: HB.Orchestration.Mcp.dll --golden run [사례|all] [--mode 모드] [--agents from=to,...] [--reasoning 에이전트=강도,...] [--dir 폴더] [--label 이름] [--no-guidelines] [--yes]\n" +
         "        HB.Orchestration.Mcp.dll --golden score <사례> --from <파일> [--dir 폴더] [--label 이름]";
 
     private static readonly JsonSerializerOptions ResultJson = new()
@@ -36,13 +36,13 @@ public static class GoldenCli
     };
 
     internal sealed record Args(string Verb, string Which, string? Mode, IReadOnlyList<string>? Agents, string? Dir, string? Label, string? From, bool Yes,
-        bool NoGuidelines = false);
+        bool NoGuidelines = false, IReadOnlyList<string>? Reasoning = null);
 
     internal static (Args? Parsed, string? Error) Parse(string[] args)
     {
         if (args.Length < 2 || args[0] != Flag || args[1] is not ("run" or "score")) return (null, null);
         string? which = null, mode = null, dir = null, label = null, from = null;
-        List<string>? agents = null;
+        List<string>? agents = null, reasoning = null;
         bool yes = false, noGuidelines = false;
 
         for (var i = 2; i < args.Length; i++)
@@ -56,6 +56,7 @@ public static class GoldenCli
                 {
                     case "--mode": mode = Next(); break;
                     case "--agents": (agents ??= []).AddRange(Next().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)); break;
+                    case "--reasoning": (reasoning ??= []).AddRange(Next().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)); break;
                     case "--dir": dir = Next(); break;
                     case "--label": label = Next(); break;
                     case "--from": from = Next(); break;
@@ -74,10 +75,10 @@ public static class GoldenCli
         var verb = args[1];
         if (verb == "run") which ??= "all";
         if (verb == "score" && (which is null or "all" || from is null)) return (null, "score는 사례 하나와 --from <파일>이 필요합니다.");
-        if (verb == "score" && (yes || agents is not null || mode is not null || noGuidelines))
-            return (null, "score는 --yes · --agents · --mode · --no-guidelines를 받지 않습니다 (외부 호출 없음).");
+        if (verb == "score" && (yes || agents is not null || reasoning is not null || mode is not null || noGuidelines))
+            return (null, "score는 --yes · --agents · --reasoning · --mode · --no-guidelines를 받지 않습니다 (외부 호출 없음).");
         if (label is not null && label.Any(c => !(char.IsLetterOrDigit(c) || c is '_' or '-' or '.'))) return (null, "--label은 글자·숫자·_-. 만 씁니다.");
-        return (new Args(verb, which!, mode, agents, dir, label, from, yes, noGuidelines), null);
+        return (new Args(verb, which!, mode, agents, dir, label, from, yes, noGuidelines, reasoning), null);
     }
 
     /// <param name="runnerFactory">run에서만 부른다 (score는 에이전트·설정이 필요 없음).</param>
@@ -155,10 +156,10 @@ public static class GoldenCli
         {
             var mode = a.Mode ?? c.Info.Mode;
             IReadOnlyList<PlanStep>? steps; string? previewError;
-            if (c.Info.IsCrash) (steps, previewError) = runner.PreviewFixedMode(mode, a.Agents, c.Input.Length, a.NoGuidelines, requireSearchLast: true);
+            if (c.Info.IsCrash) (steps, previewError) = runner.PreviewFixedMode(mode, a.Agents, c.Input.Length, a.NoGuidelines, requireSearchLast: true, a.Reasoning);
             else
             {
-                var (step, e) = runner.PreviewFixedPrompt(mode, a.Agents, c.Input.Length, a.NoGuidelines);
+                var (step, e) = runner.PreviewFixedPrompt(mode, a.Agents, c.Input.Length, a.NoGuidelines, a.Reasoning);
                 (steps, previewError) = (step is { } s ? [s] : null, e);
             }
             if (previewError is not null)
@@ -171,7 +172,7 @@ public static class GoldenCli
 
         output.WriteLine($"[골든 실행 계획] 사례 {plans.Count}개 · 폴더 {root}");
         foreach (var (c, mode, steps) in plans)
-            output.WriteLine($"  {c.Info.Id} ({c.Info.Kind}) · {mode}: {string.Join(" → ", steps.Select(s => $"{s.Role}@{s.Agent}({s.Model}) [{GuidelinesText(s.Guidelines)}]"))} · 입력 {c.Input.Length:N0}자 · 기대 {c.Expected.Count} · 함정 {c.Traps.Count}");
+            output.WriteLine($"  {c.Info.Id} ({c.Info.Kind}) · {mode}: {string.Join(" → ", steps.Select(s => $"{s.Role}@{s.Agent}({s.Model}{(s.Effort is null ? "" : $", 추론 {s.Effort}")}) [{GuidelinesText(s.Guidelines)}]"))} · 입력 {c.Input.Length:N0}자 · 기대 {c.Expected.Count} · 함정 {c.Traps.Count}");
         var chars = plans.Sum(p => p.Case.Input.Length);
         output.WriteLine($"  입력 합계 {chars:N0}자 (시스템 프롬프트 제외). 입력 토큰 추정 ≈ {chars / 3:N0} (글자 수 ÷ 3, 대략값)");
         foreach (var model in plans.SelectMany(p => p.Steps).Select(s => s.Model).Distinct())
@@ -230,7 +231,7 @@ public static class GoldenCli
 
             var step = steps[0];
             string? runId; StepResult? result; string? runError;
-            try { (runId, result, runError) = await runner.RunFixedPromptAsync(mode, c.Input, a.Agents, Tool, $"golden {c.Info.Id}", ct, a.NoGuidelines, step.Guidelines); }
+            try { (runId, result, runError) = await runner.RunFixedPromptAsync(mode, c.Input, a.Agents, Tool, $"golden {c.Info.Id}", ct, a.NoGuidelines, step.Guidelines, a.Reasoning); }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 error.WriteLine($"[취소] {c.Info.Id} 실행 중 취소. 남은 사례는 돌리지 않았습니다.");
@@ -239,7 +240,7 @@ public static class GoldenCli
             }
 
             var baseLine = new ResultRecord { CaseId = c.Info.Id, Kind = c.Info.Kind, Mode = mode, RunId = runId, Agent = step.Agent, Model = step.Model,
-                InputSha256 = Sha(c.Input), KeySha256 = c.KeySha256,
+                ReasoningEffort = step.Effort, InputSha256 = Sha(c.Input), KeySha256 = c.KeySha256,
                 GuidelinesAttached = step.Guidelines.Attached, GuidelinesSha256 = step.Guidelines.Sha256, GuidelinesReason = step.Guidelines.Reason };
             if (runError is not null || result is null || !result.Success)
             {
@@ -274,7 +275,8 @@ public static class GoldenCli
             scores.Add((c, score));
             Save(ResultLine(c, score, findings) with
             {
-                Mode = mode, RunId = runId, Agent = result.Agent, Model = record?.Model ?? step.Model, OutputState = structured.State,
+                Mode = mode, RunId = runId, Agent = result.Agent, Model = record?.Model ?? step.Model, ReasoningEffort = record is not null ? record.ReasoningEffort : step.Effort, // 기록이 있으면 "보내지 않음"(null)도 그대로
+                OutputState = structured.State,
                 InputTokens = result.InputTokens, OutputTokens = result.OutputTokens, ElapsedMs = result.ElapsedMs,
                 Source = "run", Provenance = record?.Provenance,
                 GuidelinesAttached = baseLine.GuidelinesAttached, GuidelinesSha256 = baseLine.GuidelinesSha256, GuidelinesReason = baseLine.GuidelinesReason,
@@ -343,6 +345,7 @@ public static class GoldenCli
         {
             CaseId = c.Info.Id, Kind = c.Info.Kind, Mode = mode,
             Agent = string.Join(" → ", steps.Select(s => s.Agent)), Model = string.Join(" → ", steps.Select(s => s.Model)),
+            ReasoningEffort = steps.Any(s => s.Effort is not null) ? string.Join(" → ", steps.Select(s => s.Effort ?? "-")) : null,
             InputSha256 = Sha(c.Input), KeySha256 = c.KeySha256,
             GuidelinesAttached = steps[0].Guidelines.Attached, GuidelinesSha256 = steps[0].Guidelines.Sha256, GuidelinesReason = steps[0].Guidelines.Reason,
         };
@@ -361,7 +364,7 @@ public static class GoldenCli
         try
         {
             (runId, results, runError) = await runner.RunFixedModeAsync(mode, c.Input, a.Agents, Tool, $"golden {c.Info.Id}", ct,
-                a.NoGuidelines, [.. steps.Select(s => (s.Agent, s.Guidelines))], requireSearchLast: true);
+                a.NoGuidelines, [.. steps.Select(s => (s.Agent, s.Guidelines))], requireSearchLast: true, a.Reasoning);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -394,9 +397,12 @@ public static class GoldenCli
         }
         var score = GoldenCrashScorer.Score(c, results[0].Text, results[^1].Text, searchRecord.WebSearch);
         PrintCrash(output, c, score);
+        // 추론 강도는 실행 전 계획이 아니라 단계별 호출 기록의 실제 값 (그 사이 설정이 다시 읽혔을 수 있다)
+        var sentEfforts = Enumerable.Range(1, results.Count).Select(i => (i == results.Count ? searchRecord : FindRecord(runId!, logPath, step: i))?.ReasoningEffort).ToList();
         save(baseLine with
         {
             RunId = runId, Source = "run",
+            ReasoningEffort = sentEfforts.Any(e => e is not null) ? string.Join(" → ", sentEfforts.Select(e => e ?? "-")) : null,
             Expected = score.ExpectedCount, Found = score.Found.Count, TrapHits = score.TrapHits.Count,
             Pairs = score.Found, Weak = score.KeywordOnly, Missed = score.Missed, Traps = score.TrapHits,
             InputTokens = results.Sum(r => r.InputTokens ?? 0), OutputTokens = results.Sum(r => r.OutputTokens ?? 0), ElapsedMs = results.Sum(r => r.ElapsedMs),
@@ -503,6 +509,9 @@ public static class GoldenCli
         public string? RunId { get; init; }
         public string? Agent { get; init; }
         public string? Model { get; init; }
+
+        /// <summary>보낸 추론 강도 (crash는 단계별 "a → b", 보내지 않은 단계는 "-"). 하나도 보내지 않았으면 null.</summary>
+        public string? ReasoningEffort { get; init; }
         public string? OutputState { get; init; }
         public string? Error { get; init; }
         public int? Expected { get; init; }

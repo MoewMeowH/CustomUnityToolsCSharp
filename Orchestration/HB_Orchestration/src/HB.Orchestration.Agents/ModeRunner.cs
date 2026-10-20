@@ -26,13 +26,15 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     /// 이번 실행에서만 에이전트를 바꾼다. "원래이름=새이름" 또는 "*=새이름"(모든 단계).
     /// modes.json은 그대로 두고, 같은 모드를 다른 모델로 한 번 돌려볼 때 쓴다.
     /// </param>
+    /// <param name="reasoningOverrides">이번 실행에서만 추론 강도를 바꾼다. "에이전트=강도" 또는 "*=강도" (에이전트는 교체 뒤 이름).</param>
     /// <param name="context">서버가 디스크에서 읽어 프롬프트 맨 앞(input 앞)에 둘 코드 범위. Claude가 코드를 input에 다시 쓰지 않게 한다.</param>
     /// <param name="images">서버가 읽어 보낼 이미지 경로 (프로젝트 루트 기준, image_prep.py shrink 결과). 입력을 받는 단계에만 붙는다.</param>
     /// <param name="reason">지휘자가 이 모드를 부른 이유 (필수). 기록에만 남고 에이전트에게는 보내지 않는다.</param>
     /// <param name="ownReview">결과를 보기 전의 자체 검토 (RequireOwnReview 모드에서 필수). 기록에만 남는다.</param>
     public async Task<string> RunAsync(
         string modeName, string input, IReadOnlyList<string>? files, IReadOnlyList<string>? agentOverrides,
-        IReadOnlyList<ContextRange>? context, IReadOnlyList<string>? images, string? reason, string? ownReview, CancellationToken ct)
+        IReadOnlyList<ContextRange>? context, IReadOnlyList<string>? images, string? reason, string? ownReview, CancellationToken ct,
+        IReadOnlyList<string>? reasoningOverrides = null)
     {
         // ── 1. 실행 전 검증: 여기서 걸리면 토큰을 한 개도 쓰지 않는다 ──────────────
         ModeStore.Loaded loaded;
@@ -76,7 +78,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             OwnReview = string.IsNullOrWhiteSpace(ownReview) ? null : ownReview,
         };
 
-        var (prepared, planError) = BuildPlan(loaded, modeName, mode, agentOverrides);
+        var (prepared, planError) = BuildPlan(loaded, modeName, mode, agentOverrides, reasoningOverrides: reasoningOverrides);
         if (planError is not null) return planError;
         var (swap, plan) = (prepared!.Swap, prepared.Steps);
 
@@ -117,6 +119,8 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             var swapNote = "(에이전트 교체: " + string.Join(", ", swap.Select(kv => $"{kv.Key}→{kv.Value}")) + ")";
             note = note is null ? swapNote : $"{note}\n{swapNote}";
         }
+        if (prepared.ReasoningNote is { } reasoningNote)
+            note = note is null ? reasoningNote : $"{note}\n{reasoningNote}";
 
         // 겹침 후보: 서로 다른 단계가 같은 위치를 지적했으면 끝에 한 줄씩 (판단은 지휘자).
         if (FindingOverlap.Lines(results.SelectMany(r => r.Structured?.Findings ?? [])) is { Count: > 0 } overlaps)
@@ -160,15 +164,20 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         VerdictRecorder.RecordSelfReviewAsync(info, items, Options.Records.MaxReasonChars, runner.LogPath, Options.Records.MaxOwnReviewChars);
 
     /// <summary>모드 하나의 실행 계획: 읽은 modes.json · 지침 · 에이전트 교체 · 단계별 에이전트와 시스템 프롬프트.</summary>
-    private sealed record PreparedPlan(ModeStore.Loaded Loaded, GuidelinesLoader.Result Guidelines, Dictionary<string, string> Swap, List<PlannedStep> Steps);
+    private sealed record PreparedPlan(ModeStore.Loaded Loaded, GuidelinesLoader.Result Guidelines, Dictionary<string, string> Swap, List<PlannedStep> Steps)
+    {
+        /// <summary>추론 강도를 덮어썼으면 결과 끝에 붙일 한 줄. 없으면 null.</summary>
+        public string? ReasoningNote { get; init; }
+    }
 
     /// <summary>
     /// 단계마다 에이전트(교체 반영)·시스템 프롬프트를 정한다. run_mode와 --golden이 같은 조립을 쓴다
     /// (평가가 실제 실행과 다른 프롬프트로 돌면 의미가 없으므로). 문제가 있으면 Plan은 null, Error는 '['로 시작하는 문구.
     /// </summary>
     /// <param name="withoutGuidelines">골든 --no-guidelines: 지침을 쓰는 역할이어도 붙이지 않는다 (지침 있음·없음 비교용).</param>
+    /// <param name="reasoningOverrides">이번 실행의 추론 강도 덮어쓰기 ("에이전트=강도" · "*=강도", 에이전트는 교체 뒤 이름).</param>
     private (PreparedPlan? Plan, string? Error) BuildPlan(ModeStore.Loaded loaded, string modeName, ModeDefinition mode, IReadOnlyList<string>? agentOverrides,
-        bool withoutGuidelines = false)
+        bool withoutGuidelines = false, IReadOnlyList<string>? reasoningOverrides = null)
     {
         var (swap, swapError) = ParseOverrides(agentOverrides, mode);
         if (swapError is not null) return (null, $"[모드 '{modeName}'] {swapError}");
@@ -212,7 +221,14 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
                 role.Prompt + (role.Output?.PromptText ?? "") + Prompts.CommonRules + (step.WebSearch is null ? "" : Prompts.WebSearchRules) + (attach ? guidelines.Text : ""),
                 ProvenanceBuilder.ForStep(guidelines, role.UseGuidelines, skipped: withoutGuidelines), mode.PromptCache, role.Output));
         }
-        return (new PreparedPlan(loaded, guidelines, swap, plan), null);
+
+        var (efforts, effortError) = ParseReasoningOverrides(reasoningOverrides, plan);
+        if (effortError is not null) return (null, $"[모드 '{modeName}'] {effortError}");
+        if (efforts.Count > 0)
+            plan = [.. plan.Select(p => efforts.TryGetValue(p.Agent.Name, out var e) || efforts.TryGetValue("*", out e) ? p with { Reasoning = e } : p)];
+        var reasoningNote = efforts.Count == 0 ? null
+            : "(추론 강도: " + string.Join(", ", efforts.Select(kv => $"{kv.Key}={AgentSettings.EffortName(kv.Value)}")) + ")";
+        return (new PreparedPlan(loaded, guidelines, swap, plan) { ReasoningNote = reasoningNote }, null);
     }
 
     /// <summary>이 실행의 modes.json · 서버 설정 · 지침 해시와 원문 저장. 실패는 기록에만 남기고 실행은 계속한다.</summary>
@@ -239,9 +255,9 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     /// (사례를 차례로 도는 수 분 사이에 지침 파일이 바뀌거나 사라지면 뒤쪽 사례가 말없이 다른 조건으로 돌지 않게).</param>
     public async Task<(string? RunId, StepResult? Result, string? Error)> RunFixedPromptAsync(
         string modeName, string prompt, IReadOnlyList<string>? agentOverrides, string tool, string reason, CancellationToken ct,
-        bool withoutGuidelines = false, GuidelinesProvenance? expectedGuidelines = null)
+        bool withoutGuidelines = false, GuidelinesProvenance? expectedGuidelines = null, IReadOnlyList<string>? reasoningOverrides = null)
     {
-        var (plan, error) = PlanFixedPrompt(modeName, agentOverrides, prompt.Length, withoutGuidelines);
+        var (plan, error) = PlanFixedPrompt(modeName, agentOverrides, prompt.Length, withoutGuidelines, reasoningOverrides);
         if (error is not null) return (null, null, error);
 
         var now = plan!.Steps[0].Guidelines;
@@ -264,9 +280,10 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     /// </summary>
     public async Task<(string? RunId, List<StepResult>? Results, string? Error)> RunFixedModeAsync(
         string modeName, string input, IReadOnlyList<string>? agentOverrides, string tool, string reason, CancellationToken ct,
-        bool withoutGuidelines = false, IReadOnlyList<(string Agent, GuidelinesProvenance Guidelines)>? expected = null, bool requireSearchLast = false)
+        bool withoutGuidelines = false, IReadOnlyList<(string Agent, GuidelinesProvenance Guidelines)>? expected = null, bool requireSearchLast = false,
+        IReadOnlyList<string>? reasoningOverrides = null)
     {
-        var (plan, error) = PlanFixedMode(modeName, agentOverrides, input.Length, withoutGuidelines, requireSearchLast);
+        var (plan, error) = PlanFixedMode(modeName, agentOverrides, input.Length, withoutGuidelines, requireSearchLast, reasoningOverrides);
         if (error is not null) return (null, null, error);
 
         if (expected is not null)
@@ -290,11 +307,12 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     }
 
     /// <summary>RunFixedModeAsync의 실행 전 확인: 단계마다 역할·에이전트·모델·지침. 외부 호출 없음.</summary>
-    public (IReadOnlyList<(string Role, string Agent, string Model, GuidelinesProvenance Guidelines)>? Steps, string? Error) PreviewFixedMode(
-        string modeName, IReadOnlyList<string>? agentOverrides, int inputLength, bool withoutGuidelines = false, bool requireSearchLast = false)
+    public (IReadOnlyList<(string Role, string Agent, string Model, GuidelinesProvenance Guidelines, string? Effort)>? Steps, string? Error) PreviewFixedMode(
+        string modeName, IReadOnlyList<string>? agentOverrides, int inputLength, bool withoutGuidelines = false, bool requireSearchLast = false,
+        IReadOnlyList<string>? reasoningOverrides = null)
     {
-        var (plan, error) = PlanFixedMode(modeName, agentOverrides, inputLength, withoutGuidelines, requireSearchLast);
-        return error is not null ? (null, error) : ([.. plan!.Steps.Select(s => (s.Def.Role, s.Agent.Name, s.Agent.Model, s.Guidelines))], null);
+        var (plan, error) = PlanFixedMode(modeName, agentOverrides, inputLength, withoutGuidelines, requireSearchLast, reasoningOverrides);
+        return error is not null ? (null, error) : ([.. plan!.Steps.Select(s => (s.Def.Role, s.Agent.Name, s.Agent.Model, s.Guidelines, s.EffortName))], null);
     }
 
     /// <summary>
@@ -302,7 +320,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     /// requireSearchLast: 단계 2개 이상이고 마지막 단계에 WebSearch가 있어야 한다 (crash 채점은 1단계 = 분류, 마지막 = 검색으로 읽으므로).
     /// </summary>
     private (PreparedPlan? Plan, string? Error) PlanFixedMode(string modeName, IReadOnlyList<string>? agentOverrides, int inputLength, bool withoutGuidelines,
-        bool requireSearchLast)
+        bool requireSearchLast, IReadOnlyList<string>? reasoningOverrides = null)
     {
         ModeStore.Loaded loaded;
         try { loaded = store.Load(); }
@@ -320,7 +338,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         if (maxChars > 0 && inputLength > maxChars)
             return (null, $"[입력이 너무 깁니다] {inputLength:N0}자 / 상한 {maxChars:N0}자 (모드 '{modeName}').");
 
-        var (plan, error) = BuildPlan(loaded, modeName, mode, agentOverrides, withoutGuidelines);
+        var (plan, error) = BuildPlan(loaded, modeName, mode, agentOverrides, withoutGuidelines, reasoningOverrides);
         return error is not null ? (null, error) : (plan, null);
     }
 
@@ -393,7 +411,10 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
                 return Fail + $"modes.json의 {followUp.Step}단계가 원래 실행의 역할('{original.Role}')과 다릅니다.";
             // 그 단계 하나만, 원래 실행의 에이전트로 계획한다 (다른 단계·기본 에이전트가 지금 쓸 수 없어도 막히지 않게).
             var single = new ModeDefinition { Flow = ModeFlow.Sequential, PromptCache = mode.PromptCache, Steps = [mode.Steps[followUp.Step - 1]] };
-            var (plan, planError) = BuildPlan(loaded, modeName, single, original.Agent is { } a ? [$"*={a}"] : null);
+            // 추론 강도도 원래 호출 값을 그대로 쓴다 (그 사이 설정이 바뀌어도 같은 조건으로 보충한다).
+            // 원래 보내지 않았으면(이 기능 이전 기록 포함) 이번에도 보내지 않는다 — 아래 OmitReasoning.
+            var (plan, planError) = BuildPlan(loaded, modeName, single, original.Agent is { } a ? [$"*={a}"] : null,
+                reasoningOverrides: original.ReasoningEffort is { } effort ? [$"*={effort}"] : null);
             if (planError is not null) return planError;
             var step = plan!.Steps[0];
 
@@ -422,6 +443,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             {
                 History = [new ChatMessage(ChatRole.User, original.Prompt), new ChatMessage(ChatRole.Assistant, previous)],
                 FollowUpOf = followUp.Step,
+                OmitReasoning = original.ReasoningEffort is null,
                 FollowUpRequests = [.. requested.Select(q => q.Id)],
                 FollowUpSkipped = skipped.Count > 0 ? skipped : null,
             };
@@ -455,13 +477,13 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     /// 실행 때와 같은 검사(모드·에이전트·구조화 출력·입력 상한)를 해서, 통과하면 실행도 설정 이유로는 거절되지 않는다.
     /// Guidelines는 이 단계에 지침이 붙는지 (골든 실행이 지침 없이 도는 것을 실행 전에 알리려고).
     /// </summary>
-    public ((string Role, string Agent, string Model, GuidelinesProvenance Guidelines)? Step, string? Error) PreviewFixedPrompt(
-        string modeName, IReadOnlyList<string>? agentOverrides, int promptLength, bool withoutGuidelines = false)
+    public ((string Role, string Agent, string Model, GuidelinesProvenance Guidelines, string? Effort)? Step, string? Error) PreviewFixedPrompt(
+        string modeName, IReadOnlyList<string>? agentOverrides, int promptLength, bool withoutGuidelines = false, IReadOnlyList<string>? reasoningOverrides = null)
     {
-        var (plan, error) = PlanFixedPrompt(modeName, agentOverrides, promptLength, withoutGuidelines);
+        var (plan, error) = PlanFixedPrompt(modeName, agentOverrides, promptLength, withoutGuidelines, reasoningOverrides);
         if (error is not null) return (null, error);
         var s = plan!.Steps[0];
-        return ((s.Def.Role, s.Agent.Name, s.Agent.Model, s.Guidelines), null);
+        return ((s.Def.Role, s.Agent.Name, s.Agent.Model, s.Guidelines, s.EffortName), null);
     }
 
     /// <summary>RunFixedPromptAsync가 지침이 실행 전 확인과 달라 호출하지 않았을 때 오류 문구의 머리.</summary>
@@ -481,7 +503,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     /// 입력 상한(MaxInputChars)은 run_mode와 같다.
     /// </summary>
     private (PreparedPlan? Plan, string? Error) PlanFixedPrompt(string modeName, IReadOnlyList<string>? agentOverrides, int promptLength,
-        bool withoutGuidelines = false)
+        bool withoutGuidelines = false, IReadOnlyList<string>? reasoningOverrides = null)
     {
         ModeStore.Loaded loaded;
         try { loaded = store.Load(); }
@@ -496,7 +518,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         if (maxChars > 0 && promptLength > maxChars)
             return (null, $"[입력이 너무 깁니다] {promptLength:N0}자 / 상한 {maxChars:N0}자 (모드 '{modeName}').");
 
-        var (plan, error) = BuildPlan(loaded, modeName, mode, agentOverrides, withoutGuidelines);
+        var (plan, error) = BuildPlan(loaded, modeName, mode, agentOverrides, withoutGuidelines, reasoningOverrides);
         if (error is not null) return (null, error);
         if (plan!.Steps[0].Output is null)
             return (null, $"[모드 '{modeName}'] 역할 '{plan.Steps[0].Def.Role}'에 구조화 출력(Output)이 없어 채점할 수 없습니다.");
@@ -504,7 +526,14 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     }
 
     /// <summary>실행 계획의 한 단계. Guidelines는 이 단계 역할에 지침을 붙였는지 (기록용).</summary>
-    private sealed record PlannedStep(StepDefinition Def, AgentEntry Agent, string Instructions, GuidelinesProvenance Guidelines, PromptCacheMode? PromptCache, FindingFormat? Output);
+    private sealed record PlannedStep(StepDefinition Def, AgentEntry Agent, string Instructions, GuidelinesProvenance Guidelines, PromptCacheMode? PromptCache, FindingFormat? Output)
+    {
+        /// <summary>이번 실행의 추론 강도 덮어쓰기. null이면 에이전트 설정.</summary>
+        public ReasoningEffort? Reasoning { get; init; }
+
+        /// <summary>실제로 보낼 추론 강도 이름 (표시용). null이면 보내지 않음.</summary>
+        public string? EffortName => (Reasoning ?? Agent.Reasoning) is { } e ? AgentSettings.EffortName(e) : null;
+    }
 
     /// <summary>단계 호출. 실행 단위 Provenance에 이 단계의 지침 표시를 얹는다 (Instructions 해시는 AgentRunner가 보낼 문자열로 계산).</summary>
     private StepCall NewCall(string runId, string mode, int step, PlannedStep p, string instructions, BuiltPrompt prompt, CallMeta meta) =>
@@ -517,6 +546,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             Images = prompt.Images,
             WebSearch = p.Def.WebSearch,
             Output = p.Output,
+            ReasoningOverride = p.Reasoning,
         };
 
     /// <summary>사용자 input과 서버가 읽은 첨부 자료·이미지. 프롬프트에서는 첨부가 먼저 온다.</summary>
@@ -694,6 +724,28 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         return (map, null);
     }
 
+    /// <summary>추론 강도 덮어쓰기 해석. 에이전트 이름은 교체 뒤 이름이어야 한다 (실제로 호출되는 에이전트 기준).</summary>
+    private static (Dictionary<string, ReasoningEffort> Map, string? Error) ParseReasoningOverrides(IReadOnlyList<string>? overrides, List<PlannedStep> plan)
+    {
+        var map = new Dictionary<string, ReasoningEffort>(StringComparer.OrdinalIgnoreCase);
+        if (overrides is null) return (map, null);
+
+        var used = plan.Select(p => p.Agent.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var raw in overrides.Where(o => !string.IsNullOrWhiteSpace(o)))
+        {
+            var parts = raw.Split('=', 2, StringSplitOptions.TrimEntries);
+            if (parts.Length != 2 || parts[0].Length == 0 || parts[1].Length == 0)
+                return (map, $"추론 강도 형식 오류 '{raw}' — '에이전트=강도' 또는 '*=강도'");
+            if (parts[0] != "*" && !used.Contains(parts[0]))
+                return (map, $"이번 실행은 '{parts[0]}'을(를) 쓰지 않습니다 (agents 교체 뒤 이름). 사용 중: {string.Join(", ", used)}");
+            var (effort, error) = AgentSettings.ParseEffort(parts[1]);
+            if (error is not null) return (map, error);
+            if (!map.TryAdd(parts[0], effort!.Value))
+                return (map, $"추론 강도 '{parts[0]}'이(가) 두 번 왔습니다. 하나만 남기세요.");
+        }
+        return (map, null);
+    }
+
     /// <summary>reason · ownReview 검사. 문제가 있으면 '['로 시작하는 문구.</summary>
     private string? CheckConductorNotes(string modeName, ModeDefinition mode, string? reason, string? ownReview)
     {
@@ -752,7 +804,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             sb.AppendLine($"[주의] modes.json에 예전 모드 이름이 남아 있습니다: {string.Join(", ", stale.Select(k => $"{k}→{ModeNames.Normalize(k)}"))}. 키를 새 이름으로 바꾸세요 (기록은 새 이름으로 읽혀 followUp이 어긋남).");
 
         // run_mode의 agents 교체에 쓸 수 있는 이름 목록 (짧게)
-        sb.AppendLine("에이전트: " + string.Join(", ", catalog.Agents.Select(a => $"{a.Name}({a.Model})")));
+        sb.AppendLine("에이전트: " + string.Join(", ", catalog.Agents.Select(a => $"{a.Name}({a.Model}{(a.Reasoning is { } e ? $", 추론 {AgentSettings.EffortName(e)}" : "")})")));
 
         // context의 "@이름/…"에 쓸 추가 루트. 등록이 있을 때만, 경로 없이 이름만 (비어 있으면 출력이 이전과 같다).
         // 잘못된 항목은 경고로만 알리고, 그 루트를 참조한 호출만 거절된다.

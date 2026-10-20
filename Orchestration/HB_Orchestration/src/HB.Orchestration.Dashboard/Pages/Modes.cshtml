@@ -130,7 +130,7 @@
                 <div class="table-scroll">
                     <table class="agents edit">
                         <thead>
-                        <tr><th>이름</th><th>제공사</th><th>모델 ID</th><th>출력 상한</th><th title="요청 하나의 네트워크 타임아웃. 비우면 제공사 값 → 100초">타임아웃(초)</th><th>사용</th><th title="이미지 입력을 받는지 (Vision). 표시 전용 — 바꾸려면 appsettings.json을 직접 고친다">이미지</th><th>삭제</th><th>쓰는 모드</th></tr>
+                        <tr><th>이름</th><th>제공사</th><th>모델 ID</th><th>출력 상한</th><th title="요청 하나의 네트워크 타임아웃. 비우면 제공사 값 → 100초">타임아웃(초)</th><th title="추론 강도. 비우면 보내지 않음(제공사·모델 기본값). 모델마다 받는 값이 다르다 — README 에이전트 절. 실행마다 run_mode reasoning으로 덮어쓸 수 있다">추론 강도</th><th>사용</th><th title="이미지 입력을 받는지 (Vision). 표시 전용 — 바꾸려면 appsettings.json을 직접 고친다">이미지</th><th>삭제</th><th>쓰는 모드</th></tr>
                         </thead>
                         <tbody>
                         @for (var i = 0; i <= snap.Agents.Count; i++)
@@ -153,6 +153,20 @@
                                 <td><input class="mono wide" name="@("ag.model." + i)" value="@(a?.Model)" placeholder="모델 ID" /></td>
                                 <td><input type="number" min="1" name="@("ag.max." + i)" value="@(a?.MaxOutputTokens)" placeholder="없음" /></td>
                                 <td><input type="number" min="1" name="@("ag.timeout." + i)" value="@(a?.TimeoutSeconds)" placeholder="@Model.TimeoutPlaceholder(a)" /></td>
+                                <td>
+                                    <select name="@("ag.effort." + i)">
+                                        <option value="" selected="@(string.IsNullOrWhiteSpace(a?.ReasoningEffort))">기본</option>
+                                        @if (!string.IsNullOrWhiteSpace(a?.ReasoningEffort) && HB.Orchestration.Agents.AgentSettings.ParseEffort(a.ReasoningEffort).Error is not null)
+                                        {
+                                            @* 설정 파일의 잘못된 값: 말없이 "기본"으로 바뀌어 저장되지 않도록 그대로 선택해 두고, 저장 때 오류로 막는다 *@
+                                            <option value="@a.ReasoningEffort" selected>@a.ReasoningEffort (잘못된 값)</option>
+                                        }
+                                        @foreach (var e in HB.Orchestration.Agents.AgentSettings.EffortNames)
+                                        {
+                                            <option value="@e" selected="@(string.Equals(a?.ReasoningEffort?.Trim(), e, StringComparison.OrdinalIgnoreCase))">@e</option>
+                                        }
+                                    </select>
+                                </td>
                                 <td><input type="checkbox" name="@("ag.enabled." + i)" value="true" checked="@(a?.Enabled ?? true)" /></td>
                                 <td class="@(a is { Vision: false } ? "muted" : "ok")" title="표시 전용">@(a is null ? "" : a.Vision ? "✓" : "✗")</td>
                                 <td>

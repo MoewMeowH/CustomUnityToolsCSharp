@@ -31,6 +31,10 @@ public sealed record CallRecord
 
     public required string Model { get; init; }
 
+    /// <summary>이 호출에 보낸 추론 강도 (none · low · medium · high · xhigh). 보내지 않았거나(제공사 기본값) 예전 기록이면 null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ReasoningEffort { get; init; }
+
     /// <summary>MCP 서버의 작업 디렉터리 (= Claude Code를 실행한 프로젝트 루트).</summary>
     public string? ProjectDir { get; init; }
 
