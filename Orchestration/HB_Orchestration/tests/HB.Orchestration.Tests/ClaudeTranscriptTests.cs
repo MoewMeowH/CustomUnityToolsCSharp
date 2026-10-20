@@ -106,7 +106,8 @@ public sealed class ClaudeTranscriptTests : IDisposable
 
         var calls = ClaudeTranscriptReader.Read(path).RunCalls;
 
-        Assert.Equal(["review", "cross_p3", "panel"], calls.Select(c => c.Mode));
+        // 예전 모드 이름(review · panel)은 읽을 때 새 이름으로 바뀐다 (ModeNames).
+        Assert.Equal(["review_main", "cross_p3", "review_high"], calls.Select(c => c.Mode));
         Assert.Equal(["aaaaaaaaaa", "bbbbbbbbbb", "cccccccccc"], calls.Select(c => c.RunId));
         Assert.Equal(["result", "task-notification", "persisted"], calls.Select(c => c.ResultSource));
     }

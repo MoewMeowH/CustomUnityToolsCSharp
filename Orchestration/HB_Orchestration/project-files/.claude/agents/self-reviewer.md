@@ -1,6 +1,6 @@
 ---
 name: self-reviewer
-description: 지휘자 대화 맥락 없이 코드 변경을 독립 검토한다. /self-review 또는 /cross-review(ownReview)에서 지휘자가 부른다. subagent_in/<실행>/ 에 복사된 대상 코드·리뷰 지침과 위임 메시지의 변경 의도·제약만 받는다.
+description: 지휘자 대화 맥락 없이 코드 변경을 독립 검토한다. /self-review 또는 /cross-review·/mode perf_*(ownReview)에서 지휘자가 부른다. subagent_in/<실행>/ 에 복사된 대상 코드·리뷰 지침과 위임 메시지의 변경 의도·제약만 받는다.
 tools: Read, Grep, Glob
 model: opus
 maxTurns: 40

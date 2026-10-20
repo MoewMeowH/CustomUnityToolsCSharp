@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using HB.Orchestration.Shared;
 
 namespace HB.Orchestration.Agents;
 
@@ -23,7 +24,9 @@ public sealed record GoldenCaseInfo
 
     public string Id { get; init; } = "";
     public string Kind { get; init; } = "";
-    public string Mode { get; init; } = "review";
+    /// <summary>모드 이름. 예전 이름(review · crash 등)으로 적힌 사례도 새 이름으로 읽는다 (ModeNames, 파일은 그대로).</summary>
+    public string Mode { get => _mode; init => _mode = ModeNames.Normalize(value) ?? ""; }
+    private readonly string _mode = "review_main";
 
     [JsonIgnore] public bool IsCrash => Kind == Crash;
 
@@ -126,7 +129,7 @@ public static class GoldenCaseLoader
             if (info is null || string.IsNullOrWhiteSpace(info.Id)) return (null, $"{CaseFile}에 id가 없습니다.");
             if (!string.Equals(info.Id, name, StringComparison.OrdinalIgnoreCase)) return (null, $"{CaseFile}의 id '{info.Id}'가 폴더 이름 '{name}'과 다릅니다.");
             if (info.Kind is not ("record" or "seeded" or GoldenCaseInfo.Crash)) return (null, $"{CaseFile}의 kind는 record · seeded · crash 중 하나여야 합니다 (지금 '{info.Kind}').");
-            if (string.IsNullOrWhiteSpace(info.Mode)) return (null, $"{CaseFile}의 mode가 비어 있습니다 (생략하면 review).");
+            if (string.IsNullOrWhiteSpace(info.Mode)) return (null, $"{CaseFile}의 mode가 비어 있습니다 (생략하면 review_main).");
             if (string.IsNullOrWhiteSpace(input)) return (null, $"{InputFile}이(가) 비어 있습니다.");
             if (expected.Count == 0) return (null, $"{ExpectedFile}에 기대 지적이 없습니다.");
             var problem = info.IsCrash

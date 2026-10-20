@@ -1,10 +1,10 @@
 """PreToolUse 훅 H3·H4 (mcp__hb-orchestration__run_mode) — 계획서 2026-10-19_훅-규칙-강제.
 
-- H3: mode가 review · panel인데 프로젝트 안 docs/plans/에 오늘 날짜 이름이거나 오늘 고친 계획서(.md)가 없으면 막는다.
-  CLAUDE.md "외부 에이전트 리뷰(review 모드)를 부르는 작업은 계획서. 없던 작업이면 리뷰 전에 만들고 '사후 작성' 표시".
+- H3: mode가 review_main · review_high인데 프로젝트 안 docs/plans/에 오늘 날짜 이름이거나 오늘 고친 계획서(.md)가 없으면 막는다.
+  CLAUDE.md "외부 에이전트 리뷰(review_* 모드)를 부르는 작업은 계획서. 없던 작업이면 리뷰 전에 만들고 '사후 작성' 표시".
   docs/plans/는 프로젝트 루트에서 깊이 4까지만 찾는다 (느려지지 않게).
 - H4: reason이 [ownReview:self-reviewer]로 시작하면 ownReview는 self-reviewer 결과 원문이어야 한다
-  (/cross-review 3단계). '## 지적'·'## 읽은 파일' 절이 있고, 읽은 파일 줄이 모두 subagent_in/ 안이어야 통과.
+  (/cross-review 3단계 · /mode perf_* 3단계). '## 지적'·'## 읽은 파일' 절이 있고, 읽은 파일 줄이 모두 subagent_in/ 안이어야 통과.
   2026-10-19: 첫 호출이 거절된 뒤 재호출 때 원문 대신 요약을 넣은 적이 있다.
 - 실패하면 막는다: 통과 판정일 때만 exit 0.
 
@@ -16,7 +16,7 @@ import os
 import re
 import sys
 
-PLAN_MODES = {'review', 'panel'}
+PLAN_MODES = {'review_main', 'review_high'}
 SELF_REVIEW_TAG = '[ownReview:self-reviewer]'
 MAX_DEPTH = 4
 
@@ -111,7 +111,7 @@ def check(data: dict, today: datetime.date | None = None) -> None:
 
     if reason.startswith(SELF_REVIEW_TAG) and (problem := self_review_problem(own)) is not None:
         keys = '' if own else f" (받은 입력 키: {', '.join(sorted(ti))})"
-        deny(f'ownReview가 self-reviewer 결과 원문이 아니다: {problem}{keys}. /cross-review 3단계: ownReview에는 self-reviewer 결과 원문만 넣는다.')
+        deny(f'ownReview가 self-reviewer 결과 원문이 아니다: {problem}{keys}. /cross-review 3단계 · /mode 3단계: ownReview에는 self-reviewer 결과 원문만 넣는다.')
 
     if mode in PLAN_MODES:
         root = os.environ.get('CLAUDE_PROJECT_DIR') or data.get('cwd') or os.getcwd()

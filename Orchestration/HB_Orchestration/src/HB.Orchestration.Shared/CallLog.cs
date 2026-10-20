@@ -86,7 +86,7 @@ public static class CallLog
             if (string.IsNullOrWhiteSpace(line)) continue;
             try
             {
-                if (JsonSerializer.Deserialize<CallRecord>(line, Json) is { } r) result.Add(r);
+                if (JsonSerializer.Deserialize<CallRecord>(line, Json) is { } r) result.Add(ModeNames.Normalize(r));
             }
             catch (JsonException)
             {
@@ -120,7 +120,7 @@ public static class CallLog
             }
             if (r is null) continue;
             if (r.Timestamp < stopBefore) break;
-            if (r.Timestamp >= since) result.Add(r);
+            if (r.Timestamp >= since) result.Add(ModeNames.Normalize(r));
         }
         return result;
     }

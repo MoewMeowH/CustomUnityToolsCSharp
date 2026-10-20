@@ -386,8 +386,10 @@ public sealed class AgentOptions
 }
 
 /// <summary>
-/// 입력 상한 · 세션당 실행 한도 · 사용량 집계. 하루 토큰·비용 상한(DailyTokenLimit · DailyCostLimitUsd)은 없앴다
-/// (계획서 2026-10-20_하루상한-제거 — 하루에 몰아 쓰는 사용 방식, 제공사 계정 한도가 마지막 방어선). 예전 appsettings에 키가 남아 있어도 무시된다.
+/// 입력 상한 · 사용량 집계. 하루 토큰·비용 상한(DailyTokenLimit · DailyCostLimitUsd)은 없앴다
+/// (계획서 2026-10-20_하루상한-제거 — 하루에 몰아 쓰는 사용 방식, 제공사 계정 한도가 마지막 방어선).
+/// 세션당 실행 한도(DefaultMaxRunsPerSession · 모드 MaxRunsPerSession)도 없앴다 (계획서 2026-10-20_모드이름-통일-세션한도-제거).
+/// 예전 appsettings·modes.json에 키가 남아 있어도 무시된다.
 /// </summary>
 public sealed class BudgetOptions
 {
@@ -396,9 +398,6 @@ public sealed class BudgetOptions
     /// 모드별로 덮어쓸 수 있음. Debate는 토론자가 매 턴 요청 전체를 다시 받으므로 실제 비용은 턴 수만큼 곱해진다.
     /// </summary>
     public int MaxInputChars { get; set; } = 350_000;
-
-    /// <summary>MaxRunsPerSession을 정하지 않은 모드의 세션당 실행 한도. 0이면 무제한.</summary>
-    public int DefaultMaxRunsPerSession { get; set; } = 5;
 
     /// <summary>사용량 집계에서 뺄 제공사 (무료인 로컬 등).</summary>
     public List<string> FreeProviders { get; set; } = ["local"];

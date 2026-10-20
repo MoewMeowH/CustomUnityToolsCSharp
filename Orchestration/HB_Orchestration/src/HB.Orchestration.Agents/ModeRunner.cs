@@ -35,14 +35,12 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         IReadOnlyList<ContextRange>? context, IReadOnlyList<string>? images, string? reason, string? ownReview, CancellationToken ct)
     {
         // ── 1. 실행 전 검증: 여기서 걸리면 토큰을 한 개도 쓰지 않는다 ──────────────
-        sessions.ApplyResets();
-
         ModeStore.Loaded loaded;
         try { loaded = store.Load(); }
         catch (ModeConfigException ex) { return $"[모드 설정 오류] {ex.Message}"; }
 
         if (!loaded.File.Modes.TryGetValue(modeName, out var mode))
-            return $"[알 수 없는 모드 '{modeName}'] 사용 가능: {string.Join(", ", loaded.File.Modes.Keys)}";
+            return UnknownMode(modeName, loaded);
 
         if (mode.Steps.Count == 0)
             return $"[모드 '{modeName}'] Steps가 비어 있습니다.";
@@ -85,13 +83,8 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         if (loadedImages!.Count > 0 && plan.Where(p => !p.Agent.Options.Vision).Select(p => p.Agent.Name).Distinct().ToList() is { Count: > 0 } blind)
             return $"[모드 '{modeName}'] 이미지를 받지 않는 에이전트(Vision=false): {string.Join(", ", blind)}. images 없이 호출하거나 agents로 바꾸세요.";
 
-        // 세션당 실행 한도: 검증을 다 통과한 실행만 센다 (설정 오류로 거절된 호출은 횟수에 안 들어감).
-        var limit = RunLimit(mode);
-        if (!sessions.TryReserve(modeName, limit))
-        {
-            return $"[이 세션의 '{modeName}' 실행 한도 도달] {limit}회. 외부 에이전트 없이 진행하세요. " +
-                   "더 필요하면 사용자가 대시보드 '세션' 화면에서 이 세션의 횟수를 초기화하거나 modes.json의 MaxRunsPerSession을 올릴 수 있습니다.";
-        }
+        // 세션별 실행 횟수 (대시보드 '세션' 화면 표시용, 한도 없음): 검증을 다 통과한 실행만 센다.
+        sessions.Count(modeName);
 
         // ── 2. 실행 ──────────────────────────────────────────────────────────
         var runId = Guid.NewGuid().ToString("N")[..10];
@@ -239,7 +232,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
 
     /// <summary>
     /// 골든 세트 실행 (--golden run): 고정된 프롬프트 원문을 run_mode와 같은 시스템 프롬프트·에이전트로 보낸다.
-    /// 세션 실행 한도·ownReview·context 첨부는 쓰지 않는다 (첨부는 프롬프트 원문에 이미 들어 있음).
+    /// ownReview·context 첨부는 쓰지 않는다 (첨부는 프롬프트 원문에 이미 들어 있음).
     /// 호출 기록의 Tool은 <paramref name="tool"/>, Mode는 원래 모드 이름이다.
     /// </summary>
     /// <param name="expectedGuidelines">실행 전 확인 때의 지침. 주면 호출 직전에 다시 읽은 지침(붙음 여부·해시)과 비교해 다르면 호출하지 않는다
@@ -265,7 +258,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
 
     /// <summary>
     /// --golden의 crash 사례: Sequential 모드 전체를 run_mode와 같은 계획·프롬프트 조립(Sees)으로 돌린다 (계획서 2026-10-19_골든-crash사례).
-    /// input은 run_mode의 input과 같고 첨부(context)·이미지는 없다. 세션 한도·ownReview는 쓰지 않는다. 기록 Tool은 tool.
+    /// input은 run_mode의 input과 같고 첨부(context)·이미지는 없다. ownReview는 쓰지 않는다. 기록 Tool은 tool.
     /// expected를 주면 단계 수 · 단계마다 에이전트와 지침(붙음·해시)을 실행 전 확인과 비교해 다르면 호출하지 않는다
     /// (사례를 차례로 도는 사이 modes.json·지침이 바뀌면 결과 줄의 에이전트·모델과 실제 실행이 어긋나므로).
     /// </summary>
@@ -316,7 +309,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         catch (ModeConfigException ex) { return (null, $"[모드 설정 오류] {ex.Message}"); }
 
         if (!loaded.File.Modes.TryGetValue(modeName, out var mode))
-            return (null, $"[알 수 없는 모드 '{modeName}'] 사용 가능: {string.Join(", ", loaded.File.Modes.Keys)}");
+            return (null, UnknownMode(modeName, loaded));
         if (mode.Steps.Count == 0 || mode.Flow != ModeFlow.Sequential)
             return (null, $"[모드 '{modeName}'] 골든 다단계 실행은 Sequential 모드만 됩니다 (지금 {mode.Steps.Count}단계, {mode.Flow}).");
         if (requireSearchLast && (mode.Steps.Count < 2 || mode.Steps[^1].WebSearch is null))
@@ -346,7 +339,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     /// <summary>
     /// 자료 보충 재질문 (run_mode followUp, 계획서 2026-10-19_자료요청-왕복): 원래 단계의 에이전트에게
     /// [원래 프롬프트, 원래 응답]을 앞 대화로 두고 지휘자가 찾은 보충 자료(context + input)를 이어 보낸다.
-    /// - 같은 runId에 성공한 보충 1회만 (실패·취소는 다시 할 수 있음, 동시 호출은 예약으로 막음). 세션 실행 한도는 차감하지 않는다 (사용자 결정: 원래 실행에 포함). reason은 필수, ownReview는 받지 않는다.
+    /// - 같은 runId에 성공한 보충 1회만 (실패·취소는 다시 할 수 있음, 동시 호출은 예약으로 막음). reason은 필수, ownReview는 받지 않는다.
     /// - 결과는 같은 runId의 새 단계 번호로 남는다 (지적·요청 ID와 save_result가 원래 응답과 섞이지 않게).
     /// - 보충하지 않은 요청은 결과 끝과 기록(FollowUpSkipped)에 남는다 — 지휘자는 그 이유를 사용자에게 알린다.
     /// </summary>
@@ -394,7 +387,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             ModeStore.Loaded loaded;
             try { loaded = store.Load(); }
             catch (ModeConfigException ex) { return $"[모드 설정 오류] {ex.Message}"; }
-            if (!loaded.File.Modes.TryGetValue(modeName, out var mode)) return $"[알 수 없는 모드 '{modeName}']";
+            if (!loaded.File.Modes.TryGetValue(modeName, out var mode)) return UnknownMode(modeName, loaded);
             if (mode.Flow == ModeFlow.Debate) return Fail + "Debate 모드는 보충 재질문을 하지 않습니다 (턴 번호가 단계와 다름).";
             if (followUp.Step < 1 || followUp.Step > mode.Steps.Count || !string.Equals(mode.Steps[followUp.Step - 1].Role, original.Role, StringComparison.OrdinalIgnoreCase))
                 return Fail + $"modes.json의 {followUp.Step}단계가 원래 실행의 역할('{original.Role}')과 다릅니다.";
@@ -495,7 +488,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         catch (ModeConfigException ex) { return (null, $"[모드 설정 오류] {ex.Message}"); }
 
         if (!loaded.File.Modes.TryGetValue(modeName, out var mode))
-            return (null, $"[알 수 없는 모드 '{modeName}'] 사용 가능: {string.Join(", ", loaded.File.Modes.Keys)}");
+            return (null, UnknownMode(modeName, loaded));
         if (mode.Steps.Count != 1 || mode.Flow == ModeFlow.Debate)
             return (null, $"[모드 '{modeName}'] 골든 실행은 단계가 하나인 모드만 됩니다 (지금 {mode.Steps.Count}단계, {mode.Flow}).");
 
@@ -701,31 +694,42 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         return (map, null);
     }
 
-    /// <summary>reason · ownReview 검사. 문제가 있으면 '['로 시작하는 문구 (실행 횟수 차감 전이라 거절해도 횟수가 그대로다).</summary>
+    /// <summary>reason · ownReview 검사. 문제가 있으면 '['로 시작하는 문구.</summary>
     private string? CheckConductorNotes(string modeName, ModeDefinition mode, string? reason, string? ownReview)
     {
         var records = Options.Records;
         if (string.IsNullOrWhiteSpace(reason))
-            return "[reason 필요] 이 모드를 부른 이유를 reason에 한 줄로 넣어 다시 호출하세요. 기록용이며 에이전트에게 가지 않습니다. (실행 횟수 차감 없음)";
+            return "[reason 필요] 이 모드를 부른 이유를 reason에 한 줄로 넣어 다시 호출하세요. 기록용이며 에이전트에게 가지 않습니다.";
         if (records.MaxReasonChars > 0 && reason.Length > records.MaxReasonChars)
-            return $"[reason이 너무 깁니다] {reason.Length:N0}자 / 상한 {records.MaxReasonChars:N0}자. 한 줄로 줄여 다시 호출하세요. (실행 횟수 차감 없음)";
+            return $"[reason이 너무 깁니다] {reason.Length:N0}자 / 상한 {records.MaxReasonChars:N0}자. 한 줄로 줄여 다시 호출하세요.";
 
         if (mode.RequireOwnReview && string.IsNullOrWhiteSpace(ownReview))
             return $"[ownReview 필요] '{modeName}'은(는) 결과를 보기 전에 완성한 자체 검토가 필수입니다. ownReview에 원문을 넣어 다시 호출하세요. " +
-                   "기록용이며 에이전트에게 가지 않습니다. (실행 횟수 차감 없음)";
+                   "기록용이며 에이전트에게 가지 않습니다.";
         if (ownReview is not null && records.MaxOwnReviewChars > 0 && ownReview.Length > records.MaxOwnReviewChars)
-            return $"[ownReview가 너무 깁니다] {ownReview.Length:N0}자 / 상한 {records.MaxOwnReviewChars:N0}자. 잘라서 남기지 않으니 줄여서 다시 호출하세요. (실행 횟수 차감 없음)";
+            return $"[ownReview가 너무 깁니다] {ownReview.Length:N0}자 / 상한 {records.MaxOwnReviewChars:N0}자. 잘라서 남기지 않으니 줄여서 다시 호출하세요.";
 
         return null;
     }
 
-    private int RunLimit(ModeDefinition mode) => mode.MaxRunsPerSession ?? Options.Budget.DefaultMaxRunsPerSession;
+    /// <summary>모르는 모드 이름. 예전 이름이면 새 이름을 알려 준다 (예전 이름으로 실행하지는 않는다 — ModeNames).</summary>
+    private static string UnknownMode(string modeName, ModeStore.Loaded loaded)
+    {
+        if (ModeNames.RenamedHint(modeName) is { } hint)
+            return $"[알 수 없는 모드 '{modeName}'] {hint} 새 이름으로 다시 호출하세요.";
+        // modes.json이 아직 예전 이름 키를 쓰면 새 이름이 없다 → 원인을 알려 준다.
+        if (StaleModeKeys(loaded).FirstOrDefault(k => string.Equals(ModeNames.Normalize(k), modeName, StringComparison.OrdinalIgnoreCase)) is { } stale)
+            return $"[알 수 없는 모드 '{modeName}'] modes.json({loaded.Path})에 예전 이름 '{stale}'로 남아 있습니다. 키를 '{modeName}'(으)로 바꾸세요.";
+        return $"[알 수 없는 모드 '{modeName}'] 사용 가능: {string.Join(", ", loaded.File.Modes.Keys)}";
+    }
+
+    /// <summary>modes.json에 남은 예전 이름 키 (ModeNames.Renamed). 그 키는 실행되지만 기록은 새 이름으로 읽혀 followUp이 어긋난다.</summary>
+    private static IEnumerable<string> StaleModeKeys(ModeStore.Loaded loaded) =>
+        loaded.File.Modes.Keys.Where(k => ModeNames.Renamed.ContainsKey(k));
 
     /// <summary>list_modes용 요약. 짧게 유지할수록 Claude 쪽 토큰 절약.</summary>
     public string Describe()
     {
-        sessions.ApplyResets();
-
         ModeStore.Loaded loaded;
         try { loaded = store.Load(); }
         catch (ModeConfigException ex) { return $"[모드 설정 오류] {ex.Message}"; }
@@ -738,14 +742,14 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             var arrow = mode.Flow switch { ModeFlow.Concurrent => " | ", ModeFlow.Debate => " ⇄ ", _ => " → " };
             var steps = string.Join(arrow, mode.Steps.Select(s =>
                 catalog.TryGet(s.Agent, out _) ? $"{s.Role}@{s.Agent}" : $"{s.Role}@{s.Agent}(사용불가)"));
-            var limit = RunLimit(mode);
-            var used = sessions.Get(name);
-            var quota = limit > 0 ? $" (남은 실행 {Math.Max(0, limit - used)}/{limit})" : "";
             var rounds = mode.Flow == ModeFlow.Debate ? $" 최대 {Math.Clamp(mode.MaxRounds ?? 2, 1, ModeDefinition.MaxRoundsHardCap)}회차" : "";
             var ownReview = mode.RequireOwnReview ? " [ownReview 필수]" : "";
-            sb.AppendLine($"- {name}: {mode.Description} [{steps}]{rounds}{quota}{ownReview}");
+            sb.AppendLine($"- {name}: {mode.Description} [{steps}]{rounds}{ownReview}");
         }
         if (sb.Length == 0) return "정의된 모드가 없습니다.";
+
+        if (StaleModeKeys(loaded).ToList() is { Count: > 0 } stale)
+            sb.AppendLine($"[주의] modes.json에 예전 모드 이름이 남아 있습니다: {string.Join(", ", stale.Select(k => $"{k}→{ModeNames.Normalize(k)}"))}. 키를 새 이름으로 바꾸세요 (기록은 새 이름으로 읽혀 followUp이 어긋남).");
 
         // run_mode의 agents 교체에 쓸 수 있는 이름 목록 (짧게)
         sb.AppendLine("에이전트: " + string.Join(", ", catalog.Agents.Select(a => $"{a.Name}({a.Model})")));
@@ -776,7 +780,6 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     /// <summary>server_info용: publish 후 새 서버가 떴는지, 설정이 언제 읽혔는지 확인.</summary>
     public string ServerInfo()
     {
-        sessions.ApplyResets();
         var sb = new StringBuilder();
         sb.AppendLine($"서버 빌드: {(sessions.ServerBuild?.ToString("yyyy-MM-dd HH:mm:ss") ?? "알 수 없음")}");
         sb.AppendLine($"PID: {sessions.Pid} (시작 {sessions.StartedAt:yyyy-MM-dd HH:mm:ss})");

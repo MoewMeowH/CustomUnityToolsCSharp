@@ -1,10 +1,10 @@
 ---
 description: Claude와 외부 에이전트가 독립적으로 리뷰한 뒤 결과를 종합한다
-argument-hint: [panel] [파일/커밋 범위, 비우면 현재 미커밋 변경]
+argument-hint: [main|high] [파일/커밋 범위, 비우면 현재 미커밋 변경]
 ---
 
 인자: $ARGUMENTS
-- 첫 단어가 `panel`이면 `panel` 모드, 아니면 `review` 모드.
+- 첫 단어가 `high`면 `review_high`(sol · argon 동시), `main`이거나 없으면 `review_main`. (예전 인자 `panel`은 `high`로 읽는다.)
 - 나머지가 대상. 비어 있으면 `git diff HEAD`의 미커밋 변경.
 
 1. diff가 있으면 대상 diff와 변경 의도를 파악한다. 의도가 불분명하면 커밋 메시지·주변 코드로 추론하고, 그래도 모르면 한 줄로 질문한다. / diff가 없으면(기존 코드 점검) 변경 의도 대신 "이 코드의 역할과 점검 목적"을 쓰고, 파일 전체가 아니라 핵심 클래스·메서드 위주로 추려서 넘긴다.

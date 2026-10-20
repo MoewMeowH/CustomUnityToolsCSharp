@@ -103,7 +103,6 @@ dotnet build HB_Orchestration.slnx
 | `Providers.<이름>.ImageDetail` | 이미지 부분에 실을 `detail` 값 (OpenAI: `auto`·`low`·`high`·`original`). 비우면 보내지 않음 (= 제공사 기본값). Gemini OpenAI 호환 엔드포인트는 이 필드를 문서화하지 않아 제공사 단위로 둔다 |
 | `Agents[].Vision` | 이미지 입력을 받는 모델인지 (기본 `true`). `false`인 에이전트가 낀 모드에 `images`가 오면 실행 전에 거절 |
 | `Agents[].StructuredOutput` · `Providers.<이름>.StructuredOutput` | 구조화 출력(역할 `Output`) 요청 방식. **에이전트 → 제공사 → `Prompt`** 순. `Prompt` = 시스템 프롬프트에만 JSON 형식을 적음. `Schema` = 거기에 `response_format: json_schema`(strict)까지 보내 강제. 모델이 미지원이면 400 → 그 단계 실패 (자동으로 `Prompt`로 다시 보내지 않음, 이 값을 `Prompt`로 바꿀 것). 기본 설정은 `openai`만 `Schema` (아래 "구조화 출력") |
-| `Budget.DefaultMaxRunsPerSession` | `MaxRunsPerSession`이 없는 모드의 세션당 실행 한도 |
 | `Budget.FreeProviders` | 비용 집계에서 뺄 제공사 (기본 `local`) |
 | `ResponseChecks.ExpectedLanguage` | 기대하는 응답 언어. 지금은 `ko`만 지원. **키가 없으면 `ko`(검사 켬), `""`이면 끔** (아래 "응답 검사기") |
 | `ResponseChecks.ForeignScriptRatio` | 코드 블록을 뺀 본문에서 일본어 가나 비율이 이 값 이상이면 경고 (기본 0.02 = 2%) |
@@ -171,7 +170,6 @@ SDK 자동 재시도(기본 3회, 기록에 안 남음)는 끄고 서버가 직�
 |---|---|
 | modes.json (모드·역할·에이전트 배치) | 없음 — 다음 호출부터 반영 |
 | appsettings.json (에이전트·모델·제공사·예산) | 없음 — 다음 호출부터 반영 |
-| 세션 실행 횟수 | 없음 — 대시보드 **세션** 화면에서 초기화 |
 | 서버 코드 (publish) | 배치가 MCP 서버만 종료 → Claude Code에서 `/mcp`로 재연결 (8절). Claude Code·대화는 그대로 |
 | **API 키 환경 변수** | **PC 재시작** (직접). 환경 변수는 프로그램이 시작될 때 물려받는 값이라, Unity Hub·Toolbox 같은 트레이 프로그램까지 새로 떠야 확실하다 |
 
@@ -189,8 +187,7 @@ SDK 자동 재시도(기본 3회, 기록에 안 남음)는 끄고 서버가 직�
     "Rebuttal": { "Prompt": "너는 반박자다 ...", "UseGuidelines": true }
   },
   "Modes": {
-    "debate": {
-      "MaxRunsPerSession": 2,
+    "design_main": {
       "Description": "주장/설계에 반박 후 양쪽 논리 검증",
       "Flow": "Sequential",
       "Return": "All",
@@ -213,6 +210,25 @@ SDK 자동 재시도(기본 3회, 기록에 안 남음)는 끄고 서버가 직�
 
 내장 역할 `Reviewer`, `Critic`은 코드에 들어 있고, 같은 이름으로 정의하면 덮어쓴다. 내장 `Reviewer`는 `Output: findings`다 (modes.json에서 덮어쓰면 그쪽 `Output`을 따른다). `PerfReviewer`는 modes.json에 `Output: perf_findings`로 둔다.
 
+### 기본 모드와 이름 규칙
+
+이름은 고를 수 있는 모드면 `{종류}_{등급}`(lite · main · high — high는 비싸거나 두 회사 동시), 단계 모드면 `{종류}_{단계}`다 (계획서 `docs/plans/2026-10-20_모드이름-통일-세션한도-제거.md`).
+예전 이름(review · panel · perf_sol · perf_argon · critique · debate · deliberate · research · parallel · work_order · crash · crash_review)으로 부르면 실행하지 않고 새 이름을 알려 준다.
+호출 기록·골든 사례·세션 기록에 남은 예전 이름은 **읽을 때만** 새 이름으로 바꿔 읽는다 (`ModeNames`, 파일은 그대로). 없앤 `perf_astra`는 기록에 그대로 보인다.
+구성이 바뀐 모드(`perf_argon` argon 단독 → `perf_high` sol | argon)는 예전 실행과 **한 모드로 합쳐 집계**된다. 구성별로 보려면 판정 화면의 에이전트 축을 본다.
+modes.json에 예전 이름 키가 남아 있으면 `list_modes`가 `[주의]`로 알린다 (그 키는 예전 이름 그대로 실행되지만, 기록은 새 이름으로 읽혀 followUp이 어긋난다 — 새 이름으로 바꾼다).
+
+| 종류 | 모드 | 구성 | 부르는 곳 |
+|---|---|---|---|
+| 리뷰 | `review_main` · `review_high` | sol · (sol \| argon) | `/cross-review [main\|high]` |
+| 성능 | `perf_main` · `perf_high` | sol · (sol \| argon) | `/mode`, ownReview는 self-reviewer |
+| 설계 판단 | `design_lite` · `design_main` · `design_high` | 비평(sol) · 반박(sol) → 논리 검증(flash) · 반박 ⇄ 옹호 → 판정 | `/mode` |
+| 조사 | `research_main` | luna(웹) → sol | `/mode` |
+| 크래시 | `crash_main` → `crash_check` | argon → luna(웹) · sol | `/mode` |
+| 구현 | `parallel_main` | sol \| flash | `/mode` (요청할 때만) |
+| 지시서 | `work_order_main` | luna \| flash | `/work-order` |
+| 실행 전 점검 | `preflight_p1` · `p2` · `p3` · `preflight_check` · `preflight_perf` | 단계 모드 | `/preflight` |
+
 ### 모드 (`Modes.<이름>`)
 | 키 | 값 | 의미 |
 |---|---|---|
@@ -221,9 +237,8 @@ SDK 자동 재시도(기본 3회, 기록에 안 남음)는 끄고 서버가 직�
 | `Steps` | 배열 | 단계 목록 (아래 표) |
 | `Return` | `Last`(기본) / `All` | Claude에게 돌려줄 범위. Concurrent는 항상 All |
 | `MaxInputChars` | 숫자 | 이 모드의 입력 길이 상한. 없으면 `Budget.MaxInputChars` |
-| `PromptCache` | `Off` / `Context` / 없음 | 이 모드의 프롬프트 캐시 방식. 없으면 제공사 설정(`Providers.<이름>.PromptCache`). 제공사가 정책 없음(`ProviderDefault`)이면 무시. 같은 첨부를 30분 안에 다시 보내지 않는 모드는 `Off`(쓰기 1.25배만 내지 않게). 기본 modes.json은 preflight 단계 5개 · `parallel` · `work_order`가 `Off` |
-| `MaxRunsPerSession` | 숫자 | Claude Code 세션 하나에서 실행할 수 있는 횟수 (0 = 무제한). 없으면 `Budget.DefaultMaxRunsPerSession` |
-| `RequireOwnReview` | `true` / 없음 | `true`면 `run_mode`의 `ownReview`가 필수 (review 계열). 없으면 필수 아님. `list_modes`에 `[ownReview 필수]` 표시. 기본 modes.json은 `review` · `panel` · `work_order` · `preflight_p1` · `preflight_check` · `preflight_perf` · `perf_sol` · `perf_astra` · `perf_argon` |
+| `PromptCache` | `Off` / `Context` / 없음 | 이 모드의 프롬프트 캐시 방식. 없으면 제공사 설정(`Providers.<이름>.PromptCache`). 제공사가 정책 없음(`ProviderDefault`)이면 무시. 같은 첨부를 30분 안에 다시 보내지 않는 모드는 `Off`(쓰기 1.25배만 내지 않게). 기본 modes.json은 preflight 단계 5개 · `parallel_main` · `work_order_main`이 `Off` |
+| `RequireOwnReview` | `true` / 없음 | `true`면 `run_mode`의 `ownReview`가 필수 (review 계열). 없으면 필수 아님. `list_modes`에 `[ownReview 필수]` 표시. 기본 modes.json은 `review_main` · `review_high` · `perf_main` · `perf_high` · `crash_main` · `crash_check` · `work_order_main` · `preflight_p1` · `preflight_check` · `preflight_perf` |
 | `MaxRounds` (Debate) | 1~5 | 최대 회차. 1회차 = 두 토론자가 한 번씩. 기본 2, 서버 절대 상한 5 |
 | `HistoryWindow` (Debate) | 숫자 | 각 턴이 볼 직전 발언 수 (기본 2). 판정자는 항상 전체 |
 
@@ -250,11 +265,9 @@ SDK 자동 재시도(기본 3회, 기록에 안 남음)는 끄고 서버가 직�
 토론자는 매 발언 마지막 줄에 `[계속]` 또는 `[합의]`를 쓰고, `[합의]`가 나오면 남은 회차를 건너뛰고 바로 판정으로 간다.
 토큰은 회차가 늘수록 빠르게 늘어나므로 `MaxRounds`는 2, 많아야 3을 권장. 실행 중 실패하면 판정 없이 중단.
 
-### 실행 한도
-세션당 실행 한도는 MCP 서버 프로세스(= Claude Code 세션 하나)별로 센다. 새 세션을 열면 0부터 다시 센다. 검증 단계에서 거절된 호출(설정 오류, 입력 초과 등)은 횟수에 포함되지 않는다.
-
-한도에 걸렸는데 더 필요하면 **서버를 재시작하지 말고** 대시보드 **세션** 화면에서 그 세션의 횟수를 초기화한다. 서버를 다시 띄우려면 Claude Code 세션을 새로 열어야 해서 진행 중이던 대화 맥락까지 잃는다.
-- 서버는 세션 상태를 `%LOCALAPPDATA%/HB_Orchestration/sessions/{PID}.json`에 남기고, 대시보드는 초기화 요청을 `{PID}.reset`으로 남긴다. 서버가 다음 `run_mode`·`list_modes` 때 그걸 읽고 적용한다.
+### 실행 횟수
+세션당 실행 한도는 없다 (2026-10-20 제거 — 예전 `MaxRunsPerSession` · `Budget.DefaultMaxRunsPerSession` 키는 남아 있어도 무시된다). 반복 호출은 지휘자가 "이번 호출이 결론을 바꿀 수 있는가"로 판단한다 (CLAUDE.md).
+- 서버는 세션별 실행 횟수만 `%LOCALAPPDATA%/HB_Orchestration/sessions/{PID}.json`에 남기고, 대시보드 **세션** 화면이 보여 준다.
 
 ### 지휘자의 판단 근거 (`reason` · `ownReview`)
 
@@ -339,7 +352,7 @@ review 계열(`Reviewer` · `PerfReviewer`)의 응답을 JSON으로 받아 지�
 `run_mode(mode, input, context, reason, followUp: { runId, step, requests: ["1-N1", …] })`
 - 그 단계의 에이전트(원래 실행에서 바꿨으면 바꾼 에이전트)에게 `[원래 프롬프트, 원래 응답]`을 앞 대화로 두고, 보충 자료(`context`)·지휘자 메모(`input`)·보충 지시를 이어 보낸다. 앞부분이 원래 호출과 같아 제공사 프롬프트 캐시에 걸린다.
 - 결과는 같은 runId의 **새 단계 번호**(예: 2)로 남는다 — 지적·요청 ID(`2-F1`)와 `save_result`가 원래 응답과 섞이지 않는다. 기록에 `FollowUpOf`·`FollowUpRequests`·`FollowUpSkipped`.
-- 실행마다 **성공한 보충 1회** (실패·취소된 시도는 다시 할 수 있다, 같은 실행의 동시 호출은 서버 안 예약으로 하나만). **세션 실행 한도는 차감하지 않는다** (사용자 결정 — followUp으로 한도가 다 차지 않게). 입력 상한(원래 프롬프트 + 응답 + 보충)은 본다. `reason` 필수. `agents`·`images`·`ownReview`와 함께 쓰면 거절한다.
+- 실행마다 **성공한 보충 1회** (실패·취소된 시도는 다시 할 수 있다, 같은 실행의 동시 호출은 서버 안 예약으로 하나만). 입력 상한(원래 프롬프트 + 응답 + 보충)은 본다. `reason` 필수. `agents`·`images`·`ownReview`와 함께 쓰면 거절한다.
 - 계획은 그 단계 하나만, 원래 실행의 에이전트로 다시 조립한다. 시스템 프롬프트 해시가 원래 호출과 다르면 결과에 `(주의: 시스템 프롬프트가 원래 실행 때와 다르다)`.
 - 결과 끝: 원래 단계와 보충 단계 지적의 `겹침 후보`, `(판정은 N단계 지적 기준 — 원래 단계의 같은 지적은 duplicate로 …)`. 보내지 않은 요청은 결과 끝과 에이전트에게 간 메시지에 표시된다. 지휘자는 그 이유를 사용자에게 알린다 (CLAUDE.md "결과 종합" 6번).
 - 판정 화면: followUp으로 보낸 요청은 따로 기록하지 않아도 "보충"으로 센다. 보충 단계가 새로 낸 요청은 다시 보충할 수 없어 "처리 안 함"에 넣지 않고 따로 센다.
@@ -407,7 +420,6 @@ calls.jsonl의 응답 원문을 그대로 저장한다. Claude가 응답을 다�
 | `UseGuidelines: false` | modes.json | 코드와 무관한 역할에 지침을 안 붙임 |
 | `MaxOutputTokens` | appsettings | 응답 폭주 방지 |
 | `MaxRounds` · `HistoryWindow` · `[합의]` 조기 종료 | modes.json | 다회차 토론의 누적 비용 제한 |
-| `MaxRunsPerSession` | modes.json | 리뷰→수정→재리뷰, 추가 조사 반복 같은 루프를 세션 단위로 차단. 기본값은 `Budget.DefaultMaxRunsPerSession` |
 | `files`는 에이전트에 안 보냄 | 서버 | 경로 목록은 기록·링크 전용 |
 | `context`로 코드 첨부 | 서버 | Claude가 이미 읽은 코드를 input에 다시 쓰지 않음 → **Claude 출력 토큰 절약**. 서버가 `{path, startLine, endLine}`을 디스크에서 읽어 줄 번호와 함께 붙임. 루트 밖·링크(심볼릭·junction)·전송 금지 파일·범위 오류·크기 초과는 호출 전에 거절. 첨부한 범위는 기록의 `Context`, 내용은 `Prompt`에 남음. 8.3 짧은 이름도 긴 이름으로 바꿔 금지 패턴을 검사. 한계: 검사와 읽기 사이에 링크로 바꿔치기하는 경쟁은 막지 않음(단일 사용자 PC 전제) |
 | `images`로 이미지 첨부 | 서버 | `image_prep.py shrink`로 줄인 png·jpeg를 서버가 읽어 user 메시지에 `[첨부 자료] → [이미지 N] 이름표 + 이미지 → [요청]` 순서로 붙인다. 입력을 받는 단계에만 붙음. 경로 규칙은 `context`와 같고(`@이름/` 포함), 형식·장수·바이트·긴 변·중복은 호출 전에 거절. 기록에는 `Images`(경로·크기·sha256 앞 12자)만 남고 원문은 남기지 않음. 준비 순서는 CLAUDE.md "이미지 첨부" (collect → 사용자 정리 → shrink) |
@@ -441,10 +453,10 @@ powershell -ExecutionPolicy Bypass -File tools\Sync-ProjectFiles.ps1 -UnityProje
 - `REVIEW_GUIDELINES.md` — 공통 리뷰 기준 (서버가 자동으로 찾아 주입)
 - `.claude/commands/cross-review.md` — `/cross-review`, `/cross-review panel`
 - `.claude/commands/self-review.md` — `/self-review`: 지휘자 + self-reviewer만 (외부 에이전트 없음). CLAUDE.md 리뷰 조건에 걸리면 지휘자가 `/self-review` · `/cross-review` · 리뷰 없음 중에서 묻는다. 판정은 `record_verdicts`의 `selfReview`(runId 비움)로 남기면 서버가 self-review 실행(Tool·Mode `self_review`, 에이전트 `self-reviewer`, 제공사 `claude-subagent`, 토큰은 하루 상한에 넣지 않고 UsageRaw에)을 만든다 → 판정 화면에 self-reviewer 채택률·놓침
-- `.claude/commands/mode.md` — `/mode debate ...`, `/mode deliberate ...`, `/mode research ...`, `/mode parallel ...`
+- `.claude/commands/mode.md` — `/mode design_main ...`, `/mode design_high ...`, `/mode research_main ...`, `/mode parallel_main ...`, `/mode perf_main ...`
 - `.claude/commands/unity-test.md` — `/unity-test`, `/unity-test PlayMode MyGame.Combat`
-- `.claude/commands/work-order.md` — `/work-order <요청> [첨부]`: 오케스트레이션에 맡길 작업 지시서를 만든다. 조사 → 초안 → `work_order` 모드(luna | flash 동시 검토) → `그외 이상사항` 정리 → `WorkOrders.Folder`(없으면 `docs/work-orders/`)에 저장 + 대화에 출력. 코드는 고치지 않는다. 모드별 지침은 CLAUDE.md가 아니라 이 명령 파일에 둔다 (CLAUDE.md는 세션마다 컨텍스트에 올라감)
-- `.claude/commands/preflight.md` — `/preflight <요청> [첨부]`: 큰 작업의 실행 전 점검. `preflight_p1`(A 반박 · B 위험 · 성능 동시 검토) → `preflight_p2`(상호 판정) → 사용자 확정 → `preflight_p3`(최종 수정안) → 지휘자 종합 → `preflight_check`(전체, astra) · `preflight_perf`(성능, sol). 단계마다 멈추고, P5에는 앞 단계 논의를 붙이지 않는다. 산출물은 `docs/preflight/<날짜>_<주제>/`. 첨부 xlsx·csv는 `xlsx_dump.py`로 Markdown을 만들어 `context`로 붙인다. 성능만 볼 때는 `/mode perf_sol …`(기본) · `perf_astra`(중요한 핫패스) · `perf_argon`(Gemini)
+- `.claude/commands/work-order.md` — `/work-order <요청> [첨부]`: 오케스트레이션에 맡길 작업 지시서를 만든다. 조사 → 초안 → `work_order_main` 모드(luna | flash 동시 검토) → `그외 이상사항` 정리 → `WorkOrders.Folder`(없으면 `docs/work-orders/`)에 저장 + 대화에 출력. 코드는 고치지 않는다. 모드별 지침은 CLAUDE.md가 아니라 이 명령 파일에 둔다 (CLAUDE.md는 세션마다 컨텍스트에 올라감)
+- `.claude/commands/preflight.md` — `/preflight <요청> [첨부]`: 큰 작업의 실행 전 점검. `preflight_p1`(A 반박 · B 위험 · 성능 동시 검토) → `preflight_p2`(상호 판정) → 사용자 확정 → `preflight_p3`(최종 수정안) → 지휘자 종합 → `preflight_check`(전체, argon) · `preflight_perf`(성능, sol). 단계마다 멈추고, P5에는 앞 단계 논의를 붙이지 않는다. 산출물은 `docs/preflight/<날짜>_<주제>/`. 첨부 xlsx·csv는 `xlsx_dump.py`로 Markdown을 만들어 `context`로 붙인다. 성능만 볼 때는 `/mode perf_main …`(sol, 기본) · `perf_high`(sol · argon 동시)
 - `.claude/scripts/xlsx_dump.py` — `/work-order`의 첨부 읽기 도우미. 기획서 xlsx·csv를 Markdown 표로 뽑고(병합 셀·메모·텍스트 상자 글 포함) 이미지는 `review_tmp/work-order/<파일>/`에 붙은 셀 이름으로 저장. 필요: Python 3.9+, `openpyxl` (`python -m pip install openpyxl`). `.xls`는 지원하지 않음
 - `.claude/scripts/cleanup_guard.py` · `push_guard.py` · `run_mode_guard.py` — 규칙 강제 훅 H1~H4 (CLAUDE.md "훅이 막는 규칙"), 시험은 `test_hooks.py`
 - `.claude/settings.example.json` → Unity의 `.claude/settings.json` — Unity CLI 조회·테스트 명령은 매번 승인 없이 실행 + PreToolUse 훅 등록 (기존 파일이 있으면 `allow` 항목과 `hooks`를 합치기)
@@ -497,7 +509,7 @@ unity skill install --help
 
 **모드** (`/Modes`)
 - MCP publish 폴더의 `modes.json`을 읽어 모드마다 흐름을 그림으로 보여준다 (순차 → / 동시 묶음 / 토론 ⇄ → 판정).
-- 단계별 에이전트(드롭다운), 세션당 실행 한도, 최대 회차, 반환 범위를 바꿔 **저장**하면 다음 `run_mode`부터 바로 반영된다 (재시작 불필요).
+- 단계별 에이전트(드롭다운), 최대 회차, 반환 범위를 바꿔 **저장**하면 다음 `run_mode`부터 바로 반영된다 (재시작 불필요).
 - **모델 단가** 표: 설정에 단가가 있는 모델, 켜진 에이전트가 쓰는 모델, 호출 기록에 나온 모델을 모두 한 줄씩 보여주고(쓰는 에이전트·기록 횟수 표시, 단가 없는 모델 강조), **입력 / 캐시 입력 / 출력 단가(USD / 1M 토큰)**와 환율을 편집한다. 에이전트와 상관없이 모델 단위라 예전 모델도 계속 관리할 수 있다. 세 칸을 다 비우면 그 모델의 단가를 지우고, 마지막 빈 줄로 새 모델을 추가한다.
 - **이미지 첨부** 패널 (표시 전용): `Images` 상한과 제공사별 `ImageDetail`. 에이전트 표의 **이미지** 열은 `Vision` (표시 전용, 저장해도 기존 값 보존. 바꾸려면 appsettings.json 직접 수정).
 - 저장 전 검증: 없는 에이전트·역할, Debate 단계 수, 회차 범위. 꺼진 에이전트는 경고만.
@@ -513,8 +525,7 @@ unity skill install --help
 - appsettings.json을 메모장으로 직접 고쳐서 modes.json이 없는 이름을 가리키게 되면, 화면 위에 경고와 함께 `없는 이름 → 바꿀 에이전트` 선택이 뜬다. **일괄 교체**를 누르면 그 이름을 쓰는 모든 단계가 바뀐다.
 
 **세션** (`/Sessions`)
-- 실행 중인 Claude Code 세션(= MCP 서버)마다 프로젝트, PID, 시작 시각, 서버 빌드 시각, 모드별 사용 횟수 / 한도를 보여준다.
-- 모드별 **초기화** 또는 **전체 초기화** → 그 세션의 다음 호출 때 적용 (서버 재시작 불필요). 적용 전에는 "초기화 대기 중"으로 표시.
+- 실행 중인 Claude Code 세션(= MCP 서버)마다 프로젝트, PID, 시작 시각, 서버 빌드 시각, 모드별 실행 횟수를 보여준다 (한도 없음, 이름을 바꾸기 전 서버가 남긴 예전 모드 이름은 새 이름으로 묶음).
 - 서버 빌드가 publish 폴더의 dll보다 오래됐으면 **이전 빌드** 표시 → 그 세션에서 `/mcp`로 재연결하면 새 서버가 뜬다.
 - 강제 종료된 서버가 남긴 기록은 화면을 열 때 자동 정리.
 - 어느 폴더를 볼지는 대시보드 `appsettings.json`의 `Dashboard:McpConfigDir` (배치로 실행하면 `HB_Orchestration.config`의 `PUBLISH_DIR`가 우선). 편집할 파일을 직접 지정하려면 `Dashboard:ModesPath`.
@@ -595,7 +606,7 @@ dotnet <publish 폴더>\HB.Orchestration.Mcp.dll --golden score <사례> --from 
 ```
 - `run`은 `--yes`가 없으면 사례·에이전트·입력 글자 수·입력 비용 추정·붙는 지침 파일만 보이고 **외부 호출 없이** 멈춘다.
 - 지침은 run_mode와 같은 순서로 찾는다 (`Orchestration:GuidelinesPath` → `REVIEW_GUIDELINES_PATH` → **현재 폴더**의 `REVIEW_GUIDELINES.md`). 지침을 쓰는 역할인데 못 찾으면 계획을 보인 뒤 거절한다 (외부 호출 없음) — 프로젝트 루트에서 실행하거나 경로를 지정한다. `--no-guidelines`는 파일이 있어도 지침을 빼고 돈다 (지침 있음·없음 비교용, 기록 사유 `골든 --no-guidelines`). 사례를 돌기 직전마다 지침을 다시 읽어 실행 전 확인과 다르면(파일이 바뀜·사라짐) 그 사례부터 멈춘다. 결과 줄에 `guidelinesAttached` · `guidelinesSha256` · `guidelinesReason`.
-- run_mode와 같은 시스템 프롬프트(역할 + 출력 형식 + 공통 규칙 + 지침)·에이전트로 보낸다. 세션 실행 한도·reason·ownReview·context 첨부는 쓰지 않는다 (첨부는 사례의 `input.md`에 이미 들어 있음). 하루 비용 상한은 없으니 실행 전 계획의 예상 비용을 보고 `--yes`로 돌린다. 단계가 하나이고 구조화 출력(`Output`)이 있는 모드만 채점된다.
+- run_mode와 같은 시스템 프롬프트(역할 + 출력 형식 + 공통 규칙 + 지침)·에이전트로 보낸다. reason·ownReview·context 첨부는 쓰지 않는다 (첨부는 사례의 `input.md`에 이미 들어 있음). 하루 비용 상한은 없으니 실행 전 계획의 예상 비용을 보고 `--yes`로 돌린다. 단계가 하나이고 구조화 출력(`Output`)이 있는 모드만 채점된다.
 - 호출 기록에는 `Tool = golden`, `Mode = 원래 모드`로 남는다 (대시보드·비용 집계에 보임). 세션 상태 파일은 남기지 않는다.
 - `score`는 self-reviewer 결과(마크다운 `- C1 [major] 파일:줄 — 문제`)나 findings JSON(@1·@2)을 채점만 한다 (외부 호출 없음).
 - 폴더: `--dir` 또는 appsettings `Orchestration:Golden:Folder`. 사례 하나라도 형식이 틀리면 아무것도 돌리지 않는다. 종료 코드 0 성공 / 1 일부 사례 실패 / 2 사용법·사례 형식 오류 / 3 크레딧·한도 소진(Quota)으로 남은 사례를 멈춤.
@@ -605,7 +616,7 @@ dotnet <publish 폴더>\HB.Orchestration.Mcp.dll --golden score <사례> --from 
 
 | 파일 | 내용 |
 |---|---|
-| `case.json` | `id`(폴더 이름과 같게), `kind`(`record` 판정 기록 · `seeded` 고친 결함을 되돌린 코드 · `crash` 원인이 알려진 크래시, 아래), `mode`(기본 review), `source`, `description` |
+| `case.json` | `id`(폴더 이름과 같게), `kind`(`record` 판정 기록 · `seeded` 고친 결함을 되돌린 코드 · `crash` 원인이 알려진 크래시, 아래), `mode`(기본 review_main, 예전 이름은 새 이름으로 읽음), `source`, `description` |
 | `input.md` | 에이전트에게 보낼 프롬프트 원문 (그대로 보냄) |
 | `expected.json` | 기대 지적 `[{ id, summary, files, lines: [시작, 끝], keywords, severity }]` |
 | `traps.json` | (선택) 과거에 기각된 지적, 같은 형식 + `why`(기각 이유) |

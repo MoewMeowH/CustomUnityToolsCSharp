@@ -45,7 +45,6 @@ public sealed class ModesSnapshot
 
     /// <summary>Orchestration:Images (run_mode images 상한). 표시 전용.</summary>
     public ImageOptions Images { get; init; } = new();
-    public required int DefaultMaxRunsPerSession { get; init; }
 
     /// <summary>Orchestration:Pricing (모델 단가 USD + 원화 환율).</summary>
     public required PricingOptions Pricing { get; init; }
@@ -220,7 +219,6 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
         var imageDetails = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         var providerTypes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var images = new ImageOptions();
-        var defaultRuns = new BudgetOptions().DefaultMaxRunsPerSession;
         var pricing = new PricingOptions();
         JsonObject? settingsRoot = null;
         var settingsStamp = "";
@@ -253,7 +251,6 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
                     providerTypes[name] = p.Type;
                 }
                 images = mcp.Images;
-                defaultRuns = mcp.Budget.DefaultMaxRunsPerSession;
                 pricing = mcp.Pricing;
             }
         }
@@ -276,7 +273,6 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
             ProviderImageDetails = imageDetails,
             ProviderTypes = providerTypes,
             Images = images,
-            DefaultMaxRunsPerSession = defaultRuns,
             Pricing = pricing,
         };
     }
@@ -656,9 +652,6 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
             if (mode.MaxRounds is { } r && (r < 1 || r > ModeDefinition.MaxRoundsHardCap))
                 errors.Add($"[{name}] MaxRounds는 1~{ModeDefinition.MaxRoundsHardCap} 사이여야 합니다.");
 
-            if (mode.MaxRunsPerSession is < 0)
-                errors.Add($"[{name}] MaxRunsPerSession은 0 이상이어야 합니다 (0 = 무제한).");
-
             foreach (var step in mode.Steps)
             {
                 if (!roles.Contains(step.Role))
@@ -724,7 +717,7 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
 
     /// <summary>화면에서 바꿀 수 있는 모드 단위 설정.</summary>
     public static readonly IReadOnlySet<string> EditableSettings =
-        new HashSet<string> { "MaxRunsPerSession", "MaxRounds", "Return" };
+        new HashSet<string> { "MaxRounds", "Return" };
 
     /// <summary>모드 항목의 원본 값 (없으면 null). 화면에 "파일에 실제로 적힌 값"을 보여줄 때 쓴다.</summary>
     public static string? GetRaw(JsonObject root, string mode, string key)

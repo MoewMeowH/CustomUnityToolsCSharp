@@ -47,12 +47,6 @@ public sealed class ModeDefinition
     public int? MaxInputChars { get; set; }
 
     /// <summary>
-    /// Claude Code 세션 하나에서 이 모드를 실행할 수 있는 최대 횟수 (MCP 서버 프로세스 = 세션).
-    /// 비우면 Budget.DefaultMaxRunsPerSession, 0이면 무제한.
-    /// </summary>
-    public int? MaxRunsPerSession { get; set; }
-
-    /// <summary>
     /// true면 run_mode의 ownReview(지휘자가 결과를 보기 전에 완성한 자체 검토)가 필수다 (review 계열).
     /// 키가 없으면 false = 필수 아님. list_modes에 "[ownReview 필수]"로 보인다.
     /// </summary>

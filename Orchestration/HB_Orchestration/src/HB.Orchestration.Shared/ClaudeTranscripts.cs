@@ -205,7 +205,7 @@ public static partial class ClaudeTranscriptReader
                             if (Str(block, "type") == "tool_use" && Str(block, "name") is { } name && name.EndsWith(RunModeToolSuffix, StringComparison.Ordinal)
                                 && Str(block, "id") is { } id)
                             {
-                                var mode = block.TryGetProperty("input", out var input) && input.ValueKind == JsonValueKind.Object ? Str(input, "mode") : null;
+                                var mode = ModeNames.Normalize(block.TryGetProperty("input", out var input) && input.ValueKind == JsonValueKind.Object ? Str(input, "mode") : null);
                                 var call = new PendingCall(lineNo, ts, id, mode);
                                 s.Calls.Add(call);
                                 s.ByToolUse[id] = call;
@@ -479,7 +479,7 @@ public static class RunLinker
     {
         var runs = calls.Where(c => c.RunId is not null)
             .GroupBy(c => c.RunId!)
-            .Select(g => (RunId: g.Key, Start: g.Min(c => c.Timestamp), Mode: g.First().Mode ?? g.First().Tool, ProjectDir: g.First().ProjectDir))
+            .Select(g => (RunId: g.Key, Start: g.Min(c => c.Timestamp), Mode: ModeNames.Normalize(g.First().Mode ?? g.First().Tool), ProjectDir: g.First().ProjectDir))
             .ToList();
 
         var confirmed = sessions.SelectMany(s => s.RunCalls).Where(c => c.RunId is not null).Select(c => c.RunId!).ToHashSet(StringComparer.Ordinal);

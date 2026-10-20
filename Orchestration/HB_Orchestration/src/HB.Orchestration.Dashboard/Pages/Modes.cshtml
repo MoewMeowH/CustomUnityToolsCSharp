@@ -310,10 +310,6 @@
                 </div>
 
                 <div class="settings">
-                    <label>세션당 실행 한도
-                        <input type="number" min="0" name="@ModesModel.SettingField(name, "MaxRunsPerSession")"
-                               value="@Model.Raw(name, "MaxRunsPerSession")" placeholder="기본값" />
-                    </label>
                     @if (mode.Flow == ModeFlow.Debate)
                     {
                         <label>최대 회차

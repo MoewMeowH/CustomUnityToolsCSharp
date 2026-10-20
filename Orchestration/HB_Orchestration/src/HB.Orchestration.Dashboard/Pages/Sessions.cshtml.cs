@@ -1,53 +1,27 @@
 using System.Diagnostics;
 using HB.Orchestration.Shared;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.Extensions.Options;
 
 namespace HB.Orchestration.Dashboard.Pages;
 
-/// <summary>살아 있는 MCP 서버(= Claude Code 세션)별 모드 실행 횟수와 초기화.</summary>
+/// <summary>살아 있는 MCP 서버(= Claude Code 세션)별 모드 실행 횟수. 한도는 없다 (2026-10-20 세션 한도 제거).</summary>
 public sealed class SessionsModel(IOptions<DashboardOptions> options, ModesConfigService modes) : PageModel
 {
-    public sealed record ModeUsage(string Mode, int Used, int Limit);
+    public sealed record ModeUsage(string Mode, int Used);
 
-    public sealed record SessionView(SessionState State, bool ResetPending, bool OldBuild, List<ModeUsage> Usage);
+    public sealed record SessionView(SessionState State, bool OldBuild, List<ModeUsage> Usage);
 
     public List<SessionView> Sessions { get; private set; } = [];
     public string Folder => SessionFiles.FolderFor(options.Value.ResolvedLogPath);
     public DateTimeOffset? CurrentBuild { get; private set; }
-    public string? ModesError { get; private set; }
     public int Cleaned { get; private set; }
 
-    [BindProperty(SupportsGet = true)] public bool Requested { get; set; }
-
     public void OnGet() => Build();
-
-    /// <summary>초기화 요청. mode가 비어 있으면 그 세션의 모든 모드.</summary>
-    public IActionResult OnPostReset(int pid, string? mode)
-    {
-        SessionFiles.RequestReset(Folder, pid, mode);
-        return RedirectToPage(new { requested = true });
-    }
 
     private void Build()
     {
         CurrentBuild = modes.CurrentServerBuild;
-
-        // 모드별 한도는 지금 modes.json 기준으로 보여준다.
-        var limits = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        var defaultLimit = 5;
-        try
-        {
-            var snap = modes.Load();
-            defaultLimit = snap.DefaultMaxRunsPerSession;
-            foreach (var (name, mode) in snap.Typed.Modes)
-                limits[name] = mode.MaxRunsPerSession ?? defaultLimit;
-        }
-        catch (Exception ex) when (ex is ModesConfigException or IOException)
-        {
-            ModesError = ex.Message;
-        }
 
         foreach (var state in SessionFiles.ReadAll(Folder).OrderByDescending(s => s.StartedAt))
         {
@@ -59,19 +33,18 @@ public sealed class SessionsModel(IOptions<DashboardOptions> options, ModesConfi
                 continue;
             }
 
-            var usage = limits.Keys
-                .Union(state.Runs.Keys, StringComparer.OrdinalIgnoreCase)
-                .Order(StringComparer.OrdinalIgnoreCase)
-                .Select(m => new ModeUsage(
-                    m,
-                    state.Runs.TryGetValue(m, out var used) ? used : 0,
-                    limits.TryGetValue(m, out var limit) ? limit : defaultLimit))
+            // 이름을 바꾸기 전 서버(재연결 전)가 남긴 예전 모드 이름도 새 이름으로 묶는다.
+            var usage = state.Runs
+                .GroupBy(kv => ModeNames.Normalize(kv.Key)!, StringComparer.OrdinalIgnoreCase)
+                .Select(g => new ModeUsage(g.Key, g.Sum(kv => kv.Value)))
+                .Where(u => u.Used > 0)
+                .OrderBy(u => u.Mode, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
             var oldBuild = CurrentBuild is { } current && state.ServerBuild is { } build
                            && (current - build).Duration() > TimeSpan.FromSeconds(2);
 
-            Sessions.Add(new SessionView(state, SessionFiles.HasPendingReset(Folder, state.Pid), oldBuild, usage));
+            Sessions.Add(new SessionView(state, oldBuild, usage));
         }
     }
 
