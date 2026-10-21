@@ -58,6 +58,42 @@ public static class UsageExtractor
         return null;
     }
 
+    /// <summary>Gemini API (OpenAI 호환 엔드포인트) 주소인지. 추론 토큰 보정을 이 제공사에만 적용한다.</summary>
+    public static bool IsGeminiEndpoint(string? endpoint) =>
+        Uri.TryCreate(endpoint, UriKind.Absolute, out var uri)
+        && string.Equals(uri.Host, "generativelanguage.googleapis.com", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Gemini OpenAI 호환 응답은 추론(thinking) 토큰을 usage의 어느 칸에도 넣지 않고 total_tokens에만 더한다
+    /// (2026-10-21 실측: reasoning_effort=high에서 prompt 12,026 · completion 1,230 · total 30,404).
+    /// 추론 칸(completion_tokens_details.reasoning_tokens)이 없고 total &gt; prompt + completion일 때만 그 차이를 돌려준다. 그 밖에는 null.
+    /// </summary>
+    public static long? HiddenReasoningTokens(string? usageJson)
+    {
+        if (string.IsNullOrWhiteSpace(usageJson)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(usageJson);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) return null;
+            if (root.TryGetProperty("completion_tokens_details", out var details) && details.ValueKind == JsonValueKind.Object
+                && details.TryGetProperty("reasoning_tokens", out var reported) && reported.ValueKind == JsonValueKind.Number)
+                return null;
+            if (Number(root, "total_tokens") is not { } total || Number(root, "prompt_tokens") is not { } prompt
+                || Number(root, "completion_tokens") is not { } completion)
+                return null;
+            var hidden = total - prompt - completion;
+            return hidden > 0 ? hidden : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+
+        static long? Number(JsonElement obj, string name) =>
+            obj.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt64(out var n) ? n : null;
+    }
+
     public static long? CacheWriteTokens(string? usageJson) => FirstNumber(usageJson, CacheWritePaths);
 
     public static long? CachedTokens(string? usageJson) => FirstNumber(usageJson, CachedPaths);

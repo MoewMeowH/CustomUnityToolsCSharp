@@ -252,6 +252,13 @@ public sealed class AgentRunner
             var cachedTokens = response.Usage?.CachedInputTokenCount ?? UsageExtractor.CachedTokens(usageRaw);
             var cacheWriteTokens = UsageExtractor.CacheWriteTokens(usageRaw);
             var reasoningTokens = response.Usage?.ReasoningTokenCount;
+            // Gemini 호환 응답은 추론 토큰을 total에만 넣는다 → 추론으로 기록하고 출력에도 더한다 (다른 제공사처럼 출력 = 답 + 추론, 비용이 출력 단가로 잡히게).
+            if (reasoningTokens is null && UsageExtractor.IsGeminiEndpoint(call.Agent.ProviderOptions?.Endpoint)
+                && UsageExtractor.HiddenReasoningTokens(usageRaw) is { } hiddenReasoning)
+            {
+                reasoningTokens = hiddenReasoning;
+                outTokens = (outTokens ?? 0) + hiddenReasoning;
+            }
             var webSearch = call.WebSearch is null ? null : WebSearchExtractor.From(response.Messages, text, response);
 
             // 빈 응답은 실패다 (다시 보내도 같으므로 재시도하지 않는다).
