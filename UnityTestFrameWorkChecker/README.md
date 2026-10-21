@@ -42,10 +42,14 @@ public class Slots : MonoBehaviour
 
 `[NeedSlotNullCheck]` 어트리뷰트와, 그 필드들을 실제로 널 검사하는 쪽(테스트 · 에디터 도구)은 **Unity 프로젝트에 있습니다.** 이 저장소에는 분석기만 있습니다.
 분석기는 이름(`NeedSlotNullCheck` / `NeedSlotNullCheckAttribute`)으로만 판별하므로 namespace는 자유입니다.
+HB_TestFrameworkHelper 패키지는 `HB.TestFrameworkHelper` namespace에 둡니다. 쓰는 쪽 파일에 `using HB.TestFrameworkHelper;`가 필요합니다 (코드 수정은 이 using을 넣지 않습니다).
 
 ```csharp
-[System.AttributeUsage(System.AttributeTargets.Field)]
-public sealed class NeedSlotNullCheckAttribute : System.Attribute { }
+namespace HB.TestFrameworkHelper
+{
+    [System.AttributeUsage(System.AttributeTargets.Field)]
+    public sealed class NeedSlotNullCheckAttribute : System.Attribute { }
+}
 ```
 
 ## 빌드 · Unity에 넣기
