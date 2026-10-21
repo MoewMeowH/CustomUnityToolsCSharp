@@ -113,7 +113,7 @@ dotnet build HB_Orchestration.slnx
 | `Records.StoreSettingsText` | 서버 설정(`appsettings.json`) 원문도 저장할지 (기본 `false` = 해시와 키 패턴 검사 결과만). `true`여도 키 패턴이 보이면 저장하지 않음 |
 | `WorkOrders.Folder` | `/work-order`가 지시서를 남길 폴더 (프로젝트 루트 기준 상대 경로). 값이 있으면 `list_modes` 끝에 `지시서 폴더: …` 줄이 붙고, 비우면 줄이 없고 명령은 `docs/work-orders/`를 쓴다. 절대 경로·`..`·`@이름`은 `[주의]`로만 표시. **서버는 이 폴더에 쓰지 않는다** (지휘자가 직접 씀) |
 | `Pricing.KrwPerUsd` | 1달러당 원. 비우면 대시보드는 달러만 표시 |
-| `Pricing.Models.<모델 ID>` | `InputPerMillion`, `CachedInputPerMillion`(비우면 입력과 같음), `CacheWritePerMillion`(캐시 쓰기, 비우면 입력과 같음 — OpenAI GPT-5.6 이후는 입력의 1.25배, 쓰기 토큰은 호출 기록 `CacheWriteTokens`), `OutputPerMillion` — USD / 1M 토큰. 웹검색 단계를 쓰는 모델에는 `WebSearchPerThousand`(1,000회당 USD)도 넣는다. 키는 에이전트 이름이 아니라 **모델 ID**(기록에 남는 값). 지금 안 쓰는 예전 모델도 남겨 두면 예전 기록의 비용이 계속 계산됨. 단가에 적용 날짜가 없어 단가를 바꾸면 지난 호출 비용도 새 단가로 다시 계산된다. 단가는 **실제 청구 기준**으로 둔다 — 예: `gemini-4-argon`은 공식 표준 표기($2/$10, 11-30까지)와 달리 콘솔 SKU 청구가 2배라 $4 / 캐시 $0.20 / $20 (2026-10-21 대조, 모델 항목의 `Note`). 서버는 쓰지 않고 대시보드만 읽음 |
+| `Pricing.Models.<모델 ID>` | `InputPerMillion`, `CachedInputPerMillion`(비우면 입력과 같음), `CacheWritePerMillion`(캐시 쓰기, 비우면 입력과 같음 — OpenAI GPT-5.6 이후는 입력의 1.25배, 쓰기 토큰은 호출 기록 `CacheWriteTokens`), `OutputPerMillion` — USD / 1M 토큰. 웹검색 단계를 쓰는 모델에는 `WebSearchPerThousand`(1,000회당 USD)도 넣는다. 키는 에이전트 이름이 아니라 **모델 ID**(기록에 남는 값). 지금 안 쓰는 예전 모델도 남겨 두면 예전 기록의 비용이 계속 계산됨. 단가에 적용 날짜가 없어 단가를 바꾸면 지난 호출 비용도 새 단가로 다시 계산된다. 단가는 **실효 단가**(할인 후 실제로 내는 값)로 둔다 — 예: `gemini-4-argon`은 $2 / 캐시 $0.10 / $10(11-30까지 소개 가격, 12-01부터 $4/$20). Gemini 콘솔 SKU 금액은 정가($4/$20)로 집계되고 50% 할인이 '절감'에서 상계되므로, 청구 대조는 SKU 금액이 아니라 할인 후 금액이나 크레딧 사용분과 한다 (2026-10-21 크레딧 대조, 모델 항목의 `Note`). 서버는 쓰지 않고 대시보드만 읽음 |
 
 ### 재시도
 
