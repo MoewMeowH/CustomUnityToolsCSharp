@@ -837,7 +837,8 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         sb.AppendLine($"PID: {sessions.Pid} (시작 {sessions.StartedAt:yyyy-MM-dd HH:mm:ss})");
         sb.AppendLine($"설정 읽은 시각: {catalog.LoadedAt:yyyy-MM-dd HH:mm:ss} · 사용 가능 에이전트 {catalog.Agents.Count}개");
         if (catalog.ReloadError is { } err) sb.AppendLine($"설정 재로드 실패: {err}");
-        sb.AppendLine($"modes.json: {(store.ResolvePath() ?? "없음")}");
+        var modes = store.Resolve();
+        sb.AppendLine(modes.Path is { } modesPath ? $"modes.json: {modesPath} ({ModesPathResolver.Label(modes.Source)})" : $"modes.json: 없음 — {modes.Error}");
         return sb.ToString().TrimEnd();
     }
 }

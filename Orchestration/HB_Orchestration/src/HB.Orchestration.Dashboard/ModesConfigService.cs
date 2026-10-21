@@ -18,6 +18,13 @@ public sealed record AgentInfo(string Name, string Provider, string Model, int? 
 public sealed class ModesSnapshot
 {
     public required string ModesPath { get; init; }
+
+    /// <summary>편집 대상을 정한 근거 (Dashboard:ModesPath · MCP appsettings · HB_MODES_PATH · 서버 폴더).</summary>
+    public string ModesPathSource { get; init; } = "";
+
+    /// <summary>읽은 modes.json 바이트의 SHA-256 (호출 기록의 provenance.modes.sha256과 비교).</summary>
+    public string? ModesSha256 { get; init; }
+
     public required DateTime LastWriteLocal { get; init; }
 
     /// <summary>modes.json 동시 수정 감지용. 읽은 뒤 파일이 바뀌었으면 저장을 거부한다.</summary>
@@ -87,8 +94,11 @@ public sealed class ModesConfigException(string message) : Exception(message);
 /// 알지 못하는 필드(Roles 프롬프트, Sees, Providers 등)를 잃지 않도록 JsonNode를 직접 고친다.
 /// MCP 서버는 두 파일이 바뀌면 다음 호출 때 스스로 다시 읽으므로 재시작이 필요 없다.
 /// </summary>
-public sealed partial class ModesConfigService(IOptions<DashboardOptions> options)
+/// <param name="getEnvironment">환경 변수 읽기 (테스트에서 바꾼다). null이면 이 프로세스의 환경 변수.</param>
+public sealed partial class ModesConfigService(IOptions<DashboardOptions> options, Func<string, string?>? getEnvironment = null)
 {
+    private readonly Func<string, string?> environment = getEnvironment ?? Environment.GetEnvironmentVariable;
+
     private const int BackupKeep = 10;
 
     private static readonly JsonDocumentOptions DocOptions = new()
@@ -132,34 +142,36 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
         }
     }
 
-    private (string ModesPath, string? SettingsPath) ResolvePaths()
+    /// <summary>편집 대상 modes.json을 정한 근거 (화면 머리에 보인다).</summary>
+    public const string SourceDashboardOption = "Dashboard:ModesPath";
+
+    private (string ModesPath, string ModesSource, string? SettingsPath) ResolvePaths()
     {
         var dir = McpConfigDir;
         string? settings = dir is null ? null : Path.Combine(dir, "appsettings.json");
         if (settings is not null && !File.Exists(settings)) settings = null;
 
-        var modes = options.Value.ModesPath;
-
-        // MCP 서버가 실제로 쓰는 경로와 맞춘다: appsettings의 Orchestration:ModesPath가 있으면 그쪽.
-        if (string.IsNullOrWhiteSpace(modes) && settings is not null)
+        // 직접 지정이 있으면 그 파일만 (없으면 오류 — 다른 파일로 조용히 넘어가지 않는다).
+        if (!string.IsNullOrWhiteSpace(options.Value.ModesPath))
         {
-            var configured = ReadMcpOptions(settings)?.ModesPath;
-            if (!string.IsNullOrWhiteSpace(configured))
-                modes = Path.IsPathRooted(configured) ? configured : Path.Combine(dir!, configured);
+            var direct = Path.GetFullPath(options.Value.ModesPath);
+            if (!File.Exists(direct)) throw new ModesConfigException($"modes.json이 없습니다: {direct}");
+            return (direct, SourceDashboardOption, settings);
         }
 
-        if (string.IsNullOrWhiteSpace(modes) && dir is not null)
-            modes = Path.Combine(dir, "modes.json");
+        // 그 밖에는 MCP 서버와 같은 찾는 순서 (ModesPathResolver). 대시보드에는 세션 폴더가 없어 hb-modes.json은 보지 않는다.
+        // 설정 ModesPath의 상대 경로는 공용 함수가 서버 폴더(= McpConfigDir) 기준으로 푼다 (서버와 같음).
+        var configured = settings is null ? null : ReadMcpOptions(settings)?.ModesPath;
 
-        if (string.IsNullOrWhiteSpace(modes))
-            throw new ModesConfigException(
-                "편집할 modes.json 위치를 모릅니다. 대시보드 appsettings.json의 Dashboard:McpConfigDir에 MCP publish 폴더를 지정하세요.");
+        // 지정 경로(appsettings ModesPath · HB_MODES_PATH)에 파일이 없으면 서버처럼 오류다 (다음 후보로 넘어가지 않음).
+        var found = ModesPathResolver.Resolve(configured, environment(ModesPathResolver.EnvVar), cwd: null, serverDir: dir);
+        if (found.Path is { } path) return (path, ModesPathResolver.Label(found.Source), settings);
 
-        modes = Path.GetFullPath(modes);
-        if (!File.Exists(modes))
-            throw new ModesConfigException($"modes.json이 없습니다: {modes}");
-
-        return (modes, settings);
+        throw new ModesConfigException(found.Source == ModesPathResolver.Source.ServerFolder
+            ? dir is null
+                ? "편집할 modes.json 위치를 모릅니다. 대시보드 appsettings.json의 Dashboard:McpConfigDir에 MCP publish 폴더를 지정하세요."
+                : $"modes.json이 없습니다: {Path.Combine(dir, ModesPathResolver.DefaultFileName)}"
+            : found.Error!);
     }
 
     /// <summary>
@@ -199,8 +211,12 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
 
     public ModesSnapshot Load()
     {
-        var (modesPath, settingsPath) = ResolvePaths();
-        var text = File.ReadAllText(modesPath);
+        var (modesPath, modesSource, settingsPath) = ResolvePaths();
+        var bytes = File.ReadAllBytes(modesPath);
+        // File.ReadAllText와 같은 디코딩 (UTF-8 기본, BOM 따름). 해시와 내용이 같은 시점의 파일이 되도록 한 번만 읽는다.
+        string text;
+        using (var reader = new StreamReader(new MemoryStream(bytes), Encoding.UTF8, detectEncodingFromByteOrderMarks: true))
+            text = reader.ReadToEnd();
 
         JsonObject root;
         ModesFile typed;
@@ -260,6 +276,8 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
         return new ModesSnapshot
         {
             ModesPath = modesPath,
+            ModesPathSource = modesSource,
+            ModesSha256 = HB.Orchestration.Shared.BlobStore.Sha256Hex(bytes),
             LastWriteLocal = new FileInfo(modesPath).LastWriteTime,
             Stamp = StampOf(modesPath),
             Root = root,

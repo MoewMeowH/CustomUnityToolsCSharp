@@ -76,10 +76,43 @@
 @if (snap is not null)
 {
     <div class="filebar">
-        <span class="grow muted mono" title="편집 중인 파일">@snap.ModesPath</span>
+        <span class="grow muted">편집 중: <span class="mono" title="편집 중인 파일">@snap.ModesPath</span> (@snap.ModesPathSource)</span>
         <span class="muted">수정 @snap.LastWriteLocal.ToString("MM-dd HH:mm:ss")</span>
         <a class="btn" href="/Modes">다시 불러오기</a>
     </div>
+
+    if (Model.OtherModes.Count > 0)
+    {
+        <div class="notice warn">
+            최근 7일 실행 @Model.OtherModes.Sum(u => u.Runs)개 · 호출 @Model.OtherModes.Sum(u => u.Calls)건은 이 화면과 다른 modes.json을 썼습니다 (서버의 설정 ModesPath · HB_MODES_PATH 또는 세션 폴더의 hb-modes.json). 이 화면은 그 파일을 보여 주지 않습니다.
+            <ul>
+                @foreach (var u in Model.OtherModes)
+                {
+                    <li><span class="mono">@u.Path</span>@(u.Relative ? " (상대 경로 기록 — 기준 폴더 알 수 없음)" : "") — 실행 @u.Runs · 호출 @u.Calls · 마지막 @u.LastUsed.ToLocalTime().ToString("MM-dd HH:mm")</li>
+                }
+            </ul>
+        </div>
+    }
+    var (currentUses, earlierUses) = ModesUsage.SameFile(Model.RecentModes, snap.ModesPath, snap.ModesSha256);
+    if (currentUses.Count > 0 || earlierUses.Count > 0)
+    {
+        <div class="notice muted">
+            최근 7일 이 파일을 쓴 실행 —
+            지금 내용: @(currentUses.Count == 0 ? "없음" : $"실행 {currentUses.Sum(u => u.Runs)}개 · 마지막 {currentUses.Max(u => u.LastUsed).ToLocalTime():MM-dd HH:mm}")
+            @if (earlierUses.Count > 0)
+            {
+                <details style="margin-top:4px">
+                    <summary>이전 내용 @(earlierUses.Count)개 (그 뒤 수정됨) · 실행 @earlierUses.Sum(u => u.Runs)개</summary>
+                    <ul>
+                        @foreach (var u in earlierUses)
+                        {
+                            <li><span class="mono">@(u.Sha256 is { Length: >= 12 } sha ? sha[..12] + "…" : "해시 없음")</span> — 실행 @u.Runs · 호출 @u.Calls · 마지막 @u.LastUsed.ToLocalTime().ToString("MM-dd HH:mm")</li>
+                        }
+                    </ul>
+                </details>
+            }
+        </div>
+    }
 
     if (snap.HasComments || snap.SettingsHasComments)
     {
@@ -87,7 +120,7 @@
     }
     <div class="notice muted">
         저장하면 MCP 서버가 다음 호출 때 스스로 다시 읽습니다 — 재시작 불필요. 단, API 키 환경 변수를 바꿨을 때만 PC를 재시작하세요.
-        Unity 프로젝트 루트에 <span class="mono">hb-modes.json</span>이 있으면 그 프로젝트에서는 그쪽이 우선하며, 이 화면은 위 경로의 파일만 고칩니다.
+        서버는 설정 <span class="mono">Orchestration:ModesPath</span> → <span class="mono">HB_MODES_PATH</span> → 세션(Unity 프로젝트) 폴더의 <span class="mono">hb-modes.json</span> → 서버 폴더 <span class="mono">modes.json</span> 순으로 찾습니다. 이 화면은 위 경로의 파일만 고칩니다.
     </div>
 
     var missing = snap.Agents.Count > 0 ? snap.MissingAgents.ToList() : new List<string>();

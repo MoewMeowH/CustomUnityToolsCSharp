@@ -180,6 +180,10 @@ SDK 자동 재시도(기본 3회, 기록에 안 남음)는 끄고 서버가 직�
 
 찾는 순서: `ModesPath`(appsettings) → `HB_MODES_PATH` 환경 변수 → **Unity 프로젝트 루트의 `hb-modes.json`** (프로젝트별 모드) → 서버 폴더의 `modes.json`
 
+`ModesPath`나 `HB_MODES_PATH`로 **지정했는데 그 파일이 없으면 오류**다 (run_mode 실패, server_info에 이유). 오타가 있을 때 다른 modes.json으로 조용히 넘어가지 않게 하기 위함이다. 다음 후보로 넘어가는 건 지정이 없을 때만이다.
+
+상대 경로의 기준: appsettings `ModesPath`는 **서버 폴더**(appsettings.json이 있는 곳) 기준이라 서버와 대시보드가 같은 파일을 가리킨다. `HB_MODES_PATH`는 프로세스 환경 값이라 **그 프로세스의 현재 폴더** 기준이다 — 넘길 때는 절대 경로를 쓴다. 호출 기록(provenance)의 modes 경로는 정규화된 절대 경로로 남는다 (2026-10-21 이전 기록은 받은 값 그대로라 상대 경로·`/` 표기가 섞여 있다).
+
 > modes.json은 **주석 없는 순수 JSON**으로 둔다. 설명은 이 README에 있다. (서버는 주석이 있어도 읽지만, 대시보드에서 저장하면 주석이 사라진다.)
 
 ```json
@@ -530,7 +534,8 @@ unity skill install --help
 - 서버 빌드가 publish 폴더의 dll보다 오래됐으면 **이전 빌드** 표시 → 그 세션에서 `/mcp`로 재연결하면 새 서버가 뜬다.
 - 강제 종료된 서버가 남긴 기록은 화면을 열 때 자동 정리.
 - 어느 폴더를 볼지는 대시보드 `appsettings.json`의 `Dashboard:McpConfigDir` (배치로 실행하면 `HB_Orchestration.config`의 `PUBLISH_DIR`가 우선). 편집할 파일을 직접 지정하려면 `Dashboard:ModesPath`.
-- Unity 프로젝트에 `hb-modes.json`이 있으면 그 프로젝트에서는 그쪽이 우선이다. 이 화면은 publish 폴더 쪽만 고친다.
+- 직접 지정이 없으면 서버와 같은 찾는 순서로 편집할 modes.json을 정한다: MCP appsettings `Orchestration:ModesPath` → **대시보드 프로세스의** `HB_MODES_PATH` → publish 폴더 `modes.json`. 세션 폴더의 `hb-modes.json`은 대시보드가 알 수 없어 뺀다. 화면 머리에 "편집 중: 경로 (근거)"가 보인다.
+- 서버의 `HB_MODES_PATH`(프로세스마다 다름)나 Unity 프로젝트의 `hb-modes.json`은 대시보드가 알 수 없다. 그래서 호출 기록(provenance)에서 **최근 7일 실행이 실제로 쓴 modes.json**을 모아, 편집 중인 파일과 다르면 경고로 보인다. 같은 파일인데 그 뒤 내용이 바뀌었으면 "그 뒤 수정됨"으로 표시한다.
 
 **Claude 세션** (`/ClaudeSessions`) — 지휘자가 무엇을 알고 있었나
 - Claude Code 세션 기록(`~/.claude/projects/<경로 인코딩>/<sessionId>.jsonl`)을 **읽기만** 해서, 세션마다 시작 시각(로컬) · 버전 · 프로젝트 · 불러온 지침 파일 · 부른 `run_mode`를 보여준다. **대화 본문은 보여주지 않는다.**
@@ -606,6 +611,7 @@ dotnet <publish 폴더>\HB.Orchestration.Mcp.dll --golden run [사례|all] [--mo
 dotnet <publish 폴더>\HB.Orchestration.Mcp.dll --golden score <사례> --from <파일> [--dir 폴더] [--label 이름]
 ```
 - `run`은 `--yes`가 없으면 사례·에이전트·입력 글자 수·입력 비용 추정·붙는 지침 파일만 보이고 **외부 호출 없이** 멈춘다.
+- 골든·하네스에서 `HB_MODES_PATH`·`REVIEW_GUIDELINES_PATH`로 임시 modes·지침을 넘길 때는 **절대 경로만** 쓴다. 상대 경로는 그 프로세스의 현재 폴더 기준이라, 다른 폴더에서 실행하면 엉뚱한 곳을 가리킨다 (2026-10-20 1회차: inv·base 파일이 `src\HB.Orchestration.Dashboardeview_tmp\`에 생김).
 - 지침은 run_mode와 같은 순서로 찾는다 (`Orchestration:GuidelinesPath` → `REVIEW_GUIDELINES_PATH` → **현재 폴더**의 `REVIEW_GUIDELINES.md`). 지침을 쓰는 역할인데 못 찾으면 계획을 보인 뒤 거절한다 (외부 호출 없음) — 프로젝트 루트에서 실행하거나 경로를 지정한다. `--no-guidelines`는 파일이 있어도 지침을 빼고 돈다 (지침 있음·없음 비교용, 기록 사유 `골든 --no-guidelines`). 사례를 돌기 직전마다 지침을 다시 읽어 실행 전 확인과 다르면(파일이 바뀜·사라짐) 그 사례부터 멈춘다. 결과 줄에 `guidelinesAttached` · `guidelinesSha256` · `guidelinesReason`.
 - run_mode와 같은 시스템 프롬프트(역할 + 출력 형식 + 공통 규칙 + 지침)·에이전트로 보낸다. reason·ownReview·context 첨부는 쓰지 않는다 (첨부는 사례의 `input.md`에 이미 들어 있음). 하루 비용 상한은 없으니 실행 전 계획의 예상 비용을 보고 `--yes`로 돌린다. 단계가 하나이고 구조화 출력(`Output`)이 있는 모드만 채점된다.
 - 호출 기록에는 `Tool = golden`, `Mode = 원래 모드`로 남는다 (대시보드·비용 집계에 보임). 세션 상태 파일은 남기지 않는다.

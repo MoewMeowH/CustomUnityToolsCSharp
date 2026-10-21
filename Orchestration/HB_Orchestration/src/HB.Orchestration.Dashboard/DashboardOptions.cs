@@ -15,7 +15,7 @@ public sealed class DashboardOptions
     public string? McpConfigDir { get; set; }
 
     /// <summary>
-    /// 편집할 modes.json을 직접 지정 (선택). 비우면 MCP appsettings의 Orchestration:ModesPath → McpConfigDir/modes.json 순.
+    /// 편집할 modes.json을 직접 지정 (선택). 비우면 MCP 서버와 같은 찾는 순서(ModesPathResolver): MCP appsettings의 Orchestration:ModesPath → 이 프로세스의 HB_MODES_PATH → McpConfigDir/modes.json (세션 폴더 hb-modes.json은 대시보드가 알 수 없어 뺀다).
     /// </summary>
     public string? ModesPath { get; set; }
 

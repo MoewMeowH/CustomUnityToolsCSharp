@@ -20,22 +20,16 @@ public sealed class ModeStore(AgentCatalog catalog)
         public string Sha256 { get; } = HB.Orchestration.Shared.BlobStore.Sha256Hex(Bytes);
     }
 
-    public string? ResolvePath()
-    {
-        var candidates = new[]
-        {
-            catalog.Options.ModesPath,
-            Environment.GetEnvironmentVariable("HB_MODES_PATH"),
-            System.IO.Path.Combine(Environment.CurrentDirectory, "hb-modes.json"),   // 프로젝트별 모드
-            System.IO.Path.Combine(AppContext.BaseDirectory, "modes.json"),         // 기본 모드
-        };
-        return candidates.FirstOrDefault(p => !string.IsNullOrWhiteSpace(p) && File.Exists(p));
-    }
+    /// <summary>찾는 순서는 <see cref="ModesPathResolver"/> (대시보드와 공용). 지정 경로에 파일이 없으면 Error.</summary>
+    public ModesPathResolver.Resolution Resolve() =>
+        ModesPathResolver.Resolve(catalog.Options.ModesPath, Environment.GetEnvironmentVariable(ModesPathResolver.EnvVar),
+            Environment.CurrentDirectory, AppContext.BaseDirectory);
 
     /// <exception cref="ModeConfigException">파일이 없거나 JSON이 깨졌을 때.</exception>
     public Loaded Load()
     {
-        var path = ResolvePath() ?? throw new ModeConfigException("modes.json을 찾을 수 없습니다.");
+        var resolved = Resolve();
+        var path = resolved.Path ?? throw new ModeConfigException(resolved.Error!);
         try
         {
             // 해시한 바이트와 해석한 설정이 같은 시점의 파일이 되도록 한 번만 읽는다.

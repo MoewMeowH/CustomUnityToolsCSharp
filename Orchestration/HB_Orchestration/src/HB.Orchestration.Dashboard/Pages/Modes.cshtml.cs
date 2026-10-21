@@ -15,6 +15,10 @@ public sealed class ModesModel(ModesConfigService service, CallLogCache log) : P
     public List<string> Errors { get; private set; } = [];
     public List<string> Warnings { get; private set; } = [];
 
+    /// <summary>최근 7일 호출이 실제로 쓴 modes.json (provenance). 편집 중인 파일과 다른 것은 <see cref="OtherModes"/>.</summary>
+    public List<ModesFileUse> RecentModes { get; private set; } = [];
+    public List<ModesFileUse> OtherModes { get; private set; } = [];
+
     /// <summary>저장 직후 리다이렉트로 돌아왔을 때 무엇을 저장했는지 (modes / agents / replace).</summary>
     [BindProperty(SupportsGet = true)] public string? Saved { get; set; }
 
@@ -135,6 +139,18 @@ public sealed class ModesModel(ModesConfigService service, CallLogCache log) : P
         catch (Exception ex) when (ex is ModesConfigException or IOException or UnauthorizedAccessException)
         {
             LoadError = ex.Message;
+            return;
+        }
+
+        // 최근 사용 modes.json은 부가 정보: 호출 기록을 못 읽어도 편집 화면은 그대로 둔다.
+        try
+        {
+            RecentModes = ModesUsage.Recent(log.All, DateTimeOffset.Now, ModesUsage.Window);
+            OtherModes = ModesUsage.OtherFiles(RecentModes, Snapshot.ModesPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Warnings.Add($"최근 실행이 쓴 modes.json을 확인하지 못했습니다 (호출 기록 읽기 실패: {ex.GetType().Name}: {ex.Message}).");
         }
     }
 
