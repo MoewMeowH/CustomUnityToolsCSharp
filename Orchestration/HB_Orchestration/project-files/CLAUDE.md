@@ -182,6 +182,16 @@ Quota(`[실패] Quota` — 크레딧·한도 소진)나 429 실패 뒤에는 바
   계획과 달라진 것, 테스트, 실제 확인, 리뷰 채택·기각과 그 근거를 적는다.
 * 확정과 추정을 구분해 쓴다.
 
+## project-files 원본을 바꿀 때 (동기화 대상 확인)
+
+이 CLAUDE.md · `.claude/commands|scripts|agents` · 기본 리뷰 지침의 원본은 HB_Orchestration `project-files/`이고, 각 프로젝트에는 `tools/Sync-ProjectFiles.ps1`로 복사한 사본이 있다.
+
+* 이 절은 **HB_Orchestration 저장소(ToolWithCS)에서 원본을 고치는 세션**에 해당한다. 다른 프로젝트 세션에서는 원본을 고치지 않는다 (고칠 것이 있으면 그 저장소에서).
+* 원본을 바꾸는 커밋을 할 때마다 **모든 동기화 대상을 비교만** 한다: ToolWithCS 루트에서 `powershell -ExecutionPolicy Bypass -File Orchestration\HB_Orchestration\tools\Sync-ProjectFiles.ps1 -All` (대상 목록은 그 옆 `sync-targets.local.txt`, 이 PC의 경로라 git 제외). 요약의 "맞출 것"과 함께 "참고"(settings.json 다름 = 훅 등록 차이일 수 있음, 프로젝트 지침, 대상에만 있는 파일)도 보고한다.
+  * 이유: 사본이 다르면 `-Apply`는 안전하게 멈추지만 알려 주지 않는다 — 세 프로젝트가 옛 훅으로 이틀 동안 돌았는데 아무도 몰랐다 (2026-10-22).
+* 뒤처진 대상이 있으면 대상 · 파일 목록을 사용자에게 보고한다. 맞추는 것(`-Apply`, 다른 파일이 있으면 `-Force` — 덮기 전 백업)은 사용자 확인 뒤 대상마다 따로 한다.
+* 리뷰 지침(`REVIEW_GUIDELINES.md`)은 프로젝트마다 고쳐 쓰는 파일이라 Sync가 없을 때만 만들고 덮지 않는다 (단 원본의 옛 판 그대로면 '기본 지침 옛 판'으로 갱신 대상). 프로젝트 전용 규칙은 그 프로젝트의 `PROJECT.md`에 둔다 (이 파일 끝에서 불러옴).
+
 ## Unity 테스트 (Unity CLI)
 
 `unity` CLI로 직접 테스트를 돌릴 수 있다. 명령 형식이 불확실하면 `unity <명령> --help`로 확인한다.
@@ -217,3 +227,7 @@ Quota(`[실패] Quota` — 크레딧·한도 소진)나 429 실패 뒤에는 바
 
 씬·프리팹·에셋 수정이 필요하면 YAML 파일을 직접 고치지 말고, 에디터가 연결돼 있을 때 `unity command`로 조작한다
 (사용 가능한 명령은 `unity command`로 확인). 에디터가 없을 때만 파일을 직접 고치고, 그렇게 한다고 알린다.
+
+## 이 프로젝트 전용 규칙
+
+이 프로젝트 전용 규칙(없으면 건너뜀): @PROJECT.md

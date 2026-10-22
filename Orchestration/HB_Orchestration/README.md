@@ -432,7 +432,7 @@ calls.jsonl의 응답 원문을 그대로 저장한다. Claude가 응답을 다�
 | CLAUDE.md의 input 규칙 | Unity 쪽 | diff·최소 자료만, 기본은 호출하지 않기 |
 
 ## 5. Unity 프로젝트 쪽
-> **`project-files/`가 원본이다.** Unity 프로젝트의 `CLAUDE.md`, `REVIEW_GUIDELINES.md`, `.claude/commands/*.md`, `.claude/scripts/*.py`는 복사본으로 둔다. 규칙을 고칠 때는 원본을 고친 뒤 아래 스크립트로 복사한다 (Unity 쪽에서 직접 고치면 두 벌이 갈라진다). 줄바꿈은 LF (`.gitattributes`로 고정).
+> **`project-files/`가 원본이다.** Unity 프로젝트의 `CLAUDE.md`, `.claude/commands/*.md`, `.claude/scripts/*.py`, `.claude/agents/*.md`는 복사본으로 둔다 (`REVIEW_GUIDELINES.md`는 처음에만 복사하고 그 뒤로는 프로젝트 것). 규칙을 고칠 때는 원본을 고친 뒤 아래 스크립트로 복사한다 (Unity 쪽에서 직접 고치면 두 벌이 갈라진다). 줄바꿈은 LF (`.gitattributes`로 고정).
 
 **처음 설치 (폴더째 붙여넣지 않는다)**
 1. 스크립트 `-Apply`로 규칙서·명령을 복사한다 (아래).
@@ -449,14 +449,20 @@ calls.jsonl의 응답 원문을 그대로 저장한다. Claude가 응답을 다�
 powershell -ExecutionPolicy Bypass -File tools\Sync-ProjectFiles.ps1 -UnityProject F:\MyGame
 # 복사 + 해시 확인
 powershell -ExecutionPolicy Bypass -File tools\Sync-ProjectFiles.ps1 -UnityProject F:\MyGame -Apply
+# 모든 대상 비교만 (tools\sync-targets.local.txt — sync-targets.example.txt를 복사해 이 PC 경로로, git 제외). 종료 코드는 가장 나쁜 값
+powershell -ExecutionPolicy Bypass -File tools\Sync-ProjectFiles.ps1 -All
+# 스크립트 시험 (임시 폴더만)
+powershell -ExecutionPolicy Bypass -File tools\Test-SyncProjectFiles.ps1
 ```
 
-- 동기화 대상: `CLAUDE.md`, `REVIEW_GUIDELINES.md`, `.claude/commands/*.md`, `.claude/scripts/*.py`. 바이트가 같아야 한다.
+- 동기화 대상: `CLAUDE.md`, `.claude/commands/*.md`, `.claude/scripts/*.py`, `.claude/agents/*.md`. 바이트가 같아야 한다.
+- **없으면 만듦 (2026-10-22)**: `REVIEW_GUIDELINES.md`는 프로젝트마다 고쳐 쓰는 지침이다. 대상에 없을 때만 원본(기본 지침)을 복사하고, 있으면 달라도 `프로젝트 지침`으로 보여 주기만 한다 (멈추지 않고 `-Force`로도 덮지 않음). 단 사본이 원본 git 이력의 옛 판과 같으면(프로젝트에서 고치지 않음) `기본 지침 옛 판`으로 맞출 대상이 되고 `-Apply`가 갱신한다. `-All` 요약은 맞출 것과 별도로 참고 항목(settings.json 다름 · 프로젝트 지침 · 대상에만 있는 파일)도 보여 준다 (종료 코드에는 넣지 않음). 프로젝트 전용 규칙은 그 프로젝트의 `PROJECT.md` — 공통 `CLAUDE.md` 끝의 `@PROJECT.md`가 불러오고, 없으면 오류 없이 건너뛴다 (헤드리스 Claude Code로 확인).
+- **원본을 바꾸는 커밋마다 `-All`로 모든 대상을 비교**해 뒤처진 곳을 보고한다 (CLAUDE.md "project-files 원본을 바꿀 때"). 사본이 다르면 `-Apply`가 멈추지만 알려 주지 않아, 세 프로젝트가 옛 훅으로 이틀 돈 일이 있었다 (2026-10-22). `-All`은 비교만 하고 `-Apply`와 같이 쓸 수 없다.
 - 확인만 (만들거나 덮지 않음, 종료 코드와 무관): `.claude/settings.json`은 `settings.example.json`과 해시를 비교한다. `.mcp.json`은 기기마다 경로가 달라 해시는 비교하지 않고, 없거나 `<publish 폴더>`가 남아 있으면 `[할 일]`로 알린다. Unity 쪽에 템플릿 이름 파일이 있으면 `Unity에 템플릿 사본`으로 보여 준다 (지워도 됨).
 - **`-Apply`는 Unity 쪽 파일이 원본과 다르면 아무것도 복사하지 않고 멈춘다.** Unity에서 고친 내용이 있으면 원본에 먼저 합친다. 버려도 되면 `-Force`로 덮는다. 덮기 전 파일은 `<Unity>/review_tmp/sync-backup/<시각>/`에 백업된다.
 - 줄 맨 앞 `\---`, `\_`, `\[`, `1\.` 같은 이스케이프 잔재가 보이면 경고만 한다 (종료 코드와 무관). 규칙서에 이런 이스케이프가 섞여 지침 불러오기가 깨진 적이 있다 (`@REVIEW\_GUIDELINES.md`, 원인 미확인).
 - `CLAUDE.md` — 언제 어떤 모드를 쓰고, input을 어떻게 줄이고, 결과를 어떻게 종합할지
-- `REVIEW_GUIDELINES.md` — 공통 리뷰 기준 (서버가 자동으로 찾아 주입)
+- `REVIEW_GUIDELINES.md` — 새 프로젝트용 기본 리뷰 기준 (Unity). 프로젝트에 복사된 뒤에는 그 프로젝트가 고쳐 쓴다 (서버가 프로젝트 루트에서 자동으로 찾아 주입)
 - `.claude/commands/cross-review.md` — `/cross-review`, `/cross-review panel`
 - `.claude/commands/self-review.md` — `/self-review`: 지휘자 + self-reviewer만 (외부 에이전트 없음). CLAUDE.md 리뷰 조건에 걸리면 지휘자가 `/self-review` · `/cross-review` · 리뷰 없음 중에서 묻는다. 판정은 `record_verdicts`의 `selfReview`(runId 비움)로 남기면 서버가 self-review 실행(Tool·Mode `self_review`, 에이전트 `self-reviewer`, 제공사 `claude-subagent`, 토큰은 하루 상한에 넣지 않고 UsageRaw에)을 만든다 → 판정 화면에 self-reviewer 채택률·놓침
 - `.claude/commands/mode.md` — `/mode design_main ...`, `/mode design_high ...`, `/mode research_main ...`, `/mode parallel_main ...`, `/mode perf_main ...`

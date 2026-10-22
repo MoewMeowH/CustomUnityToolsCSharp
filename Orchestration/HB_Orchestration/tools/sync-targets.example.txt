@@ -1,0 +1,3 @@
+# Sync-ProjectFiles.ps1 -All 대상 (한 줄에 프로젝트 폴더 하나, # 주석)
+# 이 파일을 sync-targets.local.txt로 복사해 이 PC의 경로로 고친다 (.local은 git 제외)
+# F:\MyGame
