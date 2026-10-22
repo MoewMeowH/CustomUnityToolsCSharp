@@ -19,6 +19,10 @@ public sealed class ModesModel(ModesConfigService service, CallLogCache log) : P
     public List<ModesFileUse> RecentModes { get; private set; } = [];
     public List<ModesFileUse> OtherModes { get; private set; } = [];
 
+    /// <summary>최근 7일 호출이 붙인 리뷰 지침 (provenance). 경고는 <see cref="GuidelinesFileUse.Warning"/>가 있는 것.</summary>
+    public List<GuidelinesFileUse> RecentGuidelines { get; private set; } = [];
+    public List<MissingGuidelinesUse> MissingGuidelines { get; private set; } = [];
+
     /// <summary>저장 직후 리다이렉트로 돌아왔을 때 무엇을 저장했는지 (modes / agents / replace).</summary>
     [BindProperty(SupportsGet = true)] public string? Saved { get; set; }
 
@@ -147,16 +151,21 @@ public sealed class ModesModel(ModesConfigService service, CallLogCache log) : P
         {
             RecentModes = ModesUsage.Recent(log.All, DateTimeOffset.Now, ModesUsage.Window);
             OtherModes = ModesUsage.OtherFiles(RecentModes, Snapshot.ModesPath);
+            RecentGuidelines = GuidelinesUsage.Recent(log.All, DateTimeOffset.Now, ModesUsage.Window);
+            MissingGuidelines = GuidelinesUsage.Missing(log.All, DateTimeOffset.Now, ModesUsage.Window);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Warnings.Add($"최근 실행이 쓴 modes.json을 확인하지 못했습니다 (호출 기록 읽기 실패: {ex.GetType().Name}: {ex.Message}).");
+            Warnings.Add($"최근 실행이 쓴 modes.json · 리뷰 지침을 확인하지 못했습니다 (호출 기록 읽기 실패: {ex.GetType().Name}: {ex.Message}).");
         }
     }
 
     // ── 화면 도우미 ─────────────────────────────────────────────────────────
 
     public static string AgentField(string mode, int index) => $"agent|{mode}|{index}";
+
+    /// <summary>내용 해시 앞 12자리 (지침 목록용).</summary>
+    public static string ShortSha(string? sha) => sha is { Length: >= 12 } ? sha[..12] : sha ?? "해시 없음";
     public static string SettingField(string mode, string key) => $"set|{mode}|{key}";
 
     public string? Raw(string mode, string key) =>

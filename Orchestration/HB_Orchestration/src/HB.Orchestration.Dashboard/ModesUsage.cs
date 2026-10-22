@@ -62,7 +62,7 @@ public static class ModesUsage
         string.Equals(Normalize(a).TrimEnd('\\', '/'), Normalize(b).TrimEnd('\\', '/'),
             OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 
-    private sealed class PathShaComparer : IEqualityComparer<(string Path, string? Sha256)>
+    internal sealed class PathShaComparer : IEqualityComparer<(string Path, string? Sha256)>
     {
         public static readonly PathShaComparer Instance = new();
         private static readonly StringComparer PathCmp = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;

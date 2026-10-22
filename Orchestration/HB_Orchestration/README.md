@@ -537,6 +537,7 @@ unity skill install --help
 - 어느 폴더를 볼지는 대시보드 `appsettings.json`의 `Dashboard:McpConfigDir` (배치로 실행하면 `HB_Orchestration.config`의 `PUBLISH_DIR`가 우선). 편집할 파일을 직접 지정하려면 `Dashboard:ModesPath`.
 - 직접 지정이 없으면 서버와 같은 찾는 순서로 편집할 modes.json을 정한다: MCP appsettings `Orchestration:ModesPath` → **대시보드 프로세스의** `HB_MODES_PATH` → publish 폴더 `modes.json`. 세션 폴더의 `hb-modes.json`은 대시보드가 알 수 없어 뺀다. 화면 머리에 "편집 중: 경로 (근거)"가 보인다.
 - 서버의 `HB_MODES_PATH`(프로세스마다 다름)나 Unity 프로젝트의 `hb-modes.json`은 대시보드가 알 수 없다. 그래서 호출 기록(provenance)에서 **최근 7일 실행이 실제로 쓴 modes.json**을 모아, 편집 중인 파일과 다르면 경고로 보인다. 같은 파일인데 그 뒤 내용이 바뀌었으면 "그 뒤 수정됨"으로 표시한다.
+- 그 아래에 **최근 7일 실행이 붙인 리뷰 지침**(provenance.guidelines)을 보인다. 프로젝트마다 자기 지침을 고쳐 쓰므로 내용은 비교하지 않고 **경로 규칙**으로만 경고한다: 경로가 `review_tmp/` 아래이거나 파일 이름이 `REVIEW_GUIDELINES.md`가 아니면 경고(하네스 임시 지침 · `REVIEW_GUIDELINES_PATH` 지정 실수). "지침 파일 없음"으로 돈 실행도 프로젝트 폴더별로 경고한다 (역할 `UseGuidelines=false` · 골든 `--no-guidelines`는 일부러 끈 것이라 뺀다). 나머지는 경로 · 해시 앞 12자리 · 실행 수 · 마지막 사용을 접힌 목록으로 — 이름이 같은 오래된 사본은 해시로 눈으로 확인한다 (계획서 `docs/plans/2026-10-22_지침-파일-경고.md`).
 
 **Claude 세션** (`/ClaudeSessions`) — 지휘자가 무엇을 알고 있었나
 - Claude Code 세션 기록(`~/.claude/projects/<경로 인코딩>/<sessionId>.jsonl`)을 **읽기만** 해서, 세션마다 시작 시각(로컬) · 버전 · 프로젝트 · 불러온 지침 파일 · 부른 `run_mode`를 보여준다. **대화 본문은 보여주지 않는다.**
