@@ -430,6 +430,26 @@ public sealed class GoldenTests
     }
 
     [Fact]
+    public async Task Specified_guidelines_path_missing_refuses_instead_of_falling_back()
+    {
+        // 2026-10-22: 지정 경로 오타면 예전 서버는 현재 폴더 REVIEW_GUIDELINES.md로 넘어갔다 — 이제 서버가 오류, 골든은 미리보기에서 거절.
+        using var h = new ModeRunnerHarness(Modes, guidelines: null!);  // Options.GuidelinesPath는 있지만 파일은 없음 (실제 GuidelinesLoader)
+        using var d = new GoldenDir();
+        d.Add("a");
+        h.Client.Script = [ScriptedChatClient.Reply(Answer)];
+
+        var (code, _, err) = await Cli(h, "run", "--dir", d.Root, "--yes");
+
+        Assert.Equal(2, code);
+        Assert.Contains("[리뷰 지침 경로 없음]", err);
+        Assert.Contains(h.GuidelinesPath, err);
+        Assert.Equal(0, h.Client.Calls);
+
+        var (flagCode, _, _) = await Cli(h, "run", "--dir", d.Root, "--no-guidelines", "--yes", "--label", "ng");
+        Assert.Equal(0, flagCode); // 일부러 지침 없이 비교하는 경우는 막지 않음
+    }
+
+    [Fact]
     public async Task No_guidelines_flag_strips_guidelines_even_when_the_file_exists()
     {
         using var h = new ModeRunnerHarness(Modes);

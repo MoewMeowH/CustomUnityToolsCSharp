@@ -184,6 +184,7 @@ public static class GoldenCli
         if (plans.Any(p => p.Steps.Count > 1))
             output.WriteLine("  다단계(crash) 사례: 뒤 단계는 앞 단계 출력과 웹검색 결과를 더 받으므로 실제 입력은 위 추정보다 크다.");
 
+        // 지정한 지침 경로에 파일이 없는 경우는 서버(GuidelinesLoader)가 오류로 내고 위 미리보기에서 거절된다 (2026-10-22).
         // 지침을 쓰는 역할인데 파일을 못 찾았으면 실제 run_mode와 다른 조건이다 (2026-10-19: 셸 현재 폴더가 프로젝트 루트가 아니어서 5회가 지침 없이 돎).
         // 계획은 먼저 보인 뒤 거절한다 (미리보기에서도 사례·비용을 볼 수 있게). --no-guidelines면 파일이 있어도 빼므로 이 경우가 생기지 않는다.
         var missing = plans.Where(p => p.Steps.Any(s => s.Guidelines.Reason == GuidelinesProvenance.ReasonNoFile)).Select(p => p.Case.Info.Id).ToList();
@@ -554,7 +555,6 @@ public static class GoldenCli
     }
 
     private static string GuidelinesText(GuidelinesProvenance g) => g.Attached ? $"지침 붙음: {g.Path}" : $"지침 없음 ({g.Reason})";
-
     private static ResultRecord ResultLine(GoldenCase c, GoldenScore s, IReadOnlyList<GoldenFinding> findings)
     {
         var unmatched = s.Unmatched.ToHashSet(StringComparer.Ordinal);

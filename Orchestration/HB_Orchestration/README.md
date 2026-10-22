@@ -78,7 +78,7 @@ dotnet build HB_Orchestration.slnx
 | 키 | 의미 |
 |---|---|
 | `ModesPath` | modes.json 위치를 직접 지정 (비우면 3절의 찾는 순서) |
-| `GuidelinesPath` | 리뷰 지침 파일 (비우면 `REVIEW_GUIDELINES_PATH` 환경 변수 → Unity 프로젝트 루트의 `REVIEW_GUIDELINES.md`) |
+| `GuidelinesPath` | 리뷰 지침 파일 (비우면 `REVIEW_GUIDELINES_PATH` 환경 변수 → Unity 프로젝트 루트의 `REVIEW_GUIDELINES.md`). 직접 지정한 경로(이 설정 또는 환경 변수)에 파일이 없으면 다음 후보로 넘어가지 않고 run_mode가 `[리뷰 지침 경로 없음]`으로 거절한다 (2026-10-22, modes.json 지정 경로와 같은 규칙) |
 | `Providers.<이름>.Type` | `openai-compatible` (현재 유일) |
 | `Providers.<이름>.Endpoint` | API 주소. OpenAI는 비움, Gemini `https://generativelanguage.googleapis.com/v1beta/openai/`, Ollama `http://localhost:11434/v1`, LM Studio `http://localhost:1234/v1` |
 | `Providers.<이름>.ApiKeyEnv` | API 키를 담은 **환경 변수 이름**. 로컬처럼 키가 필요 없으면 생략 |
@@ -613,8 +613,9 @@ dotnet <publish 폴더>\HB.Orchestration.Mcp.dll --golden run [사례|all] [--mo
 dotnet <publish 폴더>\HB.Orchestration.Mcp.dll --golden score <사례> --from <파일> [--dir 폴더] [--label 이름]
 ```
 - `run`은 `--yes`가 없으면 사례·에이전트·입력 글자 수·입력 비용 추정·붙는 지침 파일만 보이고 **외부 호출 없이** 멈춘다.
-- 골든·하네스에서 `HB_MODES_PATH`·`REVIEW_GUIDELINES_PATH`로 임시 modes·지침을 넘길 때는 **절대 경로만** 쓴다. 상대 경로는 그 프로세스의 현재 폴더 기준이라, 다른 폴더에서 실행하면 엉뚱한 곳을 가리킨다 (2026-10-20 1회차: inv·base 파일이 `src\HB.Orchestration.Dashboard
-eview_tmp\`에 생김).
+- 골든·하네스에서 `HB_MODES_PATH`·`REVIEW_GUIDELINES_PATH`로 임시 modes·지침을 넘길 때는 **절대 경로만** 쓴다. 상대 경로는 그 프로세스의 현재 폴더 기준이라, 다른 폴더에서 실행하면 엉뚱한 곳을 가리킨다 (2026-10-20 1회차: inv·base 파일이 `src\HB.Orchestration.Dashboard\review_tmp\`에 생김).
+  - 지정한 경로에 파일이 없으면 서버는 다음 후보로 넘어가지 않고 오류다 — modes.json(2026-10-21)과 리뷰 지침(2026-10-22) 모두. 골든은 계획 미리보기에서 `[리뷰 지침 경로 없음]`으로 거절한다 (`--no-guidelines`면 막지 않음).
+- 하네스 회차 실행은 `tools/golden/run_golden.sh <라벨> <모드> [건너뛸 사례 ...]` (리뷰 사례 rec-* · seed-*만, 저장소 루트·Publish_Output dll 기준). 지정한 `HB_MODES_PATH`·`REVIEW_GUIDELINES_PATH`가 절대 경로가 아니거나 파일이 없으면 시작 전 종료 2. 골든 종료 코드 2(실행 전 거절)·3(Quota)이면 그 사례에서 멈추고, 1(사례 실패)은 계속하되 끝에 `[실패 사례 N개]`와 종료 1. 시험: `bash tools/golden/test_run_golden.sh` (가짜 dotnet, 외부 호출 없음).
 - 지침은 run_mode와 같은 순서로 찾는다 (`Orchestration:GuidelinesPath` → `REVIEW_GUIDELINES_PATH` → **현재 폴더**의 `REVIEW_GUIDELINES.md`). 지침을 쓰는 역할인데 못 찾으면 계획을 보인 뒤 거절한다 (외부 호출 없음) — 프로젝트 루트에서 실행하거나 경로를 지정한다. `--no-guidelines`는 파일이 있어도 지침을 빼고 돈다 (지침 있음·없음 비교용, 기록 사유 `골든 --no-guidelines`). 사례를 돌기 직전마다 지침을 다시 읽어 실행 전 확인과 다르면(파일이 바뀜·사라짐) 그 사례부터 멈춘다. 결과 줄에 `guidelinesAttached` · `guidelinesSha256` · `guidelinesReason`.
 - run_mode와 같은 시스템 프롬프트(역할 + 출력 형식 + 공통 규칙 + 지침)·에이전트로 보낸다. reason·ownReview·context 첨부는 쓰지 않는다 (첨부는 사례의 `input.md`에 이미 들어 있음). 하루 비용 상한은 없으니 실행 전 계획의 예상 비용을 보고 `--yes`로 돌린다. 단계가 하나이고 구조화 출력(`Output`)이 있는 모드만 채점된다.
 - 호출 기록에는 `Tool = golden`, `Mode = 원래 모드`로 남는다 (대시보드·비용 집계에 보임). 세션 상태 파일은 남기지 않는다.

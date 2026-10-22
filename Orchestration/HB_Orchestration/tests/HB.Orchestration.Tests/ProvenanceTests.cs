@@ -113,7 +113,9 @@ public sealed class ProvenanceTests : IDisposable
     [Fact]
     public async Task NoGuidelinesFile_RecordsNoFile()
     {
-        File.Delete(_h.GuidelinesPath);
+        // 지정 없음 + 현재 폴더에도 없음 (지정 경로에 파일이 없으면 2026-10-22부터 오류 — GuidelinesLoaderTests)
+        _h.Options.GuidelinesPath = null;
+        _h.Runner.LoadGuidelines = o => GuidelinesLoader.Load(o, _ => null, Path.Combine(_h.Root, "empty"));
         await _h.Run("seq");
 
         var g = _h.Records().Single().Provenance!.Guidelines!;

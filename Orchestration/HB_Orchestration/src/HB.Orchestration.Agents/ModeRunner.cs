@@ -184,6 +184,9 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
 
         GuidelinesLoader.Result guidelines;
         try { guidelines = LoadGuidelines(Options); }
+        // 골든 --no-guidelines는 파일이 있어도 지침을 빼므로 지정 경로 오류로 막지 않는다
+        catch (GuidelinesPathMissingException) when (withoutGuidelines) { guidelines = new GuidelinesLoader.Result("", null, null, null); }
+        catch (GuidelinesPathMissingException ex) { return (null, $"[리뷰 지침 경로 없음] {ex.Message}"); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // 지침이 빠진 채 보내면 리뷰 결과가 달라지므로 조용히 넘어가지 않고 거절한다 (실행 횟수 차감 전).

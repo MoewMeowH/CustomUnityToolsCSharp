@@ -3,6 +3,9 @@ using HB.Orchestration.Shared;
 
 namespace HB.Orchestration.Agents;
 
+/// <summary>직접 지정한 리뷰 지침 경로(설정·환경 변수)에 파일이 없음. run_mode는 실행 전에 거절한다.</summary>
+public sealed class GuidelinesPathMissingException(string message) : IOException(message);
+
 /// <summary>공통 리뷰 지침을 실행할 때마다 읽는다. Unity 프로젝트 쪽 파일을 고치면 바로 반영된다.</summary>
 public static class GuidelinesLoader
 {
@@ -14,16 +17,34 @@ public static class GuidelinesLoader
     /// </summary>
     public sealed record Result(string Text, string? Path, byte[]? Bytes, string? Sha256);
 
-    public static Result Load(OrchestrationOptions options)
-    {
-        var candidates = new[]
-        {
-            options.GuidelinesPath,
-            Environment.GetEnvironmentVariable("REVIEW_GUIDELINES_PATH"),
-            System.IO.Path.Combine(Environment.CurrentDirectory, "REVIEW_GUIDELINES.md"),
-        };
+    public const string EnvVar = "REVIEW_GUIDELINES_PATH";
+    public const string FileName = "REVIEW_GUIDELINES.md";
 
-        var path = candidates.FirstOrDefault(p => !string.IsNullOrWhiteSpace(p) && File.Exists(p));
+    public static Result Load(OrchestrationOptions options) => Load(options, Environment.GetEnvironmentVariable, Environment.CurrentDirectory);
+
+    /// <summary>
+    /// 찾는 순서: 설정 GuidelinesPath → 환경 변수 REVIEW_GUIDELINES_PATH → 현재 폴더(세션 프로젝트 루트)의 REVIEW_GUIDELINES.md.
+    /// 직접 지정한 경로(앞의 둘 중 첫 지정)에 파일이 없으면 <see cref="GuidelinesPathMissingException"/> — 다음 후보로 조용히 넘어가면
+    /// 오타가 있을 때 다른 지침으로 돈다 (2026-10-22, modes.json 지정 경로와 같은 규칙). 지정이 없을 때만 현재 폴더를 찾는다.
+    /// </summary>
+    internal static Result Load(OrchestrationOptions options, Func<string, string?> env, string currentDirectory)
+    {
+        string? path;
+        var (specified, source) = !string.IsNullOrWhiteSpace(options.GuidelinesPath) ? (options.GuidelinesPath, "설정 Orchestration:GuidelinesPath")
+                                : env(EnvVar) is { } e && !string.IsNullOrWhiteSpace(e) ? (e, $"환경 변수 {EnvVar}")
+                                : (null, null);
+        if (specified is not null)
+        {
+            if (!File.Exists(specified))
+                throw new GuidelinesPathMissingException(
+                    $"{source}로 지정한 리뷰 지침 파일이 없습니다: {specified} (다른 지침 파일로 넘어가지 않습니다 — 경로를 고치거나 지정을 지우세요)");
+            path = specified;
+        }
+        else
+        {
+            var found = System.IO.Path.Combine(currentDirectory, FileName);
+            path = File.Exists(found) ? found : null;
+        }
         if (path is null) return new Result("", null, null, null);
 
         var bytes = File.ReadAllBytes(path);
