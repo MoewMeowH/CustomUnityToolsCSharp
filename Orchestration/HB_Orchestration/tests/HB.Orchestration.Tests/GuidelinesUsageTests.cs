@@ -29,6 +29,12 @@ public sealed class GuidelinesUsageTests
     public void Warning_follows_path_rule(string path, string? expected) =>
         Assert.Equal(expected, GuidelinesUsage.Warning(path));
 
+    [Theory]
+    [InlineData(true, null)]                                // Windows: 같은 파일
+    [InlineData(false, "이름이 REVIEW_GUIDELINES.md 아님")]  // 다른 OS: 기본 탐색이 못 찾는 다른 파일 = 지정 실수
+    public void Warning_name_case_follows_os(bool ignoreCase, string? expected) =>
+        Assert.Equal(expected, GuidelinesUsage.Warning("/home/u/proj/review_guidelines.md", ignoreCase));
+
     [Fact]
     public void Recent_groups_by_path_and_sha_and_does_not_compare_content_across_projects()
     {

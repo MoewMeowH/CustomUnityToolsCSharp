@@ -143,16 +143,21 @@ public sealed class ModesModel(ModesConfigService service, CallLogCache log) : P
         catch (Exception ex) when (ex is ModesConfigException or IOException or UnauthorizedAccessException)
         {
             LoadError = ex.Message;
-            return;
         }
 
-        // 최근 사용 modes.json은 부가 정보: 호출 기록을 못 읽어도 편집 화면은 그대로 둔다.
+        // 최근 사용 modes.json · 리뷰 지침은 부가 정보: 호출 기록을 못 읽어도 편집 화면은 그대로 둔다.
+        // 리뷰 지침은 편집 중인 modes.json과 무관하므로 modes.json을 못 읽어도 계산한다.
         try
         {
-            RecentModes = ModesUsage.Recent(log.All, DateTimeOffset.Now, ModesUsage.Window);
-            OtherModes = ModesUsage.OtherFiles(RecentModes, Snapshot.ModesPath);
-            RecentGuidelines = GuidelinesUsage.Recent(log.All, DateTimeOffset.Now, ModesUsage.Window);
-            MissingGuidelines = GuidelinesUsage.Missing(log.All, DateTimeOffset.Now, ModesUsage.Window);
+            var calls = log.All; // 한 번만 받는다 — CallLogCache는 파일이 바뀌면 다시 읽어 세 집계가 서로 다른 목록을 볼 수 있다
+            var now = DateTimeOffset.Now;
+            RecentGuidelines = GuidelinesUsage.Recent(calls, now, ModesUsage.Window);
+            MissingGuidelines = GuidelinesUsage.Missing(calls, now, ModesUsage.Window);
+            if (Snapshot is not null)
+            {
+                RecentModes = ModesUsage.Recent(calls, now, ModesUsage.Window);
+                OtherModes = ModesUsage.OtherFiles(RecentModes, Snapshot.ModesPath);
+            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -165,7 +170,7 @@ public sealed class ModesModel(ModesConfigService service, CallLogCache log) : P
     public static string AgentField(string mode, int index) => $"agent|{mode}|{index}";
 
     /// <summary>내용 해시 앞 12자리 (지침 목록용).</summary>
-    public static string ShortSha(string? sha) => sha is { Length: >= 12 } ? sha[..12] : sha ?? "해시 없음";
+    public static string ShortSha(string? sha) => sha is { Length: > 12 } ? sha[..12] + "…" : sha ?? "해시 없음"; // modes 이전 내용 목록과 같은 표기
     public static string SettingField(string mode, string key) => $"set|{mode}|{key}";
 
     public string? Raw(string mode, string key) =>

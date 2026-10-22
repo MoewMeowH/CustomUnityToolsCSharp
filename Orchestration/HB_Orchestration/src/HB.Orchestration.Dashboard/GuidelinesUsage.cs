@@ -41,12 +41,18 @@ public static class GuidelinesUsage
             .OrderByDescending(u => u.LastUsed)];
     }
 
-    /// <summary>경고 이유. 경로 구성 요소에 review_tmp가 있거나 파일 이름이 REVIEW_GUIDELINES.md가 아니면 (대소문자 무시).</summary>
-    public static string? Warning(string path)
+    /// <summary>
+    /// 경고 이유. 경로 구성 요소에 review_tmp가 있거나 파일 이름이 REVIEW_GUIDELINES.md가 아니면.
+    /// 대소문자는 Windows에서만 무시한다 (경로 비교와 같음) — 다른 OS에서 review_guidelines.md는 기본 탐색이 못 찾는 다른 파일이라 지정 실수로 본다.
+    /// </summary>
+    public static string? Warning(string path) => Warning(path, OperatingSystem.IsWindows());
+
+    public static string? Warning(string path, bool ignoreCase)
     {
+        var cmp = ignoreCase ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         var parts = path.Split('/', '\\');
-        if (parts.Any(p => p.Equals(TempFolder, StringComparison.OrdinalIgnoreCase))) return $"{TempFolder}/ 아래";
-        if (!parts[^1].Equals(FileName, StringComparison.OrdinalIgnoreCase)) return $"이름이 {FileName} 아님";
+        if (parts.Any(p => p.Equals(TempFolder, cmp))) return $"{TempFolder}/ 아래";
+        if (!parts[^1].Equals(FileName, cmp)) return $"이름이 {FileName} 아님";
         return null;
     }
 

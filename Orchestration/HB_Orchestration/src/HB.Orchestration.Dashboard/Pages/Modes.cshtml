@@ -63,6 +63,10 @@
 @if (Model.LoadError is not null)
 {
     <div class="notice err">@Model.LoadError</div>
+    if (snap is null)
+    {
+        <partial name="_GuidelinesUsage" model="Model" /> @* 리뷰 지침은 편집 중인 modes.json과 무관 — 못 읽어도 보인다 *@
+    }
 }
 @if (Model.Errors.Count > 0)
 {
@@ -114,46 +118,7 @@
         </div>
     }
 
-    var warnedGuidelines = Model.RecentGuidelines.Where(u => u.Warning is not null).ToList();
-    var normalGuidelines = Model.RecentGuidelines.Where(u => u.Warning is null).ToList();
-    if (warnedGuidelines.Count > 0)
-    {
-        <div class="notice warn">
-            최근 7일 실행 @warnedGuidelines.Sum(u => u.Runs)개 · 호출 @warnedGuidelines.Sum(u => u.Calls)건은 의도하지 않았을 수 있는 리뷰 지침으로 돌았습니다 (<span class="mono">review_tmp/</span> 아래이거나 이름이 <span class="mono">REVIEW_GUIDELINES.md</span>가 아님 — 하네스 임시 지침 · <span class="mono">REVIEW_GUIDELINES_PATH</span> 확인).
-            <ul>
-                @foreach (var u in warnedGuidelines)
-                {
-                    <li><span class="mono">@u.Path</span> · <span class="mono">@ModesModel.ShortSha(u.Sha256)</span> (@u.Warning) — 실행 @u.Runs · 호출 @u.Calls · 마지막 @u.LastUsed.ToLocalTime().ToString("MM-dd HH:mm")</li>
-                }
-            </ul>
-        </div>
-    }
-    if (Model.MissingGuidelines.Count > 0)
-    {
-        <div class="notice warn">
-            최근 7일 실행 @Model.MissingGuidelines.Sum(u => u.Runs)개 · 호출 @Model.MissingGuidelines.Sum(u => u.Calls)건은 리뷰 지침 파일을 찾지 못해 지침 없이 돌았습니다 (세션 폴더에 <span class="mono">REVIEW_GUIDELINES.md</span>가 없고 설정 · <span class="mono">REVIEW_GUIDELINES_PATH</span>도 없음). 역할 <span class="mono">UseGuidelines=false</span> · 골든 <span class="mono">--no-guidelines</span>로 일부러 끈 실행은 뺐습니다.
-            <ul>
-                @foreach (var u in Model.MissingGuidelines)
-                {
-                    <li><span class="mono">@(u.ProjectDir ?? "(프로젝트 폴더 기록 없음)")</span> — 실행 @u.Runs · 호출 @u.Calls · 마지막 @u.LastUsed.ToLocalTime().ToString("MM-dd HH:mm")</li>
-                }
-            </ul>
-        </div>
-    }
-    if (normalGuidelines.Count > 0)
-    {
-        <div class="notice muted">
-            <details>
-                <summary>최근 7일 리뷰 지침 @(normalGuidelines.Count)개 · 실행 @normalGuidelines.Sum(u => u.Runs)개 (경고 없음 — 이름이 같은 오래된 사본은 해시로 확인)</summary>
-                <ul>
-                    @foreach (var u in normalGuidelines)
-                    {
-                        <li><span class="mono">@u.Path</span> · <span class="mono">@ModesModel.ShortSha(u.Sha256)</span> — 실행 @u.Runs · 마지막 @u.LastUsed.ToLocalTime().ToString("MM-dd HH:mm")</li>
-                    }
-                </ul>
-            </details>
-        </div>
-    }
+    <partial name="_GuidelinesUsage" model="Model" />
 
     if (snap.HasComments || snap.SettingsHasComments)
     {
