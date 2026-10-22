@@ -220,13 +220,14 @@ SDK 자동 재시도(기본 3회, 기록에 안 남음)는 끄고 서버가 직�
 이름은 고를 수 있는 모드면 `{종류}_{등급}`(lite · main · high — high는 비싸거나 두 회사 동시), 단계 모드면 `{종류}_{단계}`다 (계획서 `docs/plans/2026-10-20_모드이름-통일-세션한도-제거.md`).
 예전 이름(review · panel · perf_sol · perf_argon · critique · debate · deliberate · research · parallel · work_order · crash · crash_review)으로 부르면 실행하지 않고 새 이름을 알려 준다.
 호출 기록·골든 사례·세션 기록에 남은 예전 이름은 **읽을 때만** 새 이름으로 바꿔 읽는다 (`ModeNames`, 파일은 그대로). 없앤 `perf_astra`는 기록에 그대로 보인다.
-구성이 바뀐 모드(`perf_argon` argon 단독 → `perf_high` sol | argon)는 예전 실행과 **한 모드로 합쳐 집계**된다. 구성별로 보려면 판정 화면의 에이전트 축을 본다.
+구성이 바뀐 모드(`perf_argon` argon 단독 → `perf_high` sol | argon, 2026-10-22부터 `review_high` · `perf_high` sol | argon → sol | DeepSeek)는 예전 실행과 **한 모드로 합쳐 집계**된다. 구성별로 보려면 판정 화면의 에이전트 축을 본다.
+`review_high` · `perf_high`의 두 번째 리뷰어(DeepSeek, `deepseek_main_flash`)는 Vision이 없어 `images`를 붙이면 실행 전에 거절된다. 이미지가 필요하면 `run_mode`의 `agents`로 argon을 지정해 실행한다 (`"deepseek_main_flash=gemini_high_argon"`).
 modes.json에 예전 이름 키가 남아 있으면 `list_modes`가 `[주의]`로 알린다 (그 키는 예전 이름 그대로 실행되지만, 기록은 새 이름으로 읽혀 followUp이 어긋난다 — 새 이름으로 바꾼다).
 
 | 종류 | 모드 | 구성 | 부르는 곳 |
 |---|---|---|---|
-| 리뷰 | `review_main` · `review_high` | sol · (sol | DeepSeek) |\|| 성능 | `perf_main` · `perf_high` | sol · (sol | DeepSeek) | `/cross-review [main\|high]` |
-| 성능 | `perf_main` · `perf_high` | sol · (sol | DeepSeek) |\|| 리뷰 | `review_main` · `review_high` | sol · (sol | DeepSeek) | `/mode`, ownReview는 self-reviewer |
+| 리뷰 | `review_main` · `review_high` | sol · (sol \| DeepSeek) | `/cross-review [main\|high]` |
+| 성능 | `perf_main` · `perf_high` | sol · (sol \| DeepSeek) | `/mode`, ownReview는 self-reviewer |
 | 설계 판단 | `design_lite` · `design_main` · `design_high` | 비평(sol) · 반박(sol) → 논리 검증(flash) · 반박 ⇄ 옹호 → 판정 | `/mode` |
 | 조사 | `research_main` | luna(웹) → sol | `/mode` |
 | 크래시 | `crash_main` → `crash_check` | argon → luna(웹) · sol | `/mode` |
