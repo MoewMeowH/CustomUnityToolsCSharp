@@ -253,6 +253,13 @@ public sealed class VerdictTests : IDisposable
     }
 
     [Fact]
+    public void SelfReview_format_accepts_note_section()
+    {
+        // 2026-10-22: 설명 줄은 ## 비고에 (H4가 ## 읽은 파일의 설명 줄을 막으므로)
+        Assert.Null(VerdictRecorder.SelfReviewFormatProblem(SelfReviewText + "\n## 비고\n- 폴더 안에서 검색했지만 정의가 없었다\n"));
+    }
+
+    [Fact]
     public async Task SelfReview_invalid_verdict_leaves_no_empty_run()
     {
         var result = await VerdictRecorder.RecordSelfReviewAsync(Info(), [

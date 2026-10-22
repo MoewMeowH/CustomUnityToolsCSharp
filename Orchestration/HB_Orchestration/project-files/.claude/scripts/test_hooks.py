@@ -234,6 +234,12 @@ try:
     expect('H4 지적 없음', h3('review_main', tag, '## 읽은 파일\n- subagent_in/x\n'), 2, "'## 지적'")
     expect('H4 perf_main 원문 형식', h3('perf_main', tag, good), 0)
     expect('H4 perf_main 요약 (안내에 /mode)', h3('perf_main', tag, '## 지적\n- C1 요약'), 2, '/mode 3단계')
+    # 2026-10-22 '## 비고' 칸 (계획서 2026-10-22_self-reviewer-비고-칸): 읽은 파일 검사는 그대로, 비고는 경로 검사 안 함
+    explain = '- 폴더 안에서 Grep으로 StepResult 정의를 찾았으나 없었다.\n'
+    expect('H4 비고 칸의 설명 줄', h3('review_main', tag, good + '## 비고\n' + explain), 0)
+    expect('H4 비고 칸의 폴더 밖 경로 (검사 대상 아님)', h3('review_main', tag, good + '## 비고\n- docs/worklog.md 는 받지 못함\n'), 0)
+    expect('H4 읽은 파일의 설명 줄은 계속 막음 (10-22 실사용 차단 문구)', h3('review_main', tag, good + explain + '## 비고\n- 없음\n'), 2, 'subagent_in/ 밖')
+    expect('H4 두 번째 읽은 파일 절의 폴더 밖 경로', h3('review_main', tag, good + '## 비고\n- 없음\n## 읽은 파일\n- docs/worklog.md:1-5\n'), 2, 'subagent_in/ 밖')
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

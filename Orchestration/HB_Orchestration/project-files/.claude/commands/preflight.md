@@ -15,7 +15,7 @@ argument-hint: <요청> [첨부 파일 경로 ...]
 | 상황 | 쓸 것 |
 |---|---|
 | 작은 변경, 한 파일 안의 수정 | `review_main` (/cross-review) |
-| 성능만 보고 싶을 때 (핫패스, 할당, 동기화) | `perf_main` (sol, 기본) / `perf_high` (sol · argon 동시, 중요한 핫패스·다른 회사 시선) |
+| 성능만 보고 싶을 때 (핫패스, 할당, 동기화) | `perf_main` (sol, 기본) / `perf_high` (sol · DeepSeek 동시, 중요한 핫패스·다른 회사 시선) |
 | 설계 방향 하나만 비판받고 싶을 때 | `design_lite` |
 | 여러 파일·구조를 바꾸는 큰 작업, 되돌리기 비싼 작업 | **이 명령** |
 

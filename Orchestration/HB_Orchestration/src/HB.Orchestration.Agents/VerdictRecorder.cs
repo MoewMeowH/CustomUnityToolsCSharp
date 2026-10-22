@@ -20,7 +20,7 @@ public sealed record VerdictItem(
 /// 토큰은 InputTokens·OutputTokens에 넣지 않는다 — 대시보드 오늘 사용량은 외부 에이전트 기준 (계획서 2026-10-20_리뷰조건-self-reviewer).
 /// </summary>
 public sealed record SelfReviewInfo(
-    [property: Description("self-reviewer 결과 원문 (## 지적 · ## 자료 부족 · ## 읽은 파일)")] string Review,
+    [property: Description("self-reviewer 결과 원문 (## 지적 · ## 자료 부족 · ## 읽은 파일 · ## 비고)")] string Review,
     [property: Description("위임 메시지의 변경 의도·제약 (요약 가능)")] string Intent,
     [property: Description("대상 파일 (프로젝트 루트 기준, 선택)")] string[]? Files = null,
     [property: Description("서브에이전트 모델 (기본 opus)")] string? Model = null,
@@ -146,7 +146,10 @@ public static class VerdictRecorder
         return Commit(prepared, "self-review 실행");
     }
 
-    /// <summary>self-reviewer 결과 원문 형식 (H4 훅과 같은 기준: ## 지적 · ## 읽은 파일 절). 맞으면 null.</summary>
+    /// <summary>
+    /// self-reviewer 결과 원문 형식 (H4 훅과 같은 기준: ## 지적 · ## 읽은 파일 절). 맞으면 null.
+    /// ## 비고(설명 줄, 2026-10-22 추가)는 선택 절이라 검사하지 않는다. 경로 검사는 H4만 한다.
+    /// </summary>
     internal static string? SelfReviewFormatProblem(string review)
     {
         var headings = review.Split('\n').Select(l => l.Trim()).ToHashSet(StringComparer.Ordinal);

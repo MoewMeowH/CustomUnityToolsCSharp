@@ -14,12 +14,12 @@
 * 리뷰 (`/self-review` · `/cross-review`): 50줄 이상 변경, 스레딩/비동기/메모리 관련 변경, 사용자가 교차 리뷰를 요청했을 때 — **자동으로 부르지 않고 사용자에게 묻는다** (계획서 `Orchestration/HB_Orchestration/docs/plans/2026-10-20_리뷰조건-self-reviewer.md`).
   * 선택지: `/self-review`(지휘자 + self-reviewer, 외부 없음) · `/cross-review`(+ 외부 `review_main`, 중요한 변경은 `/cross-review high` = `review_high`) · 리뷰 없음. 변경 성격(단순 이동·이름 변경·문서·테스트만 / 비용 계산·보안·직렬화·스레딩 같은 위험 영역)을 한 줄로 보이고 추천을 붙인다.
   * 사용자가 명령을 직접 입력했으면 묻지 않는다. `review_*` 모드는 `/cross-review`로만 부른다.
-* `review_high`(sol · argon 동시): 사용자가 명시적으로 요청했거나 되돌리기 어려운 구조 변경일 때만
+* `review_high`(sol · DeepSeek 동시): 사용자가 명시적으로 요청했거나 되돌리기 어려운 구조 변경일 때만
 * `design_lite` / `design_main` / `design_high`: 설계 결정, 두 가지 이상 방식 중 선택할 때. 가벼운 건 lite(비평), 중요한 건 main(반박 + 논리 검증), 되돌리기 어려운 건 high(다회차 토론 후 판정, 아래 "design_high 모드")
 * `research_main`: 사용자가 기능·도구 조사를 요청했을 때
 * `crash_main`: 사용자가 크래시 조사(원인·비슷한 사례·재현 스텝)를 요청했을 때. 마무리 평가는 `crash_check` (아래 "crash 모드 순서")
 * `parallel_main`: 사용자가 요청했을 때만
-* `perf_main`(sol): 핫패스·할당·동기화가 걸린 변경, 사용자가 성능 점검을 요청했을 때. 중요한 핫패스·다른 회사 시선은 `perf_high`(sol · argon 동시). 여러 파일·구조를 바꾸는 큰 작업은 `/preflight`를 제안한다 (`preflight_*` 모드는 그 명령으로만 쓴다)
+* `perf_main`(sol): 핫패스·할당·동기화가 걸린 변경, 사용자가 성능 점검을 요청했을 때. 중요한 핫패스·다른 회사 시선은 `perf_high`(sol · DeepSeek 동시). 여러 파일·구조를 바꾸는 큰 작업은 `/preflight`를 제안한다 (`preflight_*` 모드는 그 명령으로만 쓴다)
 * 사소한 변경, 단순 질문에는 쓰지 않는다.
 
 ### input 작성 — 토큰 절약 규칙
@@ -157,7 +157,7 @@ Quota(`[실패] Quota` — 크레딧·한도 소진)나 429 실패 뒤에는 바
 * H2 `push_guard.py`: `git push`는 **단독 명령**으로 `git [-C 경로] push [--dry-run] [-u] [원격 [브랜치]]` 형식만 (commit과 묶으면 훅이 그 커밋을 못 본다). 대상 원격에 없는 커밋의 추가된 줄에 비밀 값 모양, 또는 `docs/image/`·`GoldenSet/`·`subagent_in/`·`review_tmp/` 아래 파일이 있으면 막는다. 커밋이 300개를 넘으면 사람이 확인한다.
   * 개인 값(이메일·로컬 사용자 경로)은 `.claude/push_guard.local.txt`(한 줄에 정규식, `allow:`는 예외)에만 둔다. 프로젝트마다 `.gitignore`에 등록한다. 파일이 저장소에 추적되면 그 자체로 막는다.
 * H3 `run_mode_guard.py`: review_main·review_high 전에 `docs/plans/`에 오늘 날짜 이름이거나 오늘 고친 계획서가 없으면 ("계획서와 작업 로그").
-* H4 `run_mode_guard.py`: reason이 `[ownReview:self-reviewer]`인데 ownReview가 self-reviewer 결과 원문 형식(`## 지적`·`## 읽은 파일`, 읽은 파일은 `subagent_in/` 안)이 아니면. 재호출 때도 원문 그대로 넣는다.
+* H4 `run_mode_guard.py`: reason이 `[ownReview:self-reviewer]`인데 ownReview가 self-reviewer 결과 원문 형식(`## 지적`·`## 읽은 파일`, 읽은 파일은 `subagent_in/` 안)이 아니면. 재호출 때도 원문 그대로 넣는다. `## 읽은 파일`은 경로 줄만 허용(절이 여러 개면 모두 검사), 설명 줄은 `## 비고`에 — `## 비고`는 경로 검사를 하지 않는다 (2026-10-22).
 * 훅 등록은 `python -I .claude/scripts/check_agents.py`, 동작은 `python -I .claude/scripts/test_hooks.py`로 검사한다. settings.json을 고치면 새 세션에서 반영된다.
 
 ## 계획서와 작업 로그

@@ -6,6 +6,8 @@
 - H4: reason이 [ownReview:self-reviewer]로 시작하면 ownReview는 self-reviewer 결과 원문이어야 한다
   (/cross-review 3단계 · /mode perf_* 3단계). '## 지적'·'## 읽은 파일' 절이 있고, 읽은 파일 줄이 모두 subagent_in/ 안이어야 통과.
   2026-10-19: 첫 호출이 거절된 뒤 재호출 때 원문 대신 요약을 넣은 적이 있다.
+  '## 읽은 파일' 절이 여러 개면 모두 검사한다. '## 비고' 등 다른 절은 경로 검사를 하지 않는다 — 설명 줄은 '## 비고'에 쓰고
+  '## 읽은 파일'의 설명 줄은 계속 막는다 (계획서 2026-10-22_self-reviewer-비고-칸, 느슨하게 만들지 않는다는 사용자 결정).
 - 실패하면 막는다: 통과 판정일 때만 exit 0.
 
 입력: stdin JSON {"tool_name": "mcp__hb-orchestration__run_mode", "tool_input": {"mode", "reason", "ownReview", ...}}.
@@ -88,9 +90,10 @@ def self_review_problem(own: str) -> str | None:
     read = [i for i in heads if lines[i].strip() == '## 읽은 파일']
     if not read:
         return "'## 읽은 파일' 절이 없다 (요약이 아니라 결과 원문을 넣어야 한다)"
-    start = read[0] + 1
-    end = next((i for i in heads if i > read[0]), len(lines))
-    items = [l.strip()[2:].strip() for l in lines[start:end] if l.strip().startswith('- ')]
+    items = []
+    for head in read:  # 절이 여러 개여도 모두 검사 (두 번째 절에 숨은 폴더 밖 경로)
+        end = next((i for i in heads if i > head), len(lines))
+        items += [l.strip()[2:].strip() for l in lines[head + 1:end] if l.strip().startswith('- ')]
     if not items:
         return "'## 읽은 파일'에 항목이 없다"
     outside = [p for p in items if not read_item_ok(p)]
