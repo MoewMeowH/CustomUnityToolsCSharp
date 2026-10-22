@@ -486,6 +486,7 @@ public static class GoldenCli
             o.WriteLine($"[합계] 찾음 {found}/{expected} ({(expected == 0 ? 0 : 100.0 * found / expected):0}%) · 줄만 맞음 {scores.Sum(s => s.Score.Weak.Count)} · 함정 걸림 {scores.Sum(s => s.Score.TrapHits.Count)} · 짝 없는 지적 {scores.Sum(s => s.Score.Unmatched.Count)}");
             foreach (var kind in scores.GroupBy(s => s.Case.Info.Kind))
                 o.WriteLine($"  {kind.Key}: 찾음 {kind.Sum(s => s.Score.Found.Count)}/{kind.Sum(s => s.Score.ExpectedCount)}");
+            o.WriteLine($"  정답지 묶음 해시 (채점한 사례 {scores.Count}개, expected+traps): {GoldenCaseLoader.SetKeyHash(scores.Select(s => s.Case))} · {GoldenScorer.Version}");
             o.WriteLine("자동 짝은 틀릴 수 있습니다. 근거(강도·파일·키워드)를 보고 확인하세요. 줄만 맞은 짝은 찾음에 세지 않습니다 (맞는 지적이면 정답지 키워드를 보강).");
         }
         if (path is not null) o.WriteLine($"결과: {path}");

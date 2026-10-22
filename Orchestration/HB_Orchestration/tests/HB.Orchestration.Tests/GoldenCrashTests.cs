@@ -57,6 +57,8 @@ public sealed class GoldenCrashTests
     [InlineData("""[ { "id": "A", "step": "triage", "keywords": ["k"], "files": ["a.cs"] } ]""", "files·lines")]
     [InlineData("""[ { "id": "A", "step": "search", "urls": null } ]""", "null일 수 없습니다")]
     [InlineData("""[ { "id": "A", "step": "search", "urls": ["", "issues/1"] } ]""", "빈 조각")]
+    [InlineData("""[ { "id": "A", "step": "triage", "keywords": ["k"], "required": ["r"] } ]""", "required·locations")] // crash는 keywords만 봄 — 조용히 무시되지 않게
+    [InlineData("""[ { "id": "A", "step": "triage", "keywords": ["k"], "locations": [ { "file": "a.cs", "from": 1 } ] } ]""", "required·locations")]
     public void Rejects_bad_crash_items(string expected, string message)
     {
         using var d = new Dir();

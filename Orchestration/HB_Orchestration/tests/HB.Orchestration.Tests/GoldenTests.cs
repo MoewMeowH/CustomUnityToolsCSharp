@@ -311,6 +311,12 @@ public sealed class GoldenTests
     [InlineData(null, """[ { "id": "E1", "keywords": ["k"], "files": null } ]""", "null일 수 없습니다")]
     [InlineData(null, """[ { "id": "E1", "keywords": ["k"], "required": null } ]""", "null일 수 없습니다")]
     [InlineData(null, """[ { "id": "E1", "keywords": ["k"], "locations": [null] } ]""", "null일 수 없습니다")]
+    [InlineData(null, """[ { "id": "E1", "keywords": ["k"], "locations": [ { "from": 10 } ] } ]""", "locations는")]       // 파일 없는 위치는 채점에 안 쓰임
+    [InlineData(null, """[ { "id": "E1", "keywords": ["k"], "locations": [ { "file": "A.cs", "from": 0 } ] } ]""", "locations는")]
+    [InlineData(null, """[ { "id": "E1", "keywords": ["k"], "locations": [ { "file": "A.cs", "from": 10, "to": 5 } ] } ]""", "locations는")]
+    [InlineData(null, """[ { "id": "E1", "keywords": ["k"], "locations": [ { "file": "A.cs" } ] } ]""", "locations는")]
+    [InlineData(null, """[ { "id": "E1", "keywords": ["k"], "required": [""] } ]""", "빈 말")]                        // 필수가 있는 척 → 찾음 불가
+    [InlineData(null, """[ { "id": "E1", "keywords": [" NUL"] } ]""", "앞뒤 공백")]                                   // 공백이 경계 검사를 없앰
     [InlineData("""{ "id": "x", "kind": "seeded", "mode": null }""", null, "mode가 비어")]
     public void Rejects_bad_case_files(string? caseJson, string? expected, string message)
     {
@@ -330,6 +336,22 @@ public sealed class GoldenTests
         var (c, error) = GoldenCaseLoader.Load(d.Add("x", null, expected: expected));
         Assert.Null(error);
         Assert.NotNull(c);
+    }
+
+    [Fact]
+    public void Set_key_hash_covers_traps_and_ignores_case_order()
+    {
+        using var d = new GoldenDir();
+        d.Add("b");
+        var aDir = d.Add("a", traps: """[ { "id": "T1", "keywords": ["junction"] } ]""");
+        var (cases, _) = GoldenCaseLoader.LoadMany(d.Root, "all");
+        var before = GoldenCaseLoader.SetKeyHash(cases);
+        Assert.Equal(16, before.Length);
+        Assert.Equal(before, GoldenCaseLoader.SetKeyHash(Enumerable.Reverse(cases)));
+
+        File.WriteAllText(Path.Combine(aDir, "traps.json"), """[ { "id": "T1", "keywords": ["junction*"] } ]""");
+        var (changed, _) = GoldenCaseLoader.LoadMany(d.Root, "all");
+        Assert.NotEqual(before, GoldenCaseLoader.SetKeyHash(changed)); // 함정만 바꿔도 묶음 해시가 바뀐다
     }
 
     [Theory]

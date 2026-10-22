@@ -120,6 +120,65 @@ public sealed class GoldenScorerV2Tests
         Assert.Null(r[0]);
     }
 
+    [Fact]
+    public void Max_weight_assignment_handles_more_columns_and_empty_columns()
+    {
+        var w = new long[1, 3];
+        w[0, 0] = 4; w[0, 1] = 0; w[0, 2] = 7;
+        Assert.Equal([(int?)2], GoldenScorer.MaxWeightAssignment(w));
+
+        Assert.Equal([null, null], GoldenScorer.MaxWeightAssignment(new long[2, 0]));
+        Assert.Empty(GoldenScorer.MaxWeightAssignment(new long[0, 3]));
+    }
+
+    [Fact]
+    public void Title_matches_never_outweigh_strength_summed_over_pairs()
+    {
+        // 리뷰 731db657f4 반례: 강도 합 1단계 높은 배정 X(A-f1 · B-f2 · C-f3)와 제목 일치 3개인 배정 Y(A-f2 · B-f3 · C-f1).
+        // 예전 가중치(1e6 + 강도×1000 + 제목 500 − 순번)는 Y를 골랐다 (7000 < 6000 + 1500).
+        var A = Item("A", "A.cs", [10, 10], required: ["알파"]);
+        var B = Item("B", file: null, required: ["베타"]);
+        var C = Item("C", file: null, required: ["감마"]);
+        var s = GoldenScorer.Score(Case(A, B, C),
+        [
+            new GoldenFinding("f1", "major", "A.cs", 10, "감마 결함", "알파"),  // A: 위치 + 필수(3) · C: 필수, 제목(2)
+            new GoldenFinding("f2", "major", null, null, "알파 결함", "베타"),  // A: 제목(2) · B: 2
+            new GoldenFinding("f3", "major", null, null, "베타 결함", "감마"),  // B: 제목(2) · C: 2
+        ]);
+
+        Assert.Equal(["A←f1", "B←f2", "C←f3"], s.Found.Select(p => $"{p.ItemId}←{p.FindingId}"));
+    }
+
+    [Fact]
+    public void Same_strength_prefers_required_keyword_in_title_over_earlier_finding()
+    {
+        var A = Item("A", file: null, required: ["알파"]);
+        var s = GoldenScorer.Score(Case(A),
+            [new GoldenFinding("x", "major", null, null, "다른 문제", "알파도 언급"), new GoldenFinding("y", "major", null, null, "알파 결함", null)]);
+        Assert.Equal("y", Assert.Single(s.Found).FindingId);
+        Assert.Equal(["x"], s.Unmatched);
+    }
+
+    [Fact]
+    public void Lex_weights_keep_order_for_many_findings_and_refuse_overflow()
+    {
+        var w = GoldenScorer.LexWeights(pairs: 3, findings: 2000);
+        Assert.True(w(0, true, 1999) > w(0, false, 0));                         // 제목이 순번(지적 2000개)보다 먼저
+        Assert.True(w(1, false, 1999) > w(0, true, 0));                         // 강도가 제목보다 먼저
+        Assert.True(w(1, false, 1999) + 2 * w(0, false, 1999) > 3 * w(0, true, 0)); // 짝 3개의 합에서도
+        Assert.True(2 * w(0, false, 1999) > w(1, true, 0));                      // 찾음 수가 가장 먼저
+
+        Assert.Throws<OverflowException>(() => GoldenScorer.LexWeights(pairs: 200_000, findings: 200_000));
+    }
+
+    [Fact]
+    public void Crash_keyword_check_still_matches_identifier_prefix()
+    {
+        // crash 채점(GoldenCrashScorer)은 판 1 검사 그대로 — 오른쪽 경계를 보지 않는다
+        Assert.True(GoldenScorer.ContainsKeyword("ArgumentOutOfRangeException 발생", "ArgumentOutOfRange"));
+        Assert.False(GoldenScorer.ContainsKeyword("loads 실패", "ADS"));
+    }
+
     // ── W7 중복 ───────────────────────────────────────────────────────────
 
     [Fact]

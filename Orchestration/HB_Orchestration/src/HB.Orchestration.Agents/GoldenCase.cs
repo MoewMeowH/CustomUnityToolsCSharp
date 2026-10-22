@@ -179,6 +179,28 @@ public static class GoldenCaseLoader
         return JsonSerializer.Deserialize<T>(GuidelinesLoader.DecodeLikeReadAllText(File.ReadAllBytes(path)), Json);
     }
 
+    /// <summary>
+    /// 정답지 묶음 해시 (동결 표시용, SHA-256 앞 16자리): 사례 폴더 이름 순(Ordinal)으로 사례마다 "&lt;사례&gt;/expected.json\n" + 원본 바이트,
+    /// traps.json이 있으면 "&lt;사례&gt;/traps.json\n" + 원본 바이트를 이어 붙인다. 함정도 점수(함정 수)를 바꾸므로 넣는다
+    /// (2026-10-22 동결부터 — 그 전 동결 aab21c2e23ed4e5a · 61c79cbf9388aba5는 expected.json만 이어 붙인 값).
+    /// </summary>
+    public static string SetKeyHash(IEnumerable<GoldenCase> cases)
+    {
+        using var sha = System.Security.Cryptography.IncrementalHash.CreateHash(System.Security.Cryptography.HashAlgorithmName.SHA256);
+        foreach (var c in cases.OrderBy(c => Path.GetFileName(c.Folder), StringComparer.Ordinal))
+        {
+            var name = Path.GetFileName(c.Folder);
+            foreach (var file in new[] { ExpectedFile, TrapsFile })
+            {
+                var path = Path.Combine(c.Folder, file);
+                if (!File.Exists(path)) continue;
+                sha.AppendData(System.Text.Encoding.UTF8.GetBytes($"{name}/{file}\n"));
+                sha.AppendData(File.ReadAllBytes(path));
+            }
+        }
+        return Convert.ToHexStringLower(sha.GetHashAndReset())[..16];
+    }
+
     private static string KeyHash(string dir)
     {
         using var sha = System.Security.Cryptography.IncrementalHash.CreateHash(System.Security.Cryptography.HashAlgorithmName.SHA256);
@@ -209,6 +231,12 @@ public static class GoldenCaseLoader
             if (item.Lines.Count > 2 || item.Lines.Any(l => l < 1) || (item.Lines.Count == 2 && item.Lines[1] < item.Lines[0]))
                 return $"{file}: '{item.Id}'의 lines는 [줄] 또는 [시작, 끝]이어야 합니다.";
             if (item.Lines.Count > 0 && item.Files.Count == 0) return $"{file}: '{item.Id}'는 lines가 있는데 files가 없습니다.";
+            // 채점은 파일 이름이 있는 위치만 쓴다 — 파일 없는 위치 · 빈 범위는 오류 대신 조용한 "놓침"이 되므로 여기서 거절한다.
+            foreach (var l in item.Locations)
+                if (string.IsNullOrWhiteSpace(l.File) || l.From is not { } from || from < 1 || (l.To is { } to && to < from))
+                    return $"{file}: '{item.Id}'의 locations는 {{ file, from ≥ 1, to ≥ from(선택) }}이어야 합니다.";
+            if (item.Keywords.Concat(item.Required).FirstOrDefault(k => k.Length == 0 || k != k.Trim()) is { } bad)
+                return $"{file}: '{item.Id}'의 키워드 '{bad}' — 빈 말이나 앞뒤 공백은 안 됩니다 (공백이 경계 검사를 없앤다).";
             // 필수 키워드만 있는 항목도 짝을 지을 수 있다 (보조 키워드는 비워도 됨)
             if (item.AllLocations.All(l => l.From is null) && item.Keywords.Concat(item.Required).All(string.IsNullOrWhiteSpace))
                 return $"{file}: '{item.Id}'는 줄 위치도 keywords·required도 없어 짝을 지을 수 없습니다.";
@@ -228,6 +256,9 @@ public static class GoldenCaseLoader
             if (string.IsNullOrWhiteSpace(item.Id)) return $"{file}: id가 빈 항목이 있습니다.";
             if (!seen.Add(item.Id)) return $"{file}: id '{item.Id}'가 두 번 나옵니다.";
             if (item.Files.Count > 0 || item.Lines.Count > 0) return $"{file}: '{item.Id}' — crash 사례는 files·lines를 쓰지 않습니다.";
+            // crash 채점은 keywords(예전 검사)만 본다 — 적어도 조용히 무시되므로 거절
+            if (item.Required is not { Count: 0 } || item.Locations is not { Count: 0 })
+                return $"{file}: '{item.Id}' — crash 사례는 required·locations를 쓰지 않습니다 (keywords만 봄).";
             if (item.Step is not (GoldenItem.StepTriage or GoldenItem.StepSearch) && !(isTrap && item.Step is null))
                 return $"{file}: '{item.Id}'의 step은 triage 또는 search여야 합니다{(isTrap ? " (함정은 비우면 두 단계 모두)" : "")}.";
             if (item.Urls.Any(string.IsNullOrWhiteSpace)) return $"{file}: '{item.Id}'의 urls에 빈 조각이 있습니다 (모든 URL에 맞게 됨).";

@@ -16,7 +16,7 @@ public sealed record GoldenPair(string ItemId, string FindingId, int Strength, s
 
 /// <summary>
 /// 사례 하나의 점수. 함정 걸림은 감점하지 않고 "검토 필요"로만 보인다.
-/// Weak(강도 1, 줄만 맞음)은 찾음에 세지 않는다 — 같은 줄 범위의 다른 결함과 구분하지 못한다 (seed-safepath sol 실행: 대소문자 지적이 ADS로 짝지어짐).
+/// Weak(강도 1 — 줄만 맞음 또는 보조 키워드만 맞음)은 찾음에 세지 않는다 — 같은 줄 범위의 다른 결함과 구분하지 못한다 (seed-safepath sol 실행: 대소문자 지적이 ADS로 짝지어짐).
 /// Missed에는 Weak의 기대 지적도 들어간다.
 /// </summary>
 public sealed record GoldenScore(
@@ -36,7 +36,7 @@ public sealed record GoldenScore(
 /// 규칙 짝짓기 (LLM 판정자 없음 — 채점이 비용·변동을 만들지 않게). 판 <see cref="Version"/> (계획서 2026-10-22_채점기-구조-개선).
 /// 짝 후보: (위치 중 하나와 같은 파일 이름 + 줄이 범위 ±<see cref="LineTolerance"/>) 또는 (필수 키워드가 문제·상세에 있음 + 파일이 어긋나지 않음).
 /// 둘 다 맞으면 강도 3, 필수 키워드만 2, 위치만 또는 보조 키워드만 1. 필수 키워드가 없는 항목(예전 정답지·함정)은 키워드가 필수 역할.
-/// 기대 지적·지적 하나에 짝은 하나씩이고, 찾음 수 → 강도 합 순으로 최대가 되게 정확히 푼다 (헝가리안).
+/// 기대 지적·지적 하나에 짝은 하나씩이고, 찾음 수 → 강도 합 → 제목에 필수 키워드가 있는 짝 수 → 앞 지적 순으로 최대가 되게 정확히 푼다 (헝가리안).
 /// 기대 지적과 짝이 안 된 지적만 함정 → 중복 → 확인 필요 순으로 대조한다.
 /// </summary>
 public static class GoldenScorer
@@ -105,7 +105,7 @@ public static class GoldenScorer
     }
 
     /// <param name="onePerItem">
-    /// true(기대 지적): 짝 수가 최대가 되게 한다 (이분 매칭, 증가 경로). 후보는 강한 것부터 시도한다.
+    /// true(기대 지적): 강도 2 이상 짝만으로 최대 가중 배정 (<see cref="LexWeights"/> · <see cref="MaxWeightAssignment"/>).
     /// false(함정): 한 함정에 여러 지적이 걸릴 수 있어 지적마다 가장 강한 함정 하나. 어느 쪽이든 지적 하나는 한 번만 쓴다.
     /// </param>
     private static List<GoldenPair> Assign(IReadOnlyList<GoldenItem> items, IReadOnlyList<GoldenFinding> findings, out List<GoldenFinding> leftover, bool onePerItem = true)
@@ -122,14 +122,15 @@ public static class GoldenScorer
         var owner = new int?[findings.Count]; // 지적 → 짝 지은 항목
         if (onePerItem)
         {
-            // 찾음으로 세는 짝(강도 2 이상)만으로, 찾음 수 → 강도 합 → 필수 키워드가 제목에 있음 → 앞 지적 순으로 최대가 되게 정확히 푼다 (W2).
+            // 찾음으로 세는 짝(강도 2 이상)만으로, 찾음 수 → 강도 합 → 필수 키워드가 제목에 있는 짝 수 → 앞 지적 순으로 최대가 되게 정확히 푼다 (W2).
             // 예전의 증가 경로 + 맞바꾸기는 줄이 가깝고 흔한 키워드가 걸린 틀린 짝(3)이 맞는 짝(2)을 밀어낼 수 있었다.
-            // 제목 보너스(500)는 강도 한 단계(1000)보다 작고 순번 차(< 100)보다 크다 — 상세에 지나가듯 나온 말보다 제목이 결함을 말하는 지적을 고른다.
+            // 제목은 상세에 지나가듯 나온 말보다 제목이 결함을 말하는 지적을 고르려는 것. 자리값은 배정 전체의 합에서도 사전식이 되게 크기로 정한다.
+            var weigh = LexWeights(Math.Min(items.Count, findings.Count), findings.Count);
             var weight = new long[items.Count, findings.Count];
             for (var i = 0; i < items.Count; i++)
                 foreach (var (f, strength, _) in edges[i])
                     if (strength >= MinFoundStrength)
-                        weight[i, f] = 1_000_000L + strength * 1_000L + (RequiredInTitle(items[i], findings[f]) ? 500L : 0L) - f;
+                        weight[i, f] = weigh(strength - MinFoundStrength, RequiredInTitle(items[i], findings[f]), f);
             var assigned = MaxWeightAssignment(weight);
             for (var i = 0; i < items.Count; i++)
                 if (assigned[i] is { } f && weight[i, f] > 0) owner[f] = i;
@@ -153,6 +154,25 @@ public static class GoldenScorer
         leftover = [.. findings.Where((_, f) => owner[f] is null)];
         return [.. pairs.OrderBy(p => IndexOf(items, p.ItemId)).ThenBy(p => p.FindingId, StringComparer.Ordinal)];
 
+    }
+
+    /// <summary>
+    /// 짝 하나의 가중치 = 개수 단위 + 강도 단계 × 강도 단위 + 제목 × 제목 단위 + (지적 수 − 1 − 순번).
+    /// 짝은 최대 <paramref name="pairs"/>개라 아래 자리의 합이 바뀌는 폭은 한 단계 위 단위보다 항상 작다 —
+    /// 짝 하나 안에서만 사전식이면 제목 3개(+1500)가 강도 1단계(+1000)를 이기는 식으로 합에서 뒤집힌다 (2026-10-22 리뷰 731db657f4).
+    /// 크기가 너무 커 long을 넘으면 OverflowException (조용히 틀린 배정을 내지 않게).
+    /// </summary>
+    internal static Func<int, bool, int, long> LexWeights(int pairs, int findings)
+    {
+        checked
+        {
+            long n = Math.Max(pairs, 1), order = Math.Max(findings - 1, 0);
+            var title = n * order + 1;                                // 순번 합의 폭(≤ n·order)보다 큼
+            var strength = n * (title + order) + 1;                   // 제목 수 + 순번 합의 폭보다 큼
+            var count = n * (strength * (3 - MinFoundStrength) + title + order) + 1; // 강도·제목·순번 합의 폭보다 큼
+            _ = n * (count + strength * (3 - MinFoundStrength) + title + order); // 배정 전체의 합도 long 안
+            return (step, inTitle, f) => count + step * strength + (inTitle ? title : 0) + (order - f);
+        }
     }
 
     /// <summary>
