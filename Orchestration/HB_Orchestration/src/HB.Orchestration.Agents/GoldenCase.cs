@@ -46,6 +46,21 @@ public sealed record GoldenItem
     public IReadOnlyList<string> Files { get; init; } = [];
     public IReadOnlyList<int> Lines { get; init; } = [];
     public IReadOnlyList<string> Keywords { get; init; } = [];
+
+    /// <summary>
+    /// 필수 키워드 — 그 결함에만 맞는 말 (동의어 묶음, 하나라도 맞으면 됨). 있으면 찾음(강도 2 이상)은 이 말이 맞을 때만이고
+    /// <see cref="Keywords"/>는 보조(줄만 맞은 것과 같은 강도 1)가 된다. 비우면 예전처럼 Keywords가 필수 역할 (채점기 ⑤, 2026-10-22).
+    /// </summary>
+    public IReadOnlyList<string> Required { get; init; } = [];
+
+    /// <summary>
+    /// 위치 목록 — 원인 지점과 증상 지점처럼 여러 곳 중 하나라도 맞으면 위치 일치. 비우면 <see cref="Files"/> × <see cref="Lines"/> (예전 형식).
+    /// </summary>
+    public IReadOnlyList<GoldenLocation> Locations { get; init; } = [];
+
+    /// <summary>정답 출처 (seeded · later-commit · self-review · conductor · common · ds · sol · user-test). 모델 비교 집합을 고를 때 쓴다.</summary>
+    public string? Origin { get; init; }
+
     public string? Severity { get; init; }
 
     /// <summary>함정만: 왜 틀린 지적으로 판정됐는지 (결과에 함께 보여 "다른 관점에서 타당한지" 검토하게 한다).</summary>
@@ -62,6 +77,19 @@ public sealed record GoldenItem
 
     [JsonIgnore] public int? From => Lines.Count > 0 ? Lines[0] : null;
     [JsonIgnore] public int? To => Lines.Count > 1 ? Lines[1] : From;
+
+    /// <summary>채점에 쓰는 위치: <see cref="Locations"/>, 없으면 Files마다 Lines 범위 하나 (예전 형식).</summary>
+    [JsonIgnore]
+    public IReadOnlyList<GoldenLocation> AllLocations =>
+        Locations.Count > 0 ? Locations : [.. Files.Select(f => new GoldenLocation { File = f, From = From, To = To })];
+}
+
+/// <summary>정답 위치 하나 (파일 이름 + 줄 범위, 줄은 비울 수 있음).</summary>
+public sealed record GoldenLocation
+{
+    public string? File { get; init; }
+    public int? From { get; init; }
+    public int? To { get; init; }
 }
 
 public static class GoldenCaseLoader
@@ -173,15 +201,17 @@ public static class GoldenCaseLoader
         for (var i = 0; i < items.Count; i++)
         {
             if (items[i] is not { } item) return $"{file}: {i + 1}번째 항목이 null입니다.";
-            if (item.Files is null || item.Lines is null || item.Keywords is null || item.Files.Any(f => f is null) || item.Keywords.Any(k => k is null))
-                return $"{file}: '{item.Id}'의 files·lines·keywords는 null일 수 없습니다 (비우려면 []).";
+            if (item.Files is null || item.Lines is null || item.Keywords is null || item.Required is null || item.Locations is null
+                || item.Files.Any(f => f is null) || item.Keywords.Any(k => k is null) || item.Required.Any(k => k is null) || item.Locations.Any(l => l is null))
+                return $"{file}: '{item.Id}'의 files·lines·keywords·required·locations는 null일 수 없습니다 (비우려면 []).";
             if (string.IsNullOrWhiteSpace(item.Id)) return $"{file}: id가 빈 항목이 있습니다.";
             if (!seen.Add(item.Id)) return $"{file}: id '{item.Id}'가 두 번 나옵니다.";
             if (item.Lines.Count > 2 || item.Lines.Any(l => l < 1) || (item.Lines.Count == 2 && item.Lines[1] < item.Lines[0]))
                 return $"{file}: '{item.Id}'의 lines는 [줄] 또는 [시작, 끝]이어야 합니다.";
             if (item.Lines.Count > 0 && item.Files.Count == 0) return $"{file}: '{item.Id}'는 lines가 있는데 files가 없습니다.";
-            if (item.Lines.Count == 0 && item.Keywords.All(string.IsNullOrWhiteSpace))
-                return $"{file}: '{item.Id}'는 lines도 keywords도 없어 짝을 지을 수 없습니다.";
+            // 필수 키워드만 있는 항목도 짝을 지을 수 있다 (보조 키워드는 비워도 됨)
+            if (item.AllLocations.All(l => l.From is null) && item.Keywords.Concat(item.Required).All(string.IsNullOrWhiteSpace))
+                return $"{file}: '{item.Id}'는 줄 위치도 keywords·required도 없어 짝을 지을 수 없습니다.";
         }
         return null;
     }

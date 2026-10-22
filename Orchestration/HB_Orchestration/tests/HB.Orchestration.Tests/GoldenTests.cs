@@ -309,6 +309,8 @@ public sealed class GoldenTests
     [InlineData(null, "[ null ]", "null입니다")]
     [InlineData(null, """[ { "id": "E1", "keywords": null, "lines": [1], "files": ["A.cs"] } ]""", "null일 수 없습니다")]
     [InlineData(null, """[ { "id": "E1", "keywords": ["k"], "files": null } ]""", "null일 수 없습니다")]
+    [InlineData(null, """[ { "id": "E1", "keywords": ["k"], "required": null } ]""", "null일 수 없습니다")]
+    [InlineData(null, """[ { "id": "E1", "keywords": ["k"], "locations": [null] } ]""", "null일 수 없습니다")]
     [InlineData("""{ "id": "x", "kind": "seeded", "mode": null }""", null, "mode가 비어")]
     public void Rejects_bad_case_files(string? caseJson, string? expected, string message)
     {
@@ -317,6 +319,17 @@ public sealed class GoldenTests
         var (c, error) = GoldenCaseLoader.Load(dir);
         Assert.Null(c);
         Assert.Contains(message, error);
+    }
+
+    [Theory]
+    [InlineData("""[ { "id": "E1", "summary": "s", "required": ["k"] } ]""")]
+    [InlineData("""[ { "id": "E1", "summary": "s", "locations": [ { "file": "A.cs", "from": 3 } ] } ]""")]
+    public void Required_only_or_locations_only_items_load(string expected)
+    {
+        using var d = new GoldenDir();
+        var (c, error) = GoldenCaseLoader.Load(d.Add("x", null, expected: expected));
+        Assert.Null(error);
+        Assert.NotNull(c);
     }
 
     [Theory]

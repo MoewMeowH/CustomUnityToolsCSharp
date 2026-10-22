@@ -526,7 +526,13 @@ public static class GoldenCli
         public IReadOnlyList<GoldenPair>? Weak { get; init; }
         public IReadOnlyList<string>? Missed { get; init; }
         public IReadOnlyList<GoldenPair>? Traps { get; init; }
+
+        /// <summary>이미 찾은 항목을 한 번 더 짚은 지적 (찾음 · 짝 없음 어디에도 안 셈, 채점기 판 2).</summary>
+        public IReadOnlyList<GoldenPair>? Duplicates { get; init; }
         public IReadOnlyList<GoldenFinding>? UnmatchedFindings { get; init; }
+
+        /// <summary>채점 방식 판 (<see cref="GoldenScorer.Version"/>). 정답지 해시와 함께 봐야 점수를 비교할 수 있다.</summary>
+        public string? ScorerVersion { get; init; }
         public long? InputTokens { get; init; }
         public long? OutputTokens { get; init; }
         public long? ElapsedMs { get; init; }
@@ -563,7 +569,9 @@ public static class GoldenCli
             CaseId = c.Info.Id, Kind = c.Info.Kind, Mode = c.Info.Mode, InputSha256 = Sha(c.Input), KeySha256 = c.KeySha256,
             Expected = s.ExpectedCount, Found = s.Found.Count, TrapHits = s.TrapHits.Count, Unmatched = s.Unmatched.Count, Findings = s.FindingCount,
             Pairs = s.Found, Weak = s.Weak.Count == 0 ? null : s.Weak, Missed = s.Missed, Traps = s.TrapHits,
+            Duplicates = s.Duplicates.Count == 0 ? null : s.Duplicates,
             UnmatchedFindings = [.. findings.Where(f => unmatched.Contains(f.Id))],
+            ScorerVersion = GoldenScorer.Version,
         };
     }
 

@@ -26,17 +26,24 @@ public sealed record GoldenScore(
 {
     public IReadOnlyList<GoldenPair> Weak { get; init; } = [];
 
+    /// <summary>이미 찾음이 된 항목을 한 번 더 짚은 지적 (필수 키워드 + 위치 모두 일치). 찾음에도 짝 없음에도 넣지 않는다 (W7).</summary>
+    public IReadOnlyList<GoldenPair> Duplicates { get; init; } = [];
+
     public double Recall => ExpectedCount == 0 ? 0 : (double)Found.Count / ExpectedCount;
 }
 
 /// <summary>
-/// 규칙 짝짓기 (LLM 판정자 없음 — 채점이 비용·변동을 만들지 않게).
-/// 짝 후보: (같은 파일 이름 + 줄이 범위 ±<see cref="LineTolerance"/>) 또는 (키워드가 문제·상세에 있음 + 파일이 어긋나지 않음).
-/// 둘 다 맞으면 강도 3, 키워드만 2, 줄만 1. 기대 지적·지적 하나에 짝은 하나씩이고, 짝 수가 최대가 되게 정한다 (강한 후보부터 시도).
-/// 기대 지적과 짝이 안 된 지적만 함정과 대조한다.
+/// 규칙 짝짓기 (LLM 판정자 없음 — 채점이 비용·변동을 만들지 않게). 판 <see cref="Version"/> (계획서 2026-10-22_채점기-구조-개선).
+/// 짝 후보: (위치 중 하나와 같은 파일 이름 + 줄이 범위 ±<see cref="LineTolerance"/>) 또는 (필수 키워드가 문제·상세에 있음 + 파일이 어긋나지 않음).
+/// 둘 다 맞으면 강도 3, 필수 키워드만 2, 위치만 또는 보조 키워드만 1. 필수 키워드가 없는 항목(예전 정답지·함정)은 키워드가 필수 역할.
+/// 기대 지적·지적 하나에 짝은 하나씩이고, 찾음 수 → 강도 합 순으로 최대가 되게 정확히 푼다 (헝가리안).
+/// 기대 지적과 짝이 안 된 지적만 함정 → 중복 → 확인 필요 순으로 대조한다.
 /// </summary>
 public static class GoldenScorer
 {
+    /// <summary>결과 줄에 남기는 채점 방식 판. 정답지 해시만으로는 채점 방식이 바뀐 걸 구분할 수 없다.</summary>
+    public const string Version = "golden-scorer@2";
+
     public const int LineTolerance = 5;
 
     /// <summary>찾음으로 세는 최소 강도. 1(줄만)은 확인 필요로만 보인다.</summary>
@@ -49,13 +56,33 @@ public static class GoldenScorer
         var found = Assign(c.Expected, findings, out var leftover);
         var trapHits = Assign(c.Traps, leftover, out var rest, onePerItem: false);
         var foundIds = found.Select(p => p.ItemId).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var weak = WeakPairs(c.Expected.Where(e => !foundIds.Contains(e.Id)).ToList(), rest, out var unmatched);
+        var duplicates = DuplicatePairs(c.Expected.Where(e => foundIds.Contains(e.Id)).ToList(), rest, out var afterDup);
+        var weak = WeakPairs(c.Expected.Where(e => !foundIds.Contains(e.Id)).ToList(), afterDup, out var unmatched);
         return new GoldenScore(c.Info.Id, c.Expected.Count, findings.Count,
             found, [.. c.Expected.Where(e => !foundIds.Contains(e.Id)).Select(e => e.Id)],
             trapHits, [.. unmatched.Select(f => f.Id)])
         {
             Weak = weak,
+            Duplicates = duplicates,
         };
+    }
+
+    /// <summary>
+    /// 이미 찾음이 된 항목을 필수 키워드 + 위치(강도 3)로 한 번 더 짚은 지적. 같은 결함을 두 번 말한 것이라 짝 없음(노이즈)에서 뺀다.
+    /// 찾음에는 넣지 않는다 — 같은 결함을 여러 번 말할수록 점수가 오르면 안 되므로 (W7).
+    /// </summary>
+    private static List<GoldenPair> DuplicatePairs(IReadOnlyList<GoldenItem> foundItems, IReadOnlyList<GoldenFinding> findings, out List<GoldenFinding> leftover)
+    {
+        var pairs = new List<GoldenPair>();
+        leftover = [];
+        foreach (var f in findings)
+        {
+            // 위치 + 필수 키워드(강도 3)이고 필수 키워드가 제목에 있을 때만 — 상세에 지나가듯 나온 말로 다른 결함을 중복으로 숨기지 않게
+            var hit = foundItems.Select(i => (Item: i, M: Match(i, f))).FirstOrDefault(x => x.M is { Strength: 3 } && RequiredInTitle(x.Item, f));
+            if (hit.M is { } m) pairs.Add(new GoldenPair(hit.Item.Id, f.Id, m.Strength, "중복 — " + m.Basis));
+            else leftover.Add(f);
+        }
+        return pairs;
     }
 
     /// <summary>남은 기대 지적마다 줄만 맞은 빈 지적 하나 (앞에서부터). 확인 필요로만 보인다.</summary>
@@ -95,10 +122,17 @@ public static class GoldenScorer
         var owner = new int?[findings.Count]; // 지적 → 짝 지은 항목
         if (onePerItem)
         {
-            // 1) 찾음으로 세는 짝(강도 2 이상)만으로 최대 매칭. 강한 후보가 있는 항목부터, 지적 하나가 기대 지적 둘에 걸리면 증가 경로로 옮긴다.
-            foreach (var i in Enumerable.Range(0, items.Count).OrderByDescending(i => edges[i].Count == 0 ? 0 : edges[i][0].Strength))
-                TryAugment(i, new bool[findings.Count]);
-            SwapForStrength();
+            // 찾음으로 세는 짝(강도 2 이상)만으로, 찾음 수 → 강도 합 → 필수 키워드가 제목에 있음 → 앞 지적 순으로 최대가 되게 정확히 푼다 (W2).
+            // 예전의 증가 경로 + 맞바꾸기는 줄이 가깝고 흔한 키워드가 걸린 틀린 짝(3)이 맞는 짝(2)을 밀어낼 수 있었다.
+            // 제목 보너스(500)는 강도 한 단계(1000)보다 작고 순번 차(< 100)보다 크다 — 상세에 지나가듯 나온 말보다 제목이 결함을 말하는 지적을 고른다.
+            var weight = new long[items.Count, findings.Count];
+            for (var i = 0; i < items.Count; i++)
+                foreach (var (f, strength, _) in edges[i])
+                    if (strength >= MinFoundStrength)
+                        weight[i, f] = 1_000_000L + strength * 1_000L + (RequiredInTitle(items[i], findings[f]) ? 500L : 0L) - f;
+            var assigned = MaxWeightAssignment(weight);
+            for (var i = 0; i < items.Count; i++)
+                if (assigned[i] is { } f && weight[i, f] > 0) owner[f] = i;
         }
         else
         {
@@ -119,56 +153,58 @@ public static class GoldenScorer
         leftover = [.. findings.Where((_, f) => owner[f] is null)];
         return [.. pairs.OrderBy(p => IndexOf(items, p.ItemId)).ThenBy(p => p.FindingId, StringComparer.Ordinal)];
 
-        int StrengthOf(int item, int finding) => edges[item].FirstOrDefault(e => e.Finding == finding).Strength; // 짝 후보가 아니면 0
+    }
 
-        // 짝 수는 그대로 두고, 두 짝의 지적을 맞바꾸면 강도 합이 커질 때 바꾼다 (예: 키워드가 서로 엇갈려 맞은 두 지적 — rec-ffd7 sol 실행).
-        void SwapForStrength()
-        {
-            for (var changed = true; changed;)
-            {
-                changed = false;
-                for (var f = 0; f < findings.Count; f++)
-                    for (var g = f + 1; g < findings.Count; g++)
-                    {
-                        if (owner[f] is not { } i || owner[g] is not { } j) continue;
-                        int now = StrengthOf(i, f) + StrengthOf(j, g), swapped = StrengthOf(i, g) + StrengthOf(j, f);
-                        if (StrengthOf(i, g) == 0 || StrengthOf(j, f) == 0 || swapped <= now) continue;
-                        (owner[f], owner[g]) = (j, i);
-                        changed = true;
-                    }
-                // 짝 없는 지적이 더 강하게 맞으면 바꾼다 (지적 수가 같으므로 짝 수는 그대로).
-                for (var f = 0; f < findings.Count; f++)
-                    for (var g = 0; g < findings.Count; g++)
-                    {
-                        if (owner[f] is not { } i || owner[g] is not null || StrengthOf(i, g) <= StrengthOf(i, f)) continue;
-                        (owner[f], owner[g]) = (null, i);
-                        changed = true;
-                    }
-            }
-        }
+    /// <summary>
+    /// 최대 가중치 배정 (헝가리안, 행 = 항목 · 열 = 지적, 0은 짝 아님). 행마다 배정된 열(없으면 null).
+    /// 크기가 작아(항목 ≤ 수십 · 지적 ≤ 수십) O(n³)로 충분하다. 열이 모자라면 가짜 열을 더해 정사각으로 푼다.
+    /// </summary>
+    internal static int?[] MaxWeightAssignment(long[,] weight)
+    {
+        int rows = weight.GetLength(0), cols = weight.GetLength(1), n = Math.Max(rows, cols);
+        if (rows == 0) return [];
+        long max = 0;
+        foreach (var w in weight) max = Math.Max(max, w);
+        // 최소 비용으로 바꿔 푼다: cost = max - weight (가짜 칸은 weight 0)
+        var cost = new long[n + 1, n + 1];
+        for (var i = 1; i <= n; i++)
+            for (var j = 1; j <= n; j++)
+                cost[i, j] = max - (i <= rows && j <= cols ? weight[i - 1, j - 1] : 0);
 
-        // 빈 지적부터 쓰고, 그다음에만 다른 항목의 짝을 옮긴다 (옮기면 그 항목이 약한 짝으로 밀릴 수 있음).
-        bool TryAugment(int item, bool[] seen)
+        var u = new long[n + 1]; var v = new long[n + 1];
+        var p = new int[n + 1]; var way = new int[n + 1];
+        for (var i = 1; i <= n; i++)
         {
-            foreach (var (f, _, _) in edges[item].Where(e => e.Strength >= MinFoundStrength))
+            p[0] = i;
+            var j0 = 0;
+            var minv = Enumerable.Repeat(long.MaxValue, n + 1).ToArray();
+            var used = new bool[n + 1];
+            do
             {
-                if (seen[f] || owner[f] is not null) continue;
-                seen[f] = true;
-                owner[f] = item;
-                return true;
-            }
-            foreach (var (f, _, _) in edges[item].Where(e => e.Strength >= MinFoundStrength))
-            {
-                if (seen[f]) continue;
-                seen[f] = true;
-                if (TryAugment(owner[f]!.Value, seen))
+                used[j0] = true;
+                int i0 = p[j0], j1 = 0;
+                var delta = long.MaxValue;
+                for (var j = 1; j <= n; j++)
                 {
-                    owner[f] = item;
-                    return true;
+                    if (used[j]) continue;
+                    var cur = cost[i0, j] - u[i0] - v[j];
+                    if (cur < minv[j]) { minv[j] = cur; way[j] = j0; }
+                    if (minv[j] < delta) { delta = minv[j]; j1 = j; }
                 }
-            }
-            return false;
+                for (var j = 0; j <= n; j++)
+                {
+                    if (used[j]) { u[p[j]] += delta; v[j] -= delta; }
+                    else minv[j] -= delta;
+                }
+                j0 = j1;
+            } while (p[j0] != 0);
+            do { var j1 = way[j0]; p[j0] = p[j1]; j0 = j1; } while (j0 != 0);
         }
+
+        var result = new int?[rows];
+        for (var j = 1; j <= n; j++)
+            if (p[j] is var i && i >= 1 && i <= rows && j <= cols) result[i - 1] = j - 1;
+        return result;
     }
 
     private static int IndexOf(IReadOnlyList<GoldenItem> items, string id)
@@ -181,25 +217,66 @@ public static class GoldenScorer
     internal static (int Strength, string Basis)? Match(GoldenItem item, GoldenFinding finding)
     {
         var name = FileName(finding.File);
-        var bothHaveFile = name is not null && item.Files.Count > 0;
-        var sameFile = bothHaveFile && item.Files.Any(x => string.Equals(FileName(x), name, StringComparison.OrdinalIgnoreCase));
+        var locations = item.AllLocations;
+        var withFile = locations.Where(l => FileName(l.File) is not null).ToList();
+        var bothHaveFile = name is not null && withFile.Count > 0;
+        var sameFile = bothHaveFile && withFile.Any(l => string.Equals(FileName(l.File), name, StringComparison.OrdinalIgnoreCase));
 
-        var near = sameFile && item.From is { } from && item.To is { } to && finding.Line is { } line
-                   && line >= from - LineTolerance && line <= to + LineTolerance;
+        // 위치 목록 중 하나라도 (같은 파일 + 줄 범위 ±허용) 맞으면 위치 일치 (W4: 원인·증상 지점이 다른 결함)
+        var nearAt = !sameFile || finding.Line is not { } line ? null
+            : withFile.FirstOrDefault(l => string.Equals(FileName(l.File), name, StringComparison.OrdinalIgnoreCase)
+                                           && l.From is { } from && line >= from - LineTolerance && line <= (l.To ?? from) + LineTolerance);
+        var near = nearAt is not null;
 
         var text = finding.Problem + "\n" + finding.Detail;
-        var keyword = item.Keywords.FirstOrDefault(k => !string.IsNullOrWhiteSpace(k) && ContainsKeyword(text, k));
+        // 필수 키워드가 없으면 예전처럼 키워드가 필수 역할 (예전 정답지 · 함정)
+        var hasRequired = item.Required.Count > 0;
+        var required = (hasRequired ? item.Required : item.Keywords).FirstOrDefault(k => !string.IsNullOrWhiteSpace(k) && ContainsTerm(text, k));
+        var auxiliary = hasRequired && required is null
+            ? item.Keywords.FirstOrDefault(k => !string.IsNullOrWhiteSpace(k) && ContainsTerm(text, k)) : null;
         // 키워드만으로 짝을 지을 때 다른 파일을 가리키는 지적은 뺀다 (같은 낱말이 다른 결함에도 나오므로).
-        var byKeyword = keyword is not null && (!bothHaveFile || sameFile);
+        var fileOk = !bothHaveFile || sameFile;
+        var byRequired = required is not null && fileOk;
+        var byAuxiliary = auxiliary is not null && fileOk;
 
-        var lineText = item.From == item.To ? $"{item.From}" : $"{item.From}-{item.To}";
-        return (near, byKeyword) switch
+        var where = nearAt is null ? "" : $"{finding.Location} (기대 {LineText(nearAt)} ±{LineTolerance})";
+        var termName = hasRequired ? "필수" : "키워드";
+        return (near, byRequired) switch
         {
-            (true, true) => (3, $"{finding.Location} (기대 {lineText} ±{LineTolerance}) + 키워드 '{keyword}'"),
-            (false, true) => (2, $"키워드 '{keyword}'{(sameFile ? $" + 같은 파일 {name}" : "")}"),
-            (true, false) => (1, $"{finding.Location} (기대 {lineText} ±{LineTolerance}), 키워드 없음"),
+            (true, true) => (3, $"{where} + {termName} '{required}'"),
+            (false, true) => (2, $"{termName} '{required}'{(sameFile ? $" + 같은 파일 {name}" : "")}"),
+            (true, false) => (1, $"{where}, {(byAuxiliary ? $"보조 '{auxiliary}'만" : $"{termName} 없음")}"),
+            _ when byAuxiliary => (1, $"보조 '{auxiliary}'만{(sameFile ? $" + 같은 파일 {name}" : "")}"),
             _ => null,
         };
+
+        static string LineText(GoldenLocation l) => $"{FileName(l.File)}:{(l.From == (l.To ?? l.From) ? $"{l.From}" : $"{l.From}-{l.To}")}";
+    }
+
+    /// <summary>필수 키워드(없으면 키워드)가 지적의 제목(problem)에 있는지. 배정 동점 정렬과 중복 판정에 쓴다.</summary>
+    internal static bool RequiredInTitle(GoldenItem item, GoldenFinding finding) =>
+        (item.Required.Count > 0 ? item.Required : item.Keywords).Any(k => !string.IsNullOrWhiteSpace(k) && ContainsTerm(finding.Problem, k));
+
+    /// <summary>
+    /// 리뷰 채점(판 2)의 키워드 검사. 대소문자 무시 포함 검사이고, 키워드 첫 글자가 ASCII 영숫자면 그 앞,
+    /// 끝 글자가 ASCII 영숫자면 그 뒤도 ASCII 영숫자가 아니어야 한다 ('NUL'이 'null'에 걸리지 않게, W5).
+    /// 키워드 끝의 '*'는 앞부분 일치 ("ArgumentOutOfRange*" → "ArgumentOutOfRangeException"). 한국어는 그대로 부분 문자열.
+    /// crash 채점은 예전 <see cref="ContainsKeyword"/>를 그대로 쓴다 (정답지를 다시 보지 않은 채 경계 규칙을 바꾸지 않음).
+    /// </summary>
+    internal static bool ContainsTerm(string text, string keyword)
+    {
+        var prefix = keyword.Length > 1 && keyword[^1] == '*';
+        var term = prefix ? keyword[..^1] : keyword;
+        static bool Word(char c) => char.IsAsciiLetterOrDigit(c);
+        for (var at = text.IndexOf(term, StringComparison.OrdinalIgnoreCase); at >= 0;
+             at = text.IndexOf(term, at + 1, StringComparison.OrdinalIgnoreCase))
+        {
+            var leftOk = !Word(term[0]) || at == 0 || !Word(text[at - 1]);
+            var end = at + term.Length;
+            var rightOk = prefix || !Word(term[^1]) || end == text.Length || !Word(text[end]);
+            if (leftOk && rightOk) return true;
+        }
+        return false;
     }
 
     /// <summary>
