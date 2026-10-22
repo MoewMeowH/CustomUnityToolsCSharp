@@ -94,7 +94,7 @@
     },
     "review_high": {
       "RequireOwnReview": true,
-      "Description": "코드/diff 교차 리뷰 (sol · argon 동시, 비용 큼, 중요한 변경만)",
+      "Description": "코드/diff 교차 리뷰 (sol · DeepSeek 동시, 비용 큼, 중요한 변경만)",
       "Flow": "Concurrent",
       "Steps": [
         {
@@ -103,7 +103,7 @@
         },
         {
           "Role": "Reviewer",
-          "Agent": "gemini_high_argon"
+          "Agent": "deepseek_main_flash"
         }
       ]
     },
@@ -119,7 +119,7 @@
       ]
     },
     "perf_high": {
-      "Description": "성능 검토 (sol · argon 동시): 두 회사 모델이 따로 본다. 중요한 핫패스·큰 변경용",
+      "Description": "성능 검토 (sol · DeepSeek 동시): 두 회사 모델이 따로 본다. 중요한 핫패스·큰 변경용",
       "RequireOwnReview": true,
       "Flow": "Concurrent",
       "Steps": [
@@ -129,7 +129,7 @@
         },
         {
           "Role": "PerfReviewer",
-          "Agent": "gemini_high_argon"
+          "Agent": "deepseek_main_flash"
         }
       ]
     },
