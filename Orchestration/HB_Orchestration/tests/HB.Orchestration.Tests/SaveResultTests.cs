@@ -261,4 +261,20 @@ public class ResultFormatterTests
         var r = new StepResult(1, "R", "a", false, "[실패]") { ElapsedMs = 5_000 };
         Assert.Equal("### 1. R · a (입력 - / 출력 -, 5.0초)", ResultFormatter.Title(r));
     }
+
+    [Fact]
+    public void ReturnAll_ShowsFailedStepNextToSucceededOne()
+    {
+        // review_high처럼 동시 단계 중 하나만 실패하면 반쪽 결과가 조용히 남지 않고 실패 단계도 보여야 한다
+        var results = new[]
+        {
+            new StepResult(1, "Reviewer", "gpt_main_sol", true, "지적"),
+            new StepResult(2, "Reviewer", "deepseek_main_flash", false, "[실패] Client 400 · context length exceeded"),
+        };
+        var text = ResultFormatter.Format("r", results, returnAll: true, note: null);
+
+        Assert.Contains("### 1. Reviewer · gpt_main_sol", text);
+        Assert.Contains("### 2. Reviewer · deepseek_main_flash", text);
+        Assert.Contains("[실패] Client 400 · context length exceeded", text);
+    }
 }
