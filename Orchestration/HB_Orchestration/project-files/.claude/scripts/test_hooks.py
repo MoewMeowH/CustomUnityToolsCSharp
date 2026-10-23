@@ -66,7 +66,9 @@ expect('H1 셸 현재 폴더 = 대상', h1('Remove-Item -Recurse -Force "F:\\AI\
 expect('H1 셸 현재 폴더가 대상 밖', h1('rm -rf /f/AI/x', cwd='F:\\AI'), 0)
 expect('H1 따옴표 안 문자열은 명령 아님', h1('git commit -m "rm -rf 규칙 && 정리"'), 0)
 expect('H1 grep -r 은 삭제 아님', h1('grep -rn foo src | head'), 0)
-expect('H1 heredoc 본문의 rm -rf 는 명령 아님', h1("cd /f/x && cat >> log.md <<'EOF'\n- `cd … && rm -rf y`가 막히는지\nEOF\necho ok"), 0)
+# 본문에 재귀 삭제 글자가 있으면 묶음의 모든 조각이 데이터 전용이어야 한다 (H5와 같은 규칙, 계획서 2026-10-23_H1-H2-heredoc-본문과-rm-옵션)
+expect('H1 heredoc 본문의 rm -rf + cd · echo 묶음은 막힘', h1("cd /f/x && cat >> log.md <<'EOF'\n- `cd … && rm -rf y`가 막히는지\nEOF\necho ok"), 2, '데이터 전용')
+expect('H1 heredoc 본문의 rm -rf 는 명령 아님 (cat 단독)', h1("cat >> /f/x/log.md <<'EOF'\n- `cd … && rm -rf y`가 막히는지\nEOF"), 0)
 expect('H1 heredoc 뒤의 진짜 rm -rf', h1("cat > a <<'EOF'\nx\nEOF\nrm -rf /f/x"), 2, '묶여')
 expect('H1 끝 표시 없는 heredoc 은 본문을 지우지 않음', h1("cat > a <<'EOF'\nrm -rf x"), 2)
 expect('H1 따옴표 안 <<EOF 는 heredoc 아님', h1('echo "a<<EOF b"\nrm -rf x'), 2)
@@ -75,7 +77,8 @@ expect('H1 PowerShell here-string 본문', h1("git commit -m @'\nrm -rf 정리 �
 # 따옴표 짝 · 주석 · heredoc 경계 (계획서 2026-10-23_H5-셸-문법-우회 — 이전 판 실측 exit 0)
 expect('H1 주석 속 따옴표로 숨긴 rm', h1("ls # '\nrm -rf build\n'"), 2, '묶여')
 expect("H1 $'…'로 숨긴 rm", h1("echo $'\\'' ; rm -rf build ; 'z'"), 2, '묶여')
-expect('H1 따옴표 없는 heredoc 속 $()', h1('cat <<EOF\n$(rm -rf build)\nEOF'), 2, '명령 치환')
+# 본문 검사가 먼저 막는다 (본문의 $( )는 실행되므로 data_only도 아님) — 이전에는 '명령 치환'으로 막힘
+expect('H1 따옴표 없는 heredoc 속 $()', h1('cat <<EOF\n$(rm -rf build)\nEOF'), 2, '[정리 명령 차단]')
 expect('H1 PowerShell 굽은 따옴표로 숨긴 삭제', h1("echo 'a’; Remove-Item -Recurse -Force x; ‘'", 'PowerShell'), 2)
 expect('H1 $#는 주석 아님', h1('echo $#; rm -rf x'), 2, '묶여')
 expect('H1 ${#a}는 주석 아님', h1('echo ${#a}; rm -rf x'), 2, '묶여')
@@ -108,6 +111,39 @@ for name, cmd, tool in [
 ]:
     expect(f'H1 재검토 {name}', h1(cmd, tool), 2, '[정리 명령 차단]')
 expect('H1 리다이렉트 2>&1 은 묶음 아님', h1('rm -rf /f/AI/ToolWithCS/subagent_in/x 2>&1'), 0)
+# heredoc 본문 · 재귀 삭제 옵션 형식 (계획서 2026-10-23_H1-H2-heredoc-본문과-rm-옵션, 실측: 모두 재귀 삭제)
+for name, cmd, tool in [
+    ('heredoc을 bash에', "bash <<'EOF'\nrm -rf build\nEOF", 'Bash'),
+    ('heredoc을 python에', "python - <<'EOF'\nimport os; os.system('rm -rf build')\nEOF", 'Bash'),
+    ('here-string을 iex에', "@'\nRemove-Item -Recurse -Force x\n'@ | iex", 'PowerShell'),
+    ('rm --rec 상대 경로', 'rm --rec -f build', 'Bash'),
+    ('rm --r 상대 경로', 'rm --r build', 'Bash'),
+    ('-Recurse:$true 상대 경로', 'Remove-Item build -Recurse:$true -Force', 'PowerShell'),
+    ('en dash –Recurse', 'Remove-Item build –Recurse -Force', 'PowerShell'),
+    ('em dash —Recurse', 'Remove-Item build —Recurse -Force', 'PowerShell'),
+    ('horizontal bar ―r', 'rm build ―r', 'PowerShell'),
+]:
+    expect(f'H1 형식 {name}', h1(cmd, tool), 2, '[정리 명령 차단]')
+expect('H1 rm --rec 절대 경로 단독은 통과', h1('rm --rec -f /f/AI/ToolWithCS/subagent_in/x'), 0)
+expect('H1 -Recurse:$false는 재귀 아님', h1('Remove-Item build -Recurse:$false -Force', 'PowerShell'), 0)
+expect('H1 커밋 heredoc 본문의 rm -rf 문구', h1("git commit -F - <<'EOF'\n정리: rm -rf build 대신 Remove-Item\nEOF"), 0)
+expect('H1 cat > 파일 heredoc 본문의 rm -rf', h1("cat > notes.md <<'EOF'\nrm -rf build\nEOF"), 0)
+expect('H1 rm --force는 재귀 아님', h1('rm --force build'), 0)
+# /self-review security 625b223591 반영 (실측 exit 0이던 형식)
+for name, cmd, tool in [
+    ('따옴표 없는 heredoc을 bash에', 'bash <<EOF\nrm -rf build\nEOF', 'Bash'),
+    ('@"…"@ 를 iex에', '@"\nRemove-Item build -Recurse -Force\n"@ | iex', 'PowerShell'),
+    ('$env: 대입 + git commit', "$env:GIT_EDITOR = @'\nrm -rf build\n'@\ngit commit", 'PowerShell'),
+    ('훅 파일 쓰기 + git commit', "cat > .git/hooks/pre-commit <<'EOF'\nrm -rf build\nEOF\ngit commit -m x", 'Bash'),
+    ('bash 줄 이음 뒤 -rf', 'rm \\\n -rf build', 'Bash'),
+    ('PS 백틱 줄 이음 뒤 -Recurse', 'Remove-Item build `\n -Recurse -Force', 'PowerShell'),
+    ('PS splatting', 'Remove-Item @p', 'PowerShell'),
+]:
+    expect(f'H1 재검토2 {name}', h1(cmd, tool), 2, '[정리 명령 차단]')
+expect('H1 en dash 폴더 · 셸 현재 폴더가 그 안', h1('Remove-Item -LiteralPath "F:\\a\u2013b" -Recurse -Force', 'PowerShell', cwd='F:\\a\u2013b\\sub'), 2, '현재 폴더')
+expect('H1 en dash 폴더 · 밖에서 지움', h1('Remove-Item -LiteralPath "F:\\a\u2013b" -Recurse -Force', 'PowerShell', cwd='F:\\AI'), 0)
+expect('H1 cat <<EOF | git commit -F - (파일 안 씀)', h1("cat <<'EOF' | git commit -F -\nrm -rf 정리\nEOF"), 0)
+expect('H1 bash 줄 이음 절대 경로 단독', h1('rm \\\n -rf /f/AI/ToolWithCS/subagent_in/x'), 0)
 expect('H1 줄 이음 뒤 #는 앞 상태 (주석)', h1('echo a \\\n#c; rm -rf x'), 0)
 expect('H1 PS $( ) 뒤 #는 주석', h1('echo $(1)#; Remove-Item -Recurse -Force x', 'PowerShell'), 0)
 expect("H1 끝 표시 이어 붙임 본문은 데이터 (<<'E'OF)", h1("cat <<'E'OF\nE\nrm -rf build\nEOF\n"), 0)
@@ -230,6 +266,11 @@ try:
     expect('H2 따옴표 안 push', h2('git commit -m "git push 전에 검사"'), 0)
     expect('H2 heredoc 커밋 메시지 속 push', h2("git commit -q -F - <<'EOF'\n푸시 전 git push 검사\nEOF"), 0)
     expect('H2 주석 속 따옴표로 숨긴 push (이전 판 exit 0)', h2("ls # '\ngit push origin main && echo\n'"), 2, '묶여')
+    expect('H2 heredoc을 bash에', h2("bash <<'EOF'\ngit push origin main\nEOF"), 2, '데이터 전용')
+    expect('H2 here-string을 iex에', h2("@'\ngit push origin main\n'@ | iex", 'PowerShell'), 2, '데이터 전용')
+    expect('H2 커밋 heredoc 본문의 git push 문구', h2("git commit -q -F - <<'EOF'\n다음에 git push 할 것\nEOF"), 0)
+    expect('H2 따옴표 없는 heredoc을 bash에', h2('bash <<EOF\ngit push origin main\nEOF'), 2, '데이터 전용')
+    expect('H2 줄 이음 뒤 push', h2('git \\\n push origin main && echo'), 2, '묶여')
     expect('H2 없는 원격', h2('git push nowhere main'), 2, '원격')
     expect('H2 저장소가 아닌 곳', run('push_guard.py', {'tool_name': 'Bash', 'tool_input': {'command': 'git push'}, 'cwd': tmp}, env), 2, '검사 중 오류')
 finally:

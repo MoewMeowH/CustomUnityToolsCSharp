@@ -36,7 +36,7 @@ import sys
 
 sys.dont_write_bytecode = True  # 훅 폴더에 __pycache__를 남기지 않는다 (저장소에 섞이지 않게)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # -I는 스크립트 폴더를 경로에 넣지 않는다
-from hook_common import BASH, CD, CHAIN, PS, has_substitution, lex, native_path, read_input, scan, shell_of, strip_bodies, tokenize  # noqa: E402
+from hook_common import BASH, CD, CHAIN, PS, data_only, has_substitution, lex, native_path, read_input, scan, shell_of, strip_bodies, tokenize  # noqa: E402
 from push_guard import IGNORED_DIRS, ignored, load_patterns, mask  # noqa: E402
 
 UPLOAD = {'new', 'revise', 'update-summary', 'reply', 'ask-consent'}
@@ -67,13 +67,6 @@ READERS = {'grep', 'egrep', 'fgrep', 'rg', 'select-string', 'sls'}
 GIT_READERS = {'log', 'show', 'diff', 'status'}
 # 읽기 예외를 끄는 글자: 묶음 · 파이프 · & · 리다이렉트 · 괄호 · 중괄호 (서브셸 · PowerShell 하위 식 · 스크립트 블록 · 해시 테이블)
 NOT_STANDALONE = re.compile(r'[;&|<>(){}\n]')
-# heredoc · here-string 본문(글자 그대로의 데이터)에 slackplan이 있을 때 받아도 되는 명령 — 본문을 실행하지 않는 것만 (허용 목록:
-# 거부 목록은 tclsh · perl처럼 빠진 실행기로 통과했다. 계획서 2026-10-23_H5-셸-문법-우회 결정).
-DATA_RECEIVERS = {'cat', 'tee', 'set-content', 'add-content', 'out-file'}
-HERESTRING_SLOT = re.compile(r'@(?:\'\'|"")@')
-PS_ASSIGN = re.compile(r'\$[A-Za-z_][\w:]*\s*=\s*@(?:\'\'|"")@')
-# 데이터 전용 판정을 끄는 글자: 명령 치환 · 서브셸 · 스크립트 블록 · 프로세스 치환 (그 안에서 무엇이 도는지 보지 않는다)
-NESTED = re.compile(r'[(){}`]')
 # bash가 펼치는 따옴표 밖 글자: 낱말 시작의 ~ (사용자 폴더) · 글롭 (파일 이름). PowerShell은 ~만 본다.
 BASH_EXPANDS = re.compile(r'(?:^|[\s=:])~|[*?\[{]')  # { — 중괄호 펼침 뒤 ~ 펼침 ({~,x} → 사용자 경로, 실측)
 PS_EXPANDS = re.compile(r'(?:^|\s)~')
@@ -146,31 +139,6 @@ def reader_only(stripped: str, inner: list[str], toks: list[str]) -> bool:
     if name == 'rg' and any(t.startswith('--pre') for t in toks[1:]):
         return False
     return name in READERS
-
-
-def data_only(stripped: str, inner: list[str], shell: str) -> bool:
-    """묶음의 모든 조각(명령 치환 안 포함)이 본문을 실행하지 않는 명령이면 True: cat · tee · git commit ·
-    PowerShell Set-Content · Add-Content · Out-File · 변수 대입($m = @'…'@) · here-string 자리표만 있는 조각."""
-    texts = [stripped]
-    for text in inner:  # "$(cat <<'EOF' … EOF )" — 안도 같은 규칙. 두 겹 넘는 치환은 NESTED에 걸린다
-        visible, deeper = scan(text, shell)
-        if deeper:
-            return False
-        texts.append(visible)
-    for text in texts:
-        if NESTED.search(text):
-            return False
-        for seg in CHAIN.split(text):
-            seg = seg.strip()
-            if not seg or HERESTRING_SLOT.fullmatch(seg) or (shell == PS and PS_ASSIGN.fullmatch(seg)):
-                continue
-            toks = tokenize(seg, shell)
-            if not toks or re.search(r'[\\/]', toks[0]):  # ./cat · tools/tee 같은 경로는 이름만 같은 다른 실행 파일일 수 있다
-                return False
-            name = re.sub(r'(?i)\.exe$', '', toks[0]).lower()
-            if not (name in DATA_RECEIVERS or (name == 'git' and len(toks) > 1 and toks[1] == 'commit')):
-                return False
-    return True
 
 
 def slackplan_args(toks: list[str]) -> list[str]:
@@ -317,7 +285,7 @@ def check(data: dict) -> None:
     stripped, inner = scan(cmd, shell)
     # 본문을 셸 · 실행기에 넘기면 본문이 곧 명령이다 (bash <<'EOF' · @'…'@ | iex) — 본문에 slackplan이 있으면 데이터 전용 명령만 받는다.
     # 본문은 낱말보다 넓게 본다: SlackPlanBot 프로젝트 dotnet run · SLACKPLAN_ROOT도 (/self-review security C2 — 실측 exit 0이던 형식)
-    if any(mentions_slackplan(body) for body in lex(raw, shell).data) and not data_only(stripped, inner, shell):
+    if any(mentions_slackplan(body) for body in lex(raw, shell).bodies) and not data_only(stripped, inner, shell):
         deny('heredoc · here-string 본문에 slackplan이 있는데 받는 명령이 데이터 전용(cat · tee · git commit · Set-Content · '
              'Add-Content · Out-File · 변수 대입)이 아니다 — 훅이 그 본문을 명령으로 검사하지 못한다. 스크립트는 Write로 파일을 만들어 실행하라. ' + SIMPLE)
     if not is_target(cmd, stripped, inner, tokenize(cmd.strip(), shell), cwd):

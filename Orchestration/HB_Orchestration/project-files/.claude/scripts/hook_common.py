@@ -41,10 +41,13 @@ CASE_END = re.compile(r'esac(?![\w-])')
 class Lexed:
     """visible: 따옴표 안 · 주석 · heredoc/here-string 본문을 비운 글 (따옴표는 '' · "" 자리표로 남김).
     inner: 큰따옴표 · 따옴표 없는 heredoc · @"…"@ 안의 명령 치환($( ) · bash 백틱) 원문.
-    data: 셸이 펼치지 않는 본문(따옴표 heredoc · @'…'@) 원문. cuts: 그 본문의 (시작, 끝) 위치."""
+    data: 셸이 펼치지 않는 본문(따옴표 heredoc · @'…'@) 원문. cuts: 그 본문의 (시작, 끝) 위치.
+    expanded: 셸이 펼치는 본문(따옴표 없는 heredoc · @"…"@) 원문 — 보이는 글에는 없고 치환만 inner에 있다.
+    bodies: 본문 전부 (data + expanded) — 본문을 실행기에 넘기는지 볼 때 쓴다."""
 
-    def __init__(self, visible: str, inner: list[str], data: list[str], cuts: list[tuple[int, int]]):
-        self.visible, self.inner, self.data, self.cuts = visible, inner, data, cuts
+    def __init__(self, visible: str, inner: list[str], data: list[str], cuts: list[tuple[int, int]], expanded: list[str]):
+        self.visible, self.inner, self.data, self.cuts, self.expanded = visible, inner, data, cuts, expanded
+        self.bodies = data + expanded
 
 
 class _Lexer:
@@ -57,6 +60,7 @@ class _Lexer:
         self.sq, self.dq = ("'", '"') if shell == BASH else (PS_SQ, PS_DQ)
         self.inner: list[str] = []
         self.data: list[str] = []
+        self.expanded: list[str] = []
         self.cuts: list[tuple[int, int]] = []
         self.pending: list[tuple[bool, str, bool]] = []  # 다음 줄바꿈에서 읽을 heredoc (탭 허용, 끝 표시, 따옴표)
         self.unterminated = False  # 끝 표시를 못 찾은 heredoc — 그 뒤는 원문 그대로 보이는 글에 (따옴표 짝에 기대지 않게)
@@ -249,6 +253,7 @@ class _Lexer:
                 self.data.append(s[start:pos])
                 self.cuts.append((start, pos))
             else:  # 따옴표 없는 heredoc: 셸이 $( ) · 백틱을 펼친다 — 큰따옴표처럼
+                self.expanded.append(s[start:pos])
                 self.expansions(start, pos)
             i = min(eol + 1, self.n)
         return i
@@ -266,6 +271,7 @@ class _Lexer:
             self.data.append(self.s[opened.end():end.start()])
             self.cuts.append((opened.end(), end.start()))
         else:
+            self.expanded.append(self.s[opened.end():end.start()])
             self.expansions(opened.end(), end.start())
         return end.end()
 
@@ -335,10 +341,16 @@ def brace_var_end(s: str, i: int) -> int:
     return min(j + 1, n)
 
 
+def join_continuations(cmd: str, shell: str) -> str:
+    """줄 이음(bash \\ · PowerShell 백틱 + 줄바꿈)을 공백으로 — 명령 이름과 옵션이 다른 줄에 있어도 한 줄로 찾게
+    (/self-review security 625b223591 C3: `rm \\⏎ -rf` · `Remove-Item x `⏎ -Recurse`가 거친 탐지를 피했다)."""
+    return re.sub(r'\\\r?\n' if shell == BASH else r'`\r?\n', ' ', cmd)
+
+
 def lex(cmd: str, shell: str) -> Lexed:
     lx = _Lexer(cmd, shell)
     _, visible = lx.command(0)
-    return Lexed(visible, lx.inner, lx.data, lx.cuts)
+    return Lexed(visible, lx.inner, lx.data, lx.cuts, lx.expanded)
 
 
 def strip_bodies(cmd: str, shell: str = BASH) -> str:
@@ -432,6 +444,55 @@ def tokenize(cmd: str, shell: str) -> list[str]:
                 i += 1
         toks.append(''.join(buf))
     return toks
+
+
+# heredoc · here-string 본문(글자 그대로의 데이터)에 막을 명령 글자가 있을 때 받아도 되는 명령 — 본문을 실행하지 않는 것만
+# (허용 목록: 거부 목록은 tclsh · perl처럼 빠진 실행기로 통과했다. 계획서 2026-10-23_H5-셸-문법-우회 결정, H1 · H2도 같이 —
+# 2026-10-23_H1-H2-heredoc-본문과-rm-옵션).
+DATA_RECEIVERS = {'cat', 'tee', 'set-content', 'add-content', 'out-file'}
+HERESTRING_SLOT = re.compile(r'@(?:\'\'|"")@')
+# 범위 · 공급자 접두($env: · $global: 등)는 받지 않는다 — $env:GIT_EDITOR에 넣으면 같은 묶음의 git이 본문을 실행한다
+# (/self-review security 625b223591 C2)
+PS_ASSIGN = re.compile(r'\$[A-Za-z_]\w*\s*=\s*@(?:\'\'|"")@')
+# 파일을 쓰는 데이터 전용 조각 — git commit과 한 묶음이면 훅 파일 · 설정을 써서 같은 호출 안에서 실행될 수 있다 (같은 C2)
+WRITERS = {'tee', 'set-content', 'add-content', 'out-file'}
+# 데이터 전용 판정을 끄는 글자: 명령 치환 · 서브셸 · 스크립트 블록 · 프로세스 치환 (그 안에서 무엇이 도는지 보지 않는다)
+NESTED = re.compile(r'[(){}`]')
+
+
+def data_only(stripped: str, inner: list[str], shell: str) -> bool:
+    """묶음의 모든 조각(명령 치환 안 포함)이 본문을 실행하지 않는 명령이면 True: cat · tee · git commit ·
+    PowerShell Set-Content · Add-Content · Out-File · 변수 대입($m = @'…'@) · here-string 자리표만 있는 조각.
+    단 파일을 쓰는 조각(리다이렉트 · tee · Set-Content 등 · 대입)과 git commit이 한 묶음에 있으면 False.
+    stripped · inner는 strip_bodies 뒤 scan 결과."""
+    texts = [stripped]
+    for text in inner:  # "$(cat <<'EOF' … EOF )" — 안도 같은 규칙. 두 겹 넘는 치환은 NESTED에 걸린다
+        visible, deeper = scan(text, shell)
+        if deeper:
+            return False
+        texts.append(visible)
+    writes = commits = False
+    for text in texts:
+        if NESTED.search(text):
+            return False
+        for seg in CHAIN.split(text):
+            seg = seg.strip()
+            if not seg or HERESTRING_SLOT.fullmatch(seg):
+                continue
+            if shell == PS and PS_ASSIGN.fullmatch(seg):
+                writes = True
+                continue
+            toks = tokenize(seg, shell)
+            if not toks or re.search(r'[\\/]', toks[0]):  # ./cat · tools/tee 같은 경로는 이름만 같은 다른 실행 파일일 수 있다
+                return False
+            name = re.sub(r'(?i)\.exe$', '', toks[0]).lower()
+            if name == 'git' and len(toks) > 1 and toks[1] == 'commit':
+                commits = True
+            elif name in DATA_RECEIVERS:
+                writes = writes or name in WRITERS or '>' in seg
+            else:
+                return False
+    return not (writes and commits)
 
 
 def native_path(path: str) -> str:

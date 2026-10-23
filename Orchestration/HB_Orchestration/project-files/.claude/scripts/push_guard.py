@@ -3,7 +3,8 @@
 
 - 형식 제한: push는 **단독 명령**으로 `git [-C 경로] push [--dry-run|-n] [-u|--set-upstream] [-v|-q] [원격 [소스[:대상]]]`만 받는다.
   다른 명령과 묶음(훅은 실행 전에 돌아 같은 명령의 commit을 못 본다) · cd류 · 명령 치환 · git 전역 옵션 · --all·--tags·강제 푸시 등은
-  해석하지 않고 막는다 → "단순 형식으로 따로" 다시 하게 한다.
+  해석하지 않고 막는다 → "단순 형식으로 따로" 다시 하게 한다. heredoc · here-string 본문에 git push가 있으면 받는 명령이
+  데이터 전용(cat · tee · git commit 등, hook_common.data_only)일 때만 통과 (계획서 2026-10-23_H1-H2-heredoc-본문과-rm-옵션).
 - 범위: 대상 원격에 없는 커밋 `<소스> --not --remotes=<원격>` (소스 기본 HEAD, 원격 기본 upstream → origin).
   merge 커밋은 첫 부모 기준 diff까지 본다. 경로는 -z(한글 경로가 인용·이스케이프되지 않게).
 - 비밀 패턴: BUILT_IN(맞은 값에 FAKE_MARKERS가 있으면 시험용 가짜로 건너뜀) + 개인 값 파일 `$CLAUDE_PROJECT_DIR/.claude/push_guard.local.txt`
@@ -21,7 +22,7 @@ import sys
 
 sys.dont_write_bytecode = True  # 훅 폴더에 __pycache__를 남기지 않는다 (저장소에 섞이지 않게)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # -I는 스크립트 폴더를 경로에 넣지 않는다
-from hook_common import CD, CHAIN, has_substitution, native_path, read_input, scan, shell_of, strip_bodies, tokenize  # noqa: E402
+from hook_common import CD, CHAIN, data_only, has_substitution, join_continuations, lex, native_path, read_input, scan, shell_of, strip_bodies, tokenize  # noqa: E402
 
 BUILT_IN = [
     r'sk-[A-Za-z0-9_-]{16,}',                 # OpenAI 등
@@ -189,8 +190,13 @@ def check(data: dict) -> None:
     if tool not in ('Bash', 'PowerShell'):
         return
     shell = shell_of(tool)
-    cmd = strip_bodies((data.get('tool_input') or {}).get('command') or '', shell)
+    raw = join_continuations((data.get('tool_input') or {}).get('command') or '', shell)
+    cmd = strip_bodies(raw, shell)
     stripped, inner = scan(cmd, shell)
+    # 본문을 셸 · 실행기에 넘기면 본문이 곧 명령이다 — 본문(따옴표 있든 없든)에 git push가 있으면 데이터 전용 명령만 받는다
+    if any(ROUGH.search(body) for body in lex(raw, shell).bodies) and not data_only(stripped, inner, shell):
+        deny('heredoc · here-string 본문에 git push가 있는데 받는 명령이 데이터 전용(cat · tee · git commit · Set-Content 등)이 아니다 — '
+             '훅이 그 본문을 명령으로 검사하지 못한다. ' + SIMPLE)
     if not ROUGH.search(stripped + '\n' + '\n'.join(inner)):
         return
     if has_substitution(stripped, inner, shell):
