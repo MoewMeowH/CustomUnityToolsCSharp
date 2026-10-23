@@ -279,7 +279,7 @@ try:
     expect('H5 읽기 명령 thread', h5('thread C1-2 --reader 지휘자'), 0)
     expect('H5 읽기 명령 status', h5('status C1-2'), 0)
     expect('H5 slackplan 직접 호출', h5raw(f'slackplan new {clean}'), 0)
-    expect('H5 따옴표 안 글 (커밋 메시지)', h5raw('git commit -m "slackplan new 형식 정리"'), 0)
+    expect('H5 따옴표 안 글 (커밋 메시지 -m은 막힘, 2026-10-23 결정)', h5raw('git commit -m "slackplan new 형식 정리"'), 2)
     expect('H5 grep 인자', h5raw('grep -rn slackplan README.md'), 0)
     expect('H5 dotnet test (run 아님)', h5raw('dotnet test F:/AI/SlackPlanBot/tests'), 0)
     expect('H5 heredoc 본문', h5raw("git commit -F - <<'EOF'\nslackplan new x.md --allow-warnings\nEOF"), 0)
@@ -320,7 +320,7 @@ try:
     expect("H5 PowerShell & 'slackplan'", h5raw(f"& 'slackplan' new {bad}", 'PowerShell'), 2, '비밀')
     expect('H5 dotnet <dll>', h5raw(f'dotnet "$SLACKPLAN_ROOT/bin/slackplan.dll" new {bad}'), 2, '비밀')
     expect('H5 dotnet exec <dll>', h5raw(f'dotnet exec bin/slackplan.dll new {bad}'), 2, '비밀')
-    expect('H5 커밋 메시지 속 slackplan.exe (오탐 아님)', h5raw('git commit -m "bin/Debug의 slackplan.exe 잠금"'), 0)
+    expect('H5 커밋 메시지 속 slackplan.exe (-m은 막힘, 2026-10-23 결정)', h5raw('git commit -m "bin/Debug의 slackplan.exe 잠금"'), 2)
     expect('H5 파일 이름 (제목 기본값)', h5(f'new {plan("ProjectX-출시.md", "깨끗")}'), 2, '파일 이름')
     os.makedirs(os.path.join(proj, 'GoldenSet'))
     with open(os.path.join(proj, 'GoldenSet', 'a.md'), 'w', encoding='utf-8') as f:
@@ -367,6 +367,62 @@ try:
     expect('H5 셸 현재 폴더가 SlackPlanBot', h5raw(f'dotnet run -- new {bad_abs}', cwd=bot), 2, '비밀')
     expect('H5 PowerShell 실행 파일 경로', h5raw(f'& "{bot}\\bin\\slackplan.exe" new {bad}', 'PowerShell'), 2, '비밀')
     expect('H5 cmd /c 형식', h5raw(f'cmd /c slackplan new {clean}'), 2, '해석하지 못했다')
+    # 앞 낱말 · 따옴표 · 줄 이음으로 감싸면 이전에는 검사 없이 통과 (계획서 2026-10-23_H5-앞-낱말-우회, /self-review e256053430 — 실측 exit 0)
+    unparsed, chained = '해석하지 못했다', '다른 명령과 묶여'
+    for pre in ['env', 'X=1', 'env X=1', 'command', 'exec', 'nice', 'time', 'sudo', 'nohup', 'eval']:
+        expect(f'H5 앞 낱말 {pre} purge --yes', h5raw(f'{pre} slackplan purge --yes'), 2, unparsed)
+        expect(f'H5 앞 낱말 {pre} new', h5raw(f'{pre} slackplan new {clean}'), 2, unparsed)
+    for name, cmd, why in [
+        ('따옴표 경로', 'env "$SLACKPLAN_ROOT/bin/slackplan" purge --yes', unparsed),
+        ('공백 든 따옴표 경로', 'env "C:/Program Files/x/slackplan.exe" new secret.md', unparsed),
+        ('따옴표 하위 명령', "env slackplan 'purge' --yes", unparsed),
+        ('쪼갠 하위 명령', "nohup slackplan pur''ge --yes", unparsed),
+        ("$'…' 하위 명령", "env slackplan $'purge' --yes", unparsed),
+        ('이스케이프 하위 명령', 'env slackplan p\\urge --yes', unparsed),
+        ('쪼갠 실행 파일 이름', "env slack''plan purge --yes", unparsed),
+        ('전역 옵션 뒤 하위 명령', 'env slackplan --verbose purge --yes', unparsed),
+        ('env dotnet …dll', 'env dotnet "$SLACKPLAN_ROOT/bin/slackplan.dll" purge --yes', unparsed),
+        ('eval 따옴표', 'eval "slackplan purge --yes"', unparsed),
+        ('env -S', "env -S 'slackplan purge --yes'", unparsed),
+        ('xargs -I', 'xargs -I{} slackplan {} --yes', unparsed),
+        ('stdin xargs', 'echo purge --yes | xargs slackplan', chained),
+        ('xargs 하위 명령', 'echo a | xargs slackplan purge --yes', chained),
+        ('줄 이음', 'env slackplan \\\npurge --yes', chained),
+        ('검색 뒤 실행', 'grep x f | xargs slackplan purge', chained),
+        ('git alias', "git -c alias.x='!slackplan purge --yes' x", unparsed),
+        ('echo 명령 치환', 'echo $(slackplan purge --yes)', '명령 치환'),
+    ]:
+        expect(f'H5 우회 {name}', h5raw(cmd), 2, why)
+    expect('H5 앞 낱말 env + .exe 경로', h5raw(f'env {bot}/bin/slackplan.exe unlink C1-2 --yes'), 2, unparsed)
+    expect('H5 PowerShell 점 연산자', h5raw('. slackplan.exe purge --yes', 'PowerShell'), 2, unparsed)
+    expect('H5 PowerShell 점 연산자 따옴표', h5raw(". 'slackplan.exe' purge --yes", 'PowerShell'), 2, unparsed)
+    expect('H5 PowerShell 점 연산자 (읽기도 막음)', h5raw('. slackplan list', 'PowerShell'), 2, unparsed)
+    expect('H5 PowerShell 하위 식', h5raw('Get-Content (slackplan purge --yes)', 'PowerShell'), 2)
+    # 2회차 (/self-review 3efd4d0922, 실측 exit 0이던 형식)
+    for name, cmd, tool in [
+        ('공백 없는 &', 'echo x&env slackplan purge --yes', 'Bash'),
+        ("$'' 쪼개기", "env slack$''plan purge --yes", 'Bash'),
+        ('$"" 쪼개기', 'env slack$""plan purge --yes', 'Bash'),
+        ('스크립트 블록', 'gci x | Get-Content -Path {slackplan purge --yes}', 'PowerShell'),
+        ('해시 테이블', 'echo @{a=slackplan purge --yes}', 'PowerShell'),
+        ('git grep -O', "git grep -O'slackplan purge --yes #' -e .", 'Bash'),
+        ('rg --pre', 'rg --pre slackplan x purge', 'Bash'),
+        ('heredoc을 bash에', "bash <<'EOF'\nslackplan purge --yes\nEOF", 'Bash'),
+        ('here-string을 iex에', "@'\nslackplan purge --yes\n'@ | iex", 'PowerShell'),
+        ('리다이렉트 + git hook', 'echo slackplan purge --yes > .git/hooks/post-commit; git commit -m x', 'Bash'),
+        ('백슬래시 경로 (PowerShell)', '. C:\\bot\\bin\\slackplan.exe purge --yes', 'PowerShell'),
+        ('백슬래시 경로 (Bash)', 'env C:\\\\bot\\\\slackplan.exe purge --yes', 'Bash'),
+    ]:
+        expect(f'H5 우회 {name}', h5raw(cmd, tool), 2, '[공유 차단]')
+    # 단독 읽기 명령의 인자로만 나오면 통과
+    for cmd in ['grep -rn "slackplan purge" docs', 'grep slackplan purge.txt', 'grep -rn slackplan files/', 'rg slackplan list',
+                'git log --grep slackplan']:
+        expect(f'H5 읽기 명령 {cmd}', h5raw(cmd), 0)
+    expect('H5 읽기 명령 (PowerShell)', h5raw('Select-String -Path README.md -Pattern slackplan', 'PowerShell'), 0)
+    expect('H5 heredoc 본문을 git에 (셸 아님)', h5raw("git commit -F - <<'EOF'\nslackplan purge --yes 정리\nEOF"), 0)
+    # 읽기 예외를 좁혀 막히는 것 (계획서 결정: 단독 읽기 명령만, git commit 속 낱말도 막힘 — 사용자 "git 명령어는 크게 신경 안써도되")
+    for cmd in ['cat notes.md | grep slackplan', 'echo slackplan list', 'ls bin/slackplan.exe', 'git commit -m "slackplan new 형식"']:
+        expect(f'H5 좁힌 예외 {cmd}', h5raw(cmd), 2)
     subprocess.run(['git', 'init', '-q', proj], check=True, capture_output=True)
     subprocess.run(['git', '-C', proj, 'add', '-f', '.claude/share_guard.local.txt'], check=True, capture_output=True)
     expect('H5 share_guard.local.txt 추적됨', h5(f'new {clean}'), 2, '추적')
