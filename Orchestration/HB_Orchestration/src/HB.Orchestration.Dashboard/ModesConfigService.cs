@@ -98,6 +98,10 @@ public sealed class ModesConfigException(string message) : Exception(message);
 public sealed partial class ModesConfigService(IOptions<DashboardOptions> options, Func<string, string?>? getEnvironment = null)
 {
     private readonly Func<string, string?> environment = getEnvironment ?? Environment.GetEnvironmentVariable;
+    private int _writes;
+
+    /// <summary>이 서비스가 설정 파일(modes.json · appsettings.json)을 바꾼 횟수. PricingService가 저장 직후 바로 다시 읽는 데 쓴다.</summary>
+    public int WriteCount => Volatile.Read(ref _writes);
 
     private const int BackupKeep = 10;
 
@@ -703,7 +707,7 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
     private static string Serialize(JsonObject root) => root.ToJsonString(WriteOptions) + Environment.NewLine;
 
     /// <summary>백업을 남기고, 임시 파일에 쓴 뒤 한 번에 교체한다 (MCP 서버가 읽는 도중이어도 반쯤 쓴 파일을 보지 않게).</summary>
-    private static void WriteSafely(string path, string json, string backupFolderName)
+    private void WriteSafely(string path, string json, string backupFolderName)
     {
         var dir = Path.GetDirectoryName(path)!;
         var backupDir = Path.Combine(dir, backupFolderName);
@@ -725,6 +729,7 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
             try
             {
                 File.Replace(tmp, path, destinationBackupFileName: null);
+                Interlocked.Increment(ref _writes);
                 return;
             }
             catch (IOException) when (attempt < 5)
