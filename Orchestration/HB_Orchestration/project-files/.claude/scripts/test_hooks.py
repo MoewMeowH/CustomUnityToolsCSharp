@@ -338,6 +338,11 @@ try:
     expect('H5 슬래시 UNC', h5(f'new {plan("u2.md", "//srv/share/x")}'), 2, 'UNC')
     expect('H5 POSIX 절대 경로', h5(f'new {plan("t.md", "로그 /tmp/x.log")}'), 2, 'POSIX')
     expect('H5 URL 속 /var/ (오탐 아님)', h5(f'new {plan("url2.md", "https://example.org/var/x")}'), 0)
+    # 봇 secret_scan 시험과 같은 비교 목록 (계획서 결정 2, 봇 test_secret_scan.ShareCheck SHARED_HIT/SHARED_PASS)
+    for i, s in enumerate(['sk-' + 'Q7vR2mK9pL4xN8wT3bZ6', '-----BEGIN RSA ' + 'PRIVATE KEY-----', 'F:/AI/x', 'C:\\Users\\me', '\\\\srv\\share', '/Users/me/x', '/f/AI/x']):
+        expect(f'H5 비교 목록 걸림 {i}', h5(f'new {plan(f"hit{i}.md", s)}'), 2, '막는 패턴')
+    for i, s in enumerate(['https://example.org/var/x', 'e.g. 1:2', 'and/or', 'A/B', '1/2/3', 'a/b/c']):
+        expect(f'H5 비교 목록 안 걸림 {s}', h5(f'new {plan(f"pass{i}.md", s)}'), 0)
     expect('H5 묶음', h5raw(f'cd {proj} && dotnet run --project "$SLACKPLAN_ROOT/src/SlackPlanBot" -- new {clean}'), 2)
     expect('H5 명령 치환', h5raw('dotnet run --project "$SLACKPLAN_ROOT/src/SlackPlanBot" -- new "$(echo x.md)"'), 2, '명령 치환')
     expect('H5 -- 없음', h5raw(f'dotnet run --project "$SLACKPLAN_ROOT/src/SlackPlanBot" new {clean}'), 2, '`--`')
