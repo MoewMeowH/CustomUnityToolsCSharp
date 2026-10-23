@@ -43,11 +43,27 @@ class Lexed:
     inner: 큰따옴표 · 따옴표 없는 heredoc · @"…"@ 안의 명령 치환($( ) · bash 백틱) 원문.
     data: 셸이 펼치지 않는 본문(따옴표 heredoc · @'…'@) 원문. cuts: 그 본문의 (시작, 끝) 위치.
     expanded: 셸이 펼치는 본문(따옴표 없는 heredoc · @"…"@) 원문 — 보이는 글에는 없고 치환만 inner에 있다.
-    bodies: 본문 전부 (data + expanded) — 본문을 실행기에 넘기는지 볼 때 쓴다."""
+    bodies: 본문 전부 (data + expanded) — 본문을 실행기에 넘기는지 볼 때 쓴다.
+    quoted: 따옴표('…' · "…" · $'…') 안 글자 — bash -c "…" · iex "…"처럼 명령 문자열로 넘기는지 볼 때 쓴다.
+    comments: 주석의 (시작, 끝) 위치."""
 
-    def __init__(self, visible: str, inner: list[str], data: list[str], cuts: list[tuple[int, int]], expanded: list[str]):
+    def __init__(self, visible: str, inner: list[str], data: list[str], cuts: list[tuple[int, int]], expanded: list[str],
+                 quoted: list[str] | None = None, comments: list[tuple[int, int]] | None = None):
         self.visible, self.inner, self.data, self.cuts, self.expanded = visible, inner, data, cuts, expanded
         self.bodies = data + expanded
+        self.quoted = quoted or []
+        self.comments = comments or []
+
+    def unquoted(self, cmd: str) -> str:
+        """주석 · 따옴표 heredoc 본문을 빼고 따옴표 · 백틱 글자를 지운 원문 — 겹친 따옴표로 나뉜 명령 문자열(powershell -Command
+        "Remove-Item "$p" -Recurse")이나 쪼갠 이름(r""m)을 한 덩어리로 보려고 (/self-review security ddb47044d1 C1 · C5)."""
+        out, pos = [], 0
+        for start, end in sorted(self.cuts + self.comments):
+            if start >= pos:
+                out.append(cmd[pos:start])
+                pos = end
+        out.append(cmd[pos:])
+        return re.sub(r'[\'"`]', '', ''.join(out))
 
 
 class _Lexer:
@@ -61,6 +77,8 @@ class _Lexer:
         self.inner: list[str] = []
         self.data: list[str] = []
         self.expanded: list[str] = []
+        self.quoted: list[str] = []
+        self.comments: list[tuple[int, int]] = []
         self.cuts: list[tuple[int, int]] = []
         self.pending: list[tuple[bool, str, bool]] = []  # 다음 줄바꿈에서 읽을 heredoc (탭 허용, 끝 표시, 따옴표)
         self.unterminated = False  # 끝 표시를 못 찾은 heredoc — 그 뒤는 원문 그대로 보이는 글에 (따옴표 짝에 기대지 않게)
@@ -88,11 +106,15 @@ class _Lexer:
                 continue
             if word_start and not bash and s.startswith('<#', i):  # PowerShell 블록 주석 (낱말 가운데 a<#c#>b는 글자 — 실측)
                 end = s.find('#>', i + 2)
-                i = n if end < 0 else end + 2
+                end = n if end < 0 else end + 2
+                self.comments.append((i, end))
+                i = end
                 continue
             if c == '#' and word_start:
                 end = s.find('\n', i)
-                i = n if end < 0 else end
+                end = n if end < 0 else end
+                self.comments.append((i, end))
+                i = end
                 continue
             if c == '#' and not bash and i > 0 and s[i - 1] == '=':  # 모드에 따라 주석이거나 글자 — 줄 끝까지 원문 그대로
                 end = s.find('\n', i)
@@ -120,7 +142,9 @@ class _Lexer:
                 if cases and (m := CASE_END.match(s, i)):
                     cases -= 1
             if bash and s.startswith("$'", i):  # ANSI-C 따옴표: 안에서 \가 이스케이프
-                i = self.ansi_end(i + 2)
+                j = self.ansi_end(i + 2)
+                self.quoted.append(s[i + 2:max(j - 1, i + 2)])
+                i = j
                 out.append("$''")
                 word_start = False
                 continue
@@ -139,14 +163,11 @@ class _Lexer:
                     out.append("@''@" if s[i + 1] in self.sq else '@""@')
                     i, word_start = j, False
                     continue
-            if c in self.sq:
-                i = self.sq_end(i + 1)
-                out.append("''")
-                word_start = False
-                continue
-            if c in self.dq:
-                i = self.dq_end(i + 1)
-                out.append('""')
+            if c in self.sq or c in self.dq:
+                j = self.sq_end(i + 1) if c in self.sq else self.dq_end(i + 1)
+                self.quoted.append(s[i + 1:max(j - 1, i + 1)])  # 따옴표 안 글자 (셸 · 실행기에 넘기는 명령 문자열일 수 있다)
+                i = j
+                out.append("''" if c in self.sq else '""')
                 word_start = False
                 continue
             if bash and s.startswith('<<<', i):  # here-string: 둘째 '<'에서 heredoc을 찾지 않게 한 번에
@@ -350,7 +371,7 @@ def join_continuations(cmd: str, shell: str) -> str:
 def lex(cmd: str, shell: str) -> Lexed:
     lx = _Lexer(cmd, shell)
     _, visible = lx.command(0)
-    return Lexed(visible, lx.inner, lx.data, lx.cuts, lx.expanded)
+    return Lexed(visible, lx.inner, lx.data, lx.cuts, lx.expanded, lx.quoted, lx.comments)
 
 
 def strip_bodies(cmd: str, shell: str = BASH) -> str:
@@ -460,10 +481,18 @@ WRITERS = {'tee', 'set-content', 'add-content', 'out-file'}
 NESTED = re.compile(r'[(){}`]')
 
 
-def data_only(stripped: str, inner: list[str], shell: str) -> bool:
+# 따옴표 안 글자를 실행하지 않는 읽기 명령 — 따옴표 문자열 검사(readers=True)에서만 받는다 (계획서 2026-10-23_따옴표-명령-허용목록과-perf-ownReview).
+# rg --pre는 외부 명령을 실행하므로 뺀다. git grep은 -O(페이저 명령 실행)를 묶음 · 줄임으로도 받아 아예 뺀다 (/self-review security ddb47044d1 C3).
+READERS = {'grep', 'egrep', 'fgrep', 'rg', 'select-string', 'sls', 'echo', 'printf', 'write-output', 'write-host'}
+# git 읽기 명령도 설정(.git/config의 fsmonitor · diff.external · textconv 등)에 적힌 명령을 실행할 수 있다 — 같은 묶음에 쓰기가 있으면 막는다 (같은 C4)
+GIT_READERS = {'log', 'show', 'diff', 'status'}
+
+
+def data_only(stripped: str, inner: list[str], shell: str, readers: bool = False) -> bool:
     """묶음의 모든 조각(명령 치환 안 포함)이 본문을 실행하지 않는 명령이면 True: cat · tee · git commit ·
     PowerShell Set-Content · Add-Content · Out-File · 변수 대입($m = @'…'@) · here-string 자리표만 있는 조각.
-    단 파일을 쓰는 조각(리다이렉트 · tee · Set-Content 등 · 대입)과 git commit이 한 묶음에 있으면 False.
+    readers면 읽기 명령(grep · rg · Select-String · echo · git log 등)도 받는다 — 따옴표 문자열 검사용.
+    단 파일을 쓰는 조각(리다이렉트 · tee · Set-Content 등 · 대입 · git --output)과 git commit · git 읽기 명령이 한 묶음에 있으면 False.
     stripped · inner는 strip_bodies 뒤 scan 결과."""
     texts = [stripped]
     for text in inner:  # "$(cat <<'EOF' … EOF )" — 안도 같은 규칙. 두 겹 넘는 치환은 NESTED에 걸린다
@@ -471,7 +500,7 @@ def data_only(stripped: str, inner: list[str], shell: str) -> bool:
         if deeper:
             return False
         texts.append(visible)
-    writes = commits = False
+    writes = commits = git_reads = False
     for text in texts:
         if NESTED.search(text):
             return False
@@ -486,13 +515,20 @@ def data_only(stripped: str, inner: list[str], shell: str) -> bool:
             if not toks or re.search(r'[\\/]', toks[0]):  # ./cat · tools/tee 같은 경로는 이름만 같은 다른 실행 파일일 수 있다
                 return False
             name = re.sub(r'(?i)\.exe$', '', toks[0]).lower()
+            while name == 'git' and len(toks) > 2 and toks[1] == '-C':  # git -C <경로> commit — 저장소 위치만 바꾼다 (-c 설정은 그대로 막힘)
+                toks = [toks[0]] + toks[3:]
             if name == 'git' and len(toks) > 1 and toks[1] == 'commit':
                 commits = True
             elif name in DATA_RECEIVERS:
                 writes = writes or name in WRITERS or '>' in seg
+            elif readers and name == 'git' and len(toks) > 1 and toks[1] in GIT_READERS:
+                git_reads = True
+                writes = writes or '>' in seg or any(t.startswith('--output') for t in toks[2:])
+            elif readers and name in READERS and not (name == 'rg' and any(t.startswith('--pre') for t in toks[1:])):
+                writes = writes or '>' in seg
             else:
                 return False
-    return not (writes and commits)
+    return not (writes and (commits or git_reads))
 
 
 def native_path(path: str) -> str:

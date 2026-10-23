@@ -31,6 +31,7 @@ OWN_REVIEW_TAG = re.compile(r'^\[ownReview:([^\]]*)\]', re.IGNORECASE)
 # /self-review security C9). 절의 끝은 Markdown 제목 모양 줄(ANY_HEAD)로 정한다.
 READ_HEAD = re.compile(r'(?m)^[ \t]{0,3}#{2,}[ \t]+읽은[ \t]*파일')
 ANY_HEAD = re.compile(r'^[ \t]{0,3}#{1,6}[ \t]')
+FINDINGS_HEAD = re.compile(r'(?m)^[ \t]{0,3}#{1,6}[ \t]+지적')  # '# 지적'도 (/self-review security ddb47044d1 C6)
 MAX_DEPTH = 4
 
 
@@ -162,6 +163,11 @@ def check(data: dict, today: datetime.date | None = None) -> None:
     elif READ_HEAD.search(own):
         deny("ownReview에 서브에이전트 결과 형식('## 읽은 파일')이 있는데 reason에 [ownReview:<서브에이전트>] 태그가 없다 — "
              '태그를 붙여 훅이 원문을 검사하게 한다 (/cross-review 3단계 · /mode 3단계).')
+    # perf_*는 대상이 설계안뿐이면 태그 없는 지휘자 의견('## 지휘자 의견')을 쓴다. 서브에이전트 결과를 요약해 '## 지적'만 남긴 것은 막는다
+    # (2026-10-19 사고 유형, 계획서 2026-10-23_따옴표-명령-허용목록과-perf-ownReview)
+    elif mode.startswith('perf_') and FINDINGS_HEAD.search(own):
+        deny("태그 없는 perf ownReview에 '## 지적' 절이 있다 — perf-reviewer 결과면 원문 그대로 넣고 reason 맨 앞에 [ownReview:perf-reviewer], "
+             "설계안에 대한 지휘자 의견이면 '## 지휘자 의견' 제목으로 쓴다 (/mode 2단계).")
 
     if mode in PLAN_MODES:
         root = os.environ.get('CLAUDE_PROJECT_DIR') or data.get('cwd') or os.getcwd()

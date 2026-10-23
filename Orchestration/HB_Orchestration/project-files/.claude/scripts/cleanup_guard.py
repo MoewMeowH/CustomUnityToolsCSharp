@@ -40,6 +40,7 @@ ROUGH = re.compile(
     re.IGNORECASE)
 
 PS_DELETE = {'remove-item', 'rm', 'del', 'erase', 'ri', 'rd', 'rmdir'}
+DELETE_NAMES = PS_DELETE | {'rm', 'rmdir', 'rd'}
 # PowerShell은 매개변수 앞의 이 대시 글자도 '-'로 받는다 (–Recurse — 실측). 낱말 첫 글자만 바꾼다 — 경로 안의 대시까지 바꾸면
 # 셸 현재 폴더(cwd)와 비교가 어긋난다 (/self-review security 625b223591 C4)
 PS_DASH = re.compile(r'(?:(?<=\s)|^)[–—―](?=[A-Za-z])')
@@ -135,13 +136,23 @@ def check(data: dict) -> None:
     stripped, inner = scan(cmd, shell)
     # 본문을 셸 · 실행기에 넘기면 본문이 곧 명령이다 — 본문(따옴표 heredoc · @'…'@ · 따옴표 없는 heredoc · @"…"@)에 재귀 삭제가 있으면
     # 데이터 전용 명령만 받는다 (본문은 무슨 언어인지 모르므로 따옴표를 공백으로 바꿔 본다 — python os.system('rm -rf …') 등)
-    if any(ROUGH.search(re.sub(r'[\'"`]', ' ', body)) for body in lex(raw, shell).bodies) and not data_only(stripped, inner, shell):
+    lx = lex(raw, shell)
+    if any(ROUGH.search(re.sub(r'[\'"`]', ' ', body)) for body in lx.bodies) and not data_only(stripped, inner, shell):
         deny('heredoc · here-string 본문에 재귀 삭제가 있는데 받는 명령이 데이터 전용(cat · tee · git commit · Set-Content 등)이 아니다 — '
              '훅이 그 본문을 명령으로 검사하지 못한다. 스크립트는 Write로 파일을 만든 뒤 따로 실행하라.')
-    if not ROUGH.search(stripped + '\n' + '\n'.join(inner)):
-        return
-    if has_substitution(stripped, inner, shell):
+    rough = ROUGH.search(stripped + '\n' + '\n'.join(inner))
+    if rough and has_substitution(stripped, inner, shell):  # 따옴표 검사보다 먼저 — 이쪽 안내가 더 정확하다
         deny('재귀 삭제가 명령 치환($( ) · 백틱) 안이나 함께 있다.')
+    # 따옴표 문자열 속 재귀 삭제 (bash -c "…" · powershell -Command "…" · iex "…" · cmd /c "…"): 글을 실행하지 않는 명령
+    # (데이터 전용 + grep · echo · git commit/log 등)만 받는다 — 허용 목록 (계획서 2026-10-23_따옴표-명령-허용목록과-perf-ownReview).
+    # 안쪽 따옴표는 공백으로 바꿔 본다 (python -c "os.system('rm -rf …')"). 따옴표 · 백틱을 지운 글 전체도 본다 — 겹친 따옴표로
+    # 명령이 조각 여럿에 나뉘거나(powershell -Command "Remove-Item "$p" -Recurse") 이름을 쪼갠 것(r""m) (/self-review security ddb47044d1 C1 · C5)
+    joined = not rough and ROUGH.search(lx.unquoted(raw))
+    if (joined or any(ROUGH.search(re.sub(r'[\'"`]', ' ', q)) for q in lx.quoted)) and not data_only(stripped, inner, shell, readers=True):
+        deny('따옴표 문자열 안에 재귀 삭제가 있는데 받는 명령이 글을 실행하지 않는 명령(grep · echo · git commit 등)이 아니다 — '
+             '셸에 명령 문자열을 넘기지 말고 그 셸 도구(Bash · PowerShell)로 직접 실행하라.')
+    if not rough:
+        return
     if CHAIN.search(stripped.strip()):
         deny('재귀 삭제가 다른 명령과 묶여 있다 (&&·||·;·|·줄바꿈).')
     if CD.search(stripped):
@@ -151,7 +162,11 @@ def check(data: dict) -> None:
         deny('삭제 명령의 splatting(@변수)은 훅이 해석하지 못한다 — 경로 · -Recurse를 직접 적어라.')
     targets = delete_targets(toks, shell)
     if targets is None:
-        return  # git rm -r 등: 거친 탐지에는 걸렸지만 작업 트리 재귀 삭제가 아니다
+        if toks and command_name(toks[0]) not in DELETE_NAMES and command_name(toks[0]) != 'git':
+            # 거친 탐지에 걸렸는데 맨 앞이 삭제 명령이 아니다: cmd /c rmdir /s · env rm · timeout rm · -Command 따옴표 없음 —
+            # 실행기를 거친 삭제는 해석하지 않고 막는다 (/self-review security ddb47044d1 C2). git rm -r은 작업 트리 삭제가 아니다.
+            deny('재귀 삭제를 해석하지 못했다 — 삭제 명령(rm · Remove-Item · rmdir)을 맨 앞에 두고 cmd /c · env · timeout 등을 거치지 말고 실행하라.')
+        return  # git rm -r · Remove-Item -Recurse:$false 등: 작업 트리 재귀 삭제가 아니다
     if not targets:
         deny('삭제 대상 경로를 찾지 못했다.')
     for t in targets:

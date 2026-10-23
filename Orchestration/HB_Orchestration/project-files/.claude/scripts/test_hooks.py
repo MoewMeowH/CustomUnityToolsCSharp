@@ -144,6 +144,44 @@ expect('H1 en dash 폴더 · 셸 현재 폴더가 그 안', h1('Remove-Item -Lit
 expect('H1 en dash 폴더 · 밖에서 지움', h1('Remove-Item -LiteralPath "F:\\a\u2013b" -Recurse -Force', 'PowerShell', cwd='F:\\AI'), 0)
 expect('H1 cat <<EOF | git commit -F - (파일 안 씀)', h1("cat <<'EOF' | git commit -F -\nrm -rf 정리\nEOF"), 0)
 expect('H1 bash 줄 이음 절대 경로 단독', h1('rm \\\n -rf /f/AI/ToolWithCS/subagent_in/x'), 0)
+# 따옴표 문자열로 넘긴 명령 — 허용 목록 (계획서 2026-10-23_따옴표-명령-허용목록과-perf-ownReview)
+for name, cmd, tool in [
+    ('bash -c', 'bash -c "rm -rf build"', 'Bash'),
+    ('powershell -Command', 'powershell -Command "Remove-Item build -Recurse -Force"', 'Bash'),
+    ('iex', "iex 'Remove-Item build -Recurse -Force'", 'PowerShell'),
+    ('cmd /c', 'cmd /c "rmdir /s /q build"', 'PowerShell'),
+    ('eval', "eval 'rm -rf build'", 'Bash'),
+    ('python -c', "python -c \"import os; os.system('rm -rf build')\"", 'Bash'),
+    ('tclsh (목록 밖 실행기)', 'tclsh -c "rm -rf build"', 'Bash'),
+    ('echo | bash', 'echo "rm -rf build" | bash', 'Bash'),
+    ('rg --pre', 'rg --pre sh "rm -rf build" .', 'Bash'),
+]:
+    expect(f'H1 따옴표 명령 {name}', h1(cmd, tool), 2, '따옴표 문자열')
+for name, cmd, tool in [
+    ('git commit -m', 'git commit -m "정리: rm -rf build 대신 Remove-Item"', 'Bash'),
+    ('grep', 'grep -rn "rm -rf" docs', 'Bash'),
+    ('Select-String', "Select-String -Path README.md -Pattern 'Remove-Item x -Recurse'", 'PowerShell'),
+    ('echo', 'echo "rm -rf 은 쓰지 않는다"', 'Bash'),
+    ('git log --grep', 'git log --grep "rm -rf"', 'Bash'),
+]:
+    expect(f'H1 따옴표 글자 통과 {name}', h1(cmd, tool), 0)
+# /self-review security ddb47044d1 반영 (실측 exit 0이던 형식)
+for name, cmd, tool, why in [
+    ('겹친 따옴표 -Command', 'powershell -Command "Remove-Item "$p" -Recurse -Force"', 'Bash', '따옴표 문자열'),
+    ('cmd /c rmdir 따옴표 없음', 'cmd /c rmdir /s /q build', 'Bash', '해석하지 못했다'),
+    ('-Command 따옴표 없음', 'powershell -Command Remove-Item build -Recurse -Force', 'Bash', '해석하지 못했다'),
+    ('env rm', 'env rm -rf build', 'Bash', '해석하지 못했다'),
+    ('timeout rm', 'timeout 5 rm -rf build', 'Bash', '해석하지 못했다'),
+    ('git grep -iO', 'git grep -iO"rm -rf build" pattern', 'Bash', '따옴표 문자열'),
+    ('git log --output 훅 + commit', 'git log -1 --format="rm -rf build" --output=.git/hooks/pre-commit; git commit -m x', 'Bash', '따옴표 문자열'),
+    ('echo >> config + git status', 'echo "fsmonitor = rm -rf build" >> .git/config; git status', 'Bash', '따옴표 문자열'),
+    ('쪼갠 이름 r""m', "bash -c 'r\"\"m -rf build'", 'Bash', '따옴표 문자열'),
+    ('백틱으로 쪼갠 Remove-It`em', "iex 'Remove-It`em x -Recurse'", 'PowerShell', '따옴표 문자열'),
+]:
+    expect(f'H1 재검토3 {name}', h1(cmd, tool), 2, why)
+expect('H1 git log 단독 (쓰기 없음)', h1('git log --grep "rm -rf"'), 0)
+expect('H1 git -C 경로 commit heredoc 본문의 rm', h1("git -C /f/x commit -q -F - <<'EOF'\ncmd /c rmdir /s 막음\nEOF"), 0)
+expect('H1 git -c 설정 + commit heredoc은 막힘', h1("git -c core.hooksPath=x commit -F - <<'EOF'\nrm -rf build\nEOF"), 2, '데이터 전용')
 expect('H1 줄 이음 뒤 #는 앞 상태 (주석)', h1('echo a \\\n#c; rm -rf x'), 0)
 expect('H1 PS $( ) 뒤 #는 주석', h1('echo $(1)#; Remove-Item -Recurse -Force x', 'PowerShell'), 0)
 expect("H1 끝 표시 이어 붙임 본문은 데이터 (<<'E'OF)", h1("cat <<'E'OF\nE\nrm -rf build\nEOF\n"), 0)
@@ -271,6 +309,11 @@ try:
     expect('H2 커밋 heredoc 본문의 git push 문구', h2("git commit -q -F - <<'EOF'\n다음에 git push 할 것\nEOF"), 0)
     expect('H2 따옴표 없는 heredoc을 bash에', h2('bash <<EOF\ngit push origin main\nEOF'), 2, '데이터 전용')
     expect('H2 줄 이음 뒤 push', h2('git \\\n push origin main && echo'), 2, '묶여')
+    expect('H2 bash -c 속 push', h2('bash -c "git push origin main"'), 2, '따옴표 문자열')
+    expect('H2 iex 속 push', h2("iex 'git push origin main'", 'PowerShell'), 2, '따옴표 문자열')
+    expect('H2 grep 속 push 글자', h2('grep -rn "git push" docs'), 0)
+    expect('H2 겹친 따옴표 bash -c', h2('bash -c "git -C "$R" push"'), 2, '따옴표 문자열')
+    expect('H2 쪼갠 이름 gi""t push', h2("bash -c 'gi\"\"t push origin main'"), 2, '따옴표 문자열')
     expect('H2 없는 원격', h2('git push nowhere main'), 2, '원격')
     expect('H2 저장소가 아닌 곳', run('push_guard.py', {'tool_name': 'Bash', 'tool_input': {'command': 'git push'}, 'cwd': tmp}, env), 2, '검사 중 오류')
 finally:
@@ -341,6 +384,10 @@ try:
     expect('H4 review_main 태그 없는 ownReview', h3('review_main', '이유', good), 2, 'reason 맨 앞')
     expect('H4 태그 없는 서브에이전트 원문 (perf_main)', h3('perf_main', '이유', good), 2, '태그가 없다')
     expect('H4 perf_main 태그 없는 지휘자 의견 (설계안)', h3('perf_main', '이유', '설계안 검토: 할당 줄이기'), 0)
+    expect('H4 perf_main 태그 없는 지휘자 의견 제목', h3('perf_main', '이유', '## 지휘자 의견\n- 할당 줄이기'), 0)
+    expect("H4 perf_main 태그 없는 요약('## 지적'만)", h3('perf_main', '이유', '## 지적\n- C1 요약'), 2, '지휘자 의견')
+    expect("H4 crash_main 지휘자 조사의 '## 지적'은 그대로", h3('crash_main', '이유', '## 지적\n- 의심 1'), 0)
+    expect("H4 perf_main 태그 없는 '# 지적'(h1)", h3('perf_main', '이유', '# 지적\n- C1 요약'), 2, '지휘자 의견')
     expect("H4 읽은 파일의 번호 줄", h3('review_main', tag, good + '1. docs/worklog.md\n'), 2, "'- '로 시작하지 않는")
     expect('H4 읽은 파일의 맨 경로 줄', h3('review_main', tag, good + 'docs/worklog.md:1-5\n'), 2, "'- '로 시작하지 않는")
     expect('H4 변형 제목 읽은 파일 절도 검사', h3('review_main', tag, good + '## 읽은 파일 (추가)\n- docs/worklog.md:1-5\n'), 2, 'subagent_in/ 밖')
