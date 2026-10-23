@@ -7,6 +7,7 @@
 - 하위 명령: 올리는 것(new · revise · update-summary · reply · ask-consent)은 검사, 밖으로 글을 내지 않는 것(READ)은 통과, 그 밖은 막는다.
   `--dry-run`은 봇이 그것을 아는 new · revise에서만 통과 (reply는 그 낱말을 글로 올린다).
 - `--allow-warnings`는 늘 막는다 — 봇 경고를 넘기는 것은 사람의 `!` 명령으로만.
+- 로컬 기록을 지우는 purge · unlink의 `--yes`도 막는다 (미리보기는 통과). 셸이 펼칠 수 있는 인자($'…' · {a,b} · 백틱 등)가 있으면 미리보기도 막는다.
 - 검사 글: new · revise의 계획서 파일 내용과 파일 이름(제목 기본값 · 첨부 이름), --title · --summary · --text 값, reply 글.
   글 인자에 셸 변수(`$` · `%이름%`)가 있거나, 경로에 SLACKPLAN_ROOT 말고 다른 변수가 있거나, 파일을 못 읽으면 막는다.
   --text 없는 update-summary는 봇 저장소의 요약 파일을 훅이 같은 파일로 찾을 수 없어 막는다.
@@ -30,7 +31,11 @@ from push_guard import IGNORED_DIRS, ignored, load_patterns, mask  # noqa: E402
 
 UPLOAD = {'new', 'revise', 'update-summary', 'reply', 'ask-consent'}
 # 밖으로 글을 내지 않는 하위 명령 (SlackPlanBot App.cs 2026-10-23 기준: react는 이모지만, inbox --note는 로컬 작업 로그만)
-READ = {'find', 'thread', 'status', 'inbox', 'files', 'react', 'purge', 'listen', 'probe-ratelimit', '-h', '--help'}
+READ = {'find', 'thread', 'status', 'inbox', 'files', 'react', 'listen', 'probe-ratelimit', 'list', 'approval-record', '-h', '--help'}
+# 로컬 기록을 지우는 하위 명령 (READ에 넣지 않는다): 글자 그대로의 인자로 된 미리보기만 통과, --yes는 사람의 `!` 명령으로만
+# (계획서 2026-10-23_H5-새-하위-명령과-지우는-명령, /self-review 8c1412729e — 셸이 펼쳐 --yes가 되는 인자도 막는다)
+DESTRUCTIVE = {'purge', 'unlink'}
+LITERAL_ARG = re.compile(r'^[A-Za-z0-9._:-]+$')
 DRY_RUN_AWARE = {'new', 'revise'}
 TEXT_OPTIONS = {'--title', '--summary', '--text'}
 ID_OPTIONS = {'--thread', '--item'}  # new: 글이 아니라 ID 값
@@ -242,6 +247,13 @@ def check(data: dict) -> None:
         deny('slackplan 호출에 리다이렉트(> · 2>&1 · <)가 있다 — 출력은 도구가 그대로 받으니 리다이렉트 없이 실행하라. ' + SIMPLE)
 
     args = slackplan_args(tokenize(cmd.strip(), shell))
+    if args and args[0] in DESTRUCTIVE:
+        odd = [a for a in args[1:] if not LITERAL_ARG.match(a)]
+        if odd:
+            deny(f"{args[0]}의 인자 '{odd[0]}'에 셸이 펼칠 수 있는 글자가 있다 — 지우는 명령은 글자 그대로의 인자(영숫자 · . _ : -)만 받는다.")
+        if '--yes' in args[1:]:
+            deny(f'{args[0]} --yes는 지휘자가 붙이지 않는다 — 미리보기 결과를 사용자에게 보이고, 지울지는 사용자가 `!` 명령으로 정한다.')
+        return
     if not args or args[0] in READ:
         return
     sub, rest = args[0], args[1:]
