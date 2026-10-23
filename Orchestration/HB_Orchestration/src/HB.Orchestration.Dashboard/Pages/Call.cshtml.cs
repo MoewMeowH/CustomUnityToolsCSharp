@@ -16,6 +16,11 @@ public sealed class CallModel(IOptions<DashboardOptions> options, PricingService
 
     public DashboardOptions Opt => options.Value;
     public CallRecord Call { get; private set; } = null!;
+
+    /// <summary>프롬프트 원문 (큰 프롬프트는 blobs에서 읽는다). PromptMissing이면 원문 파일이 없어 기록의 앞부분이다.</summary>
+    public string PromptText { get; private set; } = "";
+    public bool PromptMissing { get; private set; }
+
     public string ResponseHtml { get; private set; } = "";
     public List<FileLinks.Link> Links { get; private set; } = [];
 
@@ -53,6 +58,7 @@ public sealed class CallModel(IOptions<DashboardOptions> options, PricingService
         if (call is null) return NotFound();
 
         Call = call;
+        (PromptText, PromptMissing) = CallLog.FullPrompt(call, options.Value.ResolvedLogPath);
         // 구조화 출력을 해석한 기록이면 지휘자가 받은 그린 텍스트를 보여 주고, 원문(JSON)은 따로 접어 둔다.
         ResponseHtml = Markdown.ToHtml(call.Structured is { Parsed: true } s ? HB.Orchestration.Agents.FindingRenderer.Render(s) : call.Response ?? "", Pipeline);
         var projects = rider.All;

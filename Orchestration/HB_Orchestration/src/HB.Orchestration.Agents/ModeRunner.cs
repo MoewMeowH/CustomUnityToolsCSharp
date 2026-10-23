@@ -414,6 +414,9 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
                 return Fail + $"그 실행의 모드는 '{original.Mode}'입니다 (mode에 같은 이름을 넣으세요).";
             if (original.Images is { Count: > 0 }) return Fail + "이미지를 받은 단계는 보충 재질문을 하지 않습니다.";
             if (original.Response is not { Length: > 0 } previous) return Fail + "원래 응답 원문이 기록에 없습니다.";
+            // 큰 프롬프트는 blobs에 있다 (기록에는 앞부분만) — 대화 기록으로 다시 보낼 원문을 읽는다
+            var (originalPrompt, promptMissing) = CallLog.FullPrompt(original, runner.LogPath);
+            if (promptMissing) return Fail + $"원래 프롬프트 원문 파일(blobs/{original.PromptSha256}.txt)이 없습니다.";
 
             var known = original.Structured?.Requests ?? [];
             if (ids.FirstOrDefault(id => !known.Any(q => string.Equals(q.Id, id, StringComparison.OrdinalIgnoreCase))) is { } unknown)
@@ -452,7 +455,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             sb.Append(Prompts.FollowUpRules);
             var prompt = sb.ToString();
 
-            var total = original.Prompt.Length + previous.Length + prompt.Length;
+            var total = originalPrompt.Length + previous.Length + prompt.Length;
             if (maxChars > 0 && total > maxChars)
                 return $"[입력이 너무 깁니다] 원래 프롬프트 + 응답 + 보충 {total:N0}자 / 상한 {maxChars:N0}자. 보충 범위를 줄이세요.";
 
@@ -460,7 +463,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             var meta = new CallMeta(files, attached.Sources) { ContextRoots = attached.Roots, Reason = reason, Provenance = RunProvenance(plan) };
             var call = NewCall(runId, modeName, newStep, step, step.Instructions, new BuiltPrompt(prompt, null), meta) with
             {
-                History = [new ChatMessage(ChatRole.User, original.Prompt), new ChatMessage(ChatRole.Assistant, previous)],
+                History = [new ChatMessage(ChatRole.User, originalPrompt), new ChatMessage(ChatRole.Assistant, previous)],
                 FollowUpOf = followUp.Step,
                 OmitReasoning = original.ReasoningEffort is null,
                 FollowUpRequests = [.. requested.Select(q => q.Id)],

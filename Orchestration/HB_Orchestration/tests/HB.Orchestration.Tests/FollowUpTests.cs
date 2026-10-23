@@ -37,6 +37,25 @@ public sealed class FollowUpTests
         return (h, result.Split('\n')[0]["runId: ".Length..].Trim());
     }
 
+    [Fact]
+    public async Task FollowUp_sends_full_prompt_from_blob_when_original_was_split()
+    {
+        using var h = new ModeRunnerHarness(Modes);
+        h.Client.Script = [ScriptedChatClient.Reply(FirstAnswer), ScriptedChatClient.Reply(SecondAnswer)];
+        var big = "큰 요청 " + new string('y', CallLog.PromptBlobMinBytes);
+        var first = await h.Run("r", big);
+        var runId = first.Split('\n')[0]["runId: ".Length..].Trim();
+        var original = h.Records()[0];
+        Assert.NotNull(original.PromptSha256); // 기록에는 앞부분만
+
+        var result = await FollowUp(h, runId, ["1-N1"]);
+
+        Assert.StartsWith($"runId: {runId}", result);
+        var sent = h.Client.Received[1].Messages.Where(m => m.Role != ChatRole.System).ToList();
+        Assert.Equal(CallLog.FullPrompt(original, h.LogPath).Text, sent[0].Text);
+        Assert.Contains(big, sent[0].Text);
+    }
+
     private static Task<string> FollowUp(ModeRunnerHarness h, string runId, string[] ids, IReadOnlyList<ContextRange>? context = null,
         string input = "1-N2는 사내 설정이라 보내지 않음", string mode = "r", int step = 1, string? reason = "자료 보충") =>
         h.Runner.RunFollowUpAsync(mode, new FollowUpRequest(runId, step, ids), input, null, context, reason, CancellationToken.None);

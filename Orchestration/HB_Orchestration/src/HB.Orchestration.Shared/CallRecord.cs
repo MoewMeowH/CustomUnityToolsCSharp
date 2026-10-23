@@ -38,7 +38,20 @@ public sealed record CallRecord
     /// <summary>MCP 서버의 작업 디렉터리 (= Claude Code를 실행한 프로젝트 루트).</summary>
     public string? ProjectDir { get; init; }
 
+    /// <summary>보낸 프롬프트. <see cref="PromptSha256"/>이 있으면 앞부분만이고 원문은 blobs/&lt;sha&gt;.txt — <see cref="CallLog.FullPrompt"/>로 읽는다.</summary>
     public required string Prompt { get; init; }
+
+    /// <summary>
+    /// 프롬프트 원문을 blobs에 둔 경우 그 해시 (4KB 이상, 계획서 2026-10-23_호출기록-blobs-분리와-첫화면-쪽나누기).
+    /// 골든 반복 등으로 같은 프롬프트가 여러 번 남아 기록 파일의 3분의 2를 차지했다.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PromptSha256 { get; init; }
+
+    /// <summary>blobs에 둔 프롬프트 원문의 UTF-8 바이트 수.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? PromptBytes { get; init; }
+
     public string? Response { get; init; }
 
     /// <summary>입력 토큰 합계 (캐시에 걸린 토큰 포함).</summary>
@@ -78,7 +91,7 @@ public sealed record CallRecord
     /// <summary>관련 파일. "Assets/Scripts/Player.cs" 또는 "Assets/Scripts/Player.cs:42" 형식.</summary>
     public IReadOnlyList<string> Files { get; init; } = [];
 
-    /// <summary>서버가 읽어 프롬프트에 첨부한 코드 범위. "Assets/Scripts/Player.cs:40-80" 형식. 내용은 Prompt에 있다.</summary>
+    /// <summary>서버가 읽어 프롬프트에 첨부한 코드 범위. "Assets/Scripts/Player.cs:40-80" 형식. 내용은 프롬프트에 있다 (큰 프롬프트는 CallLog.FullPrompt로 원문을 읽는다).</summary>
     public IReadOnlyList<string> Context { get; init; } = [];
 
     /// <summary>

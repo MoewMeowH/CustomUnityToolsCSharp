@@ -357,7 +357,14 @@ public sealed class AgentRunner
             }, error, failure);
         }
 
-        CallRecord NewRecord() => new()
+        // 큰 프롬프트는 blobs에 두고 기록에는 앞부분 · 해시만 (같은 프롬프트는 한 번만 저장된다). 저장 실패면 원문 그대로 + StoreErrors.
+        CallRecord NewRecord()
+        {
+            var record = CallLog.WithPromptBlob(BaseRecord(), provenance.BlobFolder is { Length: > 0 } folder ? folder : BlobStore.DefaultFolderFor(LogPath), out var error);
+            return error is null ? record : record with { Provenance = provenance with { StoreErrors = [.. provenance.StoreErrors ?? [], error] } };
+        }
+
+        CallRecord BaseRecord() => new()
         {
             Id = Guid.NewGuid().ToString("N")[..12],
             Timestamp = startedAt,

@@ -314,5 +314,9 @@
 
 <section class="panel card">
     <h2>요청 (Claude → 에이전트) — 에이전트가 받은 입력 그대로</h2>
-    <pre>@c.Prompt</pre>
+    @if (Model.PromptMissing)
+    {
+        <p class="muted">원문 파일(blobs/@(c.PromptSha256).txt)이 없어 기록에 남은 앞부분만 보입니다.</p>
+    }
+    <pre>@Model.PromptText</pre>
 </section>

@@ -14,6 +14,18 @@ if (args.Length > 0 && args[0] == ConfigDriftReport.Flag)
     return ConfigDriftReport.Run(args, Console.Out, Console.Error);
 }
 
+// 호출 기록 압축 (사람이 가끔 돌림): 예전 기록의 큰 프롬프트를 blobs로 옮기고 원래 파일은 백업으로 남긴다. 서버를 띄우지 않는다.
+// 사용: HB.Orchestration.Mcp.exe --compact-log [calls.jsonl 경로] (계획서 2026-10-23_호출기록-blobs-분리와-첫화면-쪽나누기)
+if (args.Length > 0 && args[0] == "--compact-log")
+{
+    Console.OutputEncoding = new System.Text.UTF8Encoding(false);
+    var compacted = HB.Orchestration.Shared.CallLog.CompactPrompts(args.Length > 1 ? args[1] : null);
+    Console.WriteLine($"줄 {compacted.Lines:N0} (옮김 {compacted.Moved:N0} · 그대로 {compacted.Kept:N0}) · " +
+                      $"{compacted.BytesBefore:N0} → {compacted.BytesAfter:N0}바이트 · 백업 {compacted.Backup}");
+    foreach (var e in compacted.Errors) Console.Error.WriteLine($"[저장 실패] {e}");
+    return compacted.Errors.Count == 0 ? 0 : 1;
+}
+
 // 골든 세트 회귀 평가 (사람이 가끔 돌림). 아래와 같은 설정·서비스로 에이전트를 부르지만 MCP 서버는 띄우지 않는다.
 var golden = args.Length > 0 && args[0] == GoldenCli.Flag;
 

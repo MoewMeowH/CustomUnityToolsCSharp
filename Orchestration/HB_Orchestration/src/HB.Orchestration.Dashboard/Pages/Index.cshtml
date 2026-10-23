@@ -108,7 +108,7 @@
             </tr>
             </thead>
             <tbody>
-            @foreach (var c in Model.Calls)
+            @foreach (var c in Model.PageCalls)
             {
                 var cost = Model.Pricing.CostOf(c);
                 <tr>
@@ -158,5 +158,20 @@
             </tbody>
         </table>
         </div>
+        @if (Model.PageCount > 1)
+        {
+            var first = (Model.P - 1) * IndexModel.PageSize + 1;
+            <nav class="toolbar muted" style="justify-content:center">
+                @if (Model.P > 1) { <a href="@Model.PageUrl(Model.P - 1)">← 이전</a> }
+                @for (var p = 1; p <= Model.PageCount; p++)
+                {
+                    if (p == Model.P) { <strong>@p</strong> }
+                    else if (p <= 2 || p > Model.PageCount - 2 || Math.Abs(p - Model.P) <= 2) { <a href="@Model.PageUrl(p)">@p</a> }
+                    else if (p == 3 || p == Model.PageCount - 2) { <span>…</span> }
+                }
+                @if (Model.P < Model.PageCount) { <a href="@Model.PageUrl(Model.P + 1)">다음 →</a> }
+                <span>@first.ToString("N0")–@((first + Model.PageCalls.Count - 1).ToString("N0")) / @Model.Calls.Count.ToString("N0")건</span>
+            </nav>
+        }
     }
 </section>

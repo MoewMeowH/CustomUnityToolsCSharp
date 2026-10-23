@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace HB.Orchestration.Shared;
 
@@ -33,6 +34,231 @@ public static class CallLog
             : Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "HB_Orchestration", "calls.jsonl");
+
+    // ── 프롬프트 원문을 blobs로 (계획서 2026-10-23_호출기록-blobs-분리와-첫화면-쪽나누기) ──
+    // 측정: 기록의 66%가 프롬프트인데 서로 다른 것은 4분의 1뿐 (골든 반복). 해시 이름이라 같은 원문은 한 번만 저장된다.
+
+    /// <summary>이 크기(UTF-8 바이트) 이상인 프롬프트만 blobs에 둔다. 작은 것은 파일 수만 늘린다.</summary>
+    public const int PromptBlobMinBytes = 4096;
+
+    /// <summary>blobs에 둔 프롬프트 대신 기록에 남기는 앞부분 글자 수.</summary>
+    public const int PromptPreviewChars = 1000;
+
+    private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
+
+    /// <summary>
+    /// 프롬프트가 크면 blobs에 저장하고 앞부분 · 해시만 남긴 기록. 작거나 이미 나눴거나 폴더가 없으면 그대로.
+    /// 저장에 실패하면 원문을 그대로 두고 error에 이유를 준다 (기록을 잃지 않는다).
+    /// </summary>
+    public static CallRecord WithPromptBlob(CallRecord record, string? blobFolder, out string? error)
+    {
+        error = null;
+        if (record.PromptSha256 is not null || string.IsNullOrEmpty(blobFolder)) return record;
+        var bytes = Utf8NoBom.GetBytes(record.Prompt);
+        if (bytes.Length < PromptBlobMinBytes) return record;
+        var sha = BlobStore.Sha256Hex(bytes);
+        if (StorePrompt(blobFolder, sha, bytes) is { } e)
+        {
+            error = $"prompt: {e}";
+            return record;
+        }
+        return record with { Prompt = PromptPreview(record.Prompt, bytes.Length), PromptSha256 = sha, PromptBytes = bytes.Length };
+    }
+
+    /// <summary>
+    /// BlobStore.TryStore는 해시 이름 파일이 있기만 하면 성공으로 본다. 프롬프트는 blob이 유일한 원문 보관처라, 이미 있는 파일은
+    /// 내용 해시까지 확인하고 다르면(손상 · 수동 편집) 실패로 돌려 원문을 기록에 남긴다 (/cross-review 255e65a12d self C3).
+    /// </summary>
+    private static string? StorePrompt(string folder, string sha, byte[] bytes)
+    {
+        try
+        {
+            var path = BlobStore.PathFor(folder, sha);
+            if (File.Exists(path) && BlobStore.Sha256Hex(File.ReadAllBytes(path)) != sha)
+                return $"기존 원문 파일 내용이 해시와 다름 ({path})";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return $"{ex.GetType().Name}: {ex.Message}";
+        }
+        return BlobStore.TryStore(folder, sha, bytes);
+    }
+
+    /// <summary>앞 PromptPreviewChars자 + 안내. 서로게이트 쌍 가운데서 자르지 않는다 (이모지 등).</summary>
+    private static string PromptPreview(string prompt, long bytes)
+    {
+        var cut = Math.Min(PromptPreviewChars, prompt.Length);
+        if (cut > 0 && cut < prompt.Length && char.IsHighSurrogate(prompt[cut - 1])) cut--;
+        return prompt[..cut] + $"\n… (프롬프트 원문 {bytes:N0}바이트는 blob 폴더에 따로 — 대시보드 호출 화면 · CallLog.FullPrompt로 읽는다)";
+    }
+
+    /// <summary>기록의 프롬프트 원문 폴더: Provenance.BlobFolder, 없거나 비었으면 호출 기록 옆 blobs/ (저장 · 읽기 · 압축이 같은 규칙).</summary>
+    public static string PromptFolder(CallRecord record, string logPath) =>
+        record.Provenance?.BlobFolder is { Length: > 0 } folder ? folder : BlobStore.DefaultFolderFor(logPath);
+
+    /// <summary>
+    /// 프롬프트 원문. 해시가 없으면(작은 프롬프트 · 예전 기록) 기록 그대로. 해시가 있는데 원문 파일이 없거나 내용이 해시와 다르면
+    /// Missing = true이고 Text는 기록의 앞부분이다.
+    /// </summary>
+    public static (string Text, bool Missing) FullPrompt(CallRecord record, string? logPath = null)
+    {
+        if (record.PromptSha256 is not { } sha) return (record.Prompt, false);
+        if (!BlobStore.IsValidSha(sha)) return (record.Prompt, true);
+        try
+        {
+            var bytes = File.ReadAllBytes(BlobStore.PathFor(PromptFolder(record, logPath ?? DefaultPath), sha));
+            if (BlobStore.Sha256Hex(bytes) == sha) return (Utf8NoBom.GetString(bytes), false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            // 아래: 원문 없음
+        }
+        return (record.Prompt, true);
+    }
+
+    public sealed record CompactResult(int Lines, int Moved, int Kept, long BytesBefore, long BytesAfter, string? Backup, IReadOnlyList<string> Errors);
+
+    /// <summary>
+    /// 예전 기록의 큰 프롬프트를 blobs로 옮긴다. 줄은 JSON 그대로 다루어(알 수 없는 필드 · 순서 유지) prompt만 바꾸고 promptSha256 ·
+    /// promptBytes를 더한다. 깨진 줄 · 이미 나눈 줄은 그대로. 원문 폴더는 기록의 것(PromptFolder) — FullPrompt와 같은 규칙.
+    /// 다른 서버 프로세스가 같은 파일에 덧붙이므로 (/cross-review 255e65a12d 1-F1 · self C1 · C2):
+    /// 1) 스냅샷을 마지막 줄바꿈까지만 압축한다 (쓰는 중이던 줄은 꼬리로). blob 저장 · JSON 처리는 파일을 잡지 않고 한다.
+    /// 2) 스냅샷 부분의 백업을 먼저 디스크까지 쓴다.
+    /// 3) 파일을 짧게 독점(FileShare.None)한 채, 그사이 덧붙은 꼬리를 읽어 백업에 더하고, 같은 파일을 압축본 + 꼬리로 덮어쓴다.
+    ///    다른 서버의 AppendAsync는 공유 위반 재시도로 기다린다. 파일 바꾸기(Replace)를 쓰지 않아 원본이 사라지는 중간 상태가 없다.
+    /// </summary>
+    public static CompactResult CompactPrompts(string? path = null)
+    {
+        path = Path.GetFullPath(path ?? DefaultPath);
+        var errors = new List<string>();
+        byte[] snapshot;
+        using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite)) // 서버가 쓰는 중에도 읽는다
+        {
+            snapshot = new byte[fs.Length];
+            fs.ReadExactly(snapshot);
+        }
+        var cut = Array.LastIndexOf(snapshot, (byte)'\n') + 1; // 0이면 끝난 줄이 없다
+        if (cut == 0) return new CompactResult(0, 0, 0, snapshot.Length, snapshot.Length, null, errors);
+
+        var output = new MemoryStream();
+        int lines = 0, moved = 0, kept = 0;
+        for (var start = 0; start < cut;)
+        {
+            var nl = Array.IndexOf(snapshot, (byte)'\n', start);
+            var line = snapshot.AsSpan(start, nl - start);
+            lines++;
+            if (TryCompactLine(line, path, errors) is { } replaced)
+            {
+                output.Write(replaced);
+                moved++;
+            }
+            else
+            {
+                output.Write(line);
+                kept++;
+            }
+            output.WriteByte((byte)'\n');
+            start = nl + 1;
+        }
+        var compacted = output.ToArray();
+
+        var backup = UniqueBackupPath(path);
+        using (var b = new FileStream(backup, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+        {
+            b.Write(snapshot, 0, cut);
+            b.Flush(flushToDisk: true);
+        }
+
+        long before, after;
+        using (var fs = OpenExclusive(path))
+        {
+            before = fs.Length;
+            // 앞부분은 덧붙이기만 하므로 그대로여야 한다 — 다른 압축 등으로 바뀌었으면 손대지 않는다 (마지막 64KB로 확인)
+            var check = (int)Math.Min(cut, 64 * 1024);
+            var probe = new byte[check];
+            fs.Position = cut - check;
+            fs.ReadExactly(probe);
+            if (before < cut || !probe.AsSpan().SequenceEqual(snapshot.AsSpan(cut - check, check)))
+            {
+                errors.Add("압축하는 사이 파일 앞부분이 바뀌었다 — 아무것도 바꾸지 않았다. 다시 실행하라.");
+                return new CompactResult(lines, 0, lines, before, before, backup, errors);
+            }
+            var tail = new byte[before - cut];
+            fs.Position = cut;
+            fs.ReadExactly(tail);
+            using (var b = new FileStream(backup, FileMode.Append, FileAccess.Write, FileShare.None))
+            {
+                b.Write(tail);
+                b.Flush(flushToDisk: true);
+            }
+            fs.Position = 0;
+            fs.Write(compacted);
+            fs.Write(tail);
+            fs.SetLength(compacted.Length + tail.Length);
+            fs.Flush(flushToDisk: true);
+            after = fs.Length;
+        }
+        return new CompactResult(lines, moved, kept, before, after, backup, errors);
+    }
+
+    private static string UniqueBackupPath(string path)
+    {
+        var stem = $"{path}.bak-{DateTime.Now:yyyyMMdd-HHmmss}-{Environment.ProcessId}";
+        for (var n = 0; ; n++)
+        {
+            var candidate = n == 0 ? stem : $"{stem}-{n}";
+            if (!File.Exists(candidate)) return candidate;
+        }
+    }
+
+    /// <summary>다른 프로세스가 열지 못하게 연다. 서버가 쓰는 중이면 공유 위반 — 짧게 재시도.</summary>
+    private static FileStream OpenExclusive(string path)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException) when (attempt < 40)
+            {
+                Thread.Sleep(50);
+            }
+        }
+    }
+
+    /// <summary>줄 하나의 큰 prompt를 blobs로 옮긴 새 줄 바이트, 바꿀 것이 없으면 null.</summary>
+    private static byte[]? TryCompactLine(ReadOnlySpan<byte> line, string logPath, List<string> errors)
+    {
+        if (line.Trim(" \t\r"u8).IsEmpty) return null;
+        JsonObject obj;
+        try
+        {
+            if (JsonNode.Parse(line) is not JsonObject parsed) return null;
+            obj = parsed;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+        if (obj["promptSha256"] is not null || obj["prompt"] is not JsonValue pv || !pv.TryGetValue<string>(out var prompt)) return null;
+        var bytes = Utf8NoBom.GetBytes(prompt);
+        if (bytes.Length < PromptBlobMinBytes) return null;
+
+        // FullPrompt · PromptFolder와 같은 규칙: 기록의 blobFolder, 없거나 비었으면 호출 기록 옆 blobs/
+        var folder = (obj["provenance"] as JsonObject)?["blobFolder"] is JsonValue fv && fv.TryGetValue<string>(out var f) && f.Length > 0
+            ? f : BlobStore.DefaultFolderFor(logPath);
+        var sha = BlobStore.Sha256Hex(bytes);
+        if (StorePrompt(folder, sha, bytes) is { } e)
+        {
+            errors.Add($"{obj["id"]}: {e}");
+            return null;
+        }
+        obj["prompt"] = PromptPreview(prompt, bytes.Length);
+        obj["promptSha256"] = sha;
+        obj["promptBytes"] = bytes.Length;
+        return Encoding.UTF8.GetBytes(obj.ToJsonString(Json));
+    }
 
     public static async Task AppendAsync(CallRecord record, string? path = null)
     {

@@ -21,7 +21,32 @@ public sealed class IndexModel(IOptions<DashboardOptions> options, PricingServic
     /// <summary>true면 10초마다 자동 새로고침.</summary>
     [BindProperty(SupportsGet = true)] public bool Live { get; set; }
 
+    /// <summary>표의 쪽 (1부터). 합계 · 비용 · 일별 그래프는 걸러진 전체 기준이고 표만 나눈다 (계획서 2026-10-23_호출기록-blobs-분리와-첫화면-쪽나누기).</summary>
+    [BindProperty(SupportsGet = true)] public int P { get; set; } = 1;
+
+    /// <summary>한 쪽의 행 수 (사용자 결정 2026-10-23: 200).</summary>
+    public const int PageSize = 200;
+
+    /// <summary>걸러진 전체 기록 (합계 · 그래프 기준).</summary>
     public List<CallRecord> Calls { get; private set; } = [];
+
+    /// <summary>이 쪽에 그릴 기록.</summary>
+    public List<CallRecord> PageCalls { get; private set; } = [];
+
+    public int PageCount => Math.Max(1, (Calls.Count + PageSize - 1) / PageSize);
+
+    /// <summary>필터를 유지한 채 쪽만 바꾼 주소.</summary>
+    public string PageUrl(int page)
+    {
+        var query = new List<string> { $"Days={Days}", $"P={page}" };
+        void Add(string key, string? value) { if (!string.IsNullOrWhiteSpace(value)) query.Add($"{key}={Uri.EscapeDataString(value)}"); }
+        Add(nameof(Tool), Tool);
+        Add(nameof(Provider), Provider);
+        Add(nameof(Run), Run);
+        Add(nameof(Q), Q);
+        if (Live) query.Add("Live=true");
+        return "?" + string.Join('&', query);
+    }
     public List<string> ToolNames { get; private set; } = [];
     public List<string> ProviderNames { get; private set; } = [];
     public List<(DateOnly Day, long Tokens, int Count)> Daily { get; private set; } = [];
@@ -93,7 +118,11 @@ public sealed class IndexModel(IOptions<DashboardOptions> options, PricingServic
             .Where(c => string.IsNullOrWhiteSpace(Q) || Matches(c, Q.Trim()))
             .ToList();
 
-        _runHeads = Calls.Where(c => c.RunId is not null)
+        P = Math.Clamp(P, 1, PageCount);
+        PageCalls = Calls.Skip((P - 1) * PageSize).Take(PageSize).ToList();
+
+        // 실행의 첫 줄(이유 표시)은 이 쪽 안에서 정한다 — 앞 쪽에서 이어진 실행도 이 쪽의 첫 줄에 이유가 보이게
+        _runHeads = PageCalls.Where(c => c.RunId is not null)
             .GroupBy(c => c.RunId!)
             .Select(g => g.First().Id)
             .ToHashSet();
