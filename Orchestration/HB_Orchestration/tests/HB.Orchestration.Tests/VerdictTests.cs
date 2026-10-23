@@ -240,6 +240,24 @@ public sealed class VerdictTests : IDisposable
         Assert.Equal((1, 1), (row.Adopted, row.Missed)); // 지휘자만 찾은 것 = self-reviewer가 놓친 것
     }
 
+    [Fact]
+    public async Task SelfReview_agent_name_is_recorded_and_counted_separately()
+    {
+        // 검토형 서브에이전트 추가 (계획서 2026-10-23_서브에이전트-종류-추가): 에이전트별 채택률
+        await VerdictRecorder.RecordSelfReviewAsync(Info() with { Agent = "Security-Reviewer" }, [new VerdictItem("C1", "x", "rejected", Steps: [1], Reason: "오탐")], 500, Log);
+        await VerdictRecorder.RecordSelfReviewAsync(Info(SelfReviewText + "\n## 비고\n- 둘째\n"), [new VerdictItem("C1", "x", "adopted", Steps: [1])], 500, Log);
+
+        Assert.Equal(["security-reviewer", VerdictRecorder.SelfReviewAgent], CallLog.ReadAll(Log).Select(c => c.Agent!).Order(StringComparer.Ordinal));
+        var stats = VerdictStats.Build(VerdictLog.Latest(VerdictLog.ReadAll(VerdictPath)), CallLog.ReadAll(Log), _ => null).ByAgent;
+        Assert.Equal(1, stats.Single(r => r.Key == "security-reviewer").Rejected);
+        Assert.Equal(1, stats.Single(r => r.Key == VerdictRecorder.SelfReviewAgent).Adopted);
+
+        var bad = await VerdictRecorder.RecordSelfReviewAsync(Info(SelfReviewText + "\n## 비고\n- 셋째\n") with { Agent = "web-searcher" },
+            [new VerdictItem("C1", "x", "adopted", Steps: [1])], 500, Log);
+        Assert.Contains("selfReview.agent 'web-searcher'", bad);
+        Assert.Equal(2, CallLog.ReadAll(Log).Count);
+    }
+
     [Theory]
     [InlineData("## 읽은 파일\n- a")] // 지적 절 없음
     [InlineData("## 지적\n- a")]      // 읽은 파일 절 없음

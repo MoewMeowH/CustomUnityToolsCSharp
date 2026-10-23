@@ -1,11 +1,20 @@
 ---
-description: Claude 지휘자와 self-reviewer 서브에이전트가 독립적으로 리뷰한 뒤 결과를 종합한다 (외부 에이전트 없음)
-argument-hint: [파일/커밋 범위, 비우면 현재 미커밋 변경]
+description: Claude 지휘자와 검토형 서브에이전트(기본 self-reviewer, perf · security · direction 선택)가 독립적으로 리뷰한 뒤 결과를 종합한다 (외부 에이전트 없음)
+argument-hint: [perf|security|direction] [파일/커밋 범위 또는 계획서, 비우면 현재 미커밋 변경]
 ---
 
 인자: $ARGUMENTS
-- 대상. 비어 있으면 `git diff HEAD`의 미커밋 변경.
+- 첫 단어가 관점이면 그 서브에이전트, 아니면 **self-reviewer**(코드 리뷰). (계획서 `Orchestration/HB_Orchestration/docs/plans/2026-10-23_서브에이전트-종류-추가.md`)
+  - `perf` → **perf-reviewer** (실행 비용·할당·동기화·규모 증가만)
+  - `security` → **security-reviewer** (입력 검증·경로·비밀 값·외부 전송·검사 우회·fail-closed만)
+  - `direction` → **direction-reviewer** (요청 원문과 계획서의 방향만 — 대상은 계획서, 아래 "direction일 때")
+- 나머지가 대상. 비어 있으면 `git diff HEAD`의 미커밋 변경.
+- 아래 "self-reviewer"는 고른 서브에이전트로 읽는다.
 - 외부 에이전트(`run_mode`)는 부르지 않는다. 외부 시선까지 필요하면 `/cross-review` (계획서 `Orchestration/HB_Orchestration/docs/plans/2026-10-20_리뷰조건-self-reviewer.md`).
+
+**direction일 때**: 계획서를 쓴 뒤 사용자 승인 **전**에 지휘자가 제안하고, 사용자가 이 명령을 입력했을 때 돈다 (자동으로 부르지 않는다).
+- 2-2에서 `request.md`(이 작업에 대한 사용자 메시지 **원문 그대로**, 지휘자 요약 없이)와 계획서를 복사한다. 코드는 넣지 않는다 (필요하면 판단에 쓰인 자료만).
+- 2-1 지휘자 검토와 3 종합은 "요청 누락 · 범위 확장 · 더 단순한 길 · 되돌리기 어려운 결정 · 사용자에게 물을 것" 기준. 채택한 지적은 계획서 본문을 고치지 않고 사용자에게 보고해 `## 결정`으로 반영한다.
 
 1. diff가 있으면 대상 diff와 변경 의도를 파악한다. 의도가 불분명하면 커밋 메시지·주변 코드로 추론하고, 그래도 모르면 한 줄로 질문한다. / diff가 없으면(기존 코드 점검) 변경 의도 대신 "이 코드의 역할과 점검 목적"을 쓴다.
 2. **자체 검토** — `/cross-review` 2단계와 같다. 순서를 바꾸지 않는다.
@@ -19,8 +28,8 @@ argument-hint: [파일/커밋 범위, 비우면 현재 미커밋 변경]
    - **지휘자 추가**: 너만 찾은 것.
    - 작업 로그에 남긴다: 판정과 이유 · self-reviewer 지적 수 · 오탐(이미 정한 것을 문제로 지적) 수 · 대상 코드를 다시 전부 읽었는지.
    - 끝나면 `subagent_in/<날짜>_<주제>/`를 지운다.
-4. `record_verdicts`로 판정을 남긴다 (대시보드 판정 화면 — 에이전트 `self-reviewer`의 채택률·놓침).
-   - `runId`는 빼고 `selfReview`를 준다: `review` = self-reviewer 결과 **원문 그대로**, `intent` = 위임 메시지의 변경 의도·제약, `files`, `reason`, 작업 완료 알림의 `subagentTokens`·`toolUses`·`durationMs`. 서버가 self-review 실행 1건을 만들고 결과 첫 줄에 runId를 준다.
+4. `record_verdicts`로 판정을 남긴다 (대시보드 판정 화면 — 서브에이전트별 채택률·놓침).
+   - `runId`는 빼고 `selfReview`를 준다: `review` = 서브에이전트 결과 **원문 그대로**, `agent` = 고른 서브에이전트 이름(self-reviewer면 생략 가능), `intent` = 위임 메시지의 변경 의도·제약, `files`, `reason`, 작업 완료 알림의 `subagentTokens`·`toolUses`·`durationMs`. 서버가 실행 1건을 만들고 결과 첫 줄에 runId를 준다.
    - 판정할 지적이 하나도 없으면(self-reviewer·지휘자 모두 0) 기록하지 않는다. 같은 원문을 다시 보내면 서버가 앞 runId를 알려 주며 거절한다 (응답을 못 받아 다시 불러도 두 번 세지지 않음).
    - self-reviewer 지적: `steps: [1]`, `claudeAlsoFound`는 지휘자 검토에도 있었는지. 지휘자 추가: `steps` 없이, `reason` 맨 앞에 `[지휘자 추가]`.
    - `verdict`: adopted · partial · rejected · deferred · duplicate, 채택이 아니면 `reason` 필수. 하나라도 틀리면 실행 기록도 남지 않으니 고쳐 다시 부른다.

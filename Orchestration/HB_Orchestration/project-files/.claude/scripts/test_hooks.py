@@ -240,6 +240,22 @@ try:
     expect('H4 비고 칸의 폴더 밖 경로 (검사 대상 아님)', h3('review_main', tag, good + '## 비고\n- docs/worklog.md 는 받지 못함\n'), 0)
     expect('H4 읽은 파일의 설명 줄은 계속 막음 (10-22 실사용 차단 문구)', h3('review_main', tag, good + explain + '## 비고\n- 없음\n'), 2, 'subagent_in/ 밖')
     expect('H4 두 번째 읽은 파일 절의 폴더 밖 경로', h3('review_main', tag, good + '## 비고\n- 없음\n## 읽은 파일\n- docs/worklog.md:1-5\n'), 2, 'subagent_in/ 밖')
+    # 검토형 서브에이전트 추가 (계획서 2026-10-23_서브에이전트-종류-추가)
+    expect('H4 perf-reviewer 태그', h3('perf_main', '[ownReview:perf-reviewer] 이유', good), 0)
+    expect('H4 perf-reviewer 요약은 막음', h3('perf_main', '[ownReview:perf-reviewer] 이유', '## 지적\n- C1 요약'), 2, 'perf-reviewer 결과 원문이 아니다')
+    both = good + '\n' + good
+    expect('H4 두 서브에이전트 이어 붙임', h3('review_main', '[ownReview:self-reviewer+security-reviewer] 이유', both), 0)
+    expect('H4 두 서브에이전트인데 결과 하나', h3('review_main', '[ownReview:self-reviewer+security-reviewer] 이유', good), 2, "'## 지적' 절이 1개")
+    expect('H4 두 번째 결과의 폴더 밖 경로', h3('review_main', '[ownReview:self-reviewer+security-reviewer] 이유',
+                                          good + '\n' + good.replace('subagent_in/2026-10-19_x/a.cs', 'docs/worklog.md')), 2, 'subagent_in/ 밖')
+    expect('H4 모르는 서브에이전트', h3('review_main', '[ownReview:web-searcher] 이유', good), 2, '모른다')
+    expect('H4 겹친 이름', h3('review_main', '[ownReview:self-reviewer+self-reviewer] 이유', both), 2, '두 번')
+    # /self-review fffbc4440a 반영: 블록마다 원문 · 대소문자 · 들여쓴 제목
+    expect('H4 둘째 결과가 요약', h3('review_main', '[ownReview:self-reviewer+security-reviewer] 이유', good + '\n## 지적\n- C1 요약\n'), 2, '2번째 결과')
+    expect('H4 들여쓴 지적 줄은 절 아님', h3('review_main', '[ownReview:self-reviewer+security-reviewer] 이유', good + '\n  ## 지적\n'), 2, "'## 지적' 절이 1개")
+    expect('H4 소문자 접두어도 검사', h3('review_main', '[ownreview:self-reviewer] 이유', '## 지적\n- C1 요약'), 2, '결과 원문이 아니다')
+    expect('H4 대문자 이름 받음', h3('review_main', '[ownReview:Self-Reviewer] 이유', good), 0)
+    expect('H4 빈 태그', h3('review_main', '[ownReview:] 이유', good), 2, '모른다')
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

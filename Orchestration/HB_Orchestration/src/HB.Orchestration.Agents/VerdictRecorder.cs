@@ -27,7 +27,8 @@ public sealed record SelfReviewInfo(
     [property: Description("작업 완료 알림의 subagent_tokens (선택)")] long? SubagentTokens = null,
     [property: Description("작업 완료 알림의 tool_uses (선택)")] int? ToolUses = null,
     [property: Description("작업 완료 알림의 duration_ms (선택)")] long? DurationMs = null,
-    [property: Description("리뷰를 한 이유 한 줄 (선택)")] string? Reason = null);
+    [property: Description("리뷰를 한 이유 한 줄 (선택)")] string? Reason = null,
+    [property: Description("검토한 서브에이전트: self-reviewer(기본) · perf-reviewer · security-reviewer · direction-reviewer")] string? Agent = null);
 
 /// <summary>
 /// record_verdicts: 결과 종합 뒤 지적마다 판정을 verdicts.jsonl에 남긴다 (에이전트·모드별 채택률의 원본).
@@ -42,6 +43,9 @@ public static class VerdictRecorder
     public const string SelfReviewTool = "self_review";
     public const string SelfReviewRole = "SelfReviewer";
     public const string SelfReviewAgent = "self-reviewer";
+
+    /// <summary>selfReview.agent로 받는 검토형 서브에이전트 (계획서 2026-10-23_서브에이전트-종류-추가). 대시보드가 에이전트별 채택률을 낸다.</summary>
+    public static readonly IReadOnlyList<string> SelfReviewAgents = [SelfReviewAgent, "perf-reviewer", "security-reviewer", "direction-reviewer"];
     public const string SelfReviewProvider = "claude-subagent";
 
     /// <summary>같은 self-reviewer 원문을 중복으로 보는 기간 (일).</summary>
@@ -88,6 +92,9 @@ public static class VerdictRecorder
             return Fail + $"selfReview.review·intent는 각각 {maxReviewChars:N0}자 이내입니다 (review {info.Review.Length:N0}자 · intent {info.Intent.Length:N0}자).";
         if (info.Reason is { } r && maxReasonChars > 0 && r.Length > maxReasonChars)
             return Fail + $"selfReview.reason은 {maxReasonChars:N0}자 이내입니다 ({r.Length:N0}자).";
+        var agentName = string.IsNullOrWhiteSpace(info.Agent) ? SelfReviewAgent : info.Agent.Trim().ToLowerInvariant();
+        if (!SelfReviewAgents.Contains(agentName))
+            return Fail + $"selfReview.agent '{info.Agent}'는 {string.Join(" · ", SelfReviewAgents)} 중 하나여야 합니다.";
         if (CheckCount(items) is { } countError) return countError;
 
         // 응답을 못 받아 같은 원문으로 다시 부르면 같은 리뷰가 두 번 세진다 → 최근 기록에 같은 원문이 있으면 그 runId로 안내.
@@ -120,7 +127,7 @@ public static class VerdictRecorder
             Role = SelfReviewRole,
             Step = 1,
             Attempt = 1,
-            Agent = SelfReviewAgent,
+            Agent = agentName,
             Provider = SelfReviewProvider,
             Model = string.IsNullOrWhiteSpace(info.Model) ? "opus" : info.Model.Trim(),
             ProjectDir = Environment.CurrentDirectory,

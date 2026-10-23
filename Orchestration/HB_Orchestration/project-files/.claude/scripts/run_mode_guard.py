@@ -3,8 +3,10 @@
 - H3: mode가 review_main · review_high인데 프로젝트 안 docs/plans/에 오늘 날짜 이름이거나 오늘 고친 계획서(.md)가 없으면 막는다.
   CLAUDE.md "외부 에이전트 리뷰(review_* 모드)를 부르는 작업은 계획서. 없던 작업이면 리뷰 전에 만들고 '사후 작성' 표시".
   docs/plans/는 프로젝트 루트에서 깊이 4까지만 찾는다 (느려지지 않게).
-- H4: reason이 [ownReview:self-reviewer]로 시작하면 ownReview는 self-reviewer 결과 원문이어야 한다
-  (/cross-review 3단계 · /mode perf_* 3단계). '## 지적'·'## 읽은 파일' 절이 있고, 읽은 파일 줄이 모두 subagent_in/ 안이어야 통과.
+- H4: reason이 [ownReview:<서브에이전트>]로 시작하면 ownReview는 그 서브에이전트 결과 원문이어야 한다
+  (/cross-review 3단계 · /mode perf_* 3단계). 서브에이전트는 self-reviewer · perf-reviewer · security-reviewer, 둘 이상은
+  '+'로 잇고(예: [ownReview:self-reviewer+security-reviewer]) 결과도 이어 붙인다 — '## 지적' 절이 서브에이전트 수만큼 있어야 한다.
+  모르는 이름 · 겹친 이름이면 막는다 (계획서 2026-10-23_서브에이전트-종류-추가). '## 지적'·'## 읽은 파일' 절이 있고, 읽은 파일 줄이 모두 subagent_in/ 안이어야 통과.
   2026-10-19: 첫 호출이 거절된 뒤 재호출 때 원문 대신 요약을 넣은 적이 있다.
   '## 읽은 파일' 절이 여러 개면 모두 검사한다. '## 비고' 등 다른 절은 경로 검사를 하지 않는다 — 설명 줄은 '## 비고'에 쓰고
   '## 읽은 파일'의 설명 줄은 계속 막는다 (계획서 2026-10-22_self-reviewer-비고-칸, 느슨하게 만들지 않는다는 사용자 결정).
@@ -19,7 +21,10 @@ import re
 import sys
 
 PLAN_MODES = {'review_main', 'review_high'}
-SELF_REVIEW_TAG = '[ownReview:self-reviewer]'
+# ownReview를 쓸 수 있는 검토형 서브에이전트 (계획서 2026-10-23_서브에이전트-종류-추가). 둘 이상이면 '+'로 잇고, 결과 원문도 이어 붙인다.
+REVIEWERS = {'self-reviewer', 'perf-reviewer', 'security-reviewer'}
+# 접두어 · 이름 모두 대소문자를 무시한다 — [ownreview:…]로 쓰면 검사를 건너뛰던 빈틈 (/self-review fffbc4440a C5)
+OWN_REVIEW_TAG = re.compile(r'^\[ownReview:([^\]]*)\]', re.IGNORECASE)
 MAX_DEPTH = 4
 
 
@@ -102,6 +107,22 @@ def self_review_problem(own: str) -> str | None:
     return None
 
 
+def blocks_problem(own: str, agents: int) -> str | None:
+    """이어 붙인 결과를 '## 지적' 절 제목(줄 맨 앞)마다 서브에이전트 블록으로 나눠, 블록마다 원문 형식을 검사한다
+    (둘째 결과를 요약으로 바꿔도 통과하던 빈틈, /self-review fffbc4440a C1). 같은 원문을 두 번 붙인 것은 내용 비교 없이는 못 막는다."""
+    lines = own.replace('\r\n', '\n').split('\n')
+    starts = [i for i, l in enumerate(lines) if l.startswith('## ') and l.strip() == '## 지적']
+    if len(starts) < agents:
+        return f"태그의 서브에이전트 {agents}개인데 '## 지적' 절이 {len(starts)}개다 (결과 원문을 모두 이어 붙인다)"
+    if agents < 2:
+        return None
+    for n, start in enumerate(starts):
+        end = starts[n + 1] if n + 1 < len(starts) else len(lines)
+        if (problem := self_review_problem('\n'.join(lines[start:end]))) is not None:
+            return f'{n + 1}번째 결과: {problem}'
+    return None
+
+
 def check(data: dict, today: datetime.date | None = None) -> None:
     if data.get('tool_name') != 'mcp__hb-orchestration__run_mode':
         return
@@ -112,9 +133,16 @@ def check(data: dict, today: datetime.date | None = None) -> None:
     reason = (by_key.get('reason') or '').strip()
     own = by_key.get('ownreview') or ''
 
-    if reason.startswith(SELF_REVIEW_TAG) and (problem := self_review_problem(own)) is not None:
-        keys = '' if own else f" (받은 입력 키: {', '.join(sorted(ti))})"
-        deny(f'ownReview가 self-reviewer 결과 원문이 아니다: {problem}{keys}. /cross-review 3단계 · /mode 3단계: ownReview에는 self-reviewer 결과 원문만 넣는다.')
+    if tag := OWN_REVIEW_TAG.match(reason):
+        agents = [a.strip().lower() for a in tag.group(1).split('+')]
+        if unknown := [a for a in agents if a not in REVIEWERS]:
+            deny(f"reason 태그 '{tag.group(0)}'의 서브에이전트 '{unknown[0]}'를 모른다: {', '.join(sorted(REVIEWERS))} 중에서 '+'로 잇는다.")
+        if len(set(agents)) != len(agents):
+            deny(f"reason 태그 '{tag.group(0)}'에 같은 서브에이전트가 두 번 있다: 서브에이전트마다 한 번씩만 쓴다.")
+        problem = self_review_problem(own) or blocks_problem(own, len(agents))
+        if problem is not None:
+            keys = '' if own else f" (받은 입력 키: {', '.join(sorted(ti))})"
+            deny(f'ownReview가 {"+".join(agents)} 결과 원문이 아니다: {problem}{keys}. /cross-review 3단계 · /mode 3단계: ownReview에는 서브에이전트 결과 원문만 넣는다.')
 
     if mode in PLAN_MODES:
         root = os.environ.get('CLAUDE_PROJECT_DIR') or data.get('cwd') or os.getcwd()
