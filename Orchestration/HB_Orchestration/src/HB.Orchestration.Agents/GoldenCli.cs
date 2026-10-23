@@ -4,7 +4,7 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using HB.Orchestration.Shared;
-using PlanStep = (string Role, string Agent, string Model, HB.Orchestration.Shared.GuidelinesProvenance Guidelines, string? Effort);
+using PlanStep = (string Role, string Agent, string Model, HB.Orchestration.Shared.GuidelinesProvenance Guidelines, string? Effort, string? AppendSha256);
 
 namespace HB.Orchestration.Agents;
 
@@ -172,7 +172,7 @@ public static class GoldenCli
 
         output.WriteLine($"[골든 실행 계획] 사례 {plans.Count}개 · 폴더 {root}");
         foreach (var (c, mode, steps) in plans)
-            output.WriteLine($"  {c.Info.Id} ({c.Info.Kind}) · {mode}: {string.Join(" → ", steps.Select(s => $"{s.Role}@{s.Agent}({s.Model}{(s.Effort is null ? "" : $", 추론 {s.Effort}")}) [{GuidelinesText(s.Guidelines)}]"))} · 입력 {c.Input.Length:N0}자 · 기대 {c.Expected.Count} · 함정 {c.Traps.Count}");
+            output.WriteLine($"  {c.Info.Id} ({c.Info.Kind}) · {mode}: {string.Join(" → ", steps.Select(s => $"{s.Role}@{s.Agent}({s.Model}{(s.Effort is null ? "" : $", 추론 {s.Effort}")}) [{GuidelinesText(s.Guidelines)}{(s.AppendSha256 is { } ap ? $" · 모델별 덧붙임 {ap[..12]}" : "")}]"))} · 입력 {c.Input.Length:N0}자 · 기대 {c.Expected.Count} · 함정 {c.Traps.Count}");
         var chars = plans.Sum(p => p.Case.Input.Length);
         output.WriteLine($"  입력 합계 {chars:N0}자 (시스템 프롬프트 제외). 입력 토큰 추정 ≈ {chars / 3:N0} (글자 수 ÷ 3, 대략값)");
         foreach (var model in plans.SelectMany(p => p.Steps).Select(s => s.Model).Distinct())
@@ -233,7 +233,7 @@ public static class GoldenCli
 
             var step = steps[0];
             string? runId; StepResult? result; string? runError;
-            try { (runId, result, runError) = await runner.RunFixedPromptAsync(mode, c.Input, a.Agents, Tool, $"golden {c.Info.Id}", ct, a.NoGuidelines, step.Guidelines, a.Reasoning); }
+            try { (runId, result, runError) = await runner.RunFixedPromptAsync(mode, c.Input, a.Agents, Tool, $"golden {c.Info.Id}", ct, a.NoGuidelines, step.Guidelines, a.Reasoning, step.AppendSha256); }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 error.WriteLine($"[취소] {c.Info.Id} 실행 중 취소. 남은 사례는 돌리지 않았습니다.");
@@ -366,7 +366,7 @@ public static class GoldenCli
         try
         {
             (runId, results, runError) = await runner.RunFixedModeAsync(mode, c.Input, a.Agents, Tool, $"golden {c.Info.Id}", ct,
-                a.NoGuidelines, [.. steps.Select(s => (s.Agent, s.Guidelines))], requireSearchLast: true, a.Reasoning);
+                a.NoGuidelines, [.. steps.Select(s => (s.Agent, s.Guidelines, s.AppendSha256))], requireSearchLast: true, a.Reasoning);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

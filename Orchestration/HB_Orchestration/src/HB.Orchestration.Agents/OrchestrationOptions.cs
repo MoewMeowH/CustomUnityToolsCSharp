@@ -314,6 +314,8 @@ public sealed class ContextOptions
         // Claude Code·에이전트 설정과 지침
         "**/.claude/**", ".mcp.json", "CLAUDE.md", "CLAUDE.local.md", "REVIEW_GUIDELINES.md", "hb-modes.json",
         "AGENTS.md", "GEMINI.md", "**/.cursor/**",
+        // 모델별 프롬프트 덧붙임 (modes.json 옆 prompts/<역할>/<에이전트>.md — 계획서 2026-10-23_모델별-프롬프트-덧붙임)
+        "**/prompts/**",
         // 저장소·CI·git 훅
         "**/.github/**", ".gitattributes", ".gitmodules", "**/.husky/**", "**/.githooks/**", ".pre-commit-config.yaml",
         // IDE 실행 설정

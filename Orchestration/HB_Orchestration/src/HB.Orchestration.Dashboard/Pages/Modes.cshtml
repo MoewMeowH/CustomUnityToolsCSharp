@@ -84,6 +84,14 @@
         <span class="muted">수정 @snap.LastWriteLocal.ToString("MM-dd HH:mm:ss")</span>
         <a class="btn" href="/Modes">다시 불러오기</a>
     </div>
+    @* 모델별 덧붙임 (계획서 2026-10-23_모델별-프롬프트-덧붙임): 있을 때만 한 줄. 편집은 파일에서 직접 — 골든 사례가 있는 역할에만 둔다. *@
+    var appendPairs = HB.Orchestration.Agents.PromptAppendLoader.List(snap.ModesPath);
+    if (appendPairs.Count > 0)
+    {
+        <div class="filebar">
+            <span class="grow muted">모델별 덧붙임 (<span class="mono">@HB.Orchestration.Agents.PromptAppendLoader.RootFor(snap.ModesPath)</span>): <span class="mono">@string.Join(", ", appendPairs)</span></span>
+        </div>
+    }
 
     if (Model.OtherModes.Count > 0)
     {

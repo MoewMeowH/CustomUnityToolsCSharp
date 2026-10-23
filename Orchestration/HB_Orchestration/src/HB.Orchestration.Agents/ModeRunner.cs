@@ -218,11 +218,20 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             if (role.Output is not null && step.WebSearch is not null)
                 return (null, $"[모드 '{modeName}'] {step.Role}@{agentName}: 구조화 출력(Output)과 WebSearch는 함께 쓸 수 없습니다 (웹검색 경로는 구조화 출력을 지원하지 않음).");
 
+            // 모델별 덧붙임 (교체 뒤 에이전트 이름). 골든 --no-guidelines여도 붙인다 — 프로젝트 지침이 아니라 모델 버릇 (계획서 2026-10-23_모델별-프롬프트-덧붙임 결정 2).
+            PromptAppendLoader.Result? append;
+            try { append = PromptAppendLoader.Load(loaded.Path, step.Role, agent.Name); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return (null, $"[모델별 덧붙임 읽기 실패] {step.Role}@{agent.Name}: {ex.GetType().Name}: {ex.Message} 파일을 닫거나 확인한 뒤 다시 호출하세요.");
+            }
+
             // 시스템 프롬프트 = 역할 + 출력 형식(구조화 출력) + 공통 규칙 (+ 웹검색 규칙) (+ 지침). 매번 같은 앞부분이라 제공사 프롬프트 캐시에 걸린다.
+            // 모델별 덧붙임은 여기 넣지 않고 NewCall이 맨 마지막에 붙인다 (Debate 토론 규칙보다도 뒤 — /self-review f3ecfed5ff C3).
             var attach = role.UseGuidelines && !withoutGuidelines;
             plan.Add(new PlannedStep(step, agent,
                 role.Prompt + (role.Output?.PromptText ?? "") + Prompts.CommonRules + (step.WebSearch is null ? "" : Prompts.WebSearchRules) + (attach ? guidelines.Text : ""),
-                ProvenanceBuilder.ForStep(guidelines, role.UseGuidelines, skipped: withoutGuidelines), mode.PromptCache, role.Output));
+                ProvenanceBuilder.ForStep(guidelines, role.UseGuidelines, skipped: withoutGuidelines), mode.PromptCache, role.Output) { Append = append });
         }
 
         var (efforts, effortError) = ParseReasoningOverrides(reasoningOverrides, plan);
@@ -241,7 +250,8 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         {
             return ProvenanceBuilder.ForRun(
                 plan.Loaded, plan.Guidelines, plan.Steps.Any(p => p.Guidelines.Attached),
-                catalog.SettingsPath, catalog.SettingsBytes, catalog.ReloadError, Options.Records, runner.LogPath);
+                catalog.SettingsPath, catalog.SettingsBytes, catalog.ReloadError, Options.Records, runner.LogPath,
+                [.. plan.Steps.Where(p => p.Append is not null).Select(p => (p.Append!.Sha256, p.Append.Bytes))]);
         }
         catch (Exception ex)
         {
@@ -258,7 +268,8 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     /// (사례를 차례로 도는 수 분 사이에 지침 파일이 바뀌거나 사라지면 뒤쪽 사례가 말없이 다른 조건으로 돌지 않게).</param>
     public async Task<(string? RunId, StepResult? Result, string? Error)> RunFixedPromptAsync(
         string modeName, string prompt, IReadOnlyList<string>? agentOverrides, string tool, string reason, CancellationToken ct,
-        bool withoutGuidelines = false, GuidelinesProvenance? expectedGuidelines = null, IReadOnlyList<string>? reasoningOverrides = null)
+        bool withoutGuidelines = false, GuidelinesProvenance? expectedGuidelines = null, IReadOnlyList<string>? reasoningOverrides = null,
+        string? expectedAppendSha256 = null)
     {
         var (plan, error) = PlanFixedPrompt(modeName, agentOverrides, prompt.Length, withoutGuidelines, reasoningOverrides);
         if (error is not null) return (null, null, error);
@@ -266,6 +277,9 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         var now = plan!.Steps[0].Guidelines;
         if (expectedGuidelines is not null && (now.Attached != expectedGuidelines.Attached || now.Sha256 != expectedGuidelines.Sha256))
             return (null, null, $"{GuidelinesChanged} 실행 전 확인: {Describe(expectedGuidelines)} / 지금: {Describe(now)}");
+        // 실행 전 확인을 줬으면(골든) 모델별 덧붙임도 같아야 한다 — 없음 → 없음 포함
+        if (expectedGuidelines is not null && plan.Steps[0].Append?.Sha256 != expectedAppendSha256)
+            return (null, null, $"{GuidelinesChanged} 모델별 덧붙임: 실행 전 확인 {expectedAppendSha256?[..12] ?? "없음"} / 지금 {plan.Steps[0].Append?.Sha256[..12] ?? "없음"}");
 
         var runId = Guid.NewGuid().ToString("N")[..10];
         var meta = new CallMeta(null, []) { Reason = reason, Provenance = RunProvenance(plan!) };
@@ -283,7 +297,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     /// </summary>
     public async Task<(string? RunId, List<StepResult>? Results, string? Error)> RunFixedModeAsync(
         string modeName, string input, IReadOnlyList<string>? agentOverrides, string tool, string reason, CancellationToken ct,
-        bool withoutGuidelines = false, IReadOnlyList<(string Agent, GuidelinesProvenance Guidelines)>? expected = null, bool requireSearchLast = false,
+        bool withoutGuidelines = false, IReadOnlyList<(string Agent, GuidelinesProvenance Guidelines, string? AppendSha256)>? expected = null, bool requireSearchLast = false,
         IReadOnlyList<string>? reasoningOverrides = null)
     {
         var (plan, error) = PlanFixedMode(modeName, agentOverrides, input.Length, withoutGuidelines, requireSearchLast, reasoningOverrides);
@@ -300,6 +314,8 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
                     return (null, null, $"{GuidelinesChanged} 단계 {i + 1} 에이전트: 실행 전 확인 {was.Agent} / 지금 {now.Agent.Name} (modes.json이 바뀜)");
                 if (now.Guidelines.Attached != was.Guidelines.Attached || now.Guidelines.Sha256 != was.Guidelines.Sha256)
                     return (null, null, $"{GuidelinesChanged} 단계 {i + 1}: 실행 전 확인: {Describe(was.Guidelines)} / 지금: {Describe(now.Guidelines)}");
+                if (now.Append?.Sha256 != was.AppendSha256)
+                    return (null, null, $"{GuidelinesChanged} 단계 {i + 1} 모델별 덧붙임: 실행 전 확인 {was.AppendSha256?[..12] ?? "없음"} / 지금 {now.Append?.Sha256[..12] ?? "없음"}");
             }
         }
 
@@ -310,12 +326,12 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     }
 
     /// <summary>RunFixedModeAsync의 실행 전 확인: 단계마다 역할·에이전트·모델·지침. 외부 호출 없음.</summary>
-    public (IReadOnlyList<(string Role, string Agent, string Model, GuidelinesProvenance Guidelines, string? Effort)>? Steps, string? Error) PreviewFixedMode(
+    public (IReadOnlyList<(string Role, string Agent, string Model, GuidelinesProvenance Guidelines, string? Effort, string? AppendSha256)>? Steps, string? Error) PreviewFixedMode(
         string modeName, IReadOnlyList<string>? agentOverrides, int inputLength, bool withoutGuidelines = false, bool requireSearchLast = false,
         IReadOnlyList<string>? reasoningOverrides = null)
     {
         var (plan, error) = PlanFixedMode(modeName, agentOverrides, inputLength, withoutGuidelines, requireSearchLast, reasoningOverrides);
-        return error is not null ? (null, error) : ([.. plan!.Steps.Select(s => (s.Def.Role, s.Agent.Name, s.Agent.Model, s.Guidelines, s.EffortName))], null);
+        return error is not null ? (null, error) : ([.. plan!.Steps.Select(s => (s.Def.Role, s.Agent.Name, s.Agent.Model, s.Guidelines, s.EffortName, s.Append?.Sha256))], null);
     }
 
     /// <summary>
@@ -460,10 +476,12 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
                       (skipped.Count > 0 ? $" · 보내지 않은 요청 {string.Join(", ", skipped)}" : "") + ")");
             notes.Add($"(판정은 {newStep}단계 지적 기준 — {followUp.Step}단계의 같은 지적은 duplicate로. record_verdicts에 보충한 요청은 supplied" +
                       (skipped.Count > 0 ? ", 보내지 않은 요청은 이유와 함께 declined·deferred로 남기고 사용자에게 알린다)" : ")"));
-            // 시스템 프롬프트를 지금 설정으로 다시 조립했으므로 원래 호출과 다르면 알린다 (역할 프롬프트·지침이 그 사이 바뀜).
+            // 시스템 프롬프트를 지금 설정으로 다시 조립했으므로 원래 호출과 다르면 알린다 (역할 프롬프트·지침·모델별 덧붙임이 그 사이 바뀜).
             var rec = CallLog.ReadAll(runner.LogPath).LastOrDefault(r => r.RunId == runId && r.Step == newStep);
             if (original.Provenance?.InstructionsSha256 is { } was && rec?.Provenance?.InstructionsSha256 is { } now && was != now)
-                notes.Add("(주의: 시스템 프롬프트가 원래 실행 때와 다르다 — 그 사이 역할 프롬프트·지침이 바뀌었다)");
+                notes.Add(original.Provenance?.Append?.Sha256 != rec.Provenance?.Append?.Sha256
+                    ? "(주의: 시스템 프롬프트가 원래 실행 때와 다르다 — 그 사이 모델별 덧붙임이 바뀌었다)"
+                    : "(주의: 시스템 프롬프트가 원래 실행 때와 다르다 — 그 사이 역할 프롬프트·지침이 바뀌었다)");
             return ResultFormatter.Format(runId, [result], returnAll: true, string.Join("\n", notes));
         }
         finally
@@ -480,13 +498,13 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     /// 실행 때와 같은 검사(모드·에이전트·구조화 출력·입력 상한)를 해서, 통과하면 실행도 설정 이유로는 거절되지 않는다.
     /// Guidelines는 이 단계에 지침이 붙는지 (골든 실행이 지침 없이 도는 것을 실행 전에 알리려고).
     /// </summary>
-    public ((string Role, string Agent, string Model, GuidelinesProvenance Guidelines, string? Effort)? Step, string? Error) PreviewFixedPrompt(
+    public ((string Role, string Agent, string Model, GuidelinesProvenance Guidelines, string? Effort, string? AppendSha256)? Step, string? Error) PreviewFixedPrompt(
         string modeName, IReadOnlyList<string>? agentOverrides, int promptLength, bool withoutGuidelines = false, IReadOnlyList<string>? reasoningOverrides = null)
     {
         var (plan, error) = PlanFixedPrompt(modeName, agentOverrides, promptLength, withoutGuidelines, reasoningOverrides);
         if (error is not null) return (null, error);
         var s = plan!.Steps[0];
-        return ((s.Def.Role, s.Agent.Name, s.Agent.Model, s.Guidelines, s.EffortName), null);
+        return ((s.Def.Role, s.Agent.Name, s.Agent.Model, s.Guidelines, s.EffortName, s.Append?.Sha256), null);
     }
 
     /// <summary>RunFixedPromptAsync가 지침이 실행 전 확인과 달라 호출하지 않았을 때 오류 문구의 머리.</summary>
@@ -534,14 +552,20 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         /// <summary>이번 실행의 추론 강도 덮어쓰기. null이면 에이전트 설정.</summary>
         public ReasoningEffort? Reasoning { get; init; }
 
+        /// <summary>붙인 모델별 덧붙임. 없으면 null.</summary>
+        public PromptAppendLoader.Result? Append { get; init; }
+
         /// <summary>실제로 보낼 추론 강도 이름 (표시용). null이면 보내지 않음.</summary>
         public string? EffortName => (Reasoning ?? Agent.Reasoning) is { } e ? AgentSettings.EffortName(e) : null;
     }
 
-    /// <summary>단계 호출. 실행 단위 Provenance에 이 단계의 지침 표시를 얹는다 (Instructions 해시는 AgentRunner가 보낼 문자열로 계산).</summary>
+    /// <summary>
+    /// 단계 호출. 실행 단위 Provenance에 이 단계의 지침 · 덧붙임 표시를 얹는다 (Instructions 해시는 AgentRunner가 보낼 문자열로 계산).
+    /// 모델별 덧붙임은 여기서 시스템 프롬프트 맨 끝에 붙인다 — 흐름별 규칙(토론 규칙 등)이 붙은 뒤.
+    /// </summary>
     private StepCall NewCall(string runId, string mode, int step, PlannedStep p, string instructions, BuiltPrompt prompt, CallMeta meta) =>
-        new(runId, mode, step, p.Def.Role, p.Agent, instructions, prompt.Text,
-            meta with { Provenance = (meta.Provenance ?? new CallProvenance()) with { Guidelines = p.Guidelines } })
+        new(runId, mode, step, p.Def.Role, p.Agent, instructions + (p.Append?.Text ?? ""), prompt.Text,
+            meta with { Provenance = (meta.Provenance ?? new CallProvenance()) with { Guidelines = p.Guidelines, Append = p.Append?.Provenance } })
         {
             Checks = Options.ResponseChecks,
             ContextPrefix = prompt.ContextPrefix,
@@ -808,6 +832,10 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
 
         // run_mode의 agents 교체에 쓸 수 있는 이름 목록 (짧게)
         sb.AppendLine("에이전트: " + string.Join(", ", catalog.Agents.Select(a => $"{a.Name}({a.Model}{(a.Reasoning is { } e ? $", 추론 {AgentSettings.EffortName(e)}" : "")})")));
+
+        // 모델별 덧붙임이 붙는 (역할, 에이전트). 있을 때만 (없으면 출력이 이전과 같다). 골든 사례가 있는 역할에만 두는 규칙은 보이게만 한다.
+        if (PromptAppendLoader.List(loaded.Path) is { Count: > 0 } appends)
+            sb.AppendLine("모델별 덧붙임: " + string.Join(", ", appends));
 
         // context의 "@이름/…"에 쓸 추가 루트. 등록이 있을 때만, 경로 없이 이름만 (비어 있으면 출력이 이전과 같다).
         // 잘못된 항목은 경고로만 알리고, 그 루트를 참조한 호출만 거절된다.

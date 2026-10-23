@@ -14,9 +14,11 @@ public static partial class ProvenanceBuilder
 
     /// <summary>실행 단위 값: modes.json · 서버 설정 · 지침 원문 저장. 단계별 Guidelines·Instructions는 비어 있다.</summary>
     /// <param name="settingsBytes">적용 중인 설정을 읽을 때 함께 읽은 바이트 (<see cref="AgentCatalog.SettingsBytes"/>). 여기서 파일을 다시 읽지 않는다.</param>
+    /// <param name="appends">단계마다 붙인 모델별 덧붙임 원본 (원문 저장용, 같은 해시는 한 번만 저장된다).</param>
     public static CallProvenance ForRun(
         ModeStore.Loaded modes, GuidelinesLoader.Result guidelines, bool guidelinesUsed,
-        string? settingsPath, byte[]? settingsBytes, string? settingsReloadError, RecordsOptions records, string callLogPath)
+        string? settingsPath, byte[]? settingsBytes, string? settingsReloadError, RecordsOptions records, string callLogPath,
+        IReadOnlyList<(string Sha256, byte[] Bytes)>? appends = null)
     {
         var errors = new List<string>();
 
@@ -35,6 +37,7 @@ public static partial class ProvenanceBuilder
 
         Store("modes", modes.Sha256, modes.Bytes);
         if (guidelinesUsed && guidelines.Bytes is { } g && guidelines.Sha256 is { } gSha) Store("guidelines", gSha, g);
+        foreach (var (sha, bytes) in appends ?? []) Store("append", sha, bytes);
 
         var settings = Settings(settingsPath, settingsBytes, settingsReloadError, records, errors, Store);
 

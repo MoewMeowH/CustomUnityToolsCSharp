@@ -14,6 +14,13 @@ public sealed record CallProvenance
 
     public GuidelinesProvenance? Guidelines { get; init; }
 
+    /// <summary>
+    /// 이 단계의 모델별 덧붙임 파일 (prompts/&lt;역할&gt;/&lt;에이전트&gt;.md, 원본 바이트 해시). 붙이지 않았으면 null
+    /// (계획서 2026-10-23_모델별-프롬프트-덧붙임).
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public FileProvenance? Append { get; init; }
+
     /// <summary>실행 시점 modes.json 원본 바이트.</summary>
     public FileProvenance? Modes { get; init; }
 

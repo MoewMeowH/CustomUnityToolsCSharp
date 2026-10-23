@@ -15,7 +15,7 @@ public static class ProvenanceView
 
         var rows = new List<ProvenanceRow>
         {
-            new("시스템 프롬프트", null, p.InstructionsSha256, p.InstructionsBytes, "역할 + 공통 규칙 + 지침 (에이전트에 넘긴 문자열 그대로)", Has(p.InstructionsSha256)),
+            new("시스템 프롬프트", null, p.InstructionsSha256, p.InstructionsBytes, "역할 + 공통 규칙 + 지침 (+ 모델별 덧붙임) (에이전트에 넘긴 문자열 그대로)", Has(p.InstructionsSha256)),
         };
 
         var g = p.Guidelines;
@@ -24,6 +24,10 @@ public static class ProvenanceView
             : g.Attached
                 ? new("리뷰 지침", g.Path, g.Sha256, g.Bytes, "붙임 (원본 파일 바이트)", Has(g.Sha256))
                 : new("리뷰 지침", null, null, null, $"붙이지 않음 — {g.Reason}", false));
+
+        // 모델별 덧붙임은 붙였을 때만 한 줄 (예전 기록 · 덧붙임 없는 호출은 줄 없음)
+        if (p.Append is { } a)
+            rows.Add(new("모델별 덧붙임", a.Path, a.Sha256, a.Bytes, "시스템 프롬프트 맨 끝에 붙임 (원본 파일 바이트)", Has(a.Sha256)));
 
         rows.Add(p.Modes is { } m
             ? new("modes.json", m.Path, m.Sha256, m.Bytes, null, Has(m.Sha256))
@@ -43,6 +47,7 @@ public static class ProvenanceView
     {
         if (p.InstructionsSha256 is { } i) yield return i;
         if (p.Guidelines is { Attached: true, Sha256: { } g }) yield return g;
+        if (p.Append?.Sha256 is { } a) yield return a;
         if (p.Modes?.Sha256 is { } m) yield return m;
         if (p.Settings is { Stored: true, Sha256: { } s }) yield return s;
     }
