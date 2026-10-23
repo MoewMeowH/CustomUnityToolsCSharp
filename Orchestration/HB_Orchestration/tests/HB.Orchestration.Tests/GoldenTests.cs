@@ -251,6 +251,10 @@ public sealed class GoldenTests
         Assert.Null(error);
         Assert.Equal(("1-F1", "A.cs", (int?)3), (findings[0].Id, findings[0].File, findings[0].Line));
 
+        // DeepSeek 앞부분 깨짐도 JSON으로 읽는다 (2026-10-20 8647dee8c2 · 4c125d11ce)
+        Assert.Single(GoldenScorer.ReadFindings("hink>" + json).Findings);
+        Assert.Single(GoldenScorer.ReadFindings(json[1..]).Findings);
+
         Assert.NotNull(GoldenScorer.ReadFindings("자유 텍스트 리뷰").Error);
         var none = GoldenScorer.ReadFindings("## 지적\n문제 없음\n");
         Assert.Null(none.Error);

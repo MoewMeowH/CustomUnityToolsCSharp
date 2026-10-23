@@ -48,6 +48,25 @@ public sealed class StructuredOutputTests
         Assert.Single(s.Findings);
     }
 
+    [Fact]
+    public void DeepSeek_broken_starts_are_read_and_missing_brace_is_marked()
+    {
+        // 2026-10-20 실제 모양: 추론 태그 조각이 앞에 붙음(8647dee8c2) · 여는 { 빠짐(4c125d11ce, 이전엔 "JSON 객체가 아님")
+        var fragment = Parse($$"""hink>{"findings":[{{Finding()}}],"needsInfo":[]}""");
+        Assert.True(fragment.Parsed);
+        Assert.Null(fragment.Repaired);
+        Assert.Single(fragment.Findings);
+
+        var noBrace = Parse("\"findings\":[" + Finding("minor") + "," + Finding("major") + "],\"needsInfo\":[]}");
+        Assert.True(noBrace.Parsed);
+        Assert.Equal("여는 { 누락", noBrace.Repaired);
+        Assert.Equal(["1-F1", "1-F2"], noBrace.Findings.Select(f => f.Id));
+
+        Assert.Null(Parse($$"""{"findings":[{{Finding()}}],"needsInfo":[]}""").Repaired);
+        // '{'가 "findings" 앞에 있는데 깨진 것은 고치지 않는다
+        Assert.False(Parse($$"""{ x "findings":[{{Finding()}}]}""").Parsed);
+    }
+
     [Theory]
     [InlineData("그냥 텍스트", "JSON 객체가 아님")]
     [InlineData("""{"needsInfo":[]}""", "findings 배열이 없음")]

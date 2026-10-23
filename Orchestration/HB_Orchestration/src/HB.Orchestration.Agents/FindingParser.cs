@@ -23,7 +23,7 @@ public static class FindingParser
             Error = cut is null ? why : $"{cut} · {why}",
         };
 
-        var (root, readError) = ReadJson(text);
+        var (root, readError, repaired) = ReadJson(text);
         if (root is null) return Failed(readError!);
         using (root)
         {
@@ -90,6 +90,7 @@ public static class FindingParser
                 State = cut is not null ? OutputStates.Incomplete : needsInfo.Count > 0 ? OutputStates.NeedsInfo : OutputStates.Complete,
                 Error = cut,
                 RequestedBy = requestedBy,
+                Repaired = repaired,
                 Findings = ordered,
                 NeedsInfo = needsInfo,
                 Requests = requests,
@@ -103,17 +104,22 @@ public static class FindingParser
     /// <summary>
     /// JSON 객체로 읽는다. 문법 오류일 때만(코드 펜스·앞뒤 문장) 첫 '{'부터 마지막 '}'까지로 다시 시도한다.
     /// 올바른 JSON인데 최상위가 객체가 아니면(배열 등) 그 안을 뒤지지 않고 실패다 (review 0888cb5f87).
+    /// 그래도 실패하고 "findings" 앞에 '{'가 없으면 여는 '{'를 붙여 한 번 더 — DeepSeek이 추론→본문 경계에서 '{'를 빠뜨린 경우
+    /// (2026-10-20 4c125d11ce, 258건 중 1건). 이때 Repaired로 표시한다 (조용히 고치지 않게).
     /// </summary>
-    private static (JsonDocument? Doc, string? Error) ReadJson(string text)
+    private static (JsonDocument? Doc, string? Error, string? Repaired) ReadJson(string text)
     {
         var t = text.Trim();
         var (direct, valid) = TryParse(t);
-        if (direct is not null) return (direct, null);
-        if (valid) return (null, "최상위가 JSON 객체가 아님");
+        if (direct is not null) return (direct, null, null);
+        if (valid) return (null, "최상위가 JSON 객체가 아님", null);
         var start = t.IndexOf('{');
         var end = t.LastIndexOf('}');
-        if (start >= 0 && end > start && TryParse(t[start..(end + 1)]) is { Doc: { } inner }) return (inner, null);
-        return (null, "JSON 객체가 아님");
+        if (start >= 0 && end > start && TryParse(t[start..(end + 1)]) is { Doc: { } inner }) return (inner, null, null);
+        var key = t.IndexOf("\"findings\"", StringComparison.Ordinal);
+        if (key >= 0 && (start < 0 || start > key) && end > key && TryParse("{" + t[key..(end + 1)]) is { Doc: { } fixedDoc })
+            return (fixedDoc, null, "여는 { 누락");
+        return (null, "JSON 객체가 아님", null);
 
         static (JsonDocument? Doc, bool Valid) TryParse(string s)
         {

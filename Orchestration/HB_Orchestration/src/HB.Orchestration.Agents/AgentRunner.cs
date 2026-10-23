@@ -292,6 +292,8 @@ public sealed class AgentRunner
                     call.OutputMode == StructuredOutputMode.Schema ? "schema" : "prompt");
                 if (structured.Parsed) text = FindingRenderer.Render(structured);
                 else structuredWarning = $"[경고] 구조화 출력 해석 실패 ({structured.Error}) — 원문을 그대로 전달";
+                if (structured is { Parsed: true, Repaired: { } fix })
+                    structuredWarning = $"[경고] 구조화 출력 보정: {fix} — 원문을 고쳐 읽었다 (원문은 호출 기록에)";
             }
 
             var warnings = CheckWarnings(call, text, response.FinishReason, outTokens);

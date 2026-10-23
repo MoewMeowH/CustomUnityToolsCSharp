@@ -37,6 +37,10 @@ public sealed record StructuredOutputRecord
     /// <summary>요청 방식: "schema"(response_format 강제) 또는 "prompt"(프롬프트로만 요청).</summary>
     public required string RequestedBy { get; init; }
 
+    /// <summary>원문을 고쳐서 읽었으면 그 내용 (예: "여는 { 누락"). 고치지 않았으면 null (계획서 2026-10-23_DeepSeek-응답-앞부분-깨짐).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Repaired { get; init; }
+
     public IReadOnlyList<FindingRecord> Findings { get; init; } = [];
 
     /// <summary>자료 부족 문장 (요청마다 What). 예전 기록·대시보드 호환용으로 남긴다.</summary>

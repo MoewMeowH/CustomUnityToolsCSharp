@@ -344,7 +344,10 @@ public static class GoldenScorer
     public static (List<GoldenFinding> Findings, string? Error) ReadFindings(string text)
     {
         var trimmed = text.TrimStart();
-        if (trimmed.StartsWith('{') || trimmed.StartsWith("```json", StringComparison.Ordinal))
+        // 앞에 조각이 붙은 JSON(DeepSeek "hink>{…", 2026-10-20 8647dee8c2)도 JSON으로 — "findings"가 있고 마크다운 '## 지적' 절이 없으면.
+        var looksJson = trimmed.Contains("\"findings\"", StringComparison.Ordinal)
+                        && !text.Replace("\r\n", "\n").Split('\n').Any(l => l.TrimStart().StartsWith("## 지적", StringComparison.Ordinal));
+        if (trimmed.StartsWith('{') || trimmed.StartsWith("```json", StringComparison.Ordinal) || looksJson)
         {
             var parsed = FindingParser.Parse(FindingFormat.Findings, 1, text, null, "file");
             return parsed.Parsed
