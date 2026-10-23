@@ -208,6 +208,22 @@ public sealed class FollowUpTests
         Assert.Contains("자료 요청의 verdict 'adopted'", VerdictRecorder.Record(runId, [new VerdictItem("1-N1", null, "adopted", FindingIds: ["1-N1"])], 500, h.LogPath));
         Assert.Contains("섞을 수 없습니다", VerdictRecorder.Record(runId, [new VerdictItem("k", null, "supplied", FindingIds: ["1-N1", "1-F1"])], 500, h.LogPath));
         Assert.Contains("verdict 'supplied'", VerdictRecorder.Record(runId, [new VerdictItem("1-F1", null, "supplied", FindingIds: ["1-F1"])], 500, h.LogPath));
+        Assert.DoesNotContain("findingIds에 요청 ID", VerdictRecorder.Record(runId, [new VerdictItem("1-F1", null, "supplied", FindingIds: ["1-F1"])], 500, h.LogPath));
+    }
+
+    [Fact]
+    public async Task Request_verdict_without_finding_ids_points_to_finding_ids()
+    {
+        // 2026-10-22 · 10-23 두 번: findingKey에만 요청 ID를 넣어 지적으로 검사돼 거절됨 → 안내를 붙인다 (동작은 그대로)
+        var (h, runId) = await FirstRun();
+        using var _ = h;
+        const string hint = "자료 요청 처리는 findingIds에 요청 ID를 넣으세요";
+
+        Assert.Contains(hint, VerdictRecorder.Record(runId, [new VerdictItem("1-N1", "요청", "declined", Reason: "사내")], 500, h.LogPath));
+        Assert.Contains(hint, VerdictRecorder.Record(runId, [new VerdictItem("my-key", "요청", "supplied")], 500, h.LogPath));
+        Assert.Contains(hint, VerdictRecorder.Record(runId, [new VerdictItem("1-N2", "요청", "bogus", Reason: "x")], 500, h.LogPath));
+        Assert.DoesNotContain(hint, VerdictRecorder.Record(runId, [new VerdictItem("my-key", "지적", "bogus", Reason: "x")], 500, h.LogPath));
+        Assert.Empty(VerdictLog.ReadAll(VerdictLog.PathFor(h.LogPath)));
     }
 
     [Fact]

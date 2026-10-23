@@ -7,13 +7,13 @@ namespace HB.Orchestration.Agents;
 public sealed record VerdictItem(
     [property: Description("실행 안에서 지적을 구별하는 짧은 키. 같은 키로 다시 쓰면 앞 판정을 대체. 권장: 첫 지적 ID")] string FindingKey,
     [property: Description("지적 한 줄 요약. findingIds를 주면 비워도 됨")] string? Summary,
-    [property: Description("adopted · partial · rejected · deferred · duplicate")] string Verdict,
+    [property: Description("지적: adopted · partial · rejected · deferred · duplicate. 자료 요청(findingIds에 1-N1): supplied · declined · deferred")] string Verdict,
     [property: Description("이 지적을 낸 단계 번호들. 비우면 Claude만 지적")] int[]? Steps = null,
     [property: Description("판정 근거. adopted가 아니면 필수")] string? Reason = null,
     [property: Description("high · medium · low (선택)")] string? Severity = null,
     [property: Description("ownReview에도 있던 지적인지")] bool ClaudeAlsoFound = false,
     [property: Description("관련 파일 path 또는 path:line (선택)")] string? File = null,
-    [property: Description("구조화 결과의 지적 ID (예: 1-F2). 주면 steps·summary·file·severity를 채운다")] string[]? FindingIds = null);
+    [property: Description("구조화 결과의 지적 ID (예: 1-F2) 또는 자료 요청 ID (예: 1-N1). 주면 steps·summary·file·severity를 채운다. 요청 처리는 반드시 여기에 요청 ID (findingKey만으로는 지적으로 검사됨)")] string[]? FindingIds = null);
 
 /// <summary>
 /// /self-review의 self-reviewer 실행 (record_verdicts에 runId 대신 준다). 서버가 calls.jsonl에 실행 1건(단계 1 = self-reviewer)을 만든다.
@@ -202,7 +202,8 @@ public static class VerdictRecorder
             var allowed = kinds[i] ? Verdicts.ForRequests : Verdicts.All;
             var free = kinds[i] ? Verdicts.Supplied : Verdicts.Adopted; // reason 없이 쓸 수 있는 판정
             if (verdict is null || !allowed.Contains(verdict))
-                errors.Add($"{at}: {(kinds[i] ? "자료 요청의 " : "")}verdict '{it.Verdict}'는 {string.Join(" · ", allowed)} 중 하나여야 합니다.");
+                errors.Add($"{at}: {(kinds[i] ? "자료 요청의 " : "")}verdict '{it.Verdict}'는 {string.Join(" · ", allowed)} 중 하나여야 합니다." +
+                           (RequestHint(original, verdict, kinds[i], requests) ? " 자료 요청 처리는 findingIds에 요청 ID를 넣으세요 (예: findingIds [\"1-N1\"])." : ""));
             else if (verdict != free && string.IsNullOrWhiteSpace(it.Reason))
                 errors.Add($"{at}: {Verdicts.Label(verdict)}({verdict})은 reason이 필수입니다.");
             if (it.Reason is not null && maxReasonChars > 0 && it.Reason.Length > maxReasonChars)
@@ -281,6 +282,14 @@ public static class VerdictRecorder
                (requestCount > 0 ? $" · 자료 요청 처리 {requestCount}" : "") +
                $" (runId {runId})";
     }
+
+    /// <summary>
+    /// 지적으로 검사돼 거절된 항목이 사실 자료 요청 처리였을 것 같으면 true: findingIds 없이 요청용 verdict를 썼거나 findingKey가 요청 ID.
+    /// 안내만 한다 — 자동으로 요청 처리로 바꾸면 우연히 같은 키를 쓴 지적의 판정 종류가 조용히 바뀐다 (계획서 2026-10-23_record_verdicts-자료요청-안내).
+    /// </summary>
+    private static bool RequestHint(VerdictItem it, string? verdict, bool isRequest, IReadOnlyDictionary<string, InfoRequest> requests) =>
+        !isRequest && it.FindingIds is not { Length: > 0 }
+        && (verdict is Verdicts.Supplied or Verdicts.Declined || (it.FindingKey is { } key && requests.ContainsKey(key.Trim())));
 
     /// <summary>findingIds가 모두 자료 요청 ID면 true. 지적 ID와 섞이면 오류 (판정 종류가 다르다).</summary>
     private static bool IsRequestItem(VerdictItem it, IReadOnlyDictionary<string, InfoRequest> requests, List<string> errors, int n)
