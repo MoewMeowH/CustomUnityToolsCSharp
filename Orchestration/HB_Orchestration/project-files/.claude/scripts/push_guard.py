@@ -189,7 +189,7 @@ def check(data: dict) -> None:
     if tool not in ('Bash', 'PowerShell'):
         return
     shell = shell_of(tool)
-    cmd = strip_bodies((data.get('tool_input') or {}).get('command') or '')
+    cmd = strip_bodies((data.get('tool_input') or {}).get('command') or '', shell)
     stripped, inner = scan(cmd, shell)
     if not ROUGH.search(stripped + '\n' + '\n'.join(inner)):
         return

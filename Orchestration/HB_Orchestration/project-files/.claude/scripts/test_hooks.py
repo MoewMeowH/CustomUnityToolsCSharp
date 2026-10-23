@@ -72,6 +72,45 @@ expect('H1 끝 표시 없는 heredoc 은 본문을 지우지 않음', h1("cat > 
 expect('H1 따옴표 안 <<EOF 는 heredoc 아님', h1('echo "a<<EOF b"\nrm -rf x'), 2)
 expect('H1 here-string <<< 는 heredoc 아님', h1('cat <<< "x"\nrm -rf x'), 2)
 expect('H1 PowerShell here-string 본문', h1("git commit -m @'\nrm -rf 정리 규칙\n'@", 'PowerShell'), 0)
+# 따옴표 짝 · 주석 · heredoc 경계 (계획서 2026-10-23_H5-셸-문법-우회 — 이전 판 실측 exit 0)
+expect('H1 주석 속 따옴표로 숨긴 rm', h1("ls # '\nrm -rf build\n'"), 2, '묶여')
+expect("H1 $'…'로 숨긴 rm", h1("echo $'\\'' ; rm -rf build ; 'z'"), 2, '묶여')
+expect('H1 따옴표 없는 heredoc 속 $()', h1('cat <<EOF\n$(rm -rf build)\nEOF'), 2, '명령 치환')
+expect('H1 PowerShell 굽은 따옴표로 숨긴 삭제', h1("echo 'a’; Remove-Item -Recurse -Force x; ‘'", 'PowerShell'), 2)
+expect('H1 $#는 주석 아님', h1('echo $#; rm -rf x'), 2, '묶여')
+expect('H1 ${#a}는 주석 아님', h1('echo ${#a}; rm -rf x'), 2, '묶여')
+expect('H1 커밋 "$(cat heredoc)" 본문의 rm -rf 는 명령 아님', h1("git commit -m \"$(cat <<'EOF'\nrm -rf 정리 (don't)\nEOF\n)\""), 0)
+# /cross-review 8722c947f7 반영 (bash · PowerShell 실측과 같게)
+for name, cmd, tool in [
+    ('$( ) 뒤 #는 낱말의 일부 (bash)', 'echo $(true)#; rm -rf x', 'Bash'),
+    ('<<<의 둘째 <는 heredoc 아님', 'cat <<<true\nrm -rf build\ntrue', 'Bash'),
+    ('이스케이프 공백 뒤 #는 낱말 가운데', 'echo \\ #; rm -rf build', 'Bash'),
+    ('끝 표시 뒤 공백 줄은 끝 아님', "cat <<'EOF'\nEOF \n'\nEOF\nrm -rf build\n# '\n", 'Bash'),
+    ("끝 표시 이어 붙임 <<E'OF'", "cat <<E'OF'\nEOF\nrm -rf x\nE", 'Bash'),
+    ('> 뒤 #는 주석', "echo hi >#'\nrm -rf build\n'", 'Bash'),
+    ('산술 << 는 heredoc 아님', 'y=1; echo $(( 1<<y ))\nrm -rf x\ny', 'Bash'),
+    ('큰따옴표 $( ) 속 case', 'echo "$(case x in x) rm -rf y;; esac)"', 'Bash'),
+    ('PS { 뒤 #는 주석', "& {#'\n}\nRemove-Item -Recurse -Force x\n'", 'PowerShell'),
+    ("PS ${a'b} 속 따옴표", "${a'b} = 1\nRemove-Item -Recurse -Force x\n'", 'PowerShell'),
+    ('PS --% 뒤는 글자 그대로', "cmd /c echo --% a'\nRemove-Item -Recurse -Force x\n'", 'PowerShell'),
+]:
+    expect(f'H1 셸 문법 {name}', h1(cmd, tool), 2, '[정리 명령 차단]')
+# /self-review security 반영분 재검토 (실측 exit 0이던 형식)
+for name, cmd, tool in [
+    ('공백 없는 & 뒤 rm', 'ls&rm -rf build', 'Bash'),
+    ('${…} 속 산술 <<', 'y=1; echo ${a:0:1<<y}\nrm -rf x\ny}', 'Bash'),
+    ('$[…] 속 <<', 'y=1; echo $[1<<y]\nrm -rf x\ny]', 'Bash'),
+    ("${…} 속 따옴표 } (${a:-'}'})", "echo ${a:-'}'}\nrm -rf x\n'", 'Bash'),
+    ('PS a=#b 뒤 ;', 'echo a=#b; Remove-Item -Recurse -Force x', 'PowerShell'),
+    ('PS 낱말 가운데 <#', 'echo a<#c; Remove-Item -Recurse -Force x #>b', 'PowerShell'),
+    ('PS ${a`}b} 속 따옴표', "${a`}b'} = 1\nRemove-Item -Recurse -Force x\n'", 'PowerShell'),
+    ('끝 표시 없는 heredoc 뒤 따옴표', "cat <<'EOF'\n'\nrm -rf x", 'Bash'),
+]:
+    expect(f'H1 재검토 {name}', h1(cmd, tool), 2, '[정리 명령 차단]')
+expect('H1 리다이렉트 2>&1 은 묶음 아님', h1('rm -rf /f/AI/ToolWithCS/subagent_in/x 2>&1'), 0)
+expect('H1 줄 이음 뒤 #는 앞 상태 (주석)', h1('echo a \\\n#c; rm -rf x'), 0)
+expect('H1 PS $( ) 뒤 #는 주석', h1('echo $(1)#; Remove-Item -Recurse -Force x', 'PowerShell'), 0)
+expect("H1 끝 표시 이어 붙임 본문은 데이터 (<<'E'OF)", h1("cat <<'E'OF\nE\nrm -rf build\nEOF\n"), 0)
 expect('H1 다른 도구는 무시', run('cleanup_guard.py', {'tool_name': 'Read', 'tool_input': {}}), 0)
 expect('H1 깨진 입력은 막음', (lambda r: (r.returncode, r.stderr.decode('utf-8', 'replace')))(subprocess.run([sys.executable, '-I', os.path.join(HERE, 'cleanup_guard.py')], input=b'{', capture_output=True)), 2)
 
@@ -190,6 +229,7 @@ try:
     expect('H2 push가 아닌 git 명령', h2('git status'), 0)
     expect('H2 따옴표 안 push', h2('git commit -m "git push 전에 검사"'), 0)
     expect('H2 heredoc 커밋 메시지 속 push', h2("git commit -q -F - <<'EOF'\n푸시 전 git push 검사\nEOF"), 0)
+    expect('H2 주석 속 따옴표로 숨긴 push (이전 판 exit 0)', h2("ls # '\ngit push origin main && echo\n'"), 2, '묶여')
     expect('H2 없는 원격', h2('git push nowhere main'), 2, '원격')
     expect('H2 저장소가 아닌 곳', run('push_guard.py', {'tool_name': 'Bash', 'tool_input': {'command': 'git push'}, 'cwd': tmp}, env), 2, '검사 중 오류')
 finally:
@@ -252,10 +292,19 @@ try:
     expect('H4 겹친 이름', h3('review_main', '[ownReview:self-reviewer+self-reviewer] 이유', both), 2, '두 번')
     # /self-review fffbc4440a 반영: 블록마다 원문 · 대소문자 · 들여쓴 제목
     expect('H4 둘째 결과가 요약', h3('review_main', '[ownReview:self-reviewer+security-reviewer] 이유', good + '\n## 지적\n- C1 요약\n'), 2, '2번째 결과')
-    expect('H4 들여쓴 지적 줄은 절 아님', h3('review_main', '[ownReview:self-reviewer+security-reviewer] 이유', good + '\n  ## 지적\n'), 2, "'## 지적' 절이 1개")
+    expect('H4 들여쓴 지적 줄은 절 아님', h3('review_main', '[ownReview:self-reviewer+security-reviewer] 이유', good + '## 비고\n  ## 지적\n'), 2, "'## 지적' 절이 1개")
     expect('H4 소문자 접두어도 검사', h3('review_main', '[ownreview:self-reviewer] 이유', '## 지적\n- C1 요약'), 2, '결과 원문이 아니다')
     expect('H4 대문자 이름 받음', h3('review_main', '[ownReview:Self-Reviewer] 이유', good), 0)
     expect('H4 빈 태그', h3('review_main', '[ownReview:] 이유', good), 2, '모른다')
+    # 태그 빠짐 · '- ' 아닌 줄 (계획서 2026-10-23_H5-셸-문법-우회, security-reviewer 7282089076 C10 · C11)
+    expect('H4 review_main 태그 없는 ownReview', h3('review_main', '이유', good), 2, 'reason 맨 앞')
+    expect('H4 태그 없는 서브에이전트 원문 (perf_main)', h3('perf_main', '이유', good), 2, '태그가 없다')
+    expect('H4 perf_main 태그 없는 지휘자 의견 (설계안)', h3('perf_main', '이유', '설계안 검토: 할당 줄이기'), 0)
+    expect("H4 읽은 파일의 번호 줄", h3('review_main', tag, good + '1. docs/worklog.md\n'), 2, "'- '로 시작하지 않는")
+    expect('H4 읽은 파일의 맨 경로 줄', h3('review_main', tag, good + 'docs/worklog.md:1-5\n'), 2, "'- '로 시작하지 않는")
+    expect('H4 변형 제목 읽은 파일 절도 검사', h3('review_main', tag, good + '## 읽은 파일 (추가)\n- docs/worklog.md:1-5\n'), 2, 'subagent_in/ 밖')
+    expect('H4 태그 없는 변형 제목', h3('perf_main', '이유', '## 지적\n- x\n## 읽은 파일 (추가)\n- subagent_in/x/a.cs\n'), 2, '태그가 없다')
+    expect('H4 들여쓴 · ### 읽은 파일 절도 검사', h3('review_main', tag, good + '## 비고\n- 없음\n  ### 읽은 파일\n- docs/worklog.md:1-5\n'), 2, 'subagent_in/ 밖')
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
@@ -359,7 +408,8 @@ try:
     expect("H5 purge $'--yes'", h5raw("slackplan purge --days 30 $'--yes'"), 2, '셸이 펼칠')
     expect('H5 unlink {--yes,}', h5raw('slackplan unlink C1-2 {--yes,}'), 2, '셸이 펼칠')
     expect('H5 purge ${V:---yes}', h5raw('slackplan purge --days 30 ${V:---yes}'), 2, '셸이 펼칠')
-    expect('H5 unlink PS 백틱', h5raw('& slackplan.exe unlink C1-2 --`yes', 'PowerShell'), 2, '셸이 펼칠')
+    # tokenize가 PowerShell 백틱 이스케이프를 셸처럼 풀어 --yes로 본다 (/self-review security C6 — 이전에는 '셸이 펼칠'로 막힘)
+    expect('H5 unlink PS 백틱', h5raw('& slackplan.exe unlink C1-2 --`yes', 'PowerShell'), 2, 'unlink --yes')
     expect("H5 purge PS 괄호 식", h5raw("& slackplan.exe purge --days 30 ('--yes')", 'PowerShell'), 2, '셸이 펼칠')
     expect("H5 따옴표로 감싼 '--yes'", h5raw("slackplan unlink C1-2 '--yes'"), 2, 'unlink --yes')
     expect('H5 inbox --note (로컬 작업 로그)', h5('inbox done C1-3 --note "처리함"'), 0)
@@ -436,6 +486,47 @@ try:
         expect(f'H5 읽기 명령 {cmd}', h5raw(cmd), 0)
     expect('H5 읽기 명령 (PowerShell)', h5raw('Select-String -Path README.md -Pattern slackplan', 'PowerShell'), 0)
     expect('H5 heredoc 본문을 git에 (셸 아님)', h5raw("git commit -F - <<'EOF'\nslackplan purge --yes 정리\nEOF"), 0)
+    # 따옴표 짝 · 주석 · heredoc 경계 + 본문은 허용 목록 (계획서 2026-10-23_H5-셸-문법-우회, security-reviewer 7282089076 — 이전 판 실측 exit 0)
+    for name, cmd, tool in [
+        ("C2 $'\\''로 묶음 숨김", "slackplan status $'\\'' ; slackplan purge X --yes ; 'z'", 'Bash'),
+        ("C2 읽기 예외로 묶음 숨김", "grep $'\\'' ; slackplan purge X --yes ; 'z' f", 'Bash'),
+        ('C3 따옴표 없는 heredoc 속 $()', 'cat <<EOF\n$(slackplan purge X --yes)\nEOF', 'Bash'),
+        ('C3 PS @"…"@ 속 $()', '$m = @"\n$(slackplan purge X --yes)\n"@', 'PowerShell'),
+        ('C4 따옴표 안 <<EOF', 'echo "<<EOF"\nslackplan purge X --yes\nEOF', 'Bash'),
+        ("C4 따옴표 안 <<'EOF'", "echo \"<<'EOF'\"\nslackplan purge X --yes\nEOF", 'Bash'),
+        ("C4 PS 따옴표 안 @'", "echo \"@'\nslackplan purge X --yes\n'@\"", 'PowerShell'),
+        ('C7 heredoc을 tclsh', "tclsh <<'EOF'\nslackplan purge --yes\nEOF", 'Bash'),
+        ('C7 heredoc을 perl', "perl <<'EOF'\nslackplan purge --yes\nEOF", 'Bash'),
+        ('C7 heredoc을 python 스크립트', "python -I x.py <<'EOF'\nslackplan purge --yes\nEOF", 'Bash'),
+        ('C7 대입 뒤 Invoke-Expression', "$m = @'\nslackplan purge --yes\n'@\nInvoke-Expression $m", 'PowerShell'),
+        ('주석 속 따옴표', "grep x f # '\nslackplan purge X --yes\n'", 'Bash'),
+        ('PS 주석 속 따옴표', "Select-String x f # '\nslackplan purge X --yes\n'", 'PowerShell'),
+        ('C1 PS 굽은 따옴표', "sls 'a’; slackplan purge X --yes ; ‘' f", 'PowerShell'),
+        ('C6 ~ 펼침', 'slackplan reply C1-2 로그는 ~/x 참고', 'Bash'),
+        ('C6 글롭', 'slackplan reply C1-2 파일 *.md', 'Bash'),
+        ('C6 따옴표 밖 물음표', 'slackplan reply C1-2 할까요?', 'Bash'),
+        ('중괄호 펼침 {~,x}', 'slackplan reply C1-2 {~,x}/a', 'Bash'),
+        # /cross-review 8722c947f7 반영
+        ('PS <# #> 뒤 reply 글', 'slackplan reply C1-2 a <# c #> C:/Users/me/secret', 'PowerShell'),
+        ('PS 굽은 따옴표로 쪼갠 이름', '& { sl\u2018\u2019ackplan purge X --yes }', 'PowerShell'),
+        ('경로 붙은 cat', "./cat <<'EOF'\nslackplan purge --yes\nEOF", 'Bash'),
+        ('<<<의 둘째 <', 'grep x <<<true\nslackplan purge X --yes\ntrue', 'Bash'),
+        ('이스케이프 공백 뒤 # (읽기 예외)', 'grep \\ #; slackplan purge X --yes', 'Bash'),
+        ('본문의 dotnet run SlackPlanBot', "bash <<'EOF'\ndotnet run --project \"$SLACKPLAN_ROOT/src/SlackPlanBot\" -- purge --yes\nEOF", 'Bash'),
+        ('cat &bash heredoc', "cat &bash <<'EOF'\nslackplan purge --yes\nEOF", 'Bash'),
+        ('PS 백틱으로 숨긴 --allow-warnings', 'slackplan ask-consent C1-2 `"x --allow-warnings', 'PowerShell'),
+    ]:
+        expect(f'H5 셸 문법 {name}', h5raw(cmd, tool), 2, '[공유 차단]')
+    for name, cmd, tool in [
+        ('커밋 -m "$(cat heredoc)"', "git commit -m \"$(cat <<'EOF'\nslackplan 정리 don't (x)\nEOF\n)\"", 'Bash'),
+        ('커밋 -F - 따옴표 든 본문', "git commit -F - <<'EOF'\nslackplan don't \"x\" $(y)\nEOF", 'Bash'),
+        ('cat > 파일', "cat > notes.md <<'EOF'\nslackplan new\nEOF", 'Bash'),
+        ('PS 대입', "$m = @'\nslackplan new\n'@", 'PowerShell'),
+        ('PS here-string | Set-Content', "@'\nslackplan new\n'@ | Set-Content x.md", 'PowerShell'),
+        ('reply 따옴표 안 물음표', 'slackplan reply C1-2 "할까요?"', 'Bash'),
+        ('주석 속 낱말 (읽기)', 'grep -n x f # slackplan 메모', 'Bash'),
+    ]:
+        expect(f'H5 셸 문법 통과 {name}', h5raw(cmd, tool), 0)
     # 읽기 예외를 좁혀 막히는 것 (계획서 결정: 단독 읽기 명령만, git commit 속 낱말도 막힘 — 사용자 "git 명령어는 크게 신경 안써도되")
     for cmd in ['cat notes.md | grep slackplan', 'echo slackplan list', 'ls bin/slackplan.exe', 'git commit -m "slackplan new 형식"']:
         expect(f'H5 좁힌 예외 {cmd}', h5raw(cmd), 2)

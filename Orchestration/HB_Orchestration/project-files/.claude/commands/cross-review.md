@@ -15,7 +15,7 @@ argument-hint: [main|high] [파일/커밋 범위, 비우면 현재 미커밋 변
    - 2-4. 결과가 형식(`## 지적` · `## 자료 부족` · `## 읽은 파일`, `## 비고`는 선택)을 어겼거나, 중단됐거나, 비어 있거나, `## 읽은 파일`에 그 폴더 밖 경로가 있으면 **여기서 멈추고** 사용자에게 알린다. 다시 부르거나 네가 대신 쓸지는 사용자가 정한다.
    - 2-5. **보안 영역이면 security-reviewer도** (계획서 `Orchestration/HB_Orchestration/docs/plans/2026-10-23_서브에이전트-종류-추가.md`): 변경이 훅 · 경로 · 비밀 값 · 외부 전송 · 권한 검사 · 게임 클라이언트 신뢰(재화 · 세이브 · 패킷)에 걸리면 사용자에게 "security-reviewer도 함께 돌릴지" 한 줄로 묻는다 (자동으로 돌리지 않는다). 함께 돌리면 같은 `subagent_in/` 폴더로 self-reviewer와 **각자 따로** 호출하고 2-4 검사를 둘 다 한다.
 3. `run_mode`를 호출한다. input: 변경 의도 + diff(필요한 최소). 리뷰는 input에 넣지 않는다.
-   - `ownReview`: **서브에이전트 결과 원문만** 넣는다. 둘이면 self-reviewer 결과 뒤에 security-reviewer 결과를 그대로 이어 붙인다.
+   - `ownReview`: **서브에이전트 결과 원문만** 넣는다. 둘이면 self-reviewer 결과 뒤에 security-reviewer 결과를 그대로 이어 붙인다 (사이에 구분 줄 · 제목을 넣지 않는다 — H4가 '## 읽은 파일' 절의 '- ' 아닌 줄을 막는다).
    - `reason`: 맨 앞에 `[ownReview:self-reviewer]`(둘이면 `[ownReview:self-reviewer+security-reviewer]`)를 붙이고 부른 이유 한 줄.
    - 종합·판정에서 "Claude만 지적"은 두 서브에이전트가 찾고 외부가 놓친 것이다. 어느 서브에이전트의 지적인지 작업 로그에 적는다.
 4. CLAUDE.md의 "결과 종합" 형식으로 최종 리뷰를 출력한다.

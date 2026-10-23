@@ -10,6 +10,8 @@
   2026-10-19: 첫 호출이 거절된 뒤 재호출 때 원문 대신 요약을 넣은 적이 있다.
   '## 읽은 파일' 절이 여러 개면 모두 검사한다. '## 비고' 등 다른 절은 경로 검사를 하지 않는다 — 설명 줄은 '## 비고'에 쓰고
   '## 읽은 파일'의 설명 줄은 계속 막는다 (계획서 2026-10-22_self-reviewer-비고-칸, 느슨하게 만들지 않는다는 사용자 결정).
+  '## 읽은 파일'에 '- '로 시작하지 않는 줄이 있어도 막는다. 태그가 없어도: review_*에 ownReview가 있거나, ownReview에
+  '## 읽은 파일' 절이 있으면 막는다 — 태그를 빼면 검사를 건너뛰던 빈틈 (계획서 2026-10-23_H5-셸-문법-우회).
 - 실패하면 막는다: 통과 판정일 때만 exit 0.
 
 입력: stdin JSON {"tool_name": "mcp__hb-orchestration__run_mode", "tool_input": {"mode", "reason", "ownReview", ...}}.
@@ -25,6 +27,10 @@ PLAN_MODES = {'review_main', 'review_high'}
 REVIEWERS = {'self-reviewer', 'perf-reviewer', 'security-reviewer'}
 # 접두어 · 이름 모두 대소문자를 무시한다 — [ownreview:…]로 쓰면 검사를 건너뛰던 빈틈 (/self-review fffbc4440a C5)
 OWN_REVIEW_TAG = re.compile(r'^\[ownReview:([^\]]*)\]', re.IGNORECASE)
+# '## 읽은 파일 (추가)' · 앞 공백 · '###' · 탭 같은 변형 제목도 읽은 파일 절이다 (/cross-review 8722c947f7 security C9,
+# /self-review security C9). 절의 끝은 Markdown 제목 모양 줄(ANY_HEAD)로 정한다.
+READ_HEAD = re.compile(r'(?m)^[ \t]{0,3}#{2,}[ \t]+읽은[ \t]*파일')
+ANY_HEAD = re.compile(r'^[ \t]{0,3}#{1,6}[ \t]')
 MAX_DEPTH = 4
 
 
@@ -92,13 +98,18 @@ def self_review_problem(own: str) -> str | None:
     heads = [i for i, l in enumerate(lines) if l.startswith('## ')]
     if not any(lines[i].strip() == '## 지적' for i in heads):
         return "'## 지적' 절이 없다"
-    read = [i for i in heads if lines[i].strip() == '## 읽은 파일']
+    read = [i for i, l in enumerate(lines) if READ_HEAD.match(l)]
     if not read:
         return "'## 읽은 파일' 절이 없다 (요약이 아니라 결과 원문을 넣어야 한다)"
+    any_heads = [i for i, l in enumerate(lines) if ANY_HEAD.match(l)]
     items = []
     for head in read:  # 절이 여러 개여도 모두 검사 (두 번째 절에 숨은 폴더 밖 경로)
-        end = next((i for i in heads if i > head), len(lines))
-        items += [l.strip()[2:].strip() for l in lines[head + 1:end] if l.strip().startswith('- ')]
+        end = next((i for i in any_heads if i > head), len(lines))
+        body = [l.strip() for l in lines[head + 1:end] if l.strip()]
+        # '- '가 아닌 줄(1. 경로 · * 경로 · 맨 경로)은 검사에서 빠지던 빈틈 (security-reviewer 7282089076 C11) — 경로 줄만 받는다
+        if odd := [l for l in body if not l.startswith('- ')]:
+            return f"'## 읽은 파일'에 '- '로 시작하지 않는 줄이 있다: {odd[0][:120]} (경로 줄만 쓰고 설명은 '## 비고'에)"
+        items += [l[2:].strip() for l in body]
     if not items:
         return "'## 읽은 파일'에 항목이 없다"
     outside = [p for p in items if not read_item_ok(p)]
@@ -143,6 +154,14 @@ def check(data: dict, today: datetime.date | None = None) -> None:
         if problem is not None:
             keys = '' if own else f" (받은 입력 키: {', '.join(sorted(ti))})"
             deny(f'ownReview가 {"+".join(agents)} 결과 원문이 아니다: {problem}{keys}. /cross-review 3단계 · /mode 3단계: ownReview에는 서브에이전트 결과 원문만 넣는다.')
+    # 태그가 빠지면 검사를 건너뛰던 빈틈 (계획서 2026-10-23_H5-셸-문법-우회, security-reviewer 7282089076 C10).
+    # review_*는 /cross-review로만 부르고 ownReview는 늘 서브에이전트 원문이다. perf_*는 설계안뿐이면 태그 없는 지휘자 의견 (mode.md 2단계).
+    elif mode in PLAN_MODES and own.strip():
+        deny(f"'{mode}'의 ownReview는 서브에이전트 결과 원문이다 — reason 맨 앞에 [ownReview:self-reviewer](둘이면 "
+             "[ownReview:self-reviewer+security-reviewer])를 붙인다 (/cross-review 3단계).")
+    elif READ_HEAD.search(own):
+        deny("ownReview에 서브에이전트 결과 형식('## 읽은 파일')이 있는데 reason에 [ownReview:<서브에이전트>] 태그가 없다 — "
+             '태그를 붙여 훅이 원문을 검사하게 한다 (/cross-review 3단계 · /mode 3단계).')
 
     if mode in PLAN_MODES:
         root = os.environ.get('CLAUDE_PROJECT_DIR') or data.get('cwd') or os.getcwd()
