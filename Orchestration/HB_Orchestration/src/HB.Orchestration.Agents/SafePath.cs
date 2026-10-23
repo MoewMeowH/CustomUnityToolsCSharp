@@ -96,7 +96,8 @@ public static class SafePath
             if (node.LinkTarget is not null) return (null, "심볼릭 링크·junction을 거치는 경로는 받지 않습니다.");
         }
 
-        // 금지 패턴은 실제 긴 이름으로 비교한다. 8.3 짧은 이름(CREDEN~1.JSON)으로 요청해도 같은 파일이기 때문.
+        // 금지 패턴은 실제 긴 이름으로 비교한다. 8.3 짧은 이름(CREDEN~1.JSO)으로 요청해도 같은 파일이기 때문.
+        // 짧은 이름은 위의 Path.GetFullPath가 이미 긴 이름으로 푼다 (.NET, Windows에서 '~'가 든 경로의 이미 있는 부분 — 실측 2026-10-23, ShortNameTests가 고정).
         var relative = LongRelativePath(root, full);
         var denied = denyPatterns.FirstOrDefault(p => GlobToRegex(p).IsMatch(relative));
         if (denied is not null)
@@ -129,8 +130,8 @@ public static class SafePath
     };
 
     /// <summary>
-    /// 경로 구성 요소마다 디렉터리 항목을 조회해 실제 긴 이름으로 바꾼다.
-    /// 운영체제는 짧은 이름으로 조회해도 긴 이름 항목을 돌려준다. 항목을 못 찾으면(쓰기로 새로 만들 부분 포함) 요청한 이름을 그대로 쓴다.
+    /// 경로 구성 요소마다 디렉터리 항목을 조회해 실제 이름(대소문자)으로 바꾼다. 항목을 못 찾으면(쓰기로 새로 만들 부분 포함) 요청한 이름을 그대로 쓴다.
+    /// 짧은 이름은 여기서 풀지 못한다 (.NET 10 GetFileSystemInfos("CREDEN~1.JSO")는 0건) — 호출 전 Path.GetFullPath가 푼다.
     /// </summary>
     private static string LongRelativePath(string root, string full)
     {
