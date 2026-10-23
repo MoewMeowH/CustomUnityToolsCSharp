@@ -5,6 +5,7 @@ rem    <this>.bat             : menu
 rem    <this>.bat publish     : publish MCP server only
 rem    <this>.bat dashboard   : build + run dashboard only
 rem    <this>.bat all         : publish, then dashboard
+rem    add --yes after publish or all to stop a running MCP server without asking
 rem  Settings are read from the .config file with the SAME NAME as this batch file
 rem  (HB_Orchestration.bat -> HB_Orchestration.config). Rename both together.
 rem ============================================================================
@@ -22,6 +23,13 @@ if errorlevel 1 (
 )
 
 call :load_config
+
+set "ASSUME_YES="
+if /i "%~2"=="--yes" set "ASSUME_YES=1"
+if not "%~2"=="" if not defined ASSUME_YES (
+    echo [ERROR] Unknown option: %~2   - only --yes is accepted after publish or all
+    exit /b 2
+)
 
 if /i "%~1"=="publish"   goto :arg_publish
 if /i "%~1"=="dashboard" goto :arg_dashboard
@@ -137,6 +145,21 @@ exit /b 0
 rem ============================================================================
 rem  Publish MCP server
 rem ============================================================================
+:confirm_stop
+rem Returns 0 only for an explicit yes. "choice" did not cancel when its input was redirected
+rem (2026-10-22: it printed "Input redirection is not supported" and publish went on), so this uses
+rem set /p with No as the default: empty input, end of input or anything but Y cancels.
+rem "publish --yes" skips the question (for runs without a console).
+if /i "%ASSUME_YES%"=="1" (
+    echo [Info] --yes given: stopping the MCP server without asking.
+    exit /b 0
+)
+set "ANSWER="
+set /p "ANSWER=Stop the MCP server now and publish? [y/N] "
+if /i "%ANSWER%"=="Y" exit /b 0
+if /i "%ANSWER%"=="YES" exit /b 0
+exit /b 1
+
 :publish
 echo.
 echo [Publish] %MCP_PROJ%
@@ -155,8 +178,8 @@ set "MCP_COUNT=%errorlevel%"
 if not "%MCP_COUNT%"=="0" (
     echo [Info] Running MCP server processes: %MCP_COUNT%
     echo        They must be stopped to publish. Claude Code itself keeps running.
-    choice /c YN /m "Stop the MCP server now and publish"
-    if errorlevel 2 (
+    call :confirm_stop
+    if errorlevel 1 (
         echo [Info] Publish cancelled.
         exit /b 1
     )
