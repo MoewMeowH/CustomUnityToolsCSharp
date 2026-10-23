@@ -175,12 +175,69 @@ public sealed class ModelPrice
     public decimal? WebSearchPerThousand { get; set; }
 
     /// <summary>
-    /// 한 기록의 USD 비용. 입력 토큰에는 캐시 읽기·쓰기 토큰이 포함되어 있으므로
+    /// 날짜별 단가 변경 (계획서 2026-10-23_단가-적용-시작일). 위의 칸은 처음 단가이고, 기록 시각이 변경의 시작일(UTC 0시) 이후면
+    /// 그 변경에 적은 칸만 덮는다. 설정을 그날 바꾸면 이전 기록 비용까지 새 단가로 다시 계산되므로, 단가가 오르내릴 때는 위 칸을 고치지 말고 여기에 더한다.
+    /// 날짜를 읽지 못한 변경은 적용하지 않는다 (서버가 설정을 읽을 때 경고 — <see cref="ChangeProblems"/>).
+    /// </summary>
+    public List<PriceChange> Changes { get; set; } = [];
+
+    /// <summary>시각 <paramref name="at"/>에 적용되는 단가. 시작일 순으로 덮고, 같은 날짜 항목은 목록 순서대로 겹쳐 덮는다.</summary>
+    public ModelPrice PriceAt(DateTimeOffset at)
+    {
+        var price = this;
+        foreach (var (from, change) in ParsedChanges())
+        {
+            if (from > at) break;
+            price = new ModelPrice
+            {
+                InputPerMillion = change.InputPerMillion ?? price.InputPerMillion,
+                CachedInputPerMillion = change.CachedInputPerMillion ?? price.CachedInputPerMillion,
+                CacheWritePerMillion = change.CacheWritePerMillion ?? price.CacheWritePerMillion,
+                OutputPerMillion = change.OutputPerMillion ?? price.OutputPerMillion,
+                WebSearchPerThousand = change.WebSearchPerThousand ?? price.WebSearchPerThousand,
+            };
+        }
+        return price;
+    }
+
+    /// <summary>날짜를 읽은 변경을 시작일 순으로 (같은 날짜는 목록 순서 유지).</summary>
+    public IEnumerable<(DateTimeOffset From, PriceChange Change)> ParsedChanges() =>
+        (Changes ?? []).Select(c => (From: PriceChange.ParseFrom(c.From), Change: c))
+               .Where(x => x.From is not null)
+               .Select(x => (x.From!.Value, x.Change))
+               .OrderBy(x => x.Item1);
+
+    /// <summary>
+    /// 설정 문제 (날짜 형식 오류 · 같은 날짜 중복 · 단가 칸 없음 · 음수 단가). 경고만 하고 거절하지 않는다 (사용자 결정 2026-10-23).
+    /// 단가 칸 없음은 키 이름 오타(바인더가 조용히 무시)를 잡기 위한 것이다.
+    /// </summary>
+    public IEnumerable<string> ChangeProblems()
+    {
+        var seen = new HashSet<DateTimeOffset>();
+        foreach (var c in Changes ?? [])
+        {
+            if (PriceChange.ParseFrom(c.From) is not { } from)
+                yield return $"From '{c.From}'을(를) 날짜(yyyy-MM-dd, UTC)로 읽지 못해 이 변경은 적용하지 않습니다.";
+            else if (!seen.Add(from))
+                yield return $"From '{c.From}'이(가) 중복됩니다 (같은 날짜 항목은 목록 순서대로 겹쳐 적용됨).";
+
+            decimal?[] prices = [c.InputPerMillion, c.CachedInputPerMillion, c.CacheWritePerMillion, c.OutputPerMillion, c.WebSearchPerThousand];
+            if (prices.All(p => p is null))
+                yield return $"From '{c.From}' 변경에 단가 칸이 없습니다 (키 이름 오타 확인 — 바뀌는 것 없음).";
+            else if (prices.Any(p => p < 0))
+                yield return $"From '{c.From}' 변경에 음수 단가가 있습니다.";
+        }
+    }
+
+    /// <summary>
+    /// 한 기록의 USD 비용. 기록 시각의 단가(<see cref="PriceAt"/>)로 계산한다. 입력 토큰에는 캐시 읽기·쓰기 토큰이 포함되어 있으므로
     /// (입력 - 읽기 - 쓰기) × 입력 단가 + 읽기 × 캐시 단가 + 쓰기 × 캐시 쓰기 단가 + 출력 × 출력 단가.
     /// 쓰기 토큰을 기록하기 전의 호출(CacheWriteTokens null)은 쓰기 0으로 계산한다.
     /// 웹검색은 search 동작 수(WebSearchRecord.BilledCalls, 없으면 모든 동작 수)로 계산한다.
     /// </summary>
-    public decimal CostOf(CallRecord r)
+    public decimal CostOf(CallRecord r) => Changes is not { Count: > 0 } ? BaseCostOf(r) : PriceAt(r.Timestamp).BaseCostOf(r);
+
+    private decimal BaseCostOf(CallRecord r)
     {
         var input = r.InputTokens ?? 0;
         var cached = Math.Clamp(r.CachedInputTokens ?? 0, 0, input);
@@ -191,6 +248,29 @@ public sealed class ModelPrice
              + (r.OutputTokens ?? 0) / 1_000_000m * OutputPerMillion
              + (r.WebSearch?.BilledCalls ?? 0) / 1_000m * (WebSearchPerThousand ?? 0);
     }
+}
+
+/// <summary>
+/// <see cref="ModelPrice.Changes"/>의 한 항목. 적은 칸만 바뀌고 비운 칸은 이전 단가를 이어받는다.
+/// From은 문자열로 받는다: 설정 바인더가 날짜를 DateTimeOffset으로 바꾸면 이 PC의 지역 시간 0시가 되기 때문.
+/// </summary>
+public sealed class PriceChange
+{
+    /// <summary>적용 시작일 "yyyy-MM-dd". 그날 UTC 0시부터 적용한다.</summary>
+    public string? From { get; set; }
+
+    public string? Note { get; set; }
+    public decimal? InputPerMillion { get; set; }
+    public decimal? CachedInputPerMillion { get; set; }
+    public decimal? CacheWritePerMillion { get; set; }
+    public decimal? OutputPerMillion { get; set; }
+    public decimal? WebSearchPerThousand { get; set; }
+
+    public static DateTimeOffset? ParseFrom(string? text) =>
+        DateOnly.TryParseExact(text?.Trim(), "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.None, out var d)
+            ? new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero)
+            : null;
 }
 
 /// <summary>run_mode의 context(서버가 읽어 붙이는 코드 범위) 제한.</summary>

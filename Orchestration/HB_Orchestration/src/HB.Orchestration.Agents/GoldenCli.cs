@@ -177,7 +177,8 @@ public static class GoldenCli
         output.WriteLine($"  입력 합계 {chars:N0}자 (시스템 프롬프트 제외). 입력 토큰 추정 ≈ {chars / 3:N0} (글자 수 ÷ 3, 대략값)");
         foreach (var model in plans.SelectMany(p => p.Steps).Select(s => s.Model).Distinct())
         {
-            if (!options.Pricing.Models.TryGetValue(model, out var price)) { output.WriteLine($"  {model}: 단가 없음"); continue; }
+            if (!options.Pricing.Models.TryGetValue(model, out var configured)) { output.WriteLine($"  {model}: 단가 없음"); continue; }
+            var price = configured.PriceAt(DateTimeOffset.UtcNow); // 날짜별 변경(Changes)이 있으면 지금 적용되는 값
             var modelChars = plans.Sum(p => p.Steps.Count(s => s.Model == model) * p.Case.Input.Length);
             output.WriteLine($"  {model}: 입력만 ≈ ${modelChars / 3 / 1_000_000m * price.InputPerMillion:0.000} (출력 단가 ${price.OutputPerMillion}/1M은 응답 길이에 따라 더해짐)");
         }

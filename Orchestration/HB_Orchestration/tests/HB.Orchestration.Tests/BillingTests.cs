@@ -114,6 +114,25 @@ public sealed class BillingTests
         Assert.Equal(1, r18.Ours.Requests);      // gemini 제외
     }
 
+    [Fact]
+    public void Daily_UsesPriceOfEachRecordDay_WhenPriceChanges()
+    {
+        var changing = new ModelPrice
+        {
+            InputPerMillion = 2, OutputPerMillion = 10,
+            Changes = [new PriceChange { From = "2026-10-18", InputPerMillion = 4 }],
+        };
+        var calls = new[]
+        {
+            Call("2026-10-18T08:59:00+09:00", 1_000_000, 0, 0), // UTC 10-17 → 2
+            Call("2026-10-18T09:00:00+09:00", 1_000_000, 0, 0), // UTC 10-18 → 4
+        };
+
+        var rows = BillingComparer.Daily(calls, _ => changing, D18, 2, [], []);
+
+        Assert.Equal([2m, 4m], rows.Select(r => r.Computed));
+    }
+
     private static readonly Dictionary<string, ProviderOptions> Providers = new(StringComparer.OrdinalIgnoreCase)
     {
         ["openai"] = new() { Type = "openai-compatible" },

@@ -192,6 +192,11 @@ public sealed partial class AgentCatalog
         if (agents.Count == 0)
             _logger.LogWarning("사용 가능한 에이전트가 없습니다. appsettings.json과 API 키 환경 변수를 확인하세요.");
 
+        // 단가 변경 구간 오류는 경고만 한다 (읽지 못한 변경은 적용하지 않음).
+        foreach (var (model, price) in options.Pricing.Models)
+            foreach (var problem in price.ChangeProblems())
+                _logger.LogWarning("단가 '{Model}' Changes: {Problem}", model, problem);
+
         return new Snapshot(options, agents, skipped, DateTimeOffset.Now, settingsBytes);
     }
 

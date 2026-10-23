@@ -75,6 +75,116 @@ public sealed class BudgetTests : IDisposable
         Assert.Equal(2m, noWrite.CostOf(Call("openai", 1_000_000, 0) with { CacheWriteTokens = 1_000_000 }));
     }
 
+    // ── 날짜별 단가 변경 (계획서 2026-10-23_단가-적용-시작일) ─────────────
+
+    private static ModelPrice Argon() => new()
+    {
+        InputPerMillion = 2, CachedInputPerMillion = 0.1m, OutputPerMillion = 10,
+        Changes = [new PriceChange { From = "2026-12-01", InputPerMillion = 4, CachedInputPerMillion = 0.2m, OutputPerMillion = 20 }],
+    };
+
+    private static CallRecord At(string time) => Call("gemini", 1_000_000, 1_000_000) with { Timestamp = DateTimeOffset.Parse(time) };
+
+    [Fact]
+    public void CostOf_UsesPriceAtRecordTime_SwitchingAtUtcMidnight()
+    {
+        var p = Argon();
+        Assert.Equal(12m, p.CostOf(At("2026-11-30T23:59:59Z")));
+        Assert.Equal(24m, p.CostOf(At("2026-12-01T00:00:00Z")));
+        // KST 12-01 08:59 = UTC 11-30 → 이전 단가
+        Assert.Equal(12m, p.CostOf(At("2026-12-01T08:59:00+09:00")));
+        Assert.Equal(24m, p.CostOf(At("2026-12-01T09:00:00+09:00")));
+    }
+
+    [Fact]
+    public void PriceAt_OverlaysOnlyGivenFields_InDateOrder()
+    {
+        var p = new ModelPrice
+        {
+            InputPerMillion = 1, CachedInputPerMillion = 0.1m, CacheWritePerMillion = 1.25m, OutputPerMillion = 5, WebSearchPerThousand = 10,
+            Changes =
+            [
+                new PriceChange { From = "2027-02-01", OutputPerMillion = 9 },  // 목록 순서와 무관하게 날짜 순
+                new PriceChange { From = "2027-01-01", InputPerMillion = 2, OutputPerMillion = 7 },
+            ],
+        };
+
+        var jan = p.PriceAt(DateTimeOffset.Parse("2027-01-15T00:00:00Z"));
+        Assert.Equal((2m, 0.1m, 1.25m, 7m, 10m), (jan.InputPerMillion, jan.CachedInputPerMillion, jan.CacheWritePerMillion, jan.OutputPerMillion, jan.WebSearchPerThousand));
+
+        var feb = p.PriceAt(DateTimeOffset.Parse("2027-02-01T00:00:00Z"));
+        Assert.Equal((2m, 9m), (feb.InputPerMillion, feb.OutputPerMillion));
+
+        Assert.Same(p, p.PriceAt(DateTimeOffset.Parse("2026-12-31T23:59:59Z")));
+    }
+
+    [Fact]
+    public void ChangeProblems_WarnsBadOrDuplicateDates_AndBadDateIsNotApplied()
+    {
+        var p = new ModelPrice
+        {
+            InputPerMillion = 1, OutputPerMillion = 1,
+            Changes =
+            [
+                new PriceChange { From = "2026/12/01", InputPerMillion = 100 },
+                new PriceChange { From = "2026-12-01", InputPerMillion = 2 },
+                new PriceChange { From = "2026-12-01", InputPerMillion = 3 },
+            ],
+        };
+
+        var problems = p.ChangeProblems().ToList();
+        Assert.Equal(2, problems.Count);
+        Assert.Contains("읽지 못해", problems[0]);
+        Assert.Contains("중복", problems[1]);
+
+        // 읽지 못한 변경은 무시, 같은 날짜는 목록 뒤의 값
+        Assert.Equal(3m, p.PriceAt(DateTimeOffset.Parse("2027-01-01T00:00:00Z")).InputPerMillion);
+        Assert.Empty(Argon().ChangeProblems());
+    }
+
+    [Fact]
+    public void ChangeProblems_WarnsEmptyOrNegativeChange_NullChangesIsSafe()
+    {
+        var p = new ModelPrice
+        {
+            InputPerMillion = 1, OutputPerMillion = 1,
+            Changes =
+            [
+                new PriceChange { From = "2026-12-01" },                          // 키 오타 등으로 칸이 비면
+                new PriceChange { From = "2027-01-01", OutputPerMillion = -1 },
+            ],
+        };
+        var problems = p.ChangeProblems().ToList();
+        Assert.Equal(2, problems.Count);
+        Assert.Contains("단가 칸이 없습니다", problems[0]);
+        Assert.Contains("음수", problems[1]);
+
+        var nullChanges = new ModelPrice { InputPerMillion = 2, OutputPerMillion = 10, Changes = null! };
+        Assert.Equal(12m, nullChanges.CostOf(At("2026-12-01T00:00:00Z")));
+        Assert.Empty(nullChanges.ChangeProblems());
+    }
+
+    [Fact]
+    public void Changes_BindFromConfiguration_WithDateAsUtc()
+    {
+        var config = Microsoft.Extensions.Configuration.MemoryConfigurationBuilderExtensions.AddInMemoryCollection(
+            new Microsoft.Extensions.Configuration.ConfigurationBuilder(),
+            new Dictionary<string, string?>
+            {
+                ["Pricing:Models:m:InputPerMillion"] = "2",
+                ["Pricing:Models:m:OutputPerMillion"] = "10",
+                ["Pricing:Models:m:Changes:0:From"] = "2026-12-01",
+                ["Pricing:Models:m:Changes:0:InputPerMillion"] = "4",
+            })
+            .Build();
+        var options = Microsoft.Extensions.Configuration.ConfigurationBinder.Get<OrchestrationOptions>(config)!;
+
+        var price = options.Pricing.Models["m"];
+        Assert.Equal(2m, price.PriceAt(DateTimeOffset.Parse("2026-11-30T23:59:59Z")).InputPerMillion);
+        Assert.Equal(4m, price.PriceAt(DateTimeOffset.Parse("2026-12-01T00:00:00Z")).InputPerMillion);
+        Assert.Equal(10m, price.PriceAt(DateTimeOffset.Parse("2026-12-01T00:00:00Z")).OutputPerMillion);
+    }
+
     [Fact]
     public void UnpricedCalls_CountsRecordsWithTokensButNoPrice_ExcludingFree()
     {
