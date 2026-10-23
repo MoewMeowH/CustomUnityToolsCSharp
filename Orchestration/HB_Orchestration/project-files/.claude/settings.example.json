@@ -24,6 +24,10 @@
             "type": "command",
             "command": "python -I \"$CLAUDE_PROJECT_DIR/.claude/scripts/push_guard.py\" || exit 2",
             "timeout": 120
+          },
+          {
+            "type": "command",
+            "command": "python -I \"$CLAUDE_PROJECT_DIR/.claude/scripts/share_guard.py\" || exit 2"
           }
         ]
       },

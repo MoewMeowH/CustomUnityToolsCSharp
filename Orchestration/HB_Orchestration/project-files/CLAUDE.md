@@ -158,6 +158,7 @@ Quota(`[실패] Quota` — 크레딧·한도 소진)나 429 실패 뒤에는 바
   * 개인 값(이메일·로컬 사용자 경로)은 `.claude/push_guard.local.txt`(한 줄에 정규식, `allow:`는 예외)에만 둔다. 프로젝트마다 `.gitignore`에 등록한다. 파일이 저장소에 추적되면 그 자체로 막는다.
 * H3 `run_mode_guard.py`: review_main·review_high 전에 `docs/plans/`에 오늘 날짜 이름이거나 오늘 고친 계획서가 없으면 ("계획서와 작업 로그").
 * H4 `run_mode_guard.py`: reason이 `[ownReview:self-reviewer]`인데 ownReview가 self-reviewer 결과 원문 형식(`## 지적`·`## 읽은 파일`, 읽은 파일은 `subagent_in/` 안)이 아니면. 재호출 때도 원문 그대로 넣는다. `## 읽은 파일`은 경로 줄만 허용(절이 여러 개면 모두 검사), 설명 줄은 `## 비고`에 — `## 비고`는 경로 검사를 하지 않는다 (2026-10-22).
+* H5 `share_guard.py`: SlackPlanBot `slackplan`의 올리는 하위 명령(new · revise · update-summary · reply · ask-consent)에서 `--allow-warnings`, 또는 나갈 글(계획서 · 제목 · 요약 · 답)에 비밀 값 · 개인 값(`push_guard.local.txt`) · 프로젝트 패턴(`.claude/share_guard.local.txt`, 같은 형식, `.gitignore` 등록) · `docs/image/`·`GoldenSet/`·`subagent_in/`·`review_tmp/` 언급 · 로컬 절대 경로가 있으면. 계획서 파일 이름도 검사하고, 명령줄 글의 셸 변수 · 모르는 하위 명령 · 리다이렉트 · here-string은 막는다. 대상이면 단독 명령만 받는다. new · revise의 `--dry-run`과 읽기 명령은 통과 (계획서 `Orchestration/HB_Orchestration/docs/plans/2026-10-23_plan-share-명령과-share_guard.md`).
 * 훅 등록은 `python -I .claude/scripts/check_agents.py`, 동작은 `python -I .claude/scripts/test_hooks.py`로 검사한다. settings.json을 고치면 새 세션에서 반영된다.
 
 ## 계획서와 작업 로그
@@ -173,6 +174,7 @@ Quota(`[실패] Quota` — 크레딧·한도 소진)나 429 실패 뒤에는 바
 * 1단계 (계획): 코드와 기록을 조사한 뒤 작업 대상 저장소의 `docs/plans/YYYY-MM-DD_제목.md`를 쓴다.
   작업이 여러 저장소에 걸치면 주로 고치는 저장소에 두고, 다른 저장소의 변경도 계획서에 적는다.
   승인 전에는 코드를 고치지 않는다.
+  사용자 결정이 필요한 계획서면 `/plan-share`를 제안한다. 자동으로 올리지 않는다.
   구성: 요약(3줄 이내) / 배경 / 계획 / 버린 대안과 이유 / 위험 / 테스트 / 실제 확인 / 사용자에게 물을 것
 * 2단계 (결정): 사용자 답을 받으면 계획서 끝에 `## 결정` 절을 덧붙인다.
   * 사용자 답은 원문 그대로 인용한다. 요약하지 않는다.

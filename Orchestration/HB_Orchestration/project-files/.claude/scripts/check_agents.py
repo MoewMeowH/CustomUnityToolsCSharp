@@ -43,7 +43,7 @@ def check(path: str) -> list:
 
 
 REQUIRED_HOOKS = {  # 계획서 2026-10-19_훅-규칙-강제: matcher → 반드시 걸려 있어야 하는 스크립트
-    'Bash|PowerShell': ['cleanup_guard.py', 'push_guard.py'],
+    'Bash|PowerShell': ['cleanup_guard.py', 'push_guard.py', 'share_guard.py'],  # share_guard: 2026-10-23_plan-share-명령과-share_guard
     'mcp__hb-orchestration__run_mode': ['run_mode_guard.py'],
 }
 

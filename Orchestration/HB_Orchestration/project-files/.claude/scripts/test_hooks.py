@@ -1,4 +1,4 @@
-"""cleanup_guard · push_guard · run_mode_guard 회귀 시험 (계획서 2026-10-19_훅-규칙-강제, /cross-review 10bfc8de41 반영).
+"""cleanup_guard · push_guard · run_mode_guard · share_guard 회귀 시험 (계획서 2026-10-19_훅-규칙-강제, /cross-review 10bfc8de41 반영).
 사용: python -I .claude/scripts/test_hooks.py  → 마지막 줄 'ALL True'면 통과 (exit 0), 아니면 exit 1.
 H2는 임시 폴더에 저장소와 bare 원격을 만들어 시험한다 (실제 원격·실제 저장소는 건드리지 않는다).
 입력은 UTF-8 바이트로 보낸다 (Claude Code가 보내는 것과 같게 — 한글 깨짐 회귀 시험).
@@ -240,6 +240,115 @@ try:
     expect('H4 비고 칸의 폴더 밖 경로 (검사 대상 아님)', h3('review_main', tag, good + '## 비고\n- docs/worklog.md 는 받지 못함\n'), 0)
     expect('H4 읽은 파일의 설명 줄은 계속 막음 (10-22 실사용 차단 문구)', h3('review_main', tag, good + explain + '## 비고\n- 없음\n'), 2, 'subagent_in/ 밖')
     expect('H4 두 번째 읽은 파일 절의 폴더 밖 경로', h3('review_main', tag, good + '## 비고\n- 없음\n## 읽은 파일\n- docs/worklog.md:1-5\n'), 2, 'subagent_in/ 밖')
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
+# ── H5 share_guard (계획서 2026-10-23_plan-share-명령과-share_guard) ────
+tmp = tempfile.mkdtemp(prefix='hb-shareguard-')
+try:
+    proj = os.path.join(tmp, 'proj')  # CLAUDE_PROJECT_DIR · 셸 현재 폴더
+    bot = os.path.join(tmp, 'SlackPlanBot')  # SLACKPLAN_ROOT
+    os.makedirs(os.path.join(proj, '.claude'))
+    os.makedirs(os.path.join(proj, 'docs', 'plans'))
+    os.makedirs(os.path.join(bot, 'threads', 'C1-2'))
+    with open(os.path.join(proj, '.claude', 'push_guard.local.txt'), 'w', encoding='utf-8') as f:
+        f.write('person@example\\.com\n')
+    with open(os.path.join(proj, '.claude', 'share_guard.local.txt'), 'w', encoding='utf-8') as f:
+        f.write('(?i)projectx\nallow: ^F:/ok/\n')
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=proj, SLACKPLAN_ROOT=bot)
+    SECRET = 'sk-' + 'Q7vR2mK9pL4xN8wT3bZ6'
+
+    def plan(name: str, text: str) -> str:
+        with open(os.path.join(proj, 'docs', 'plans', name), 'w', encoding='utf-8') as f:
+            f.write(text)
+        return f'docs/plans/{name}'
+
+    def h5(args: str, tool: str = 'Bash', cwd: str = proj, extra: dict | None = None) -> tuple[int, str]:
+        root = '$env:SLACKPLAN_ROOT' if tool == 'PowerShell' else '$SLACKPLAN_ROOT'
+        cmd = f'dotnet run --no-build --project "{root}/src/SlackPlanBot" -- {args}'
+        return run('share_guard.py', {'tool_name': tool, 'tool_input': {'command': cmd}, 'cwd': cwd}, dict(env, **(extra or {})))
+
+    def h5raw(cmd: str, tool: str = 'Bash', cwd: str = proj) -> tuple[int, str]:
+        return run('share_guard.py', {'tool_name': tool, 'tool_input': {'command': cmd}, 'cwd': cwd}, env)
+
+    clean = plan('clean.md', '# 계획\n- 내용\n')
+    expect('H5 깨끗한 계획서 new', h5(f'new {clean} --title "제목"'), 0)
+    expect('H5 깨끗한 계획서 new (PowerShell)', h5(f'new {clean}', 'PowerShell'), 0)
+    expect('H5 SLACKPLAN_ROOT 경로의 계획서', h5('revise C1-2 "$SLACKPLAN_ROOT/threads/C1-2/../../../proj/' + clean + '"'), 0)
+    expect('H5 읽기 명령 find', h5(f'find {clean}'), 0)
+    expect('H5 읽기 명령 thread', h5('thread C1-2 --reader 지휘자'), 0)
+    expect('H5 읽기 명령 status', h5('status C1-2'), 0)
+    expect('H5 slackplan 직접 호출', h5raw(f'slackplan new {clean}'), 0)
+    expect('H5 따옴표 안 글 (커밋 메시지)', h5raw('git commit -m "slackplan new 형식 정리"'), 0)
+    expect('H5 grep 인자', h5raw('grep -rn slackplan README.md'), 0)
+    expect('H5 dotnet test (run 아님)', h5raw('dotnet test F:/AI/SlackPlanBot/tests'), 0)
+    expect('H5 heredoc 본문', h5raw("git commit -F - <<'EOF'\nslackplan new x.md --allow-warnings\nEOF"), 0)
+
+    expect('H5 --allow-warnings', h5(f'new {clean} --allow-warnings'), 2, '--allow-warnings')
+    expect('H5 --allow-warnings + --dry-run도 막음', h5(f'new {clean} --dry-run --allow-warnings'), 2, '--allow-warnings')
+    bad = plan('secret.md', f'키 {SECRET}\n')
+    expect('H5 비밀 모양 (값은 가림)', h5(f'new {bad}'), 2, 'sk-Q…')
+    expect('H5 비밀 모양이어도 --dry-run은 통과', h5(f'new {bad} --dry-run'), 0)
+    fake = plan('fake.md', 'InlineData("sk-abcdefghijklmnopqrstu")\n')
+    expect('H5 가짜 값 표식도 막음 (밖으로 나감)', h5(f'new {fake}'), 2, '비밀')
+    expect('H5 개인 값 (push_guard.local)', h5(f'new {plan("p.md", "person@example.com")}'), 2, '비밀 · 개인 값')
+    expect('H5 프로젝트 패턴 (share_guard.local)', h5(f'new {plan("x.md", "ProjectX 출시")}'), 2, '프로젝트 패턴')
+    expect('H5 GoldenSet 언급', h5(f'new {plan("g.md", "GoldenSet/case1 참고")}'), 2, 'GoldenSet/')
+    img = plan('i.md', 'docs\\image\\a.png')
+    expect('H5 docs/image 언급 (역슬래시)', h5(f'new {img}'), 2, 'docs/image/')
+    expect('H5 드라이브 문자 경로', h5(f'new {plan("d.md", "F:/AI/ToolWithCS 에서")}'), 2, '드라이브')
+    expect('H5 allow: 예외', h5(f'new {plan("ok.md", "F:/ok/a 에서")}'), 0)
+    expect('H5 Git Bash 경로', h5(f'new {plan("b.md", "cd /f/AI/x")}'), 2, 'Git Bash')
+    unc = plan('u.md', '\\\\srv\\share')
+    expect('H5 UNC 경로', h5(f'new {unc}'), 2, 'UNC')
+    expect('H5 URL은 통과', h5(f'new {plan("url.md", "https://docs.unity.com/a/b")}'), 0)
+    expect('H5 --title에 비밀', h5(f'new {clean} --title "{SECRET}"'), 2, '--title')
+    expect('H5 reply 글', h5(f'reply C1-2 "경로 C:/Users/me"'), 2, 'reply 글')
+    expect('H5 ask-consent --text', h5(f'ask-consent C1-2 --text "{SECRET}"'), 2, '--text')
+    expect('H5 파일 없음', h5('new docs/plans/none.md'), 2, '읽지 못했다')
+    expect('H5 풀 수 없는 변수', h5('new "$HOME/x.md"'), 2, '변수')
+    expect('H5 SLACKPLAN_ROOT 없음', h5('new "$SLACKPLAN_ROOT/x.md"', extra={'SLACKPLAN_ROOT': ''}), 2, 'SLACKPLAN_ROOT')
+    expect('H5 모르는 옵션', h5(f'new {clean} --file x'), 2, '모른다')
+    expect('H5 revise 인자 수', h5(f'revise {clean}'), 2, '인자 수')
+    expect('H5 --text 없는 update-summary', h5('update-summary C1-2'), 2, '--text')
+    expect('H5 update-summary --text', h5('update-summary C1-2 --text "깨끗한 요약"'), 0)
+    # /cross-review 32ab98a8a9 반영
+    expect('H5 reply 글의 셸 변수', h5('reply C1-2 "$OPENAI_API_KEY"'), 2, '셸 변수')
+    expect('H5 --title의 %변수%', h5(f'new {clean} --title "%USERPROFILE%"'), 2, '셸 변수')
+    expect('H5 --text의 PowerShell 변수', h5('ask-consent C1-2 --text "$env:SECRET_X"', 'PowerShell'), 2, '셸 변수')
+    expect('H5 따옴표로 감싼 확장자 없는 실행 파일', h5raw(f'"$SLACKPLAN_ROOT/bin/slackplan" new {clean} --allow-warnings'), 2, '--allow-warnings')
+    expect("H5 PowerShell & 'slackplan'", h5raw(f"& 'slackplan' new {bad}", 'PowerShell'), 2, '비밀')
+    expect('H5 dotnet <dll>', h5raw(f'dotnet "$SLACKPLAN_ROOT/bin/slackplan.dll" new {bad}'), 2, '비밀')
+    expect('H5 dotnet exec <dll>', h5raw(f'dotnet exec bin/slackplan.dll new {bad}'), 2, '비밀')
+    expect('H5 커밋 메시지 속 slackplan.exe (오탐 아님)', h5raw('git commit -m "bin/Debug의 slackplan.exe 잠금"'), 0)
+    expect('H5 파일 이름 (제목 기본값)', h5(f'new {plan("ProjectX-출시.md", "깨끗")}'), 2, '파일 이름')
+    os.makedirs(os.path.join(proj, 'GoldenSet'))
+    with open(os.path.join(proj, 'GoldenSet', 'a.md'), 'w', encoding='utf-8') as f:
+        f.write('깨끗\n')
+    expect('H5 무시 폴더 아래 계획서', h5('new GoldenSet/a.md'), 2, 'GoldenSet/')
+    expect('H5 PowerShell here-string 인자', h5raw("slackplan reply C1-2 @'\nProjectX\n'@", 'PowerShell'), 2, 'here-string')
+    expect('H5 모르는 하위 명령', h5(f'publish {clean}'), 2, '모른다')
+    expect('H5 react (이모지만)', h5('react C1-2 eyes'), 0)
+    expect('H5 inbox --note (로컬 작업 로그)', h5('inbox done C1-3 --note "처리함"'), 0)
+    expect('H5 reply의 --dry-run은 통과 아님 (봇이 글로 올림)', h5(f'reply C1-2 "{SECRET}" --dry-run'), 2, "'--dry-run'")
+    expect('H5 옵션 값 자리의 --dry-run (봇도 dry-run)', h5(f'new {bad} --title --dry-run'), 0)
+    expect('H5 리다이렉트 2>&1', h5(f'new {clean} 2>&1'), 2, '리다이렉트')
+    expect('H5 new --thread · --item', h5(f'new {clean} --thread C1-2 --item C1-3'), 0)
+    expect('H5 --thread 값이 ID가 아님', h5(f'new {clean} --thread "a b"'), 2, 'ID 모양')
+    expect('H5 슬래시 UNC', h5(f'new {plan("u2.md", "//srv/share/x")}'), 2, 'UNC')
+    expect('H5 POSIX 절대 경로', h5(f'new {plan("t.md", "로그 /tmp/x.log")}'), 2, 'POSIX')
+    expect('H5 URL 속 /var/ (오탐 아님)', h5(f'new {plan("url2.md", "https://example.org/var/x")}'), 0)
+    expect('H5 묶음', h5raw(f'cd {proj} && dotnet run --project "$SLACKPLAN_ROOT/src/SlackPlanBot" -- new {clean}'), 2)
+    expect('H5 명령 치환', h5raw('dotnet run --project "$SLACKPLAN_ROOT/src/SlackPlanBot" -- new "$(echo x.md)"'), 2, '명령 치환')
+    expect('H5 -- 없음', h5raw(f'dotnet run --project "$SLACKPLAN_ROOT/src/SlackPlanBot" new {clean}'), 2, '`--`')
+    bad_abs = os.path.join(proj, bad).replace('\\', '/')
+    expect('H5 셸 현재 폴더가 SlackPlanBot', h5raw(f'dotnet run -- new {bad_abs}', cwd=bot), 2, '비밀')
+    expect('H5 PowerShell 실행 파일 경로', h5raw(f'& "{bot}\\bin\\slackplan.exe" new {bad}', 'PowerShell'), 2, '비밀')
+    expect('H5 cmd /c 형식', h5raw(f'cmd /c slackplan new {clean}'), 2, '해석하지 못했다')
+    subprocess.run(['git', 'init', '-q', proj], check=True, capture_output=True)
+    subprocess.run(['git', '-C', proj, 'add', '-f', '.claude/share_guard.local.txt'], check=True, capture_output=True)
+    expect('H5 share_guard.local.txt 추적됨', h5(f'new {clean}'), 2, '추적')
+    expect('H5 깨진 입력은 막음', (lambda r: (r.returncode, r.stderr.decode('utf-8', 'replace')))(subprocess.run([sys.executable, '-I', os.path.join(HERE, 'share_guard.py')], input=b'{', capture_output=True)), 2)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
