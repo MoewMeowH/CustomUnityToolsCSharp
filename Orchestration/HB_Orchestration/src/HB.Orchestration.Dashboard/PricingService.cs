@@ -128,6 +128,41 @@ public sealed class PricingService(IOptions<DashboardOptions> options, ModesConf
         return any ? sum : null;
     }
 
+    /// <summary>
+    /// 합계에 섞인 추정분 안내 (끊긴 호출, <see cref="UsageEstimator"/>). 추정 기록이 없으면 빈 문자열.
+    /// 예: " · 추정 $0.0700 포함 (1건)", 출력을 모르는 기록이 있으면 " · 출력 미상 1건"을 더한다.
+    /// </summary>
+    /// <param name="costOf">합계와 같은 기준으로 셀 때 (예: 오늘 비용은 MCP 단가만). 비우면 <see cref="TotalOf"/>.</param>
+    public string EstimateNote(IEnumerable<CallRecord> records, int usdDecimals = 4, Func<IReadOnlyList<CallRecord>, decimal?>? costOf = null)
+    {
+        var estimated = records.Where(r => r.Estimate is not null).ToList();
+        if (estimated.Count == 0) return "";
+        var unknown = estimated.Count(r => r.Estimate!.OutputUnknown);
+        var cost = (costOf ?? (list => TotalOf(list)))(estimated) ?? 0m;
+        return $" · 추정 {Format(cost, usdDecimals)} 포함 ({estimated.Count}건{(unknown > 0 ? $", 출력 미상 {unknown}건" : "")})";
+    }
+
+    /// <summary>호출 한 건의 추정 근거 설명. 추정이 아니면 null.</summary>
+    public static string? EstimateLabel(CallRecord r)
+    {
+        if (r.Estimate is not { } e) return null;
+        var label = e switch
+        {
+            { Basis: EstimateBasis.Sibling } => r.ErrorKind is "Timeout" or "Network"
+                ? "추정: 같은 단계 성공 시도의 입력 · 출력 (서버가 끝까지 생성해 청구했다고 봄)"
+                : "추정: 같은 단계 성공 시도의 입력 (연결을 닫아 생성은 멈췄다고 봄, 출력 0)",
+            { OutputUnknown: true } => $"추정: 보낸 바이트 × {UsageEstimator.TokensPerByte} 입력만 — 출력 미상 (실제 청구는 더 클 수 있음)",
+            _ => $"추정: 보낸 바이트 × {UsageEstimator.TokensPerByte} 입력만 (연결을 닫아 생성은 멈췄다고 봄)",
+        };
+        // 바이트 어림은 프롬프트 · 지침만 센다: followUp의 앞 대화와 이미지는 빠진다.
+        if (e.Basis == EstimateBasis.Bytes && (r.FollowUpOf is not null || r.Images is { Count: > 0 }))
+            label += " · 하한 (앞 대화 · 이미지 입력 빠짐)";
+        // 응답 없이 끊긴 오류에는 요청을 보내기 전 실패(연결 거부 · DNS)도 섞이는데 기록으로는 구분할 수 없다.
+        if (r.ErrorKind is "Timeout" or "Network")
+            label += " · 요청 전 실패(연결 거부 등)였다면 청구되지 않았을 수 있음";
+        return label;
+    }
+
     /// <summary>"$0.0123 (₩17)" 형식. 환율이 없으면 달러만, 금액이 없으면 "-".</summary>
     public string Format(decimal? usd, int usdDecimals = 4)
     {

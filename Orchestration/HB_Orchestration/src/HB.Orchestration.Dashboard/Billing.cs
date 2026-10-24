@@ -247,7 +247,13 @@ public sealed record BillingRow(
     DateTimeOffset Start, DateTimeOffset End,
     decimal? Billed, IReadOnlyList<CostLine> BilledItems,
     decimal Computed, decimal ComputedAssumed, int UnknownWriteCalls, int UnpricedCalls,
-    TokenSum Ours, TokenSum? OpenAI);
+    TokenSum Ours, TokenSum? OpenAI)
+{
+    /// <summary>Computed 중 끊긴 호출의 추정분 (<see cref="UsageEstimator"/>)과 그 건수 · 출력 미상 건수.</summary>
+    public decimal EstimatedCost { get; init; }
+    public int EstimatedCalls { get; init; }
+    public int OutputUnknownCalls { get; init; }
+}
 
 /// <summary>
 /// 우리 기록(OpenAI 조직으로 청구되는 제공사의 호출)과 OpenAI 청구·사용량을 UTC 칸별로 맞춘다. 계산식은 서버와 같은 ModelPrice.CostOf.
@@ -320,8 +326,8 @@ public static class BillingComparer
     private static BillingRow Row(DateTimeOffset start, DateTimeOffset end, List<CallRecord> calls, Func<string, ModelPrice?> price,
         decimal? billed, IReadOnlyList<CostLine> items, IReadOnlyList<UsageRow> usage)
     {
-        decimal computed = 0, assumed = 0;
-        int unknown = 0, unpriced = 0;
+        decimal computed = 0, assumed = 0, estimated = 0;
+        int unknown = 0, unpriced = 0, estimatedCalls = 0, outputUnknown = 0;
         var ours = TokenSum.Zero;
         foreach (var c in calls.Where(c => c.Timestamp >= start && c.Timestamp < end))
         {
@@ -330,7 +336,13 @@ public static class BillingComparer
             ours = ours.Add(input, cached, c.CacheWriteTokens ?? 0, c.OutputTokens ?? 0, c.InputTokens is null ? 0 : 1);
             if (price(c.Model) is not { } p) { if (c.InputTokens is not null) unpriced++; continue; }
             computed += p.CostOf(c);
-            if (c.CacheWriteTokens is null && c.InputTokens is not null)
+            if (c.Estimate is { } est)
+            {
+                estimated += p.CostOf(c);
+                estimatedCalls++;
+                if (est.OutputUnknown) outputUnknown++;
+            }
+            if (c.CacheWriteTokens is null && c.InputTokens is not null && c.Estimate is null) // 추정 기록은 쓰기를 모르는 게 아니라 0으로 둔 것
             {
                 // 쓰기를 기록하기 전 호출은 OpenAI 기본 동작(캐시에 안 걸린 입력 전부 쓰기)으로 가정한 값도 낸다.
                 unknown++;
@@ -343,6 +355,11 @@ public static class BillingComparer
         TokenSum? openai = inRange.Count == 0 ? null
             : inRange.Aggregate(TokenSum.Zero, (s, u) => s.Add(u.Input, u.Cached, u.CacheWrite, u.Output, u.Requests));
 
-        return new BillingRow(start, end, billed, items, computed, assumed, unknown, unpriced, ours, openai);
+        return new BillingRow(start, end, billed, items, computed, assumed, unknown, unpriced, ours, openai)
+        {
+            EstimatedCost = estimated,
+            EstimatedCalls = estimatedCalls,
+            OutputUnknownCalls = outputUnknown,
+        };
     }
 }

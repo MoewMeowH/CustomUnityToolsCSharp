@@ -55,7 +55,7 @@ public sealed class IndexModel(IOptions<DashboardOptions> options, PricingServic
     public long TotalCached => Calls.Sum(c => c.CachedInputTokens ?? 0);
 
     /// <summary>입력 토큰은 있는데 캐시 값이 없는 기록 수. 0(미적중)과 다르다: 제공사가 값을 주지 않았거나(Gemini 미적중 등) 예전 기록.</summary>
-    public int CacheUnknown => Calls.Count(c => c.InputTokens is not null && c.CachedInputTokens is null);
+    public int CacheUnknown => Calls.Count(c => c.InputTokens is not null && c.CachedInputTokens is null && c.Estimate is null);
     /// <summary>캐시 쓰기 토큰 합계. 비용 계산에는 아직 넣지 않는다 (제공사 부과 여부 확인 전).</summary>
     public long TotalCacheWrite => Calls.Sum(c => c.CacheWriteTokens ?? 0);
     public long TotalOut => Calls.Sum(c => c.OutputTokens ?? 0);
@@ -73,6 +73,9 @@ public sealed class IndexModel(IOptions<DashboardOptions> options, PricingServic
 
     /// <summary>오늘 비용 (USD). MCP appsettings의 단가만 쓴다 (대시보드 예전 단가 보완 없음).</summary>
     public decimal TodayCost { get; private set; }
+
+    /// <summary>오늘 비용에 섞인 끊긴 호출 추정분 안내 (없으면 빈 문자열).</summary>
+    public string TodayEstimateNote { get; private set; } = "";
 
     /// <summary>오늘 기록 중 단가가 없어 비용에 넣지 못한 건수.</summary>
     public int TodayUnpriced { get; private set; }
@@ -108,6 +111,8 @@ public sealed class IndexModel(IOptions<DashboardOptions> options, PricingServic
         TodayCounted = budget.CountedTokens(todayCalls);
         TodayCost = budget.CountedCost(todayCalls, pricing.Current);
         TodayUnpriced = budget.UnpricedCalls(todayCalls, pricing.Current);
+        // 오늘 비용과 같은 기준(MCP 단가 · 무료 제공사 제외)으로 추정분을 센다.
+        TodayEstimateNote = pricing.EstimateNote(todayCalls, 2, estimated => budget.CountedCost(estimated, pricing.Current));
 
         var since = DateTimeOffset.Now.AddDays(-Days);
         Calls = all

@@ -159,6 +159,10 @@ public sealed class AgentRunner
         var stepWatch = Stopwatch.StartNew();
         var failedKinds = new List<string>();
 
+        // 강제 종료로 남은 다른 프로세스의 호출 중 표시를 Lost 기록으로 옮긴다 (실패해도 호출은 계속).
+        try { await InflightLog.SweepAsync(LogPath); }
+        catch (Exception ex) { _logger.LogWarning(ex, "호출 중 표시 정리 실패"); }
+
         // 에이전트에 넘길 문자열 그대로를 해시한다 (Debate 규칙 등 덧붙인 뒤의 최종본). 시도마다 같으므로 한 번만.
         var provenance = ProvenanceBuilder.WithInstructions(call.Meta.Provenance, call.Instructions, LogPath);
         if (provenance.StoreErrors is { Count: > 0 } storeErrors)
@@ -169,8 +173,12 @@ public sealed class AgentRunner
             var outcome = await RunAttemptAsync(call, provenance, attempt, maxAttempts, ct);
             var record = outcome.Record;
 
-            // 기록 실패가 결과 전달을 막으면 안 된다.
-            try { await CallLog.AppendAsync(record, _logPath); }
+            // 기록 실패가 결과 전달을 막으면 안 된다. 기록하지 못했으면 표시를 남겨, 프로세스가 끝난 뒤 Lost로라도 남게 한다.
+            try
+            {
+                await CallLog.AppendAsync(record, _logPath);
+                InflightLog.End(outcome.Marker);
+            }
             catch (Exception ex) { _logger.LogWarning(ex, "호출 기록 저장 실패"); }
 
             string? finalText = null;
@@ -207,13 +215,17 @@ public sealed class AgentRunner
         }
     }
 
-    private sealed record AttemptOutcome(CallRecord Record, string Text, FailureInfo? Failure);
+    /// <param name="Marker">호출 중 표시 파일. 시도 기록을 남긴 뒤 지운다. 표시를 쓰지 못했으면 null.</param>
+    private sealed record AttemptOutcome(CallRecord Record, string Text, FailureInfo? Failure, string? Marker);
 
     /// <summary>한 번 호출. 사용자 취소만 예외로 올리고, 나머지 실패는 기록과 분류로 돌려준다.</summary>
     private async Task<AttemptOutcome> RunAttemptAsync(StepCall call, CallProvenance provenance, int attempt, int maxAttempts, CancellationToken ct)
     {
         var startedAt = DateTimeOffset.Now;
         var sw = Stopwatch.StartNew();
+        // 호출 중 표시와 시도 기록이 같은 Id를 쓴다 (기록 직후 죽어 표시가 남아도 읽을 때 중복을 뺄 수 있게).
+        var id = Guid.NewGuid().ToString("N")[..12];
+        string? marker = null;
 
         try
         {
@@ -237,6 +249,9 @@ public sealed class AgentRunner
             var runOptions = call.Reasoning is { } effort
                 ? new ChatClientAgentRunOptions(new ChatOptions { Reasoning = new ReasoningOptions { Effort = effort } })
                 : null;
+            marker = InflightLog.Begin(NewRecord(), LogPath, out var markerError);
+            if (markerError is not null)
+                _logger.LogWarning("[{Mode}#{Step}] 호출 중 표시 쓰기 실패 (호출은 계속): {Error}", call.Mode, call.Step, markerError);
             var response = call.History is { Count: > 0 } history
                 ? await agent.RunAsync([.. history, new ChatMessage(ChatRole.User, call.Prompt)], options: runOptions, cancellationToken: ct)
                 : call.Images is { Count: > 0 }
@@ -279,7 +294,7 @@ public sealed class AgentRunner
                     ElapsedMs = sw.ElapsedMilliseconds,
                     Success = false,
                     Error = text,
-                }, text, null);
+                }, text, null, marker);
             }
 
             // 구조화 출력: 원문(JSON)은 기록에, 지휘자·다음 단계에는 그린 텍스트. 해석 실패면 원문 그대로 + 경고 (실패로 치지 않음).
@@ -322,7 +337,7 @@ public sealed class AgentRunner
                 ElapsedMs = sw.ElapsedMilliseconds,
                 Success = true,
                 Warnings = warnings,
-            }, text, null);
+            }, text, null, marker);
         }
         catch (Exception ex) when (RetryClassifier.IsUserCancellation(ex, ct))
         {
@@ -334,7 +349,11 @@ public sealed class AgentRunner
                 Error = "[취소] 사용자가 실행을 취소했습니다.",
                 ErrorKind = "Canceled",
             };
-            try { await CallLog.AppendAsync(canceled, _logPath); }
+            try
+            {
+                await CallLog.AppendAsync(canceled, _logPath);
+                InflightLog.End(marker);
+            }
             catch (Exception logEx) { _logger.LogWarning(logEx, "호출 기록 저장 실패"); }
             throw;
         }
@@ -354,7 +373,7 @@ public sealed class AgentRunner
                 Success = false,
                 Error = error,
                 ErrorKind = kind,
-            }, error, failure);
+            }, error, failure, marker);
         }
 
         // 큰 프롬프트는 blobs에 두고 기록에는 앞부분 · 해시만 (같은 프롬프트는 한 번만 저장된다). 저장 실패면 원문 그대로 + StoreErrors.
@@ -366,7 +385,7 @@ public sealed class AgentRunner
 
         CallRecord BaseRecord() => new()
         {
-            Id = Guid.NewGuid().ToString("N")[..12],
+            Id = id,
             Timestamp = startedAt,
             Tool = call.Tool ?? call.Mode,
             RunId = call.RunId,

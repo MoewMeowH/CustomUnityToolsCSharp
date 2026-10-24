@@ -95,6 +95,10 @@
                     {
                         <div class="items err" title="모드 화면의 모델 단가 표에 단가가 없는 모델의 호출은 계산에서 빠졌습니다">단가 없음 @(r.UnpricedCalls)건 제외 — 불완전</div>
                     }
+                    @if (r.EstimatedCalls > 0)
+                    {
+                        <div class="items" title="끊긴 호출(Timeout · Network · 취소 · 강제 종료)의 추정 사용량. 같은 단계 성공 시도가 있으면 그 실측, 없으면 보낸 바이트 어림(입력만)">추정 @Model.Money(r.EstimatedCost) 포함 (@(r.EstimatedCalls)건@(r.OutputUnknownCalls > 0 ? $", 출력 미상 {r.OutputUnknownCalls}건" : ""))</div>
+                    }
                     @if (r.UnknownWriteCalls > 0)
                     {
                         <div class="items" title="캐시 쓰기를 기록하기 전 호출(@r.UnknownWriteCalls 건)을 OpenAI 기본 동작(캐시에 안 걸린 입력 전부 쓰기)으로 가정한 값">쓰기 가정 @Model.Money(r.ComputedAssumed)</div>

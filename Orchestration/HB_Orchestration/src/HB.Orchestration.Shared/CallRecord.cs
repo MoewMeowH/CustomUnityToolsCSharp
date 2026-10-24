@@ -147,6 +147,13 @@ public sealed record CallRecord
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? FollowUpSkipped { get; init; }
+
+    /// <summary>
+    /// 끊긴 호출에 대시보드가 채운 추정 사용량 표시 (<see cref="UsageEstimator.Apply"/>). 있으면 InputTokens · OutputTokens는 추정값이다.
+    /// 기록 파일에는 쓰지 않는다.
+    /// </summary>
+    [JsonIgnore]
+    public UsageEstimate? Estimate { get; init; }
 }
 
 /// <summary>

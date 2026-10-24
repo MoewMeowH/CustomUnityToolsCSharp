@@ -27,7 +27,7 @@ public sealed class IndexPagingTests : IDisposable
             }, log);
         var options = Options.Create(new DashboardOptions { LogPath = log, McpConfigDir = _dir });
         var modes = new ModesConfigService(options, _ => null);
-        var model = new IndexModel(options, new PricingService(options, modes), new CallLogCache(options), new VerdictLogCache(options))
+        var model = new IndexModel(options, new PricingService(options, modes), new CallLogCache(options, Microsoft.Extensions.Logging.Abstractions.NullLogger<CallLogCache>.Instance), new VerdictLogCache(options))
         {
             P = page, Q = q,
         };

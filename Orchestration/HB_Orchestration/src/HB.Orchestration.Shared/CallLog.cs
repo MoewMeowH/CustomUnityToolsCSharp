@@ -15,7 +15,7 @@ public static class CallLog
     /// 한글을 \uXXXX(6바이트)로 바꾸지 않고 UTF-8(3바이트) 그대로 쓴다. 예전처럼 이스케이프된 기록도 그대로 읽힌다.
     /// 기록은 HTML에 그대로 넣지 않으므로 HTML 문자를 이스케이프하지 않아도 된다 (대시보드는 Razor가 따로 인코딩한다).
     /// </summary>
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
+    internal static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
@@ -345,7 +345,8 @@ public static class CallLog
                 continue;
             }
             if (r is null) continue;
-            if (r.Timestamp < stopBefore) break;
+            // Lost는 원래 시작 시각을 단 채 정리 때(몇 시간 · 며칠 뒤) 끝에 붙으므로 멈출 기준으로 쓰지 않는다 (/cross-review 39552cf537 1-F3).
+            if (r.ErrorKind != InflightLog.LostKind && r.Timestamp < stopBefore) break;
             if (r.Timestamp >= since) result.Add(ModeNames.Normalize(r));
         }
         return result;

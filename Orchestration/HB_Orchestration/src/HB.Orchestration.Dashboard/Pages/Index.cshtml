@@ -60,7 +60,7 @@
 
 <section class="stats">
     <div class="panel stat" title="오늘 0시부터 · MCP 단가로 계산 · 무료 제공사 제외 (위 필터와 무관). 단가 없는 모델은 비용에 들어가지 않는다">
-        <div class="label">오늘 비용@(Model.TodayUnpriced > 0 ? $" · 단가 없는 모델 {Model.TodayUnpriced}건(비용 미집계)" : "")</div>
+        <div class="label">오늘 비용@(Model.TodayUnpriced > 0 ? $" · 단가 없는 모델 {Model.TodayUnpriced}건(비용 미집계)" : "")@Model.TodayEstimateNote</div>
         <div class="value @(Model.TodayUnpriced > 0 ? "err" : "")">$@Model.TodayCost.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)</div>
     </div>
     <div class="panel stat" title="오늘 0시부터 · 입력+출력 · 무료 제공사 제외 (위 필터와 무관)">
@@ -71,7 +71,7 @@
     <div class="panel stat"><div class="label" title="캐시 정보 없음 = 제공사가 캐시 값을 주지 않은 기록 (미적중 0과 다름)">입력 토큰 (캐시 @Model.TotalCached.ToString("N0")@(Model.TotalCacheWrite > 0 ? $" · 쓰기 {Model.TotalCacheWrite:N0}" : "")@(Model.CacheUnknown > 0 ? $" · 정보 없음 {Model.CacheUnknown}건" : ""))</div><div class="value">@Model.TotalIn.ToString("N0")</div></div>
     <div class="panel stat"><div class="label">출력 토큰@(Model.TotalReasoning > 0 ? $" (추론 {Model.TotalReasoning:N0})" : "")</div><div class="value">@Model.TotalOut.ToString("N0")</div></div>
     <div class="panel stat"><div class="label">평균 응답</div><div class="value">@Model.AvgSeconds.ToString("0.0")s</div></div>
-    <div class="panel stat"><div class="label">예상 비용@(Model.Pricing.Current.KrwPerUsd is { } rate ? $" · 1$ = ₩{rate:N0}" : "")</div><div class="value">@Model.Pricing.Format(Model.TotalCost, 3)</div></div>
+    <div class="panel stat"><div class="label" title="끊긴 호출(Timeout · Network · 취소 · 강제 종료)은 추정 사용량으로 센다">예상 비용@(Model.Pricing.Current.KrwPerUsd is { } rate ? $" · 1$ = ₩{rate:N0}" : "")@Model.Pricing.EstimateNote(Model.Calls, 3)</div><div class="value">@Model.Pricing.Format(Model.TotalCost, 3)</div></div>
     <div class="panel stat"><div class="label">실패</div><div class="value @(Model.Failures > 0 ? "err" : "")">@Model.Failures</div></div>
 </section>
 
@@ -111,6 +111,7 @@
             @foreach (var c in Model.PageCalls)
             {
                 var cost = Model.Pricing.CostOf(c);
+                var estimate = PricingService.EstimateLabel(c);
                 <tr>
                     <td class="num"><a class="row-link" href="/Call/@c.Id">@c.Timestamp.LocalDateTime.ToString("MM-dd HH:mm:ss")</a></td>
                     <td>
@@ -149,10 +150,10 @@
                         @if (c.Images is { Count: > 0 } imgs) { <span class="muted"> · 이미지 @imgs.Count</span> }
                         @if (c.WebSearch is { } search) { <span class="@(search.Unverified.Count > 0 ? "err" : "muted")"> · 검색 @search.Calls@(search.SearchActions is { } billed && billed != search.Calls ? $" (청구 추정 {billed})" : "")@(search.Unverified.Count > 0 ? $" (출처 의심 {search.Unverified.Count})" : "")</span> }
                     </td>
-                    <td class="num">@(c.InputTokens?.ToString("N0") ?? "-")</td>
-                    <td class="num">@(c.OutputTokens?.ToString("N0") ?? "-")</td>
+                    <td class="num" title="@estimate">@(estimate is null ? "" : "≈")@(c.InputTokens?.ToString("N0") ?? "-")</td>
+                    <td class="num" title="@estimate">@(estimate is null ? "" : "≈")@(c.Estimate is { OutputUnknown: true } ? "?" : c.OutputTokens?.ToString("N0") ?? "-")</td>
                     <td class="num">@((c.ElapsedMs / 1000.0).ToString("0.0"))s</td>
-                    <td class="num">@Model.Pricing.Format(cost)</td>
+                    <td class="num" title="@estimate">@(estimate is null ? "" : "≈")@Model.Pricing.Format(cost)</td>
                 </tr>
             }
             </tbody>

@@ -48,7 +48,11 @@
     <div><div class="label">시간</div><div class="value">@c.Timestamp.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss")</div></div>
     <div><div class="label">응답 시간</div><div class="value">@((c.ElapsedMs / 1000.0).ToString("0.0"))s</div></div>
     <div><div class="label">입력 / 출력 토큰</div><div class="value">@(c.InputTokens?.ToString("N0") ?? "-") / @(c.OutputTokens?.ToString("N0") ?? "-")@(c.InputTokens is null ? "" : c.CachedInputTokens is { } cached ? $" (캐시 {cached:N0})" : " (캐시 정보 없음)")</div></div>
-    <div><div class="label">예상 비용</div><div class="value">@Model.Pricing.Format(Model.Cost)</div></div>
+    <div><div class="label">예상 비용</div><div class="value">@(c.Estimate is null ? "" : "≈")@Model.Pricing.Format(Model.Cost)</div></div>
+    @if (PricingService.EstimateLabel(c) is { } estimateLabel)
+    {
+        <div><div class="label">추정 사용량</div><div class="value" style="color: var(--warn)">@estimateLabel</div></div>
+    }
     <div><div class="label">상태</div><div class="value @(c.Success ? "ok" : "err")">@(c.Success ? "성공" : "실패")@(c.ErrorKind is { } kind ? $" ({kind})" : "")</div></div>
     @if (Model.StepAttempts > 1)
     {
@@ -166,7 +170,7 @@
     var runCost = Model.Pricing.TotalOf(Model.RunSteps);
     <section class="panel files">
         <span class="muted" style="font-size:12.5px">
-            이 실행의 단계 — 합계 입력 @runIn.ToString("N0") / 출력 @runOut.ToString("N0") 토큰@(runCost is not null ? " · " + Model.Pricing.Format(runCost) : "")
+            이 실행의 단계 — 합계 입력 @runIn.ToString("N0") / 출력 @runOut.ToString("N0") 토큰@(runCost is not null ? " · " + Model.Pricing.Format(runCost) : "")@Model.Pricing.EstimateNote(Model.RunSteps)
         </span>
         <ol class="steps">
             @foreach (var s in Model.RunSteps)
@@ -175,7 +179,7 @@
                     @{ var label = $"{s.Role} · {s.Agent}" + (s.Attempt is > 1 ? $" (시도 {s.Attempt})" : ""); }
                     @if (s.Id == c.Id) { <strong>@label</strong> }
                     else { <a href="/Call/@s.Id">@label</a> }
-                    <span class="muted"> — @(s.InputTokens?.ToString("N0") ?? "-") / @(s.OutputTokens?.ToString("N0") ?? "-") 토큰, @((s.ElapsedMs / 1000.0).ToString("0.0"))s</span>
+                    <span class="muted" title="@PricingService.EstimateLabel(s)"> — @(s.Estimate is null ? "" : "≈")@(s.InputTokens?.ToString("N0") ?? "-") / @(s.OutputTokens?.ToString("N0") ?? "-") 토큰, @((s.ElapsedMs / 1000.0).ToString("0.0"))s</span>
                     @if (!s.Success) { <span class="err"> 실패@(s.ErrorKind is { } sk ? $" {sk}" : "")</span> }
                     @if (s.Warnings.Count > 0) { <span class="badge warn" title="@string.Join("\n", s.Warnings)">경고 @s.Warnings.Count</span> }
                     @if (s.Provenance?.InstructionsSha256 is { } ish) { <span class="sha muted" title="시스템 프롬프트 SHA-256 @ish"> · 지침 @ish[..8]</span> }

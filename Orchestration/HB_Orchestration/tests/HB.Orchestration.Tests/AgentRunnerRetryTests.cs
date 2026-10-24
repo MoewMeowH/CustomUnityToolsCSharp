@@ -8,12 +8,13 @@ namespace HB.Orchestration.Tests;
 /// <summary>재시도 루프: 시도마다 기록이 남고, MaxAttempts를 넘지 않고, 재시도하지 않는 오류는 1회로 끝난다.</summary>
 public sealed class AgentRunnerRetryTests : IDisposable
 {
-    private readonly string _log = Path.Combine(Path.GetTempPath(), $"hb-orch-test-{Guid.NewGuid():N}.jsonl");
+    // 기록 옆에 호출 중 표시(inflight/)·blobs/가 생기므로 테스트마다 폴더를 따로 둔다.
+    private readonly string _log = Path.Combine(Directory.CreateTempSubdirectory("hb-orch-test-").FullName, "calls.jsonl");
     private readonly List<TimeSpan> _waits = [];
 
     public void Dispose()
     {
-        if (File.Exists(_log)) File.Delete(_log);
+        try { Directory.Delete(Path.GetDirectoryName(_log)!, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
 
     private AgentRunner Runner() => new(NullLogger<AgentRunner>.Instance, (t, _) => { _waits.Add(t); return Task.CompletedTask; }, _log);

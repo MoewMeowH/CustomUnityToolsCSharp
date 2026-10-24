@@ -127,11 +127,12 @@ public class ResponseCheckerTests
 /// <summary>검사기가 실행 경로에 붙었는지: 경고가 기록·결과에 남고, 응답은 그대로 성공으로 전달된다.</summary>
 public sealed class AgentRunnerCheckTests : IDisposable
 {
-    private readonly string _log = Path.Combine(Path.GetTempPath(), $"hb-orch-test-{Guid.NewGuid():N}.jsonl");
+    // 기록 옆에 호출 중 표시(inflight/)·blobs/가 생기므로 테스트마다 폴더를 따로 둔다.
+    private readonly string _log = Path.Combine(Directory.CreateTempSubdirectory("hb-orch-test-").FullName, "calls.jsonl");
 
     public void Dispose()
     {
-        if (File.Exists(_log)) File.Delete(_log);
+        try { Directory.Delete(Path.GetDirectoryName(_log)!, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
 
     private async Task<StepResult> Run(ScriptedChatClient client)

@@ -11,11 +11,12 @@ namespace HB.Orchestration.Tests;
 /// <summary>usage 원문 기록: SDK가 모르는 캐시 쓰기 필드도 원문에 남고, 추론 토큰·캐시 쓰기 토큰이 기록된다. 원문이 없으면 null.</summary>
 public sealed class UsageRecordingTests : IDisposable
 {
-    private readonly string _log = Path.Combine(Path.GetTempPath(), $"hb-orch-test-{Guid.NewGuid():N}.jsonl");
+    // 기록 옆에 호출 중 표시(inflight/)·blobs/가 생기므로 테스트마다 폴더를 따로 둔다.
+    private readonly string _log = Path.Combine(Directory.CreateTempSubdirectory("hb-orch-test-").FullName, "calls.jsonl");
 
     public void Dispose()
     {
-        if (File.Exists(_log)) File.Delete(_log);
+        try { Directory.Delete(Path.GetDirectoryName(_log)!, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
 
     private const string CompletionJson = """
