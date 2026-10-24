@@ -361,7 +361,7 @@ public sealed class ContextOptions
 
 /// <summary>
 /// run_mode images 제한. 서버는 이미지를 줄이지 않으므로 축소는 image_prep.py shrink가 하고, 여기서는 넘친 것을 거절만 한다.
-/// 이미지는 MaxInputChars(텍스트 글자 수)에 들어가지 않는다. 토큰은 실제 사용량(InputTokens)으로 일일 한도·비용에 잡힌다.
+/// 이미지는 MaxInputChars(텍스트 글자 수)에 들어가지 않는다. 토큰은 실제 사용량(InputTokens)으로 비용에 잡힌다.
 /// </summary>
 public sealed class ImageOptions
 {
@@ -377,7 +377,10 @@ public sealed class ImageOptions
 
 public sealed class ProviderOptions
 {
-    /// <summary>클라이언트 구현 종류. 현재는 "openai-compatible" 하나로 OpenAI·Gemini·Ollama·LM Studio를 모두 처리.</summary>
+    /// <summary>
+    /// 클라이언트 구현 종류. "openai-compatible"(Chat Completions — OpenAI·Gemini·Fireworks·Ollama·LM Studio)과
+    /// "openai-responses"(OpenAI Responses API — 웹검색 단계용).
+    /// </summary>
     public string Type { get; set; } = "openai-compatible";
 
     /// <summary>API 기본 주소. 비우면 OpenAI 공식 주소.</summary>

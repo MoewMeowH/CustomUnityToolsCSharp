@@ -11,6 +11,6 @@
   <Folder Name="/project-files/">
     <File Path="project-files/CLAUDE.md" />
     <File Path="project-files/REVIEW_GUIDELINES.md" />
-    <File Path="project-files/.mcp.json" />
+    <File Path="project-files/.mcp.example.json" />
   </Folder>
 </Solution>

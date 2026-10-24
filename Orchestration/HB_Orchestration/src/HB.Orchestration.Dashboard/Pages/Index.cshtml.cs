@@ -56,7 +56,7 @@ public sealed class IndexModel(IOptions<DashboardOptions> options, PricingServic
 
     /// <summary>입력 토큰은 있는데 캐시 값이 없는 기록 수. 0(미적중)과 다르다: 제공사가 값을 주지 않았거나(Gemini 미적중 등) 예전 기록.</summary>
     public int CacheUnknown => Calls.Count(c => c.InputTokens is not null && c.CachedInputTokens is null && c.Estimate is null);
-    /// <summary>캐시 쓰기 토큰 합계. 비용 계산에는 아직 넣지 않는다 (제공사 부과 여부 확인 전).</summary>
+    /// <summary>캐시 쓰기 토큰 합계. 비용은 CacheWritePerMillion 단가로 계산된다 (ModelPrice.CostOf).</summary>
     public long TotalCacheWrite => Calls.Sum(c => c.CacheWriteTokens ?? 0);
     public long TotalOut => Calls.Sum(c => c.OutputTokens ?? 0);
     public long TotalReasoning => Calls.Sum(c => c.ReasoningTokens ?? 0);

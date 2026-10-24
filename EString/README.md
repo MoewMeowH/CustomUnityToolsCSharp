@@ -59,7 +59,7 @@ Perm   w  = 5.ToPermFast();                              // Read | Exec (IntConv
 
 ## 생성되는 멤버
 
-클래스 이름은 `{바깥타입_}{Enum}Extensions`입니다. enum과 같은 namespace에 생성되며, 파일 이름은 `{Namespace}.{클래스 이름}.g.cs`입니다.
+클래스 이름은 `{바깥타입_}{Enum}Extensions`입니다. enum과 같은 namespace에 생성되며, 파일 이름은 `{Namespace}.{클래스 이름}.g.cs`입니다. 파일 이름이 대소문자만 다르게 겹치면(예: namespace `Game.ab`와 `Game.AB`에 같은 이름의 enum, 또는 `Kind`와 `KIND`) 겹치는 것 모두에 `.{8자리 해시}`(namespace를 포함한 전체 이름 `{Namespace}.{클래스 이름}`의 FNV-1a 32비트, 대문자 16진수)를 붙여 전부 생성합니다 — `AddSource`가 이름을 대소문자 없이 비교해 예외로 생성기 전체가 멈추던 문제를 막습니다.
 클래스 접근성은 enum을 따릅니다. enum과 바깥 타입이 모두 `public`이면 `public`이고, 그 외(`internal` 등)에는 `internal`입니다.
 메서드 이름에는 모두 `Fast`를 붙여 .NET 기본 API(`ToString`, `Enum.IsDefined` 등)와 구분합니다.
 
@@ -106,6 +106,7 @@ Perm   w  = 5.ToPermFast();                              // Read | Exec (IntConv
 | `E2S002` | enum 또는 바깥 타입이 `private` · `protected` | 생성하지 않음 |
 | `E2S003` | `IntConversion`인데 멤버 값이 int 범위를 벗어남 (`uint` · `long` · `ulong`) | 생성함. `ToIntFast`는 값을 자르고 int API는 그 멤버를 인식하지 않음 |
 | `E2S004` | 생성 클래스 이름이 같은 namespace에서 겹침 (예: 최상위 `Outer_E`와 중첩 `Outer.E`) | 뒤에 나온 enum은 생성하지 않음 |
+| `E2S005` | 같은 namespace에서 `To{Enum}Fast` 확장 메서드 이름이 겹침 (예: `Outer1.Kind`와 `Outer2.Kind`) | 생성함. `"x".ToKindFast()` 확장 호출이 모호하므로 `Outer1_KindExtensions.ToKindFast("x")`처럼 정적 호출로 씀 |
 
 ## Unity에 넣기
 
@@ -133,4 +134,4 @@ Perm   w  = 5.ToPermFast();                              // Read | Exec (IntConv
 - `uint` · `long` · `ulong` enum에서 int 범위를 벗어난 값은 int API(`ToIntFast`, `To{Enum}Fast(int)`, `IsDefinedFast(int)`)로 다룰 수 없습니다(`E2S003`). 이런 enum은 `ToStringFast` · 문자열 파싱 · `IsDefinedFast(T)`를 쓰세요.
 - `[Flags]` 조합 문자열 캐시는 프로세스가 끝날 때까지 유지됩니다. 서로 다른 조합 값이 아주 많이 생기는 용도라면 메모리를 확인하세요.
 - `Values`는 배열이라 외부에서 내용을 바꿀 수 있습니다. 수정하지 마세요.
-- 저장소 루트의 `bin/Release/netstandard2.0/EString.dll`은 예전 구조의 산출물입니다. Unity에 넣을 dll은 `Script/bin/Release/netstandard2.0/EString.dll`입니다.
+- 생성 코드는 `using`을 쓰지 않고 `global::`로 씁니다 (`MethodImpl` · `StringComparison` · `Dictionary` · `StringBuilder`). 사용자 코드의 같은 이름 타입과 부딪히지 않습니다.

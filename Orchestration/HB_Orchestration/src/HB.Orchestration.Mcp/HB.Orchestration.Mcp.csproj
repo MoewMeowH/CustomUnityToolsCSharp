@@ -20,7 +20,6 @@
     -->
     <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
     <None Update="modes.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
-    <None Update="Prompts\**\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
