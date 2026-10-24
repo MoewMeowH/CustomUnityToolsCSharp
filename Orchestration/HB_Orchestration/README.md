@@ -106,7 +106,7 @@ dotnet build HB_Orchestration.slnx
 | `Agents[].ReasoningEffort` | 추론 강도 `none` · `low` · `medium` · `high` · `xhigh` (대소문자 무시). **에이전트 전용** (같은 제공사라도 모델마다 받는 값이 달라 제공사 기본값은 없음). 비우면 보내지 않음 = 제공사·모델 기본값. 다른 값이면 그 에이전트를 건너뛴다. Chat Completions는 `reasoning_effort`, Responses(openai-web)는 `reasoning.effort`로 나간다. 실행마다 `run_mode`의 `reasoning`(`"에이전트=강도"` · `"*=강도"`, 에이전트는 `agents` 교체 뒤 이름) · 골든 `--reasoning`으로 덮어쓴다. followUp은 원래 호출 값을 그대로 쓴다. 추론 토큰도 `MaxOutputTokens` 안에 들어가므로 강도를 올리면 상한에 닿아 본문 없이 끝날 수 있다 (2026-10-20 sol·argon·deepseek 64,000으로 올림). 호출 기록 `ReasoningEffort`에 실제로 보낸 값이 남고, `list_modes` 에이전트 줄에 설정 값이 보인다. 대시보드 에이전트 편집에서도 고친다. 제공사별 받는 값: OpenAI gpt-6.1-sol은 low~xhigh(none·minimal 400, 기본 medium) · Gemini OpenAI 호환은 low~high(xhigh 매핑 없음, 3.x·4는 끌 수 없음) · Fireworks는 low~xhigh·none (모델별 기본값 문서 없음). **Gemini OpenAI 호환은 강도를 비우면 추론을 거의 하지 않고**(2026-10-21 실측: argon 기본 21초 · total = prompt + completion, high 명시 201초), 추론 토큰을 usage의 `total_tokens`에만 넣는다 → 서버가 Gemini 제공사(엔드포인트 generativelanguage.googleapis.com)에서만 추론 칸이 없고 total > prompt + completion이면 그 차이를 `ReasoningTokens`로 기록하고 `OutputTokens`에 더한다(비용이 출력 단가로 잡힘). **`gemini_high_argon`은 ReasoningEffort가 비어 있어 호환 경로 기본값(추론 거의 없음)으로 동작한다** — 이 에이전트를 쓰는 crash_main · preflight_* 모두 해당 (review_high · perf_high는 2026-10-22부터 DeepSeek, 계획서 `docs/plans/2026-10-22_argon-모드-유지-검토.md`). high를 명시하면 비용 약 6배·시간 약 10배인데 골든 rec-4942 찾음은 1→2/11뿐이라 바꾸지 않았다 (2026-10-21 사용자 결정, 에이전트 이름은 provenance와 연결돼 그대로). appsettings 에이전트의 `Note` 칸에도 같은 설명 (서버가 읽지 않는 메모 칸 — 주석과 달리 대시보드 저장 때 지워지지 않음). 계획서 `docs/plans/2026-10-20_추론강도-설정.md` |
 | `Budget.FreeProviders` | 비용 집계에서 뺄 제공사 (기본 `local`) |
 | `ResponseChecks.ExpectedLanguage` | 기대하는 응답 언어. 지금은 `ko`만 지원. **키가 없으면 `ko`(검사 켬), `""`이면 끔** (아래 "응답 검사기") |
-| `ResponseChecks.ForeignScriptRatio` | 코드 블록을 뺀 본문에서 일본어 가나 비율이 이 값 이상이면 경고 (기본 0.02 = 2%) |
+| `ResponseChecks.ForeignScriptRatio` | 코드 블록을 뺀 본문에서 일본어 가나 비율, 또는 한자 비율(중국어)이 이 값 이상이면 경고 (기본 0.02 = 2%) |
 | `Debug.DumpToolResults` | `true`면 `run_mode`가 반환하는 문자열을 그대로 `%LOCALAPPDATA%/HB_Orchestration/dumps/`에 남긴다 (조사용, 기본 `false`). 결과가 Claude에게 가는 동안 바뀌는지 가를 때 쓰고, 끝나면 끈다 |
 | `Records.BlobFolder` | 지침·설정 원문 저장 폴더. 비우면 `calls.jsonl` 옆 `blobs/`, 상대 경로면 `calls.jsonl` 폴더 기준 (아래 "호출 기록의 지침·설정 해시") |
 | `Records.MaxReasonChars` · `Records.MaxOwnReviewChars` | `run_mode`의 `reason` · `ownReview` 글자 수 상한 (기본 500 · 30,000, 0 = 무제한). 넘으면 잘라 쓰지 않고 거절 (실행 횟수 차감 없음) |
@@ -152,13 +152,12 @@ SDK 자동 재시도(기본 3회, 기록에 안 남음)는 끄고 서버가 직�
 |---|---|---|
 | 빈 응답 | 내용 없음 | **실패** `[빈 응답]` (종료 이유가 길이 제한이면 MaxOutputTokens 안내) |
 | 출력 상한에서 잘림 | 응답의 종료 이유가 길이 제한(`length`) | 경고 |
-| 언어 이탈 | 코드 블록(```` ``` ```` · `~~~`)과 인라인 코드를 뺀 본문에서 가나 비율 ≥ `ForeignScriptRatio`, 가나 5자 이상 | 경고 |
+| 언어 이탈 | 코드 블록(```` ``` ```` · `~~~`)과 인라인 코드를 뺀 본문에서 가나 비율 ≥ `ForeignScriptRatio`, 가나 5자 이상. 가나가 기준 밑이면 한자(CJK 통합 · 확장 A · 호환)도 같은 기준으로 본다 (중국어) | 경고 (한 줄: 가나가 넘으면 가나, 아니면 한자) |
 
-- 경고는 실패가 아니다. 응답은 그대로 전달하고, `run_mode` 결과의 해당 단계 아래에 `[경고] 응답 언어 이탈 감지 (가나 비율 10.7%, 308자)`처럼 한 줄씩 붙인다.
+- 경고는 실패가 아니다. 응답은 그대로 전달하고, `run_mode` 결과의 해당 단계 아래에 `[경고] 응답 언어 이탈 감지 (가나 비율 10.7%, 308자)` · `[경고] 응답 언어 이탈 감지 (한자 비율 65.5%, 610자)`처럼 한 줄씩 붙인다.
 - 경고는 기록(`Warnings`)에도 남고, 대시보드 목록과 상세 화면에 `경고 n` 배지로 보인다.
 - 검사기 자체가 오류를 내면 경고 없이 넘어가고 서버 로그만 남긴다.
 - `ExpectedLanguage`는 "비우면 기존 동작" 원칙의 **예외**로, 키가 없어도 검사가 켜진다. 경고는 결과를 바꾸지 않고, 사람이 대시보드를 보기 전에는 모르는 이탈(3장)을 기본으로 잡기 위해서다. 끄려면 `""`.
-- 한자(중국어) 이탈은 잡지 않는다.
 
 ### 호출 기록의 지침·설정 해시 (`Provenance`)
 

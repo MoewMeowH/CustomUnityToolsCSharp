@@ -125,13 +125,13 @@ public sealed class ResponseChecksOptions
     public const double DefaultForeignScriptRatio = 0.02;
 
     /// <summary>
-    /// 기대하는 응답 언어. 지금은 "ko"만 지원 (코드 블록을 뺀 본문의 일본어 가나 비율을 본다).
+    /// 기대하는 응답 언어. 지금은 "ko"만 지원 (코드 블록을 뺀 본문의 일본어 가나 비율, 가나가 적으면 한자 비율을 본다).
     /// 키가 없으면 "ko"(검사 켬), ""이면 검사 끔. "비우면 기존 동작" 원칙의 의도적 예외다:
     /// 경고는 실패가 아니라 기존 실행 결과를 바꾸지 않고, 3장처럼 사람이 대시보드를 보기 전엔 모르는 이탈을 기본으로 잡기 위해서다.
     /// </summary>
     public string? ExpectedLanguage { get; set; } = "ko";
 
-    /// <summary>본문 글자 중 가나 비율이 이 값 이상이면 경고 (0~1, 기본 0.02 = 2%). 0 이하나 1 초과면 기본값.</summary>
+    /// <summary>본문 글자 중 가나 비율(또는 한자 비율)이 이 값 이상이면 경고 (0~1, 기본 0.02 = 2%). 0 이하나 1 초과면 기본값.</summary>
     public double ForeignScriptRatio { get; set; } = DefaultForeignScriptRatio;
 
     public double EffectiveForeignScriptRatio =>

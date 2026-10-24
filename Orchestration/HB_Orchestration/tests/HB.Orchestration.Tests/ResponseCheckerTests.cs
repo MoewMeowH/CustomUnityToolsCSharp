@@ -93,7 +93,60 @@ public class ResponseCheckerTests
     public void KatakanaMiddleDot_IsNotCountedAsKana()
     {
         // 한국어 문서에도 쓰이는 '・'(U+30FB)는 가타카나 블록이지만 문장 부호라 세지 않는다.
-        Assert.Equal((0, 4), ResponseChecker.CountKana("가나・다라"));
+        Assert.Equal((0, 0, 4), ResponseChecker.CountScripts("가나・다라"));
+    }
+
+    [Fact]
+    public void CountScripts_CountsKanaAndHanSeparately()
+    {
+        // 漢字 2 + 호환 한자 U+F900 1 / カナ 2 / 한글 2 / 영문 2
+        var text = "漢字" + (char)0xF900 + " カナ 한글 ab";
+        Assert.Equal((2, 3, 9), ResponseChecker.CountScripts(text));
+    }
+
+    [Fact]
+    public void ChineseDrift_IsWarned()
+    {
+        // 2026-10-24 perf_main(runId 679d390e34) gpt_main_sol 응답 일부 — 가나 없이 한자만 쓴 중국어
+        const string text = """
+            - 1-F1 [low] HLogConsoleWindow.cs:577 — 选择项随环形缓冲区淘汰时，会反复分配完整可见集合及捕获闭包。 / 在窗口中复用一个清理用 HashSet，仅在选择减少时 Clear 并填充。 / 확신도(high)
+              상세: 事实：选择减少时，此分支会从 filteredLogs 新建 HashSet，并为捕获 visible 的谓词产生分配。
+            """;
+        var warnings = ResponseChecker.Warnings(text, ChatFinishReason.Stop, 900, Ko);
+        Assert.Contains(warnings, w => w.StartsWith("[경고] 응답 언어 이탈 감지 (한자 비율 ", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void JapaneseDrift_ReportsKanaOnly()
+    {
+        // 가나와 한자가 같이 기준을 넘어도 경고는 가나 한 줄 (일본어)
+        var data = Data("ch3_cross_p1_A_japanese_drift.md");
+        var (_, han, letters) = ResponseChecker.CountScripts(ResponseChecker.StripCode(data));
+        Assert.True(han >= ResponseChecker.MinForeignChars && (double)han / letters >= Ko.EffectiveForeignScriptRatio,
+            $"전제: 한자도 기준을 넘어야 한다 (한자 {han} / 글자 {letters})");
+
+        var warnings = ResponseChecker.Warnings(data, ChatFinishReason.Stop, 7000, Ko);
+        Assert.Single(warnings, w => w.StartsWith("[경고] 응답 언어 이탈 감지", StringComparison.Ordinal));
+        Assert.DoesNotContain(warnings, w => w.Contains("한자 비율", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void FewHan_InKoreanResponse_IsNotWarned()
+    {
+        // 한자 4자(靜的 · 同期): 최소 글자 수(5) 미만
+        Assert.Empty(ResponseChecker.Warnings("이 값은 정적(靜的) 동기(同期) 상태로 남는다", ChatFinishReason.Stop, 20, Ko));
+
+        // 한자 5자(同期化 · 費用)지만 긴 한국어 본문에서 비율이 2% 미만
+        var longKorean = string.Concat(Enumerable.Repeat("한국어로 쓴 리뷰 본문입니다. 선택 정리는 필드를 재사용합니다. ", 20)) + "동기화(同期化) 비용(費用)";
+        Assert.Empty(ResponseChecker.Warnings(longKorean, ChatFinishReason.Stop, 500, Ko));
+    }
+
+    [Fact]
+    public void FiveHan_InShortText_IsWarned()
+    {
+        // 경계: 한자 정확히 5자(靜的 · 同期化)면 최소 글자 수를 채워 경고 (짧아서 비율도 2% 이상)
+        var warnings = ResponseChecker.Warnings("이 값은 정적(靜的) 동기화(同期化) 상태로 남는다", ChatFinishReason.Stop, 20, Ko);
+        Assert.Contains(warnings, w => w.StartsWith("[경고] 응답 언어 이탈 감지 (한자 비율 ", StringComparison.Ordinal) && w.EndsWith(", 5자)", StringComparison.Ordinal));
     }
 
     [Fact]
