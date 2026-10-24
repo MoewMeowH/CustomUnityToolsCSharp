@@ -149,7 +149,7 @@ Quota(`[실패] Quota` — 크레딧·한도 소진)나 429 실패 뒤에는 바
 
 ## Unity 테스트 (Unity CLI)
 
-`unity test`를 돌릴 때는 `/unity-test` 명령 파일의 절차를 따른다 (배치 전용 프로젝트 `F:\AI\Unity_AITest\<버전>\ForAI`, 에디터 확인 → 관련 테스트만 → 종료 코드 → 실패 항목만).
+`unity test`를 돌릴 때는 `/unity-test` 명령 파일의 절차를 따른다 (배치 전용 프로젝트 `F:\AI\Unity_AITest\<버전>\ForAI`에 패키지를 넣고 → 에디터 확인 → 관련 테스트만 → 종료 코드 → 실패 항목만 → 되돌리기).
 
 ### 테스트와 외부 에이전트
 
