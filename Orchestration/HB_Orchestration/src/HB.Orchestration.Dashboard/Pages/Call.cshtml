@@ -47,7 +47,7 @@
     <div><div class="label">제공사 / 모델</div><div class="value mono">@IndexModel.ProviderOf(c) / @c.Model@(c.ReasoningEffort is { } effort ? $" · 추론 {effort}" : "")</div></div>
     <div><div class="label">시간</div><div class="value">@c.Timestamp.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss")</div></div>
     <div><div class="label">응답 시간</div><div class="value">@((c.ElapsedMs / 1000.0).ToString("0.0"))s</div></div>
-    <div><div class="label">입력 / 출력 토큰</div><div class="value">@(c.InputTokens?.ToString("N0") ?? "-") / @(c.OutputTokens?.ToString("N0") ?? "-")@(c.InputTokens is null ? "" : c.CachedInputTokens is { } cached ? $" (캐시 {cached:N0})" : " (캐시 정보 없음)")</div></div>
+    <div><div class="label">입력 / 출력 토큰</div><div class="value">@(c.InputTokens?.ToString("N0") ?? "-") / @(c.OutputTokens?.ToString("N0") ?? "-")@(c.InputTokens is null || c.Estimate is not null ? "" : c.CachedInputTokens is { } cached ? $" (캐시 {cached:N0})" : " (캐시 정보 없음)")</div></div>
     <div><div class="label">예상 비용</div><div class="value">@(c.Estimate is null ? "" : "≈")@Model.Pricing.Format(Model.Cost)</div></div>
     @if (PricingService.EstimateLabel(c) is { } estimateLabel)
     {
