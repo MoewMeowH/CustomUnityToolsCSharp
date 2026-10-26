@@ -30,6 +30,9 @@ try {
     Check '지침이 없으면 만듦' ((Read (Join-Path $t1 'REVIEW_GUIDELINES.md')) -eq $guide)
     $r = Run @('-UnityProject', $t1, '-Source', $src)
     Check '맞춘 뒤 비교는 0' ($r.Code -eq 0) $r.Out
+    # 2026-10-27: 서브에이전트 실수 목록은 퍼지고, 외부 에이전트 덧붙임(prompts)은 서버 전용이라 퍼지지 않는다
+    Check '서브에이전트 실수 목록 복사' ((Read (Join-Path $t1 '.claude\mistakes\self-reviewer.md')) -eq (Read (Join-Path $src '.claude\mistakes\self-reviewer.md')))
+    Check 'prompts는 복사 안 함' (-not (Test-Path -LiteralPath (Join-Path $t1 'prompts')))
 
     # 2. 지침만 프로젝트에 맞춰 고침: 비교 0 · 프로젝트 지침 표시 · -Apply가 덮지 않음
     $custom = "# 프로젝트 전용 지침`n- 시험`n"

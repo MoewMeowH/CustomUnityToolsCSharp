@@ -21,6 +21,12 @@ public sealed class OrchestrationOptions
     /// </summary>
     public string? GuidelinesPath { get; set; }
 
+    /// <summary>
+    /// 모델별 덧붙임(prompts/&lt;역할&gt;/&lt;에이전트&gt;.md) 폴더. 원본은 저장소 project-files/prompts (계획서 2026-10-27_실수목록-분리).
+    /// 상대 경로는 서버 폴더 기준. 비우면 modes.json 옆 prompts. 지정했는데 폴더가 없으면 실행을 거절한다.
+    /// </summary>
+    public string? PromptsPath { get; set; }
+
     public BudgetOptions Budget { get; set; } = new();
 
     public ContextOptions Context { get; set; } = new();

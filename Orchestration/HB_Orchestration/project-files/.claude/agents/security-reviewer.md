@@ -29,6 +29,7 @@ hooks:
 
 ## 읽는 것
 - 위임 메시지에 적힌 `subagent_in/<실행>/` 폴더 안의 파일만 읽는다 (훅이 그 밖을 막는다).
+- 그 폴더에 `_SUBAGENT_MISTAKES.md`가 있으면 가장 먼저 읽는다. 이 역할이 전에 한 실수 목록이다 — 같은 실수를 되풀이하지 않는다.
 - 먼저 그 폴더의 `REVIEW_GUIDELINES.md`를 읽는다.
 - Grep·Glob은 path를 꼭 그 폴더로 지정한다.
 

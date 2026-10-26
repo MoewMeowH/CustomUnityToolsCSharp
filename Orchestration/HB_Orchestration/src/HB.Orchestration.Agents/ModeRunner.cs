@@ -193,6 +193,9 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             return (null, $"[리뷰 지침 읽기 실패] {ex.GetType().Name}: {ex.Message} 파일을 닫거나 확인한 뒤 다시 호출하세요.");
         }
 
+        var (appendRoot, appendRootError) = PromptAppendLoader.ResolveRoot(Options.PromptsPath, AppContext.BaseDirectory, loaded.Path);
+        if (appendRootError is not null) return (null, $"[모델별 덧붙임 폴더 오류] {appendRootError}");
+
         var plan = new List<PlannedStep>();
         foreach (var step in mode.Steps)
         {
@@ -220,8 +223,8 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
 
             // 모델별 덧붙임 (교체 뒤 에이전트 이름). 골든 --no-guidelines여도 붙인다 — 프로젝트 지침이 아니라 모델 버릇 (계획서 2026-10-23_모델별-프롬프트-덧붙임 결정 2).
             PromptAppendLoader.Result? append;
-            try { append = PromptAppendLoader.Load(loaded.Path, step.Role, agent.Name); }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            try { append = PromptAppendLoader.Load(appendRoot!, step.Role, agent.Name); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
             {
                 return (null, $"[모델별 덧붙임 읽기 실패] {step.Role}@{agent.Name}: {ex.GetType().Name}: {ex.Message} 파일을 닫거나 확인한 뒤 다시 호출하세요.");
             }
@@ -836,9 +839,18 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         // run_mode의 agents 교체에 쓸 수 있는 이름 목록 (짧게)
         sb.AppendLine("에이전트: " + string.Join(", ", catalog.Agents.Select(a => $"{a.Name}({a.Model}{(a.Reasoning is { } e ? $", 추론 {AgentSettings.EffortName(e)}" : "")})")));
 
-        // 모델별 덧붙임이 붙는 (역할, 에이전트). 있을 때만 (없으면 출력이 이전과 같다). 골든 사례가 있는 역할에만 두는 규칙은 보이게만 한다.
-        if (PromptAppendLoader.List(loaded.Path) is { Count: > 0 } appends)
-            sb.AppendLine("모델별 덧붙임: " + string.Join(", ", appends));
+        // 모델별 덧붙임이 붙는 (역할, 에이전트) — 본문이 있는 것만, 어느 폴더에서 읽는지와 함께.
+        // 설정 폴더 오류는 실행이 거절되므로 그 이유를, 설정이 비었는데 modes.json 옆 폴더도 없으면 원본을 못 읽고 있다는 것을 보인다
+        // (원본은 저장소 project-files/prompts — 빈 설정이면 실수 목록을 적어도 조용히 반영되지 않는다, /self-review 2026-10-27 C2).
+        var (appendRoot, appendRootError) = PromptAppendLoader.ResolveRoot(Options.PromptsPath, AppContext.BaseDirectory, loaded.Path);
+        var besideModes = string.IsNullOrWhiteSpace(Options.PromptsPath);
+        var appendSource = besideModes ? "modes.json 옆" : "설정 PromptsPath";
+        if (appendRootError is not null)
+            sb.AppendLine($"모델별 덧붙임: 폴더 오류 — {appendRootError}");
+        else if (besideModes && !Directory.Exists(appendRoot))
+            sb.AppendLine("모델별 덧붙임: 없음 — 설정 Orchestration:PromptsPath가 비어 있고 modes.json 옆 prompts 폴더도 없습니다 (원본은 HB_Orchestration project-files/prompts).");
+        else if (PromptAppendLoader.List(appendRoot!) is { Count: > 0 } appends)
+            sb.AppendLine($"모델별 덧붙임({appendSource}): " + string.Join(", ", appends));
 
         // context의 "@이름/…"에 쓸 추가 루트. 등록이 있을 때만, 경로 없이 이름만 (비어 있으면 출력이 이전과 같다).
         // 잘못된 항목은 경고로만 알리고, 그 루트를 참조한 호출만 거절된다.

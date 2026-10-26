@@ -92,6 +92,7 @@ dotnet test tests/HB.Orchestration.Tests
 |---|---|
 | `ModesPath` | modes.json 위치를 직접 지정 (비우면 3절의 찾는 순서) |
 | `GuidelinesPath` | 리뷰 지침 파일 (비우면 `REVIEW_GUIDELINES_PATH` 환경 변수 → Unity 프로젝트 루트의 `REVIEW_GUIDELINES.md`). 직접 지정한 경로(이 설정 또는 환경 변수)에 파일이 없으면 다음 후보로 넘어가지 않고 run_mode가 `[리뷰 지침 경로 없음]`으로 거절한다 (2026-10-22, modes.json 지정 경로와 같은 규칙) |
+| `PromptsPath` | 모델별 덧붙임(외부 에이전트 실수 목록) 폴더. 원본은 `project-files/prompts`, 상대 경로는 서버 폴더 기준. 비우면 modes.json 옆 `prompts/`. 지정했는데 폴더가 없으면 `[모델별 덧붙임 폴더 오류]`으로 거절한다 ("모델별 덧붙임") |
 | `Providers.<이름>.Type` | `openai-compatible`(Chat Completions — OpenAI · Gemini · Fireworks · Ollama · LM Studio) · `openai-responses`(OpenAI Responses API, 웹검색 단계용) |
 | `Providers.<이름>.Endpoint` | API 주소. OpenAI는 비움, Gemini `https://generativelanguage.googleapis.com/v1beta/openai/`, Fireworks `https://api.fireworks.ai/inference/v1`, Ollama `http://localhost:11434/v1`, LM Studio `http://localhost:1234/v1` |
 | `Providers.<이름>.ApiKeyEnv` | API 키를 담은 **환경 변수 이름** (`OPENAI_API_KEY` · `GEMINI_API_KEY` · `FIREWORKS_API_KEY`). 로컬처럼 키가 필요 없으면 생략. 키 값은 서버 프로세스가 시작될 때 물려받은 값만 보인다 |
@@ -261,13 +262,13 @@ dotnet <publish 폴더>\HB.Orchestration.Mcp.dll --compact-log [calls.jsonl 경�
 내장 역할 `Reviewer`, `Critic`은 코드에 들어 있고, 같은 이름으로 정의하면 덮어쓴다. `Prompt` · `PromptFile` 없이 내장 역할 이름에 `Output` · `UseGuidelines`만 적으면 내장 프롬프트는 두고 그 두 값만 바뀐다. 내장 `Reviewer`는 `Output: findings`다 (modes.json에서 덮어쓰면 그쪽 `Output`을 따른다). `PerfReviewer`는 modes.json에 `Output: perf_findings`로 둔다.
 
 ### 모델별 덧붙임 (`prompts/<역할>/<에이전트>.md`)
-역할 프롬프트를 모델마다 복사하지 않고, modes.json 옆 `prompts/<역할>/<에이전트 이름>.md`를 시스템 프롬프트 **맨 끝**(지침 뒤)에 `## 모델별 덧붙임`으로 붙인다 (계획서 `docs/plans/2026-10-23_모델별-프롬프트-덧붙임.md`).
-* 에이전트는 `agents` 교체 **뒤** 실제 이름으로 찾는다 — 전용 모드가 필요 없다. 실행마다 다시 읽고, 파일이 없거나 본문이 공백뿐이면 붙이지 않는다 (시스템 프롬프트는 바이트 그대로).
-* "modes.json 옆"은 **실제로 쓰는** modes.json 옆이다 — 세션 폴더의 `hb-modes.json`을 쓰면 그 프로젝트 폴더의 `prompts/`에서 읽는다.
+역할 프롬프트를 모델마다 복사하지 않고, `prompts/<역할>/<에이전트 이름>.md`를 시스템 프롬프트 **맨 끝**(지침 뒤)에 `## 모델별 덧붙임`으로 붙인다 (계획서 `docs/plans/2026-10-23_모델별-프롬프트-덧붙임.md`). 그 (역할, 에이전트)가 자주 하는 실수 · 모델 버릇을 적는 자리다 (계획서 `docs/plans/2026-10-27_실수목록-분리.md`).
+* 원본은 저장소 `project-files/prompts/`이고, 서버는 appsettings `Orchestration:PromptsPath`로 읽는다 (상대 경로는 서버 폴더 기준, 예: `../HB_Orchestration/project-files/prompts`). 지정했는데 폴더가 없으면 `[모델별 덧붙임 폴더 오류]`으로 실행하지 않는다. 비우면 **실제로 쓰는** modes.json 옆 `prompts/` (세션 폴더의 `hb-modes.json`을 쓰면 그 프로젝트 폴더).
+* 에이전트는 `agents` 교체 **뒤** 실제 이름으로 찾는다 — 전용 모드가 필요 없다. 실행마다 다시 읽고, 파일이 없거나 HTML 주석(`<!-- -->`)을 뺀 본문이 공백뿐이면 붙이지 않는다 (시스템 프롬프트는 바이트 그대로). 기본 파일은 서식 안내 주석뿐이다. 주석 짝이 맞지 않으면(중첩 · 닫지 않음) 안내문이 새지 않게 `[모델별 덧붙임 읽기 실패]`로 실행하지 않는다.
 * Debate 토론자도 토론 규칙 **뒤** 맨 끝에 붙는다. 역할·에이전트 이름이 영문·숫자·`_`·`-` 밖의 글자를 가지면 덧붙임을 둘 수 없다(실행은 됨). 파일이 있는데 못 읽으면 `[모델별 덧붙임 읽기 실패]`로 실행하지 않는다. 골든 `--no-guidelines`여도 붙인다 (모델 버릇이지 프로젝트 지침이 아님).
-* 보이는 곳: `list_modes`의 `모델별 덧붙임:` 줄, 대시보드 모드 화면 · 호출 상세(`Provenance.Append` 경로·해시·원문), 골든 실행 계획 줄. 골든 실행 전 확인 뒤 덧붙임이 바뀌면 호출하지 않는다.
-* 규칙 (서버는 막지 않고 보이게만): **골든 사례가 있는 역할에만** 두고, 골든 기준점은 (역할, 에이전트) 단위로 잡는다. 만드는 쪽은 지휘자뿐 — `save_result`는 `**/prompts/**`에 쓰지 못한다.
-* `prompts/`는 저장소에 없고 서버 폴더(publish 폴더)에만 둔다. publish는 SDK가 지난번에 내보낸 파일만 지우므로 남는다 (2026-10-24 publish 뒤 확인).
+* 보이는 곳: `list_modes`의 `모델별 덧붙임(읽는 곳):` 줄(본문 있는 것만. 설정 폴더 오류면 그 이유, 설정이 비었는데 modes.json 옆 폴더도 없으면 `없음 —` 안내), 대시보드 호출 상세(`Provenance.Append` 경로·해시·원문 — 주석 포함 파일 그대로), 골든 실행 계획 줄. 골든 실행 전 확인 뒤 덧붙임이 바뀌면 호출하지 않는다.
+* 규칙: 만드는 쪽은 지휘자뿐 — `save_result`는 `**/prompts/**`에 쓰지 못한다. 골든 기준점은 (역할, 에이전트) 단위다. 골든 사례가 없는 역할에도 실수를 적을 수 있고, 골든 사례가 있는 역할에 적었으면 골든 1건으로 확인한다 (2026-10-27 결정 2 — 예전 "골든 사례가 있는 역할에만" 규칙을 풀었다).
+* 기본 파일은 modes.json이 쓰는 (역할, 에이전트) 쌍마다 하나씩 있다. 새 쌍을 넣으면 같은 서식으로 만든다 (`project-files/prompts/README.md`).
 
 ### 기본 모드와 이름 규칙
 

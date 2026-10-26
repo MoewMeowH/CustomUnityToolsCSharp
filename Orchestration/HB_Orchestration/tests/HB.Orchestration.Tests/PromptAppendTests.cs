@@ -83,7 +83,7 @@ public sealed class PromptAppendTests : IDisposable
     {
         WriteAppend("밖으로 나가면 안 됨", role: "x"); // prompts/x/a1.md — "../x" 등으로 닿지 않아야 한다
         File.WriteAllText(Path.Combine(_h.Root, "x.md"), "루트의 파일");
-        Assert.Null(PromptAppendLoader.Load(_h.ModesPath, role, agent));
+        Assert.Null(PromptAppendLoader.Load(PromptAppendLoader.RootFor(_h.ModesPath), role, agent));
     }
 
     [Fact]
@@ -135,15 +135,17 @@ public sealed class PromptAppendTests : IDisposable
     [Fact]
     public void List_shows_role_at_agent_pairs_and_list_modes_line()
     {
-        Assert.Empty(PromptAppendLoader.List(_h.ModesPath));
-        Assert.DoesNotContain("모델별 덧붙임", _h.Runner.Describe());
+        Assert.Empty(PromptAppendLoader.List(PromptAppendLoader.RootFor(_h.ModesPath)));
+        Assert.Contains("모델별 덧붙임: 없음 — 설정 Orchestration:PromptsPath가 비어 있고", _h.Runner.Describe()); // 원본을 못 읽고 있음을 보인다
+        Directory.CreateDirectory(Path.Combine(_h.Root, "prompts", "R"));
+        Assert.DoesNotContain("모델별 덧붙임", _h.Runner.Describe()); // 폴더는 있고 본문 있는 파일이 없으면 출력이 이전과 같다
 
         WriteAppend("x", "R", "a1");
         WriteAppend("y", "NoG", "deepseek_main_flash");
         File.WriteAllText(Path.Combine(_h.Root, "prompts", "R", "notes.txt"), "md 아님");
 
-        Assert.Equal(["NoG@deepseek_main_flash", "R@a1"], PromptAppendLoader.List(_h.ModesPath));
-        Assert.Contains("모델별 덧붙임: NoG@deepseek_main_flash, R@a1", _h.Runner.Describe());
+        Assert.Equal(["NoG@deepseek_main_flash", "R@a1"], PromptAppendLoader.List(PromptAppendLoader.RootFor(_h.ModesPath)));
+        Assert.Contains("모델별 덧붙임(modes.json 옆): NoG@deepseek_main_flash, R@a1", _h.Runner.Describe());
     }
 
     [Fact]
@@ -173,6 +175,82 @@ public sealed class PromptAppendTests : IDisposable
         var sent = ScriptedChatClient.SystemText(Assert.Single(g.Client.Received));
         Assert.Contains("실행 전 확인 뒤에 생김", sent);
         Assert.DoesNotContain("한글 규칙", sent); // 지침은 빠지고 덧붙임은 남음
+    }
+
+    [Fact]
+    public async Task Comment_only_default_file_leaves_system_prompt_byte_identical()
+    {
+        // 기본 파일은 서식 안내 주석뿐 (계획서 2026-10-27_실수목록-분리 결정 4)
+        await _h.Run("seq");
+        var before = ScriptedChatClient.SystemText(_h.Client.Received[0]);
+        WriteAppend("<!--\n서식: - 실수 / 대신 / 날짜·출처\n-->\n\n");
+        await _h.Run("seq");
+
+        Assert.Equal(before, ScriptedChatClient.SystemText(_h.Client.Received[1]));
+        Assert.Null(_h.Records()[1].Provenance!.Append);
+        Assert.Empty(PromptAppendLoader.List(PromptAppendLoader.RootFor(_h.ModesPath)));
+    }
+
+    [Fact]
+    public async Task Comments_are_stripped_and_raw_file_is_recorded()
+    {
+        WriteAppend("<!-- 안내 -->\n- 실수 하나\n<!-- 끝 주석 -->");
+        await _h.Run("seq");
+
+        var sent = ScriptedChatClient.SystemText(_h.Client.Received[0]);
+        Assert.EndsWith(PromptAppendLoader.Header + "- 실수 하나\n", sent);
+        Assert.DoesNotContain("안내", sent);
+        Assert.Equal(BlobStore.Sha256Hex(File.ReadAllBytes(AppendPath())), _h.Records()[0].Provenance!.Append!.Sha256);
+    }
+
+    [Theory]
+    [InlineData("<!-- 바깥 <!-- 안쪽 --> 남은 안내 -->\n- 실수\n")]
+    [InlineData("<!-- 닫지 않음\n- 실수\n")]
+    public async Task Unpaired_comment_refuses_the_run(string text)
+    {
+        WriteAppend(text);
+        Assert.StartsWith("[모델별 덧붙임 읽기 실패]", await _h.Run("seq"));
+        Assert.Empty(_h.Client.Received);
+        Assert.Equal(["R@a1"], PromptAppendLoader.List(PromptAppendLoader.RootFor(_h.ModesPath))); // 거절되는 파일은 보이게 남긴다
+    }
+
+    [Fact]
+    public async Task Configured_prompts_path_is_used_instead_of_modes_folder()
+    {
+        var other = Path.Combine(_h.Root, "elsewhere");
+        Directory.CreateDirectory(Path.Combine(other, "R"));
+        File.WriteAllText(Path.Combine(other, "R", "a1.md"), "설정 폴더");
+        WriteAppend("modes 옆");
+        _h.Options.PromptsPath = other;
+        File.SetLastWriteTimeUtc(_h.SettingsPath, DateTime.UtcNow.AddSeconds(5)); // 설정 다시 읽기
+
+        await _h.Run("seq");
+        var sent = ScriptedChatClient.SystemText(_h.Client.Received[0]);
+        Assert.Contains("설정 폴더", sent);
+        Assert.DoesNotContain("modes 옆", sent);
+        Assert.Contains("모델별 덧붙임(설정 PromptsPath): R@a1", _h.Runner.Describe());
+    }
+
+    [Fact]
+    public async Task Configured_prompts_path_missing_refuses_the_run()
+    {
+        WriteAppend("modes 옆");
+        _h.Options.PromptsPath = Path.Combine(_h.Root, "없는 폴더");
+        File.SetLastWriteTimeUtc(_h.SettingsPath, DateTime.UtcNow.AddSeconds(5));
+
+        Assert.StartsWith("[모델별 덧붙임 폴더 오류]", await _h.Run("seq"));
+        Assert.Empty(_h.Client.Received);
+        Assert.Contains("모델별 덧붙임: 폴더 오류", _h.Runner.Describe());
+    }
+
+    [Fact]
+    public void Relative_prompts_path_is_based_on_server_folder()
+    {
+        var server = Path.Combine(_h.Root, "server");
+        Directory.CreateDirectory(Path.Combine(_h.Root, "src", "prompts"));
+        var (root, error) = PromptAppendLoader.ResolveRoot(Path.Combine("..", "src", "prompts"), server, _h.ModesPath);
+        Assert.Null(error);
+        Assert.Equal(Path.GetFullPath(Path.Combine(_h.Root, "src", "prompts")), root);
     }
 
     [Fact]

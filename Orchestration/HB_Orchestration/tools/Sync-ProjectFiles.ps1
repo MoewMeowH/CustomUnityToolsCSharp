@@ -6,7 +6,8 @@
     원본 방향: project-files가 원본이고 Unity 프로젝트 쪽은 복사본이다. 규칙을 고칠 때는 원본을 고친 뒤 이 스크립트로 복사한다.
 
     파일 구분
-      동기화   CLAUDE.md, .claude/commands/*.md, .claude/scripts/*.py, .claude/agents/*.md (원본 폴더에 있는 것)  바이트 동일해야 한다
+      동기화   CLAUDE.md, .claude/commands/*.md, .claude/scripts/*.py, .claude/agents/*.md, .claude/mistakes/*.md (원본 폴더에 있는 것)  바이트 동일해야 한다
+               prompts/(외부 에이전트 덧붙임)는 서버가 PromptsPath로 읽는 서버 전용이라 동기화하지 않는다 (2026-10-27).
       없으면 만듦  REVIEW_GUIDELINES.md   프로젝트마다 고쳐 쓰는 리뷰 지침 (2026-10-22). 없을 때만 원본(기본 지침)을 복사하고,
                있으면 다르더라도 '프로젝트 지침'으로 보여 주기만 한다 — 멈추지 않고 덮지 않는다. 프로젝트 전용 규칙은 PROJECT.md(공통 CLAUDE.md가 불러옴).
                단 원본 git 이력의 옛 판과 같으면(프로젝트에서 고치지 않음) '기본 지침 옛 판'으로 맞출 대상에 넣는다 (-Apply가 갱신, -Force 불필요).
@@ -198,7 +199,8 @@ foreach ($f in ($syncFiles + $seedFiles)) {
 $syncDirs = @(
     @{ Dir = '.claude/commands'; Filter = '*.md' },   # 슬래시 명령
     @{ Dir = '.claude/scripts';  Filter = '*.py' },   # 명령이 부르는 도우미 (예: /work-order의 xlsx_dump.py, 서브에이전트 읽기 차단 훅)
-    @{ Dir = '.claude/agents';   Filter = '*.md' }    # 서브에이전트 정의 (self-reviewer, evidence-collector)
+    @{ Dir = '.claude/agents';   Filter = '*.md' },   # 서브에이전트 정의 (self-reviewer, evidence-collector)
+    @{ Dir = '.claude/mistakes'; Filter = '*.md' }    # 서브에이전트 실수 목록 (계획서 2026-10-27_실수목록-분리)
 )
 
 # 서브에이전트 정의 검사: 원본에 정의가 있으면 비교·복사 전에 검사한다. 실패하면 Unity 쪽은 건드리지 않는다.
