@@ -104,6 +104,7 @@ Quota(`[실패] Quota` — 크레딧·한도 소진)나 429 실패 뒤에는 바
   * 정의 파일에는 `tools` 허용 목록이 반드시 있어야 한다 (생략하면 MCP 도구까지 상속 → `run_mode`를 부를 수 있음). `python -I .claude/scripts/check_agents.py`로 검사한다. `permissionMode` bypass 계열 금지.
 * 입력: 대상 파일을 `subagent_in/<날짜>_<주제>/`에 **명령으로 복사**하고 SHA-256을 확인한 뒤 그 경로만 넘긴다. 리뷰 지침이 필요하면 `REVIEW_GUIDELINES.md`도 복사한다 (`omitClaudeMd`라 CLAUDE.md·지침이 자동으로 들어가지 않음).
   * 읽기 차단 훅(`.claude/scripts/subagent_read_guard.py`)이 `subagent_in/` 밖을 막는다. 이전 리뷰·작업 로그·호출 기록을 넣지 않는다.
+  * `CLAUDE.md`가 검토 대상이면 `CLAUDE.md.txt`처럼 이름을 바꿔 복사한다 (그대로 두면 지휘자 규칙이 서브에이전트에 자동으로 실린다 — H6이 막음). 링크가 아니라 내용을 복사한다. 부르기 전에 복사를 끝내고, 서브에이전트가 도는 동안에는 `subagent_in/`에 복사하지 않는다 (H6은 부르는 순간만 본다).
   * 그 서브에이전트의 `.claude/mistakes/<이름>.md`에 항목(주석 밖 `- ` 줄)이 있으면 `_SUBAGENT_MISTAKES.md`로 함께 복사한다 (검토 대상인 프로젝트 `MISTAKES.md`와 겹치지 않는 이름). web-searcher는 파일을 못 읽으므로 주석 밖 `- ` 줄만 위임 메시지 끝 `## 자주 하는 실수` 절로 붙인다 ("실수 기록").
   * 위임 메시지에는 대상·의도·제약만 쓴다. 너의 결론·의심 지점은 넣지 않는다 (`run_mode` input 규칙과 같다).
   * `subagent_in/`은 프로젝트마다 `.gitignore`에 등록한다. 끝나면 지운다.
@@ -122,6 +123,7 @@ Quota(`[실패] Quota` — 크레딧·한도 소진)나 429 실패 뒤에는 바
 * H3 `run_mode_guard.py`: `review_*` 전에 오늘 계획서가 없으면 ("계획서와 작업 로그").
 * H4 `run_mode_guard.py`: `reason`이 `[ownReview:<서브에이전트>]`(둘이면 `+`)면 ownReview는 그 결과 원문이어야 한다 (`## 읽은 파일`은 경로 줄만, 설명은 `## 비고`). `review_*`는 태그가 필수다.
 * H5 `share_guard.py`: `slackplan`으로 나가는 글에 비밀 값 · 개인 값 · 프로젝트 패턴(`.claude/share_guard.local.txt`, `.gitignore` 등록) · 위 폴더 언급 · 로컬 절대 경로가 있거나, `--allow-warnings` · 지우는 명령의 `--yes`면 막는다. 호출은 단독 명령만, heredoc 본문에 slackplan이 있으면 데이터 전용 명령(cat · git commit 등)에만.
+* H6 `subagent_input_guard.py`: 서브에이전트를 부르거나 이어 부를 때(`Agent` · `SendMessage`) 메시지에 `subagent_in`이 나오면 `subagent_in/` 전체를 훑어, `CLAUDE.md` · `CLAUDE.local.md` · `.claude`나 폴더 링크 · 정션이 있거나 경로가 이 프로젝트 `subagent_in/` 밖이면. 그 파일들은 서브에이전트가 폴더를 읽을 때 하네스가 자동으로 불러온다.
 * 훅 등록은 `python -I .claude/scripts/check_agents.py`, 동작은 `python -I .claude/scripts/test_hooks.py`로 검사한다. settings.json을 고치면 새 세션에서 반영된다.
 
 ## 계획서와 작업 로그

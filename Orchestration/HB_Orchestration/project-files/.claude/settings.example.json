@@ -39,6 +39,15 @@
             "command": "python -I \"$CLAUDE_PROJECT_DIR/.claude/scripts/run_mode_guard.py\" || exit 2"
           }
         ]
+      },
+      {
+        "matcher": "Agent|Task|SendMessage",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -I \"$CLAUDE_PROJECT_DIR/.claude/scripts/subagent_input_guard.py\" || exit 2"
+          }
+        ]
       }
     ]
   }

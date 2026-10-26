@@ -1,4 +1,4 @@
-"""cleanup_guard · push_guard · run_mode_guard · share_guard 회귀 시험 (계획서 2026-10-19_훅-규칙-강제, /cross-review 10bfc8de41 반영).
+"""cleanup_guard · push_guard · run_mode_guard · share_guard · subagent_input_guard 회귀 시험 (계획서 2026-10-19_훅-규칙-강제, /cross-review 10bfc8de41 반영).
 사용: python -I .claude/scripts/test_hooks.py  → 마지막 줄 'ALL True'면 통과 (exit 0), 아니면 exit 1.
 H2는 임시 폴더에 저장소와 bare 원격을 만들어 시험한다 (실제 원격·실제 저장소는 건드리지 않는다).
 입력은 UTF-8 바이트로 보낸다 (Claude Code가 보내는 것과 같게 — 한글 깨짐 회귀 시험).
@@ -624,6 +624,90 @@ try:
     expect('H5 깨진 입력은 막음', (lambda r: (r.returncode, r.stderr.decode('utf-8', 'replace')))(subprocess.run([sys.executable, '-I', os.path.join(HERE, 'share_guard.py')], input=b'{', capture_output=True)), 2)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
+
+# ── H6 subagent_input_guard (계획서 2026-10-27_H6-서브에이전트-입력-자동로드-차단) ──
+proj6 = tempfile.mkdtemp(prefix='h6-')
+try:
+    env6 = dict(os.environ, CLAUDE_PROJECT_DIR=proj6)
+    run_dir = os.path.join(proj6, 'subagent_in', '2026-10-27_x')
+    os.makedirs(os.path.join(run_dir, 'src', 'deep'))
+    open(os.path.join(run_dir, 'src', 'a.cs'), 'w').close()
+
+    def h6(prompt, tool: str = 'Agent') -> tuple[int, str]:
+        return run('subagent_input_guard.py', {'tool_name': tool, 'tool_input': {'subagent_type': 'self-reviewer', 'prompt': prompt}}, env6)
+
+    def put(rel: str, is_dir: bool = False) -> str:
+        p = os.path.join(proj6, rel)
+        os.makedirs(p) if is_dir else open(p, 'w').close()
+        return p
+
+    win = f'폴더: {run_dir}\\ (이 폴더 안만 읽는다)\n대상: src/a.cs'
+    rel = '폴더: `subagent_in/2026-10-27_x/`\n대상: src/a.cs:1-10'
+    expect('H6 깨끗한 폴더 (Windows 경로)', h6(win), 0)
+    expect('H6 깨끗한 폴더 (상대 경로)', h6(rel), 0)
+    expect('H6 subagent_in 언급 없음', h6('웹에서 X를 찾아 요약'), 0)
+    expect('H6 자리표시 <실행>만', h6('`subagent_in/<실행>/` 밖은 읽지 않는다'), 0)
+    expect('H6 없는 실행 폴더', h6('폴더: subagent_in/없는폴더/'), 0)
+    expect('H6 이름 바꾼 CLAUDE.md.txt', (put('subagent_in/2026-10-27_x/CLAUDE.md.txt'), h6(win))[1], 0)
+    for name, rel_path, is_dir in [('CLAUDE.md', 'subagent_in/2026-10-27_x/CLAUDE.md', False),
+                                   ('소문자 claude.md', 'subagent_in/2026-10-27_x/src/claude.md', False),
+                                   ('깊은 곳', 'subagent_in/2026-10-27_x/src/deep/CLAUDE.md', False),
+                                   ('CLAUDE.local.md', 'subagent_in/2026-10-27_x/CLAUDE.local.md', False),
+                                   ('.claude 폴더', 'subagent_in/2026-10-27_x/.claude', True),
+                                   ('subagent_in 바로 아래', 'subagent_in/CLAUDE.md', False)]:
+        p = put(rel_path, is_dir)
+        expect(f'H6 막음 {name} (Windows 경로)', h6(win), 2, '[입력 차단]')
+        expect(f'H6 막음 {name} (상대 경로)', h6(rel), 2, 'CLAUDE.md.txt' if 'subagent_in/2026' in rel_path else '[입력 차단]')
+        os.rmdir(p) if is_dir else os.remove(p)
+    if os.name == 'nt':
+        put('subagent_in/2026-10-27_x/CLAUDE.md')
+        gb = '/' + proj6[0].lower() + proj6[2:].replace('\\', '/')
+        expect('H6 Git Bash 경로', h6(f'폴더: {gb}/subagent_in/2026-10-27_x/'), 2, '[입력 차단]')
+        os.remove(os.path.join(run_dir, 'CLAUDE.md'))
+    # /self-review security 78e1a3aaca C1 · C2: 경로 해석이 빗나가도 subagent_in/ 전체를 검사한다
+    p = put('subagent_in/2026-10-27_x/CLAUDE.md')
+    for name, prompt in [('붙여 쓴 콜론', '폴더:subagent_in/2026-10-27_x/'), ('path= 꼴', 'path=subagent_in/2026-10-27_x'),
+                         ('대소문자', f'폴더: {proj6}\\Subagent_In\\2026-10-27_x\\'), ('한국어 조사', 'subagent_in/2026-10-27_x에서 읽는다'),
+                         ('자리표시만', '`subagent_in/<실행>/` 안만 읽는다'), ('띄어 쓴 설명', 'subagent_in 폴더의 2026-10-27_x')]:
+        expect(f'H6 해석 빗나가도 막음 {name}', h6(prompt), 2, '[입력 차단]')
+    os.remove(p)
+    other = put('subagent_in/2026-10-26_old', True)
+    put('subagent_in/2026-10-26_old/CLAUDE.md')
+    expect('H6 다른 실행 폴더의 CLAUDE.md도 막음', h6(win), 2, '2026-10-26_old')
+    shutil.rmtree(other)
+    expect('H6 SendMessage 이어 부르기 (깨끗)', run('subagent_input_guard.py', {'tool_name': 'SendMessage', 'tool_input': {'to': 'a1', 'message': rel}}, env6), 0)
+    p = put('subagent_in/2026-10-27_x/CLAUDE.md')
+    expect('H6 SendMessage 이어 부르기 (CLAUDE.md)', run('subagent_input_guard.py', {'tool_name': 'SendMessage', 'tool_input': {'to': 'a1', 'message': rel}}, env6), 2, '[입력 차단]')
+    expect('H6 SendMessage 언급 없음', run('subagent_input_guard.py', {'tool_name': 'SendMessage', 'tool_input': {'to': 'peer', 'message': '테스트 끝났어'}}, env6), 0)
+    os.remove(p)
+    # C3: 폴더 링크 · 정션은 안을 볼 수 없으니 막는다 (Python 3.10 os.walk는 정션 안으로 들어감)
+    outside = tempfile.mkdtemp(prefix='h6-out-')
+    open(os.path.join(outside, 'CLAUDE.md'), 'w').close()
+    link = os.path.join(run_dir, 'linked')
+    made = False
+    if os.name == 'nt':
+        made = subprocess.run(['cmd', '/c', 'mklink', '/J', link, outside], capture_output=True).returncode == 0
+    else:
+        os.symlink(outside, link, target_is_directory=True)
+        made = True
+    if made:
+        expect('H6 폴더 링크 · 정션 막음', h6(win), 2, '링크')
+        os.rmdir(link) if os.name == 'nt' else os.remove(link)
+    else:
+        expect('H6 정션 만들기 (시험 준비)', (1, 'mklink /J 실패'), 0)
+    shutil.rmtree(outside, ignore_errors=True)
+    expect('H6 Task 이름', h6(rel, tool='Task'), 0)
+    expect('H6 .. 로 밖', h6('폴더: subagent_in/../docs/'), 2, '밖이다')
+    expect('H6 다른 프로젝트의 subagent_in', h6('폴더: F:\\Other\\subagent_in\\x\\' if os.name == 'nt' else '폴더: /other/subagent_in/x/'), 2, '밖이다')
+    expect('H6 비슷한 낱말은 경로 아님', h6('not_subagent_in/x 와 subagent_inbox'), 0)
+    # 문자열이 아닌 prompt는 JSON 글로 바꿔 언급을 찾는다 (형식이 바뀌어도 놓치지 않게)
+    expect('H6 prompt가 문자열 아님 (언급 없음)', run('subagent_input_guard.py', {'tool_name': 'Agent', 'tool_input': {'prompt': ['x']}}, env6), 0)
+    p = put('subagent_in/2026-10-27_x/CLAUDE.md')
+    expect('H6 prompt가 문자열 아님 (언급 있음)', run('subagent_input_guard.py', {'tool_name': 'Agent', 'tool_input': {'prompt': {'folder': 'subagent_in/2026-10-27_x'}}}, env6), 2, '[입력 차단]')
+    os.remove(p)
+    expect('H6 깨진 입력은 막음', (lambda r: (r.returncode, r.stderr.decode('utf-8', 'replace')))(subprocess.run([sys.executable, '-I', os.path.join(HERE, 'subagent_input_guard.py')], input=b'{', capture_output=True, env=env6)), 2)
+finally:
+    shutil.rmtree(proj6, ignore_errors=True)
 
 print('ALL', ok)
 sys.exit(0 if ok else 1)
