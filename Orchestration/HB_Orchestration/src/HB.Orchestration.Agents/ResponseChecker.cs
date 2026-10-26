@@ -5,13 +5,24 @@ using Microsoft.Extensions.AI;
 namespace HB.Orchestration.Agents;
 
 /// <summary>
-/// 응답 검사기. 빈 응답은 실패, 출력 상한에서 잘림·언어 이탈은 경고다.
+/// 응답 검사기. 빈 응답은 실패, 출력 상한에서 잘림·언어 이탈·영어 문장 섞임·출력 형식 절 빠짐은 경고다.
 /// 경고는 응답을 막지 않는다: 그대로 전달하고 기록(CallRecord.Warnings)과 run_mode 결과에 한 줄씩 붙인다.
 /// </summary>
 public static partial class ResponseChecker
 {
     /// <summary>가나 · 한자 각각 이 수보다 적으면 비율과 관계없이 경고하지 않는다 (짧은 응답에서 고유명사 하나로 오탐하지 않도록).</summary>
     public const int MinForeignChars = 5;
+
+    /// <summary>
+    /// 영어 문장 줄: 코드 밖, 한글이 없고 영어 낱말(글자 2개 이상)이 이만큼 있는 줄. 이런 줄이 <see cref="MinEnglishLines"/>줄 이상이면 경고.
+    /// 기준은 지난 응답 754건으로 정함 — 걸린 것은 sol의 작업 메모 · 이탈 두 건(5e81a2ed47 · 8f8065bf09)뿐 (계획서 2026-10-27_한국어-응답-지시-강화).
+    /// </summary>
+    public const int MinEnglishWords = 5;
+
+    public const int MinEnglishLines = 2;
+
+    /// <summary>맨 앞부터 쓴 "N. 제목" 줄을 절 제목으로 볼 제목 길이 상한 — 본문 번호 목록(긴 문장)과 가른다 (지난 preflight 응답 36건으로 확인).</summary>
+    public const int MaxPlainSectionTitle = 40;
 
     /// <summary>지금 언어 검사를 지원하는 값. 다른 값이면 언어 검사를 건너뛴다.</summary>
     public static bool IsSupportedLanguage(string? language) =>
@@ -32,7 +43,9 @@ public static partial class ResponseChecker
     }
 
     /// <summary>내용이 있는 응답의 경고 목록. 경고가 없으면 빈 목록.</summary>
-    public static IReadOnlyList<string> Warnings(string text, ChatFinishReason? finishReason, long? outTokens, ResponseChecksOptions options)
+    /// <param name="outputSections">역할의 출력 형식 절 개수 (modes.json OutputSections). 있으면 1..N 절 제목이 모두 있는지 본다.</param>
+    public static IReadOnlyList<string> Warnings(string text, ChatFinishReason? finishReason, long? outTokens, ResponseChecksOptions options,
+        int? outputSections = null)
     {
         var warnings = new List<string>();
 
@@ -49,10 +62,85 @@ public static partial class ResponseChecker
                 warnings.Add($"[경고] 응답 언어 이탈 감지 (가나 비율 {Percent(kanaRatio)}%, {kana:N0}자)");
             else if (Exceeds(han, letters, threshold, out var hanRatio))
                 warnings.Add($"[경고] 응답 언어 이탈 감지 (한자 비율 {Percent(hanRatio)}%, {han:N0}자)");
+
+            // 가나 · 한자 비율로는 안 잡히는 영어 이탈 · 작업 메모("Need not generate too long…")
+            if (EnglishLines(text) is { Count: >= MinEnglishLines } english)
+                warnings.Add($"[경고] 영어 문장 섞임 ({english.Count}줄, 예: \"{Clip(english[0], 60)}\"). 작업 메모가 새었거나 영어로 바뀌었을 수 있습니다.");
         }
+
+        // 상한에 닿지 않고 모델이 스스로 멈춘 응답은 종료 이유로 알 수 없다 → 출력 형식의 절이 다 있는지로 본다.
+        // 상한에서 잘렸으면 위 잘림 경고가 같은 사건을 이미 알린다 (/self-review 3c0fdb8eb4 C7)
+        if (finishReason != ChatFinishReason.Length && outputSections is > 0 && MissingSections(text, outputSections.Value) is { Count: > 0 } missing)
+            warnings.Add($"[경고] 출력 형식 절 빠짐 ({string.Join(", ", missing.Select(n => $"{n}."))} / 전체 {outputSections}절). 응답이 중간에 끊겼을 수 있습니다.");
 
         return warnings;
     }
+
+    /// <summary>
+    /// 코드 밖의 영어 문장 줄 (한글 없음, 영어 낱말 <see cref="MinEnglishWords"/>개 이상). 낱말 = 소문자로 이어지는 영어 낱말 —
+    /// CamelCase · 대문자 약어 · 경로 · 밑줄 · 숫자가 든 토큰은 식별자로 보고 세지 않는다. `>` 인용 줄 · `|` 표 줄(인용한 로그 · 영어 표 머리줄)은 보지 않는다.
+    /// 해석에 실패한 구조화 출력(JSON 원문)은 보지 않는다.
+    /// </summary>
+    public static IReadOnlyList<string> EnglishLines(string text)
+    {
+        if (JsonStart().IsMatch(text)) return [];
+        var lines = new List<string>();
+        foreach (var raw in StripCode(text).Split('\n'))
+        {
+            var line = raw.Trim();
+            if (line.Length == 0 || line[0] is '>' or '|' || line.Any(IsHangul)) continue;
+            var words = line.Split((char[])[' ', '\t'], StringSplitOptions.RemoveEmptyEntries)
+                .Count(t => EnglishWord().IsMatch(t.Trim(WordEdge)));
+            if (words >= MinEnglishWords) lines.Add(line);
+        }
+        return lines;
+    }
+
+    /// <summary>
+    /// 1..count 중 제목 줄이 없는 절 번호 (코드 밖). 두 꼴 중 하나로 본다 (/self-review 3c0fdb8eb4 C1 · C2 · C3):
+    /// - 제목 꼴: `#` · `**` · `__`(함께 와도 됨) 뒤의 "N." · "N)" (sol 꼴 "## 3. …", "## **3. …**"). 한 줄이라도 있으면 이 꼴만 보고,
+    ///   1절과 같은 단계(`#` 개수, `#` 없이 굵게만이면 굵게)만 센다 — 다른 단계의 "### 3." 하위 제목은 절이 아니다.
+    /// - 평문 꼴 (제목 꼴이 하나도 없을 때): 맨 앞부터 쓴 "N. 제목" · "N) 제목", 제목 부분(첫 `—` · `–` · `:` · ` - ` 앞)이
+    ///   <see cref="MaxPlainSectionTitle"/>자 이하 (argon 꼴 "3. 수정 방향", "4. 결론: 수정 후 진행 — …"). 들여 쓴 줄 · 긴 문장은 본문 번호 목록.
+    /// </summary>
+    public static IReadOnlyList<int> MissingSections(string text, int count)
+    {
+        var headings = new List<(int Number, string Level)>();
+        var plain = new HashSet<int>();
+        foreach (var raw in CodeFences.WithoutBlocks(text).Split('\n'))
+        {
+            var line = raw.TrimEnd('\r');
+            if (HeadingSection().Match(line) is { Success: true } h && (h.Groups["hash"].Success || h.Groups["bold"].Success))
+                headings.Add((int.Parse(h.Groups["n"].Value, CultureInfo.InvariantCulture), h.Groups["hash"].Success ? h.Groups["hash"].Value : "**"));
+            else if (PlainSection().Match(line) is { Success: true } p && PlainTitle(p.Groups[2].Value).Length <= MaxPlainSectionTitle)
+                plain.Add(int.Parse(p.Groups[1].Value, CultureInfo.InvariantCulture));
+        }
+
+        HashSet<int> found;
+        if (headings.Count > 0)
+        {
+            var level = headings.FirstOrDefault(x => x.Number == 1) is { Level: { } one } ? one : headings[0].Level;
+            found = [.. headings.Where(x => x.Level == level).Select(x => x.Number)];
+        }
+        else found = plain;
+        return [.. Enumerable.Range(1, count).Where(n => !found.Contains(n))];
+    }
+
+    /// <summary>평문 꼴 제목 부분: 굵게 표시를 벗기고 첫 `—` · `–` · `:` · ` - ` 앞까지 (결론 절은 답을 같은 줄에 잇는다).</summary>
+    private static string PlainTitle(string rest)
+    {
+        var s = rest.Trim().Trim('*').Trim();
+        var cut = s.Length;
+        foreach (var sep in (string[])["—", "–", ":", " - "])
+            if (s.IndexOf(sep, StringComparison.Ordinal) is var i and >= 0 && i < cut) cut = i;
+        return s[..cut].Trim();
+    }
+
+    private static readonly char[] WordEdge = ['"', '\'', '(', ')', '[', ']', '{', '}', '*', '_', ',', '.', ';', ':', '!', '?', '…', '<', '>', '|'];
+
+    private static bool IsHangul(char c) => c is >= '가' and <= '힣' or >= 'ㄱ' and <= 'ㆎ';
+
+    private static string Clip(string s, int max) => s.Length <= max ? s : s[..max] + "…";
 
     private static bool Exceeds(int count, int letters, double threshold, out double ratio)
     {
@@ -94,4 +182,18 @@ public static partial class ResponseChecker
 
     [GeneratedRegex("`[^`\n]*`")]
     private static partial Regex InlineCode();
+
+    /// <summary>영어 낱말: 첫 글자만 대문자일 수 있고 나머지는 소문자 (CamelCase · 약어는 식별자).</summary>
+    [GeneratedRegex(@"^[A-Za-z][a-z]+(?:['-][a-z]+)*$")]
+    private static partial Regex EnglishWord();
+
+    /// <summary>JSON 원문: `{`로 시작하거나 `[` 뒤에 `{` · `"` · `]`가 온다 (`[A3-01] …` · `[링크](…)` 마크다운은 아님).</summary>
+    [GeneratedRegex(@"^\s*(?:\{|\[\s*[{""\]])")]
+    private static partial Regex JsonStart();
+
+    [GeneratedRegex(@"^\s*(?<hash>#{1,6})?\s*(?<bold>\*\*|__)?\s*(?<n>\d{1,3})[.)]")]
+    private static partial Regex HeadingSection();
+
+    [GeneratedRegex(@"^(\d{1,3})[.)]\s+(.*)$")]
+    private static partial Regex PlainSection();
 }

@@ -165,6 +165,96 @@ public class ResponseCheckerTests
         Assert.Null(ResponseChecker.EmptyFailure("내용", ChatFinishReason.Stop, 10, agent));
     }
 
+    // ── 영어 문장 섞임 (계획서 2026-10-27_한국어-응답-지시-강화: sol 5e81a2ed47의 작업 메모) ──
+
+    private static bool HasEnglishWarning(IReadOnlyList<string> warnings) =>
+        warnings.Any(w => w.StartsWith("[경고] 영어 문장 섞임", StringComparison.Ordinal));
+
+    [Fact]
+    public void EnglishWorkNotes_AreWarned()
+    {
+        // 5e81a2ed47 Preflight_P3_A 응답에 섞인 작업 메모 두 줄 (원문)
+        var text = "## 2. 최종 수정안\n설계안을 정리한다.\n\nBoth need Korean no accidental. continue mentally must not Japanese output. compose normal\n\n"
+                 + "Need not generate too long and foreign errors must final clean. We have budget enough actual final ~\n";
+        var warnings = ResponseChecker.Warnings(text, ChatFinishReason.Stop, 7018, Ko);
+        Assert.True(HasEnglishWarning(warnings), string.Join(" / ", warnings));
+        Assert.Contains("(2줄, 예: \"Both need Korean no accidental.", Assert.Single(warnings));
+    }
+
+    [Theory]
+    [InlineData("Need not generate too long and foreign errors must final clean.\n한국어 본문은 정상이다.")]       // 영어 한 줄 (기준 2줄 미만)
+    [InlineData("`NullReferenceException: Object reference not set to an instance` 오류가 난다.\n`Object reference not set to an instance of an object` 도 같다.")] // 인라인 코드
+    [InlineData("```\nThis is a long English comment inside a code block here\nAnother long English comment line inside code\n```\n설명은 한국어다.")] // 코드 블록
+    [InlineData("이 함수는 Dispose Track Untrack Register Unregister 를 부른다.\nPlayMode EditMode TearDown SetUp OneTimeSetUp 순서다.")] // 한글이 있는 줄
+    [InlineData("{\"findings\": [\n{\"title\": \"This is an English title with many words here\"},\n{\"title\": \"Another English title with many words here\"}]}")] // 구조화 출력(JSON)
+    [InlineData("경로는 Assets/Tools/HB_TestFrameworkHelper/Editor/Foo.cs 와\nAssets/Tools/HB/Runtime/Bar.cs src/a/b.cs c/d.cs e/f.cs 이다")] // 경로는 낱말 아님
+    public void NotEnglishDrift(string text) =>
+        Assert.False(HasEnglishWarning(ResponseChecker.Warnings(text, ChatFinishReason.Stop, 100, Ko)));
+
+    [Fact]
+    public void EnglishCheck_FollowsExpectedLanguage()
+    {
+        var text = "Both need Korean no accidental. continue mentally must not\nNeed not generate too long and foreign errors must final clean.\n";
+        Assert.False(HasEnglishWarning(ResponseChecker.Warnings(text, ChatFinishReason.Stop, 10, new ResponseChecksOptions { ExpectedLanguage = "" })));
+    }
+
+    // ── 출력 형식 절 빠짐 (스스로 멈춘 응답: 종료 이유 Stop · 상한의 11%) ──
+
+    [Fact]
+    public void SolStyle_Truncated_ReportsMissingSections()
+    {
+        // 5e81a2ed47 P3_A 꼴: "## 1." · "## 2." 뒤 하위 제목과 본문 번호 목록만 있고 끝남
+        var text = "## 1. 상대 Phase 2 판정에 대한 응답\n| B2-01 | 수용 | 근거 |\n\n## 2. 최종 수정안\n### A3-17. 적용 범위\n"
+                 + "   3. 들여 쓴 번호 목록은 절이 아니다\n4. 이 줄은 맨 앞부터지만 제목이 아니라 아주 긴 문장이어서 본문 번호 목록으로 보아야 하는 경우다\n"
+                 + "```\n## 5. 코드 블록 안 제목은 세지 않는다\n```\n";
+        Assert.Equal([3, 4, 5, 6, 7], ResponseChecker.MissingSections(text, 7));
+        var warning = Assert.Single(ResponseChecker.Warnings(text, ChatFinishReason.Stop, 7018, Ko, outputSections: 7));
+        Assert.Equal("[경고] 출력 형식 절 빠짐 (3., 4., 5., 6., 7. / 전체 7절). 응답이 중간에 끊겼을 수 있습니다.", warning);
+    }
+
+    [Theory]
+    [InlineData("## 1. 가\n내용\n## 2. 나\n## 3. 다\n## 4. 라\n")]                                // sol 꼴
+    [InlineData("## **1. 가**\n## __2. 나__\n## 3) 다\n### 1) 하위 제목\n## **4) 라**\n")]         // # 뒤 굵게 · N) (3c0fdb8eb4 C1)
+    [InlineData("**1. 가**\n내용\n**2. 나**\n**3. 다**\n**4. 라**\n")]                             // 굵게만
+    [InlineData("1. 새로 찾은 문제\n   1. 긴 본문 목록\n2. 확정 사항 위반\n3. 수정 방향\n4. 결론\n")]   // argon 꼴 (맨 앞부터 짧은 제목)
+    [InlineData("1. 지적 목록\n2. 확인 필요\n3. 수정 방향\n4. 결론: 수정 후 진행 — C-02 해제 누락이 남아 있어 고쳐야 하며 다른 항목은 확인됨\n")] // 결론 줄에 답 (C2)
+    public void CompleteSections_NoWarning(string text)
+    {
+        Assert.Empty(ResponseChecker.MissingSections(text, 4));
+        Assert.Empty(ResponseChecker.Warnings(text, ChatFinishReason.Stop, 100, Ko, outputSections: 4));
+    }
+
+    [Theory]
+    [InlineData("## 1. 지적 목록\n### 1. F1\n### 2. F2\n### 3. F3\n### 4. F4\n", new[] { 2, 3, 4 })]   // 다른 단계 하위 제목은 절 아님 (C3)
+    [InlineData("## 1. 지적 목록\n3. 짧은 목록\n4. 짧은 목록\n## 2. 확인 필요\n", new[] { 3, 4 })]      // 제목 꼴이 있으면 평문 꼴은 무시 (C3)
+    [InlineData("## 1. 가\n## 2. 나\n**3. 다**\n### 4. 라\n", new[] { 3, 4 })]                        // 단계가 다른 제목
+    public void OtherLevelOrPlainLines_AreNotSections(string text, int[] missing) =>
+        Assert.Equal(missing, ResponseChecker.MissingSections(text, 4));
+
+    [Fact]
+    public void LengthStop_OnlyTruncationWarning()
+    {
+        // 상한에서 잘렸으면 잘림 경고 하나만 (C7)
+        var warning = Assert.Single(ResponseChecker.Warnings("## 1. 가\n", ChatFinishReason.Length, 64000, Ko, outputSections: 4));
+        Assert.StartsWith("[경고] 출력 상한에서 잘림", warning);
+    }
+
+    [Theory]
+    [InlineData("[A3-01] 항목\nBoth need Korean no accidental and continue mentally must\nNeed not generate too long and foreign errors must final\n")] // [로 시작하는 마크다운 (C6)
+    public void MarkdownStartingWithBracket_IsChecked(string text) =>
+        Assert.True(HasEnglishWarning(ResponseChecker.Warnings(text, ChatFinishReason.Stop, 100, Ko)));
+
+    [Theory]
+    [InlineData("GetComponent FindObjectOfType PlayMode EditMode TearDown OneTimeSetUp\nNullReferenceException ArgumentException InvalidOperationException ObjectDisposedException IOException\n")] // CamelCase (C4)
+    [InlineData("> Object reference not set to an instance of an object\n> Object reference not set to an instance of an object again\n")] // 인용 줄 (C4)
+    [InlineData("| Severity | File | Line | Summary | Suggestion |\n| major | the file name is here | line | summary text goes here | fix this one |\n")] // 표 줄 (C4)
+    public void IdentifiersQuotesTables_NotEnglishDrift(string text) =>
+        Assert.False(HasEnglishWarning(ResponseChecker.Warnings(text, ChatFinishReason.Stop, 100, Ko)));
+
+    [Fact]
+    public void NoOutputSections_NoSectionCheck() =>
+        Assert.Empty(ResponseChecker.Warnings("## 1. 가\n", ChatFinishReason.Stop, 10, Ko));
+
     [Theory]
     [InlineData("""{"Orchestration":{}}""", "ko")]                                          // 키 없음 → 기본 ko (검사 켬)
     [InlineData("""{"Orchestration":{"ResponseChecks":{}}}""", "ko")]
@@ -211,6 +301,16 @@ public sealed class AgentRunnerCheckTests : IDisposable
         var record = Assert.Single(CallLog.ReadAll(_log));
         Assert.True(record.Success);
         Assert.Equal(result.Warnings, record.Warnings);
+    }
+
+    [Fact]
+    public async Task OutputSections_ReachChecker_FromModesJson()
+    {
+        // modes.json 역할의 OutputSections → PlannedStep → StepCall → 응답 검사기
+        using var h = new ModeRunnerHarness("""{ "Roles": { "P": { "Prompt": "역할", "OutputSections": 3 } }, "Modes": { "m": { "Steps": [ { "Role": "P", "Agent": "a1" } ] } } }""");
+        h.Client.Script = [ScriptedChatClient.Reply("## 1. 가\n## 2. 나\n")];
+        await h.Run("m");
+        Assert.Contains("[경고] 출력 형식 절 빠짐 (3. / 전체 3절). 응답이 중간에 끊겼을 수 있습니다.", Assert.Single(h.Records()).Warnings);
     }
 
     [Fact]

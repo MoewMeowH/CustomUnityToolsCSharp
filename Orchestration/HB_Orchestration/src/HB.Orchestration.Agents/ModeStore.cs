@@ -62,6 +62,10 @@ public sealed class ModeStore(AgentCatalog catalog)
             : throw new ModeConfigException($"역할 '{role}'의 Output '{output}'을(를) 모릅니다. 사용 가능: {FindingFormat.KnownNames}");
     }
 
+    /// <summary>역할의 출력 형식 절 개수 (modes.json OutputSections). 정의가 없거나 1보다 작으면 null.</summary>
+    public static int? OutputSections(Loaded loaded, string role) =>
+        loaded.File.Roles.TryGetValue(role, out var def) && def.OutputSections is > 0 ? def.OutputSections : null;
+
     private static (string Prompt, bool UseGuidelines, string? Output) ResolveRaw(Loaded loaded, string role)
     {
         if (loaded.File.Roles.TryGetValue(role, out var def))

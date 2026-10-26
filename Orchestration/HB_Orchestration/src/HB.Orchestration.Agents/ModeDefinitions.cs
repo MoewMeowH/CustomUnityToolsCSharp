@@ -29,6 +29,12 @@ public sealed class RoleDefinition
     /// 지적 ID를 매긴다. 역할 프롬프트에는 출력 형식을 따로 적지 않는다. 비우면 자유 텍스트 (지금 동작).
     /// </summary>
     public string? Output { get; set; }
+
+    /// <summary>
+    /// 자유 텍스트 출력 형식의 절 개수 (예: preflight P3는 7). 있으면 응답 검사기가 1..N 절 제목이 모두 있는지 보고, 빠지면 경고한다
+    /// (모델이 상한 전에 스스로 멈춘 응답 — 계획서 2026-10-27_한국어-응답-지시-강화). 비우면 검사하지 않는다.
+    /// </summary>
+    public int? OutputSections { get; set; }
 }
 
 public sealed class ModeDefinition

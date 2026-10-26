@@ -234,7 +234,8 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             var attach = role.UseGuidelines && !withoutGuidelines;
             plan.Add(new PlannedStep(step, agent,
                 role.Prompt + (role.Output?.PromptText ?? "") + Prompts.CommonRules + (step.WebSearch is null ? "" : Prompts.WebSearchRules) + (attach ? guidelines.Text : ""),
-                ProvenanceBuilder.ForStep(guidelines, role.UseGuidelines, skipped: withoutGuidelines), mode.PromptCache, role.Output) { Append = append });
+                ProvenanceBuilder.ForStep(guidelines, role.UseGuidelines, skipped: withoutGuidelines), mode.PromptCache, role.Output)
+                { Append = append, OutputSections = ModeStore.OutputSections(loaded, step.Role) });
         }
 
         var (efforts, effortError) = ParseReasoningOverrides(reasoningOverrides, plan);
@@ -561,6 +562,9 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         /// <summary>붙인 모델별 덧붙임. 없으면 null.</summary>
         public PromptAppendLoader.Result? Append { get; init; }
 
+        /// <summary>역할의 출력 형식 절 개수 (응답 검사기용). 없으면 null.</summary>
+        public int? OutputSections { get; init; }
+
         /// <summary>실제로 보낼 추론 강도 이름 (표시용). null이면 보내지 않음.</summary>
         public string? EffortName => (Reasoning ?? Agent.Reasoning) is { } e ? AgentSettings.EffortName(e) : null;
     }
@@ -579,6 +583,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             Images = prompt.Images,
             WebSearch = p.Def.WebSearch,
             Output = p.Output,
+            OutputSections = p.OutputSections,
             ReasoningOverride = p.Reasoning,
         };
 

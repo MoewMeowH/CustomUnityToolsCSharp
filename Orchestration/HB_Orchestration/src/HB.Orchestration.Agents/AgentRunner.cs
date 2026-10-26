@@ -63,6 +63,9 @@ public sealed record StepCall(
     /// <summary>역할의 구조화 출력 형식. 있으면 응답을 해석해 지적 ID를 매기고 그린 텍스트를 넘긴다. 없으면 자유 텍스트.</summary>
     public FindingFormat? Output { get; init; }
 
+    /// <summary>역할의 자유 텍스트 출력 형식 절 개수 (modes.json OutputSections). 있으면 응답 검사기가 절 빠짐을 본다.</summary>
+    public int? OutputSections { get; init; }
+
     /// <summary>구조화 출력 요청 방식 (에이전트 → 제공사 → Prompt). Output이 없으면 의미 없다.</summary>
     public StructuredOutputMode OutputMode => AgentSettings.ResolveStructuredOutput(Agent.Options, Agent.ProviderOptions);
 
@@ -444,7 +447,7 @@ public sealed class AgentRunner
             if (!ResponseChecker.IsSupportedLanguage(call.Checks.ExpectedLanguage))
                 _logger.LogWarning("ResponseChecks.ExpectedLanguage '{Language}'은(는) 지원하지 않아 언어 검사를 건너뜁니다 (지원: ko).", call.Checks.ExpectedLanguage);
 
-            var warnings = ResponseChecker.Warnings(text, finishReason, outTokens, call.Checks);
+            var warnings = ResponseChecker.Warnings(text, finishReason, outTokens, call.Checks, call.OutputSections);
             foreach (var w in warnings)
                 _logger.LogWarning("[{Mode}#{Step}] {Role}@{Agent} {Warning}", call.Mode, call.Step, call.Role, call.Agent.Name, w);
             return warnings;
