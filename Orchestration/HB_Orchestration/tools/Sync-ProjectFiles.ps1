@@ -393,7 +393,11 @@ $differ = @($pending | Where-Object { $_.State -eq '다름' })
 if (-not $Apply) {
     Write-Host ''
     if ($pending.Count -eq 0) { Write-Host '결과: 동기화 대상이 모두 같습니다.'; exit 0 }
-    Write-Host "결과: 동기화 대상 $($pending.Count)개가 원본과 다릅니다. -Apply로 맞출 수 있습니다."
+    # '다름'이 있으면 -Apply는 멈추므로 그렇다고 안내한다 (2026-10-27: "-Apply로 맞출 수 있습니다"를 믿고 보고했다가 -Apply가 멈춤)
+    if ($differ.Count -gt 0) {
+        Write-Host "결과: 동기화 대상 $($pending.Count)개가 원본과 다릅니다. 그중 Unity 쪽 '다름' $($differ.Count)개 때문에 -Apply는 멈춥니다 — 원본에 먼저 합치거나, 버려도 되면 -Apply -Force (덮기 전 백업)."
+    }
+    else { Write-Host "결과: 동기화 대상 $($pending.Count)개가 원본과 다릅니다. -Apply로 맞출 수 있습니다." }
     exit 1
 }
 

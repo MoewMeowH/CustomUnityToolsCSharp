@@ -47,6 +47,9 @@ try {
     # 3. 동기화 대상(CLAUDE.md)이 옛 판 + 고친 지침: -Apply 멈춤(1) · -Force는 CLAUDE.md만 덮고 백업, 지침은 그대로
     $t2 = Join-Path $root 't2'; Copy-Item -Recurse -LiteralPath $t1 -Destination $t2
     [System.IO.File]::WriteAllText((Join-Path $t2 'CLAUDE.md'), "# 옛 판`n")
+    # 2026-10-27: 비교 요약이 '다름'이 있으면 -Apply가 멈춘다고 안내 (예전엔 "-Apply로 맞출 수 있습니다")
+    $r = Run @('-UnityProject', $t2, '-Source', $src)
+    Check "'다름'이 있으면 요약이 -Force 안내" ($r.Code -eq 1 -and $r.Out -match '-Apply는 멈춥니다' -and $r.Out -match '-Apply -Force' -and $r.Out -notmatch '-Apply로 맞출 수 있습니다') $r.Out
     $r = Run @('-UnityProject', $t2, '-Source', $src, '-Apply')
     Check '옛 CLAUDE.md면 -Apply 멈춤' ($r.Code -eq 1 -and $r.Out -match '멈춤') $r.Out
     Check '멈춤 때 아무것도 안 바뀜' ((Read (Join-Path $t2 'CLAUDE.md')) -eq "# 옛 판`n")
