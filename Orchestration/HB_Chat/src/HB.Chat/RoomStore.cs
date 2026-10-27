@@ -22,6 +22,12 @@ public sealed record Room
     public string? LastError { get; init; }
     public double? TotalCostUsd { get; init; }
     public long? KnownSize { get; init; }
+
+    /// <summary>
+    /// 실행을 시작하면 적고, 결과를 남길 때 지운다. 다음 실행 때 남아 있으면 앞 실행이 앱 종료(충돌 · 강제 종료)로 끊긴 것 —
+    /// 그 실행이 쓴 세션 기록 때문에 크기가 달라도 "앱 밖에서 바뀜"이 아니다 (Job Object 실제 확인에서 발견).
+    /// </summary>
+    public DateTimeOffset? RunStartedAt { get; init; }
 }
 
 /// <summary>

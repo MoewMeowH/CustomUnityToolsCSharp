@@ -189,6 +189,25 @@ public sealed class RoomHubTests : IDisposable
     }
 
     [Fact]
+    public async Task RunCutByAppExit_IsNotReportedAsOutsideChange()
+    {
+        // 앞 실행이 끝을 남기지 못한 채(앱 종료) 세션 기록이 자랐다 → "앱 밖에서 바뀜"이 아니라 "앞 실행이 끊김".
+        var room = NewRoom();
+        var projectDir = Path.Combine(_dir, "projects", "F--ws");
+        Directory.CreateDirectory(projectDir);
+        File.WriteAllText(Path.Combine(projectDir, room.SessionId + ".jsonl"), "{}\n{}\n");
+        _store.Update(room.Id, r => r with { KnownSize = 3, RunStartedAt = DateTimeOffset.Now.AddMinutes(-5) });
+
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "hello");
+        var seen = await Until(ch, e => e.Kind == "idle");
+        var notice = seen.Single(e => e.Kind == "notice");
+        Assert.Contains("앱 종료로 끊겼습니다", notice.Text);
+        Assert.DoesNotContain("이 앱 밖에서", notice.Text);
+        Assert.Null(_store.Get(room.Id)!.RunStartedAt); // 이번 실행은 끝을 남겼다
+    }
+
+    [Fact]
     public async Task SendRightAfterStop_RunsBeforeIdle()
     {
         // 중지한 뒤 루프가 쉬기 전에 보낸 말은 이어서 돈다 (RoomHub 루프의 새 세대 분기, 0a3b1d5155 C12).

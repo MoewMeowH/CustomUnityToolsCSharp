@@ -39,6 +39,11 @@ builder.Services.AddSingleton(sp => new ChatTranscripts(() => sp.GetRequiredServ
 builder.Services.AddSingleton<RoomHub>();
 
 var app = builder.Build();
+
+// 앱이 비정상 종료돼도 claude 프로세스 트리가 남지 않게 (ProcessJob). 실패해도 켜기는 한다 — 정상 종료 · 중지의 트리 종료는 그대로 돈다.
+if (ProcessJob.AttachCurrentProcess() is { } jobError)
+    app.Logger.LogWarning("Job Object에 넣지 못했습니다 — 앱이 비정상 종료되면 claude 프로세스가 남을 수 있습니다: {Error}", jobError);
+
 app.UseSameOriginGuard();
 app.MapRazorPages();
 app.MapStickerImages();

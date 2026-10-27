@@ -200,8 +200,11 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         var resume = size is not null;
         if (resume && room.KnownSize is { } known && known != size)
         {
-            // 다른 곳(Claude 앱 · CLI)에서 같은 세션을 이어 쓴 것으로 보인다 — 갈래가 생겼을 수 있다 (계획서 위험 첫 항목).
-            var notice = $"세션 기록이 이 앱 밖에서 바뀌었습니다 ({known:N0} → {size:N0}바이트). 다른 곳에서 이 세션을 이어 쓰면 대화가 갈라질 수 있습니다.";
+            // 앞 실행이 끝을 남기지 못했으면(앱 종료) 그 실행이 쓴 것이다. 아니면 다른 곳(Claude 앱 · CLI)에서
+            // 같은 세션을 이어 쓴 것으로 보인다 — 갈래가 생겼을 수 있다 (계획서 위험 첫 항목).
+            var notice = room.RunStartedAt is not null
+                ? "앞 실행이 앱 종료로 끊겼습니다 — 그 턴의 답은 없거나 일부만 남았을 수 있습니다."
+                : $"세션 기록이 이 앱 밖에서 바뀌었습니다 ({known:N0} → {size:N0}바이트). 다른 곳에서 이 세션을 이어 쓰면 대화가 갈라질 수 있습니다.";
             lock (live.Gate)
             {
                 live.Notice = notice;
@@ -234,6 +237,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             return Record(room, new RunResult(false, false, ex.Message, null, null, null, 0, 0, null));
         }
 
+        store.Update(room.Id, r => r with { RunStartedAt = DateTimeOffset.Now });
         string? mismatch = null;
         using var stopOnMismatch = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var result = await ClaudeRunner.RunAsync(process, text, ev =>
@@ -276,6 +280,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 LastError = result.Ok ? null : result.Error,
                 TotalCostUsd = result.CostUsd ?? r.TotalCostUsd,
                 KnownSize = size ?? r.KnownSize,
+                RunStartedAt = null,
             });
         }
         catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
