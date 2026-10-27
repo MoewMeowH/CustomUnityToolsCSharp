@@ -337,6 +337,29 @@ public sealed class ClaudeCliTests : IDisposable
         """;
 
     [Fact]
+    public async Task Mode_run_can_take_context_root_and_record_tool()   // 골든 리플레이 (계획서 2026-10-27_리플레이-골든)
+    {
+        using var h = new ModeRunnerHarness(CliModes, providerType: ClaudeCliProvider.TypeName);
+        var root = Path.Combine(_dir, "case", "files");
+        Directory.CreateDirectory(Path.Combine(root, "src"));
+        File.WriteAllText(Path.Combine(root, "src", "a.cs"), "class A { }\n");
+        var copied = false;
+        h.Client.Script = [_ =>
+        {
+            var folder = h.Client.Received[^1].Options?.AdditionalProperties?[ClaudeCliChatClient.WorkFolderKey] as string;
+            copied = folder is not null && File.Exists(Path.Combine(folder, "src", "a.cs"));
+            return ScriptedChatClient.Reply("## 지적\n- 문제 없음")(default);
+        }];
+
+        var result = await h.Runner.RunAsync("cli", "의도", null, null, [new ContextRange("src/a.cs", 1, 1)], null, ModeRunnerHarness.DefaultReason, null,
+            CancellationToken.None, rootDir: root, tool: GoldenCli.Tool);
+
+        Assert.Contains("문제 없음", result);
+        Assert.True(copied);                                                                   // 현재 폴더가 아니라 rootDir 기준으로 복사
+        Assert.Equal(GoldenCli.Tool, h.Records().Last().Tool);                                 // 대시보드 집계에서 run_mode와 구분
+    }
+
+    [Fact]
     public async Task Mode_run_passes_work_folder_and_focus_only_then_cleans_up()
     {
         using var h = new ModeRunnerHarness(CliModes, providerType: ClaudeCliProvider.TypeName);

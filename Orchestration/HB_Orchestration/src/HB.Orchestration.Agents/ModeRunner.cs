@@ -34,8 +34,11 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     public async Task<string> RunAsync(
         string modeName, string input, IReadOnlyList<string>? files, IReadOnlyList<string>? agentOverrides,
         IReadOnlyList<ContextRange>? context, IReadOnlyList<string>? images, string? reason, string? ownReview, CancellationToken ct,
-        IReadOnlyList<string>? reasoningOverrides = null)
+        IReadOnlyList<string>? reasoningOverrides = null, string? rootDir = null, string? tool = null)
     {
+        // rootDir: context · images 경로의 기준 (기본 = 현재 폴더). 골든 리플레이는 사례의 files/ 폴더를 준다 (계획서 2026-10-27_리플레이-골든).
+        // tool: 호출 기록의 Tool (기본 run_mode). 골든은 GoldenCli.Tool로 남겨 대시보드 집계와 구분한다.
+        var root = rootDir ?? Environment.CurrentDirectory;
         // ── 1. 실행 전 검증: 여기서 걸리면 토큰을 한 개도 쓰지 않는다 ──────────────
         ModeStore.Loaded loaded;
         try { loaded = store.Load(); }
@@ -66,7 +69,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         // 제공사 Type은 AgentCatalog처럼 대소문자를 무시한다 (/self-review C4 · sub_self C6).
         var cliSteps = plan.Count(p => string.Equals(p.Agent.ProviderOptions?.Type, Providers.ClaudeCliProvider.TypeName, StringComparison.OrdinalIgnoreCase));
 
-        var (attached, contextError) = ContextLoader.Load(context, Options.Context, Environment.CurrentDirectory, cliSteps > 0 ? 0 : maxChars, ct);
+        var (attached, contextError) = ContextLoader.Load(context, Options.Context, root, cliSteps > 0 ? 0 : maxChars, ct);
         if (contextError is not null) return $"[첨부 코드 오류] {contextError}";
 
         // 상한은 에이전트가 실제로 받는 양(input + 첨부) 기준이다.
@@ -74,7 +77,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             return $"[입력이 너무 깁니다] input {input.Length:N0}자 + 첨부 코드 {attached!.Text.Length:N0}자 / 상한 {maxChars:N0}자. " +
                    "context 범위를 줄여 다시 호출하세요.";
 
-        var (loadedImages, imageError) = ImageLoader.Load(images, Options.Images, Options.Context, Environment.CurrentDirectory, ct);
+        var (loadedImages, imageError) = ImageLoader.Load(images, Options.Images, Options.Context, root, ct);
         if (imageError is not null) return $"[첨부 이미지 오류] {imageError}";
 
         // 결과 머리말의 첨부 여유 (claude-cli는 첨부 본문을 보내지 않아 이 상한과 무관 — 표시하지 않음)
@@ -106,7 +109,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             if (RecentQuota(plan.Select(p => p.Agent.Provider).Distinct(), runner.LogPath, ClaudeCliQuotaHold, DateTimeOffset.Now) is { } quotaAt)
                 return $"{AgentRunner.QuotaFailurePrefix} (최근) — claude-cli 크레딧 소진 기록 {quotaAt.ToLocalTime():MM-dd HH:mm}. " +
                        $"{ClaudeCliQuotaHold.TotalHours:0}시간 동안은 호출하지 않는다 — 서브에이전트로 대신하라 (그 뒤 한 번 다시 시도).";
-            var (folder, focus, folderError) = ReviewWorkFolder.Create(ReviewWorkFolder.BaseFor(runner.LogPath), context, Options.Context, Environment.CurrentDirectory, ct);
+            var (folder, focus, folderError) = ReviewWorkFolder.Create(ReviewWorkFolder.BaseFor(runner.LogPath), context, Options.Context, root, ct);
             if (folderError is not null) return $"[첨부 코드 오류] {folderError}";
             workFolder = folder;
             promptInput = promptInput with { Context = focus! };
@@ -128,13 +131,13 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             switch (mode.Flow)
             {
                 case ModeFlow.Concurrent:
-                    results = await RunConcurrentAsync(runId, modeName, plan, promptInput, meta, ct);
+                    results = await RunConcurrentAsync(runId, modeName, plan, promptInput, meta, ct, tool);
                     break;
                 case ModeFlow.Debate:
                     (results, note) = await RunDebateAsync(runId, modeName, mode, plan, promptInput, meta, ct);
                     break;
                 default:
-                    results = await RunSequentialAsync(runId, modeName, plan, promptInput, meta, ct);
+                    results = await RunSequentialAsync(runId, modeName, plan, promptInput, meta, ct, tool);
                     if (results.Count < plan.Count)
                         note = $"(단계 {results.Count}에서 실패해 이후 {plan.Count - results.Count}단계는 실행하지 않음)";
                     break;
@@ -681,10 +684,10 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
 
     private async Task<List<StepResult>> RunConcurrentAsync(
         string runId, string mode, List<PlannedStep> plan,
-        PromptInput input, CallMeta meta, CancellationToken ct)
+        PromptInput input, CallMeta meta, CancellationToken ct, string? tool = null)
     {
         var prompt = BuildPrompt(input, [], StepSees.Input);
-        var tasks = plan.Select((p, i) => runner.RunStepAsync(NewCall(runId, mode, i + 1, p, p.Instructions, prompt, meta), ct));
+        var tasks = plan.Select((p, i) => runner.RunStepAsync(NewCall(runId, mode, i + 1, p, p.Instructions, prompt, meta) with { Tool = tool }, ct));
         return [.. await Task.WhenAll(tasks)];
     }
 

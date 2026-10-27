@@ -12,15 +12,23 @@ public sealed record GoldenCase(GoldenCaseInfo Info, string Folder, string Input
 {
     /// <summary>expected.json + traps.json 원본 바이트의 해시. 정답지를 고치면 바뀐다 (점수 비교 때 입력 해시와 함께 본다).</summary>
     public string KeySha256 { get; init; } = "";
+
+    /// <summary>replay 사례만: context.json (경로는 files/ 기준). 서버가 이 범위로 작업 폴더를 만든다.</summary>
+    public IReadOnlyList<ContextRange> Context { get; init; } = [];
+
+    /// <summary>replay 사례만: 복원한 파일 폴더 (사례 폴더/files).</summary>
+    public string FilesFolder => Path.Combine(Folder, GoldenCaseLoader.FilesFolder);
 }
 
 /// <summary>
-/// case.json. Kind는 "record"(판정 기록에서 옴) · "seeded"(고친 결함을 되돌린 코드) · "crash"(원인이 알려진 크래시, 다단계 모드 전체를 돌림).
-/// crash 사례의 input.md는 run_mode input (서버가 "## 요청"으로 감쌈), 리뷰 사례는 보낼 프롬프트 원문이다.
+/// case.json. Kind는 "record"(판정 기록에서 옴) · "seeded"(고친 결함을 되돌린 코드) · "crash"(원인이 알려진 크래시, 다단계 모드 전체를 돌림)
+/// · "replay"(과거 검토형 서브에이전트 리뷰를 복원, API 리뷰 sub_* 모드로 돌림 — 계획서 2026-10-27_리플레이-골든).
+/// crash · replay 사례의 input.md는 run_mode input (서버가 "## 요청"으로 감쌈), 리뷰 사례는 보낼 프롬프트 원문이다.
 /// </summary>
 public sealed record GoldenCaseInfo
 {
     public const string Crash = "crash";
+    public const string Replay = "replay";
 
     public string Id { get; init; } = "";
     public string Kind { get; init; } = "";
@@ -29,6 +37,7 @@ public sealed record GoldenCaseInfo
     private readonly string _mode = "review_main";
 
     [JsonIgnore] public bool IsCrash => Kind == Crash;
+    [JsonIgnore] public bool IsReplay => Kind == Replay;
 
     /// <summary>출처: runId, 커밋 등 (기록용).</summary>
     public string? Source { get; init; }
@@ -98,6 +107,8 @@ public static class GoldenCaseLoader
     public const string InputFile = "input.md";
     public const string ExpectedFile = "expected.json";
     public const string TrapsFile = "traps.json";
+    public const string ContextFile = "context.json";
+    public const string FilesFolder = "files";
 
     /// <summary>결과 폴더 이름. 사례 목록에서 뺀다.</summary>
     public const string ResultsFolder = "results";
@@ -156,7 +167,8 @@ public static class GoldenCaseLoader
             var name = Path.GetFileName(dir.TrimEnd('/', '\\'));
             if (info is null || string.IsNullOrWhiteSpace(info.Id)) return (null, $"{CaseFile}에 id가 없습니다.");
             if (!string.Equals(info.Id, name, StringComparison.OrdinalIgnoreCase)) return (null, $"{CaseFile}의 id '{info.Id}'가 폴더 이름 '{name}'과 다릅니다.");
-            if (info.Kind is not ("record" or "seeded" or GoldenCaseInfo.Crash)) return (null, $"{CaseFile}의 kind는 record · seeded · crash 중 하나여야 합니다 (지금 '{info.Kind}').");
+            if (info.Kind is not ("record" or "seeded" or GoldenCaseInfo.Crash or GoldenCaseInfo.Replay))
+                return (null, $"{CaseFile}의 kind는 record · seeded · crash · replay 중 하나여야 합니다 (지금 '{info.Kind}').");
             if (string.IsNullOrWhiteSpace(info.Mode)) return (null, $"{CaseFile}의 mode가 비어 있습니다 (생략하면 review_main).");
             if (string.IsNullOrWhiteSpace(input)) return (null, $"{InputFile}이(가) 비어 있습니다.");
             if (expected.Count == 0) return (null, $"{ExpectedFile}에 기대 지적이 없습니다.");
@@ -165,10 +177,35 @@ public static class GoldenCaseLoader
                 : ItemProblem(expected, ExpectedFile) ?? ItemProblem(traps, TrapsFile);
             if (problem is not null) return (null, problem);
 
-            return (new GoldenCase(info, dir, input, [.. expected!], [.. traps!]) { KeySha256 = KeyHash(dir) }, null);
+            IReadOnlyList<ContextRange> context = [];
+            if (info.IsReplay)
+            {
+                var (ranges, contextProblem) = ReplayContext(dir);
+                if (contextProblem is not null) return (null, contextProblem);
+                context = ranges!;
+            }
+
+            return (new GoldenCase(info, dir, input, [.. expected!], [.. traps!]) { KeySha256 = KeyHash(dir), Context = context }, null);
         }
         catch (JsonException ex) { return (null, $"JSON 형식 오류: {ex.Message}"); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return (null, $"읽기 실패: {ex.Message}"); }
+    }
+
+    /// <summary>replay: context.json(필수, 비면 안 됨)의 경로가 모두 files/ 안의 파일인지. 실행 전 거절용.</summary>
+    private static (IReadOnlyList<ContextRange>? Ranges, string? Problem) ReplayContext(string dir)
+    {
+        var ranges = Read<List<ContextRange?>>(dir, ContextFile, required: false);
+        if (ranges is null || ranges.Count == 0) return (null, $"replay 사례는 {ContextFile}(files/ 기준 경로 · 줄 범위)이 필요합니다.");
+        var files = Path.GetFullPath(Path.Combine(dir, FilesFolder));
+        foreach (var r in ranges)
+        {
+            if (r is null || string.IsNullOrWhiteSpace(r.Path) || r.StartLine < 1 || r.EndLine < r.StartLine)
+                return (null, $"{ContextFile}: 빈 항목이나 잘못된 줄 범위가 있습니다.");
+            var full = Path.GetFullPath(Path.Combine(files, r.Path));
+            if (!full.StartsWith(files + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) || !File.Exists(full))
+                return (null, $"{ContextFile}: '{r.Path}'이(가) {FilesFolder}/ 안에 없습니다.");
+        }
+        return ([.. ranges!], null);
     }
 
     private static T? Read<T>(string dir, string file, bool required)

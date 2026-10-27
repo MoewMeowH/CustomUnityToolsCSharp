@@ -26,7 +26,8 @@ public static class GoldenCli
 
     private const string Usage =
         "사용법: HB.Orchestration.Mcp.dll --golden run [사례|all] [--mode 모드] [--agents from=to,...] [--reasoning 에이전트=강도,...] [--dir 폴더] [--label 이름] [--no-guidelines] [--yes]\n" +
-        "        HB.Orchestration.Mcp.dll --golden score <사례> --from <파일> [--dir 폴더] [--label 이름]";
+        "        HB.Orchestration.Mcp.dll --golden score <사례> --from <파일> [--dir 폴더] [--label 이름]\n" +
+        "        HB.Orchestration.Mcp.dll --golden replay-build [runId|all] [--exclude 프로젝트글자 ...] [--dir 폴더] [--yes]";
 
     private static readonly JsonSerializerOptions ResultJson = new()
     {
@@ -36,13 +37,16 @@ public static class GoldenCli
     };
 
     internal sealed record Args(string Verb, string Which, string? Mode, IReadOnlyList<string>? Agents, string? Dir, string? Label, string? From, bool Yes,
-        bool NoGuidelines = false, IReadOnlyList<string>? Reasoning = null);
+        bool NoGuidelines = false, IReadOnlyList<string>? Reasoning = null, IReadOnlyList<string>? Exclude = null);
+
+    /// <summary>리플레이 사례 만들기 (계획서 2026-10-27_리플레이-골든).</summary>
+    public const string ReplayBuildVerb = "replay-build";
 
     internal static (Args? Parsed, string? Error) Parse(string[] args)
     {
-        if (args.Length < 2 || args[0] != Flag || args[1] is not ("run" or "score")) return (null, null);
+        if (args.Length < 2 || args[0] != Flag || args[1] is not ("run" or "score" or ReplayBuildVerb)) return (null, null);
         string? which = null, mode = null, dir = null, label = null, from = null;
-        List<string>? agents = null, reasoning = null;
+        List<string>? agents = null, reasoning = null, exclude = null;
         bool yes = false, noGuidelines = false;
 
         for (var i = 2; i < args.Length; i++)
@@ -60,6 +64,7 @@ public static class GoldenCli
                     case "--dir": dir = Next(); break;
                     case "--label": label = Next(); break;
                     case "--from": from = Next(); break;
+                    case "--exclude": (exclude ??= []).Add(Next()); break;
                     case "--yes": yes = true; break;
                     case "--no-guidelines": noGuidelines = true; break;
                     default:
@@ -73,12 +78,15 @@ public static class GoldenCli
         }
 
         var verb = args[1];
-        if (verb == "run") which ??= "all";
+        if (verb is "run" or ReplayBuildVerb) which ??= "all";
+        if (verb == ReplayBuildVerb && (agents is not null || reasoning is not null || mode is not null || noGuidelines || from is not null || label is not null))
+            return (null, "replay-build는 [runId|all] · --exclude · --dir · --yes만 받습니다 (외부 호출 없음).");
+        if (verb != ReplayBuildVerb && exclude is not null) return (null, "--exclude는 replay-build에서만 씁니다.");
         if (verb == "score" && (which is null or "all" || from is null)) return (null, "score는 사례 하나와 --from <파일>이 필요합니다.");
         if (verb == "score" && (yes || agents is not null || reasoning is not null || mode is not null || noGuidelines))
             return (null, "score는 --yes · --agents · --reasoning · --mode · --no-guidelines를 받지 않습니다 (외부 호출 없음).");
         if (label is not null && label.Any(c => !(char.IsLetterOrDigit(c) || c is '_' or '-' or '.'))) return (null, "--label은 글자·숫자·_-. 만 씁니다.");
-        return (new Args(verb, which!, mode, agents, dir, label, from, yes, noGuidelines, reasoning), null);
+        return (new Args(verb, which!, mode, agents, dir, label, from, yes, noGuidelines, reasoning, exclude), null);
     }
 
     /// <param name="runnerFactory">run에서만 부른다 (score는 에이전트·설정이 필요 없음).</param>
@@ -101,6 +109,8 @@ public static class GoldenCli
             return 2;
         }
 
+        if (a.Verb == ReplayBuildVerb) return ReplayBuild(a, root, logPath ?? runnerFactory().LogPath, output, error);
+
         var (cases, caseErrors) = GoldenCaseLoader.LoadMany(root, a.Which);
         if (caseErrors.Count > 0)
         {
@@ -118,6 +128,49 @@ public static class GoldenCli
         return a.Verb == "score"
             ? ScoreFile(a, root, cases[0], output, error)
             : await RunCasesAsync(a, root, cases, options, runnerFactory(), logPath, output, error, ct);
+    }
+
+    /// <summary>
+    /// 보관된 검토형 결과에서 replay 사례를 만든다. --yes가 없으면 후보와 건너뛸 이유만 보인다. 외부 호출 없음.
+    /// --exclude는 프로젝트 폴더 경로에 그 글자가 든 결과를 뺀다 (예: --exclude MoJak — 회사 코드, 사용자 결정 2026-10-27).
+    /// </summary>
+    private static int ReplayBuild(Args a, string root, string logPath, TextWriter output, TextWriter error)
+    {
+        var archive = SubagentArchive.FolderFor(logPath);
+        var verdictPath = VerdictLog.PathFor(logPath);
+        var exclude = a.Exclude ?? [];
+        var candidates = ReplayCaseBuilder.FindCandidates(logPath, verdictPath, archive,
+                r => exclude.Any(x => r.ProjectDir?.Contains(x, StringComparison.OrdinalIgnoreCase) ?? false))
+            .Where(c => a.Which == "all" || c.RunId == a.Which).ToList();
+        if (candidates.Count == 0)
+        {
+            error.WriteLine($"[오류] 후보가 없습니다 (보관 폴더 {archive}{(a.Which == "all" ? "" : $", runId {a.Which}")}).");
+            return 2;
+        }
+
+        var ready = candidates.Where(c => c.Skip is null).ToList();
+        output.WriteLine($"[리플레이 후보] 보관된 결과 {candidates.Count}개 · 만들 수 있는 후보 {ready.Count}개 · 폴더 {root}");
+        foreach (var g in candidates.Where(c => c.Skip is not null).GroupBy(c => c.Skip!.Split(" (")[0]).OrderByDescending(g => g.Count()))
+            output.WriteLine($"  건너뜀 {g.Count()}개: {g.Key}");
+        foreach (var c in ready)
+            output.WriteLine($"  {c.RunId} · {c.Mode} · {c.Result.ReturnedAt?.ToLocalTime():yyyy-MM-dd} · {Path.GetFileName(c.Result.ProjectDir?.TrimEnd('/', '\\'))} · {Short(c.Result.Description ?? "")}");
+        if (!a.Yes)
+        {
+            output.WriteLine("만들지 않고 멈췄습니다 (통째로 읽지 않은 파일이 있는 후보는 만들 때 건너뜀). 만들려면 같은 명령에 --yes를 붙이세요.");
+            return 0;
+        }
+
+        Directory.CreateDirectory(root);
+        int made = 0;
+        foreach (var c in ready)
+        {
+            var (folder, skip, notes) = ReplayCaseBuilder.Build(c, root, verdictPath, exclude);
+            output.WriteLine(folder is not null ? $"  만듦 {Path.GetFileName(folder)} ({c.Mode})" : $"  건너뜀 {c.RunId}: {skip}");
+            foreach (var n in notes) output.WriteLine($"      {n}");
+            if (folder is not null) made++;
+        }
+        output.WriteLine($"사례 {made}개를 만들었습니다. 정답지(expected.json의 required)는 자동 추출이라 결과를 보고 보강하세요.");
+        return 0;
     }
 
     private static int ScoreFile(Args a, string root, GoldenCase c, TextWriter output, TextWriter error)
@@ -156,7 +209,13 @@ public static class GoldenCli
         {
             var mode = a.Mode ?? c.Info.Mode;
             IReadOnlyList<PlanStep>? steps; string? previewError;
-            if (c.Info.IsCrash) (steps, previewError) = runner.PreviewFixedMode(mode, a.Agents, c.Input.Length, a.NoGuidelines, requireSearchLast: true, a.Reasoning);
+            if (c.Info.IsReplay && a.NoGuidelines)
+            {
+                error.WriteLine($"[{c.Info.Id}] replay 사례는 run_mode 경로로 돌아 --no-guidelines를 받지 않습니다.");
+                return 2;
+            }
+            if (c.Info.IsReplay) (steps, previewError) = runner.PreviewFixedMode(mode, a.Agents, c.Input.Length, reasoningOverrides: a.Reasoning);
+            else if (c.Info.IsCrash) (steps, previewError) = runner.PreviewFixedMode(mode, a.Agents, c.Input.Length, a.NoGuidelines, requireSearchLast: true, a.Reasoning);
             else
             {
                 var (step, e) = runner.PreviewFixedPrompt(mode, a.Agents, c.Input.Length, a.NoGuidelines, a.Reasoning);
@@ -184,6 +243,9 @@ public static class GoldenCli
         }
         if (plans.Any(p => p.Steps.Count > 1))
             output.WriteLine("  다단계(crash) 사례: 뒤 단계는 앞 단계 출력과 웹검색 결과를 더 받으므로 실제 입력은 위 추정보다 크다.");
+        if (plans.Where(p => p.Case.Info.IsReplay).ToList() is { Count: > 0 } replays)
+            output.WriteLine($"  replay 사례 {replays.Count}개 (작업 폴더 파일 {replays.Sum(p => p.Case.Context.Count)}개): 에이전트가 파일을 읽어 실제 입력은 위 추정보다 훨씬 크다 — " +
+                             "시범 실측 사례당 약 $0.3~0.5 (claude-cli 단계는 기록의 total_cost_usd로 확인).");
 
         // 지정한 지침 경로에 파일이 없는 경우는 서버(GuidelinesLoader)가 오류로 내고 위 미리보기에서 거절된다 (2026-10-22).
         // 지침을 쓰는 역할인데 파일을 못 찾았으면 실제 run_mode와 다른 조건이다 (2026-10-19: 셸 현재 폴더가 프로젝트 루트가 아니어서 5회가 지침 없이 돎).
@@ -220,6 +282,17 @@ public static class GoldenCli
         foreach (var (c, mode, steps) in plans)
         {
             if (ct.IsCancellationRequested) { error.WriteLine("[취소] 남은 사례는 돌리지 않았습니다."); failed = true; break; }
+
+            if (c.Info.IsReplay)
+            {
+                var (replayScore, stop, replayQuota) = await RunReplayCaseAsync(a, c, mode, steps[0], runner, logPath, ProviderOf, Save, output, error, ct);
+                if (replayScore is not null) scores.Add((c, replayScore));
+                else failed = true;
+                if (replayScore is not null && ProviderOf(steps[0].Agent) is { } replayProvider) exhaustedProviders.Remove(replayProvider);
+                quota |= replayQuota;
+                if (stop) break;
+                continue;
+            }
 
             if (c.Info.IsCrash)
             {
@@ -328,6 +401,59 @@ public static class GoldenCli
             return [];
         }
         return exhausted;
+    }
+
+    /// <summary>
+    /// replay 사례 하나 (계획서 2026-10-27_리플레이-골든): run_mode와 같은 경로(ModeRunner.RunAsync)로 사례의 files/를 작업 폴더 원본 삼아 돌리고,
+    /// 응답의 '## 지적'(self-reviewer 형식)을 읽어 채점한다. 기록 Tool은 golden. Quota(서버의 최근 Quota 빠른 실패 포함)면 남은 사례를 멈춘다.
+    /// </summary>
+    private static async Task<(GoldenScore? Score, bool Stop, bool Quota)> RunReplayCaseAsync(Args a, GoldenCase c, string mode, PlanStep step, ModeRunner runner,
+        string? logPath, Func<string, string?> providerOf, Action<ResultRecord> save, TextWriter output, TextWriter error, CancellationToken ct)
+    {
+        var baseLine = new ResultRecord { CaseId = c.Info.Id, Kind = c.Info.Kind, Mode = mode, Agent = step.Agent, Model = step.Model,
+            ReasoningEffort = step.Effort, InputSha256 = InputHash(c), KeySha256 = c.KeySha256,
+            GuidelinesAttached = step.Guidelines.Attached, GuidelinesSha256 = step.Guidelines.Sha256, GuidelinesReason = step.Guidelines.Reason };
+        string text;
+        try
+        {
+            text = await runner.RunAsync(mode, c.Input, null, a.Agents, c.Context, null, $"golden {c.Info.Id}", null, ct, a.Reasoning,
+                rootDir: c.FilesFolder, tool: Tool);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            error.WriteLine($"[취소] {c.Info.Id} 실행 중 취소. 남은 사례는 돌리지 않았습니다.");
+            return (null, true, false);
+        }
+
+        var runId = text.StartsWith("runId: ", StringComparison.Ordinal) ? text.Split('\n')[0]["runId: ".Length..].Trim() : null;
+        var record = runId is null ? null : FindRecord(runId, logPath);
+        if (record?.Response is not { } response)
+        {
+            var why = Short(text);
+            error.WriteLine($"[{c.Info.Id}] 실행 실패: {why}");
+            save(baseLine with { RunId = runId, Error = why });
+            if (IsQuota(text)) { QuotaStopNotice(error, [providerOf(step.Agent) ?? step.Agent]); return (null, true, true); }
+            return (null, StopsRemaining(text), false);
+        }
+
+        var (findings, readError) = GoldenScorer.ReadFindings(response);
+        if (readError is not null)
+        {
+            error.WriteLine($"[{c.Info.Id}] {readError} (runId {runId})");
+            save(baseLine with { RunId = runId, Agent = record.Agent, Error = readError, Provenance = record.Provenance });
+            return (null, false, false);
+        }
+
+        var score = GoldenScorer.Score(c, findings);
+        Print(output, c, score, findings);
+        save(ResultLine(c, score, findings) with
+        {
+            Mode = mode, RunId = runId, Agent = record.Agent, Model = record.Model ?? step.Model, ReasoningEffort = record.ReasoningEffort,
+            InputTokens = record.InputTokens, OutputTokens = record.OutputTokens, ElapsedMs = record.ElapsedMs,
+            Source = "run", Provenance = record.Provenance,
+            GuidelinesAttached = baseLine.GuidelinesAttached, GuidelinesSha256 = baseLine.GuidelinesSha256, GuidelinesReason = baseLine.GuidelinesReason,
+        });
+        return (score, false, false);
     }
 
     /// <summary>지침이 실행 전 확인과 달라짐: 남은 사례도 다른 조건으로 돈다. (하루 비용·토큰 상한은 없앴다 — 계획서 2026-10-20_하루상한-제거)</summary>
@@ -568,7 +694,7 @@ public static class GoldenCli
         var unmatched = s.Unmatched.ToHashSet(StringComparer.Ordinal);
         return new ResultRecord
         {
-            CaseId = c.Info.Id, Kind = c.Info.Kind, Mode = c.Info.Mode, InputSha256 = Sha(c.Input), KeySha256 = c.KeySha256,
+            CaseId = c.Info.Id, Kind = c.Info.Kind, Mode = c.Info.Mode, InputSha256 = InputHash(c), KeySha256 = c.KeySha256,
             Expected = s.ExpectedCount, Found = s.Found.Count, TrapHits = s.TrapHits.Count, Unmatched = s.Unmatched.Count, Findings = s.FindingCount,
             Pairs = s.Found, Weak = s.Weak.Count == 0 ? null : s.Weak, Missed = s.Missed, Traps = s.TrapHits,
             Duplicates = s.Duplicates.Count == 0 ? null : s.Duplicates,
@@ -610,4 +736,25 @@ public static class GoldenCli
     }
 
     private static string Sha(string text) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+
+    /// <summary>
+    /// 사례 입력 해시. replay는 실제 입력이 복원한 코드라 input.md + context.json + files/(경로 순, "경로\n" + 바이트)를 함께 해시한다 —
+    /// files를 보강해도 같은 입력으로 비교되지 않게 (sub_self 2f9f8ff874 C4). 그 밖의 사례는 input.md 원문만 (예전 결과와 같은 값).
+    /// </summary>
+    internal static string InputHash(GoldenCase c)
+    {
+        if (!c.Info.IsReplay) return Sha(c.Input);
+        using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        sha.AppendData(Encoding.UTF8.GetBytes(c.Input));
+        var context = Path.Combine(c.Folder, GoldenCaseLoader.ContextFile);
+        if (File.Exists(context)) sha.AppendData(File.ReadAllBytes(context));
+        if (Directory.Exists(c.FilesFolder))
+            foreach (var file in Directory.EnumerateFiles(c.FilesFolder, "*", SearchOption.AllDirectories)
+                         .Select(f => (Full: f, Rel: Path.GetRelativePath(c.FilesFolder, f).Replace('\\', '/'))).OrderBy(f => f.Rel, StringComparer.Ordinal))
+            {
+                sha.AppendData(Encoding.UTF8.GetBytes(file.Rel + "\n"));
+                sha.AppendData(File.ReadAllBytes(file.Full));
+            }
+        return Convert.ToHexStringLower(sha.GetHashAndReset());
+    }
 }
