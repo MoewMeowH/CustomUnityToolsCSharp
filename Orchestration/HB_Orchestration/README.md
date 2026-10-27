@@ -79,7 +79,7 @@ dotnet test tests/HB.Orchestration.Tests
 | `deepseek_main_flash` | fireworks | `accounts/fireworks/models/deepseek-v4p1-flash-1017` | review_high · perf_high의 두 번째 시선 (`Vision: false`) |
 | `local` | local (Ollama) | `ollama list`의 모델 | 꺼 둠 (`Enabled: false`) |
 
-제공사는 `openai` · `openai-web` · `gemini` · `fireworks` · `local` 다섯이다 (Type은 `openai-web`만 `openai-responses`, 나머지는 `openai-compatible`). 실제 쓰는 값은 publish 폴더의 appsettings.json이고, `list_modes` 마지막의 `에이전트:` 줄에 보인다.
+제공사는 `openai` · `openai-web` · `gemini` · `fireworks` · `local` · `anthropic-cli` 여섯이다 (Type은 `openai-web`만 `openai-responses`, `anthropic-cli`는 `claude-cli`, 나머지는 `openai-compatible`). 실제 쓰는 값은 publish 폴더의 appsettings.json이고, `list_modes` 마지막의 `에이전트:` 줄에 보인다.
 
 - `MaxOutputTokens`: 응답 상한. **추론 모델은 생각 토큰도 포함**되므로 낮게 잡으면 답변 없이 끝난다 (서버가 `[빈 응답]` 실패로 기록). 폭주 방지용으로 넉넉하게 (1만 이상 권장).
 - 키가 없거나 설정이 틀린 에이전트는 그것만 건너뛰고 서버는 정상 시작. `list_modes`에 `(사용불가)`로 표시.
@@ -93,7 +93,8 @@ dotnet test tests/HB.Orchestration.Tests
 | `ModesPath` | modes.json 위치를 직접 지정 (비우면 3절의 찾는 순서) |
 | `GuidelinesPath` | 리뷰 지침 파일 (비우면 `REVIEW_GUIDELINES_PATH` 환경 변수 → Unity 프로젝트 루트의 `REVIEW_GUIDELINES.md`). 직접 지정한 경로(이 설정 또는 환경 변수)에 파일이 없으면 다음 후보로 넘어가지 않고 run_mode가 `[리뷰 지침 경로 없음]`으로 거절한다 (2026-10-22, modes.json 지정 경로와 같은 규칙) |
 | `PromptsPath` | 모델별 덧붙임(외부 에이전트 실수 목록) 폴더. 원본은 `project-files/prompts`, 상대 경로는 서버 폴더 기준. 비우면 modes.json 옆 `prompts/`. 지정했는데 폴더가 없으면 `[모델별 덧붙임 폴더 오류]`으로 거절한다 ("모델별 덧붙임") |
-| `Providers.<이름>.Type` | `openai-compatible`(Chat Completions — OpenAI · Gemini · Fireworks · Ollama · LM Studio) · `openai-responses`(OpenAI Responses API, 웹검색 단계용) |
+| `Providers.<이름>.Type` | `openai-compatible`(Chat Completions — OpenAI · Gemini · Fireworks · Ollama · LM Studio) · `openai-responses`(OpenAI Responses API, 웹검색 단계용) · `claude-cli`(아래 "claude-cli 제공사") |
+| `Providers.<이름>.ExecutablePath` | `claude-cli` 전용: Claude Code 실행 파일. 비우면 PATH의 `claude` |
 | `Providers.<이름>.Endpoint` | API 주소. OpenAI는 비움, Gemini `https://generativelanguage.googleapis.com/v1beta/openai/`, Fireworks `https://api.fireworks.ai/inference/v1`, Ollama `http://localhost:11434/v1`, LM Studio `http://localhost:1234/v1` |
 | `Providers.<이름>.ApiKeyEnv` | API 키를 담은 **환경 변수 이름** (`OPENAI_API_KEY` · `GEMINI_API_KEY` · `FIREWORKS_API_KEY`). 로컬처럼 키가 필요 없으면 생략. 키 값은 서버 프로세스가 시작될 때 물려받은 값만 보인다 |
 | `Providers.<이름>.TimeoutSeconds` | 요청 하나의 네트워크 타임아웃(초). 에이전트에 값이 없을 때 적용 (생략 = SDK 기본 100초) |
@@ -106,6 +107,7 @@ dotnet test tests/HB.Orchestration.Tests
 | `Agents[].TimeoutSeconds` | 요청 하나의 네트워크 타임아웃(초). **에이전트 → 제공사 → SDK 기본 100초** 순. 긴 응답을 쓰는 모델(sol 등)만 길게 잡을 때 사용. 대시보드 에이전트 표의 "타임아웃(초)" 칸 |
 | `Agents[].MaxAttempts` | 한 단계의 최대 시도 횟수 (첫 시도 포함, 1~5). **에이전트 → 제공사 → 2**(= 최대 1회 재시도) 순. 아래 "재시도" 참고 |
 | `Agents[].Enabled` | `false`면 끔 (생략 = 켬) |
+| `Agents[].MaxTurns` · `Agents[].MaxBudgetUsd` | `claude-cli` 전용: 도구 턴 상한(`--max-turns`, 생략 = 40) · 실행 1회 비용 상한 USD(`--max-budget-usd`, CLI 추정 기준이라 한 응답만큼 넘을 수 있음, 생략 = 없음) |
 | `Budget.FreeProviders` | 대시보드 비용 집계 · 오늘 사용량에서 뺄 제공사 (기본 `local`). 설정 값은 기본값 뒤에 **덧붙으므로** `local`은 항상 빠진다 (`[]`로 써도 마찬가지). 하루 토큰·비용 상한(`DailyTokenLimit` · `DailyCostLimitUsd`)은 2026-10-20에 없앴다 — 예전 키가 남아 있어도 무시 |
 | `Budget.MaxInputChars` | `run_mode` 입력 최대 글자 수 (input + `context` 첨부 합계, 기본 350,000). Debate는 토론자가 매 턴 요청 전체를 받으므로 비용이 턴 수만큼 곱해짐 |
 | `Context.MaxRanges` | `context` 범위 개수 상한 (기본 30) |
@@ -127,6 +129,18 @@ dotnet test tests/HB.Orchestration.Tests
 | `WorkOrders.Folder` | `/work-order`가 지시서를 남길 폴더 (프로젝트 루트 기준 상대 경로). 값이 있으면 `list_modes` 끝에 `지시서 폴더: …` 줄이 붙고, 비우면 줄이 없고 명령은 `docs/work-orders/`를 쓴다. 절대 경로·`..`·`@이름`은 `[주의]`로만 표시. **서버는 이 폴더에 쓰지 않는다** (지휘자가 직접 씀) |
 | `Pricing.KrwPerUsd` | 1달러당 원. 비우면 대시보드는 달러만 표시 |
 | `Pricing.Models.<모델 ID>` | `InputPerMillion`, `CachedInputPerMillion`(비우면 입력과 같음), `CacheWritePerMillion`(캐시 쓰기, 비우면 입력과 같음 — OpenAI GPT-5.6 이후는 입력의 1.25배, 쓰기 토큰은 호출 기록 `CacheWriteTokens`), `OutputPerMillion` — USD / 1M 토큰. 웹검색 단계를 쓰는 모델에는 `WebSearchPerThousand`(1,000회당 USD)도 넣는다. 키는 에이전트 이름이 아니라 **모델 ID**(기록에 남는 값). 지금 안 쓰는 예전 모델도 남겨 두면 예전 기록의 비용이 계속 계산됨. 위 칸은 **처음 단가**이고, 단가가 바뀌면 칸을 고치지 말고 `Changes[]`에 `{ "From": "yyyy-MM-dd"(UTC 0시부터), 바뀌는 칸만, "Note" }`을 더한다 — 기록 시각 기준으로 그때 단가가 적용된다 (고치면 지난 호출 비용까지 새 단가로 다시 계산됨). 날짜 형식 오류 · 같은 날짜 중복 · 단가 칸 없음 · 음수는 서버가 설정을 읽을 때 경고만 한다. 대시보드 모드 화면은 처음 단가만 고치고 `Changes`는 파일에서 직접 고친다. 단가는 **실효 단가**(할인 후 실제로 내는 값)로 둔다 — 예: `gemini-4-argon`은 $2 / 캐시 $0.10 / $10(11-30까지 소개 가격, 12-01부터 $4/$20). Gemini 콘솔 SKU 금액은 정가($4/$20)로 집계되고 50% 할인이 '절감'에서 상계되므로, 청구 대조는 SKU 금액이 아니라 할인 후 금액이나 크레딧 사용분과 한다 (2026-10-21 크레딧 대조, 모델 항목의 `Note`). 서버는 비용 계산에 쓰지 않고(설정을 읽을 때 `Changes` 문제만 경고) 대시보드 비용 · 골든 실행 전 비용 추정이 쓴다 |
+
+### claude-cli 제공사 (`sub_*` 모드 — 계획서 `docs/plans/2026-10-27_검토형-서브에이전트-API-전환.md`)
+
+검토형 서브에이전트(self-reviewer 등)를 Claude Code 구독 대신 **Anthropic API 키**로 돌린다. 서버가 `claude --bare --restricted -p`를 읽기 전용 에이전트로 띄워, 에이전트가 작업 폴더의 파일을 통째로 직접 읽는다 (지휘자가 고른 범위만 받는 외부 에이전트와 다름). **이 PC의 Claude Code 2.1.311(Windows)은 `--tools`에 Grep · Glob을 줘도 Read만 준다** (2026-10-27 확인) — 검색은 못 하고, 프롬프트의 파일 목록에서 골라 읽는다.
+- 실행: `claude --bare --restricted -p --no-session-persistence --output-format json --model <Model> --effort <ReasoningEffort> --max-turns <MaxTurns> [--max-budget-usd <MaxBudgetUsd>] --permission-mode dontAsk --tools Read,Glob,Grep --settings <폴더 밖 읽기 막음> --append-system-prompt-file <역할 + 출력 형식 + 공통 규칙 + 지침>`, 사용자 프롬프트는 stdin, 작업 폴더 = 아래.
+  - 확인한 것 (2026-10-27, 실제 실행): `blockReadsOutsideWorkingDirectories`는 상대 · 절대 경로 모두 폴더 밖 읽기를 거절한다. `--bare`만으로는 작업 폴더의 `.claude/settings.json`이 **적용된다** — 그래서 `--restricted`(사용자 · 프로젝트 · 로컬 설정 파일 무시, `--settings`만 적용, 파일 도구를 작업 폴더로 제한)를 함께 쓴다. `--bare -p`는 세션 기록(소스 사본 포함)을 `~/.claude/projects`에 남긴다 — `--no-session-persistence`로 끈다.
+  - 실행 파일: `ExecutablePath`(절대 경로만) 또는 PATH의 **절대 경로 항목에서만** `claude.exe`를 찾는다 — 상대 이름을 넘기면 Windows가 서버의 현재 폴더(프로젝트 루트)를 먼저 찾아 거기 놓인 claude.exe가 키를 받을 수 있다. npm 설치본(claude.cmd)은 찾지 않으니 그런 PC는 `ExecutablePath`에 실행 파일을 넣는다.
+- **과금**: 자식 프로세스에만 `ANTHROPIC_API_KEY` = `ApiKeyEnv`(기본 `Custom_ANTHROPIC_API_KEY`) 값. `ANTHROPIC_AUTH_TOKEN` · `CLAUDE_CODE_OAUTH_TOKEN` · 클라우드 제공사 플래그 · `ANTHROPIC_BASE_URL`, 키를 담은 원래 변수, 이름이 `_API_KEY` · `_ADMIN_KEY` · `_TOKEN` · `_SECRET`으로 끝나는 변수(다른 제공사 키)는 지운다. 설정 · 실행 기록(record의 ToString)에 키 값은 찍히지 않는다. `--bare`는 구독 로그인(OAuth)을 읽지 않으므로 키가 없으면 구독으로 넘어가지 않고 실패한다. `ApiKeyEnv`에 `ANTHROPIC_API_KEY`를 쓰면 에이전트를 건너뛴다 — 사용자 환경 변수로 두면 Claude Code 자체가 API 과금으로 바뀐다. 키는 각 프로젝트 `.mcp.json`의 `env`에 `"Custom_ANTHROPIC_API_KEY": "${Custom_ANTHROPIC_API_KEY:-}"`로 넘긴다.
+- **작업 폴더**: 서버가 `<데이터 폴더>/review_in/<임의>/`에 `context`가 가리키는 파일을 **파일 전체**로 상대 경로 그대로 복사한다 (경로 규칙 · 추가 루트 `@이름/` · 전송 금지 · 파일 크기 상한은 첨부와 같음, 합계 4,000,000바이트 상한). 프롬프트의 첨부 절에는 본문 대신 **파일 목록(경로 · SHA-256 앞 12자 — 기록에 남아 나중에 대조)**과 "이번 검토의 중심"(경로:줄) 목록만 들어간다. 본문을 보내지 않으므로 모드 입력 상한(MaxInputChars)은 input에만 적용한다. context가 없으면 실행하지 않는다. 한 모드에 다른 제공사 에이전트를 섞을 수 없고, images · followUp은 받지 않는다.
+- **결과**: CLI JSON의 `result`가 응답. 토큰은 입력 = 캐시 안 됨 + 캐시 쓰기 + 캐시 읽기, 캐시 읽기 · 쓰기를 따로 기록 (단가 `claude-opus-5-5` 4 / 읽기 0.2 / 쓰기 5 / 출력 20 — 2026-10-27 시험에서 CLI `total_cost_usd`와 일치). usageRaw에 CLI 원문(본문 제외: `total_cost_usd` · `num_turns` · `permission_denials` …). `error_max_turns` · `error_max_budget_usd` · refusal은 재시도 없는 실패 — 이때도 결과 JSON의 토큰 · usageRaw를 실패 기록에 남겨 비용에서 빠지지 않는다. "credit balance" 문구는 상태 코드와 상관없이 Quota, 429 · 5xx는 재시도 규칙대로. CLI가 입력을 읽기 전에 끝나면(인자 오류 · 판 변경) 네트워크 오류가 아니라 CLI 출력으로 실패를 남긴다. 추론 강도 `none`은 거절(Opus 5.5는 thinking을 끌 수 없음). 결과 JSON의 `permission_denials`가 있으면 `[경고] claude-cli 도구 사용 N건이 거절됨`. 결과에 `result` · `usage`가 없으면 CLI 판이 바뀐 것으로 보고 실패한다.
+- 시간: 에이전트 · 제공사 `TimeoutSeconds`(없으면 15분)를 넘으면 프로세스 트리를 끝내고 종료를 기다린 뒤(작업 폴더 잠김 방지) Timeout.
+- 모드 `sub_self` (역할 `SubSelf` = self-reviewer 형식, 에이전트 `claude_cli_opus` = claude-opus-5-5 · effort high · MaxTurns 40 · MaxBudgetUsd 2 · 재시도 없음, 제공사도 MaxAttempts 1). 시범 1호(2026-10-27, 이 기능 자체 리뷰): 17턴 · 274초 · $1.26, self-reviewer 서브에이전트와 지적 9건 겹침. 절차는 `/self-review api` (명령 파일 "api일 때").
 
 ### 재시도
 
@@ -202,6 +216,7 @@ SDK 자동 재시도(기본 3회, 기록에 안 남음)는 끄고 서버가 직�
 | `calls.jsonl` | 호출 기록. 한 줄 = 시도 1회 (UTF-8, camelCase). 여러 서버 프로세스가 같이 덧붙인다 |
 | `blobs/<sha256>.txt` | 시스템 프롬프트 · 지침 · modes.json · (선택) 설정 원문, 그리고 **4,096바이트 이상인 프롬프트**. 큰 프롬프트는 기록에 앞 1,000자 + `promptSha256` · `promptBytes`만 남는다 — 원문은 대시보드 호출 상세가 blob에서 읽는다. `Records.BlobFolder`로 위치를 바꿀 수 있다 |
 | `inflight/<기록 Id>.json` | 호출 중 표시 (위 "끊긴 호출 비용 추정") |
+| `review_in/<임의 이름>/` | `claude-cli` 단계의 작업 폴더 (context 파일 전체 복사). 실행이 끝나면 지우고, 남은 것은 하루 뒤 다음 실행이 지운다 |
 | `verdicts.jsonl` | `record_verdicts` 판정. 같은 키는 마지막 줄이 이긴다. `HB_ORCH_VERDICTS_PATH`로 따로 둘 수 있다 |
 | `sessions/<pid>.json` | 서버 프로세스별 모드 실행 횟수 |
 | `subagents/<agentId>_<호출 id>.json` | 검토형 서브에이전트(self · perf · security · direction-reviewer)가 지휘자에게 넘긴 결과 원문의 보관본 (7절 "서브에이전트 결과"). 한 번 쓰면 바꾸지 않는다. `_state/scanned.json` = 보관을 마친 검토형 기록 (경로 → 크기:수정 시각, 지워진 기록은 빠진다) |

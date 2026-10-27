@@ -21,6 +21,9 @@ public sealed record CallMeta(IReadOnlyList<string>? Files, IReadOnlyList<string
 
     /// <summary>지휘자가 결과를 보기 전에 완성한 자체 검토. 기록 전용 — 에이전트에게 보내지 않는다.</summary>
     public string? OwnReview { get; init; }
+
+    /// <summary>claude-cli 단계의 작업 폴더 (ReviewWorkFolder). 다른 제공사는 null.</summary>
+    public string? WorkFolder { get; init; }
 }
 
 /// <summary>모드의 한 단계 실행 정보.</summary>
@@ -249,9 +252,11 @@ public sealed class AgentRunner
             using var cacheScope = PromptCacheScope.Enter(cacheMode);
             using var searchScope = WebSearchScope.Enter(call.WebSearch);
             // 추론 강도는 실행 옵션으로 얹는다 (에이전트 ChatOptions — Schema 모드의 응답 형식 — 위에 합쳐진다).
-            var runOptions = call.Reasoning is { } effort
-                ? new ChatClientAgentRunOptions(new ChatOptions { Reasoning = new ReasoningOptions { Effort = effort } })
-                : null;
+            var chatOptions = call.Reasoning is { } effort ? new ChatOptions { Reasoning = new ReasoningOptions { Effort = effort } } : null;
+            // claude-cli는 작업 폴더가 있어야 돈다 (ModeRunner가 만든 폴더를 실행 옵션으로 넘긴다).
+            if (call.Meta.WorkFolder is { } workFolder)
+                (chatOptions ??= new ChatOptions()).AdditionalProperties = new() { [Providers.ClaudeCliChatClient.WorkFolderKey] = workFolder };
+            var runOptions = chatOptions is null ? null : new ChatClientAgentRunOptions(chatOptions);
             marker = InflightLog.Begin(NewRecord(), LogPath, out var markerError);
             if (markerError is not null)
                 _logger.LogWarning("[{Mode}#{Step}] 호출 중 표시 쓰기 실패 (호출은 계속): {Error}", call.Mode, call.Step, markerError);
@@ -316,6 +321,7 @@ public sealed class AgentRunner
 
             var warnings = CheckWarnings(call, text, response.FinishReason, outTokens);
             if (structuredWarning is not null) warnings = [.. warnings, structuredWarning];
+            if (Providers.ClaudeCliChatClient.DenialWarning(usageRaw) is { } denied) warnings = [.. warnings, denied];
             if (webSearch is { Unverified.Count: > 0 } searched)
             {
                 // 출처 대조 경고: 응답은 그대로 전달하고 결과에 한 줄 붙인다 (지휘자가 해당 URL을 근거로 쓰지 않도록).
@@ -370,8 +376,16 @@ public sealed class AgentRunner
 
             _logger.LogError(ex, "[{Mode}#{Step}] {Role}@{Agent} 시도 {Attempt}/{Max} 실패 ({Kind})",
                 call.Mode, call.Step, call.Role, call.Agent.Name, attempt, maxAttempts, kind ?? "분류 안 됨");
+            // claude-cli: 턴 · 비용 상한 · refusal로 실패해도 이미 쓴 토큰은 기록한다 (비용 집계에서 빠지지 않게).
+            var spent = Providers.ClaudeCliException.Find(ex)?.Spent;
             return new AttemptOutcome(NewRecord() with
             {
+                InputTokens = spent?.InputTokens,
+                CachedInputTokens = spent?.CachedInputTokens,
+                CacheWriteTokens = spent?.CacheWriteTokens,
+                OutputTokens = spent?.OutputTokens,
+                ReasoningTokens = spent?.ReasoningTokens,
+                UsageRaw = spent?.RawJson,
                 ElapsedMs = sw.ElapsedMilliseconds,
                 Success = false,
                 Error = error,

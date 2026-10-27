@@ -58,12 +58,20 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             return $"[입력이 너무 깁니다] {input.Length:N0}자 / 상한 {maxChars:N0}자. " +
                    "코드는 input 대신 context(경로·줄 범위)로 넘기고, 꼭 필요한 범위만 남겨 다시 호출하세요.";
 
-        var (attached, contextError) = ContextLoader.Load(context, Options.Context, Environment.CurrentDirectory, maxChars, ct);
+        // 실행 계획을 첨부보다 먼저 만든다: claude-cli 단계는 첨부 본문을 보내지 않으므로 그 길이로 상한을 재지 않는다
+        // (복사 총량은 ReviewWorkFolder가 막는다 — /self-review C9 · sub_self C8).
+        var (prepared, planError) = BuildPlan(loaded, modeName, mode, agentOverrides, reasoningOverrides: reasoningOverrides);
+        if (planError is not null) return planError;
+        var (swap, plan) = (prepared!.Swap, prepared.Steps);
+        // 제공사 Type은 AgentCatalog처럼 대소문자를 무시한다 (/self-review C4 · sub_self C6).
+        var cliSteps = plan.Count(p => string.Equals(p.Agent.ProviderOptions?.Type, Providers.ClaudeCliProvider.TypeName, StringComparison.OrdinalIgnoreCase));
+
+        var (attached, contextError) = ContextLoader.Load(context, Options.Context, Environment.CurrentDirectory, cliSteps > 0 ? 0 : maxChars, ct);
         if (contextError is not null) return $"[첨부 코드 오류] {contextError}";
 
         // 상한은 에이전트가 실제로 받는 양(input + 첨부) 기준이다.
-        if (maxChars > 0 && input.Length + attached!.Text.Length > maxChars)
-            return $"[입력이 너무 깁니다] input {input.Length:N0}자 + 첨부 코드 {attached.Text.Length:N0}자 / 상한 {maxChars:N0}자. " +
+        if (maxChars > 0 && input.Length + (cliSteps > 0 ? 0 : attached!.Text.Length) > maxChars)
+            return $"[입력이 너무 깁니다] input {input.Length:N0}자 + 첨부 코드 {attached!.Text.Length:N0}자 / 상한 {maxChars:N0}자. " +
                    "context 범위를 줄여 다시 호출하세요.";
 
         var (loadedImages, imageError) = ImageLoader.Load(images, Options.Images, Options.Context, Environment.CurrentDirectory, ct);
@@ -78,12 +86,24 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             OwnReview = string.IsNullOrWhiteSpace(ownReview) ? null : ownReview,
         };
 
-        var (prepared, planError) = BuildPlan(loaded, modeName, mode, agentOverrides, reasoningOverrides: reasoningOverrides);
-        if (planError is not null) return planError;
-        var (swap, plan) = (prepared!.Swap, prepared.Steps);
-
         if (loadedImages!.Count > 0 && plan.Where(p => !p.Agent.Options.Vision).Select(p => p.Agent.Name).Distinct().ToList() is { Count: > 0 } blind)
             return $"[모드 '{modeName}'] 이미지를 받지 않는 에이전트(Vision=false): {string.Join(", ", blind)}. images 없이 호출하거나 agents로 바꾸세요.";
+
+        // claude-cli 단계: context 파일을 통째로 작업 폴더에 복사하고, 프롬프트의 첨부 본문 대신 "주목할 범위"만 넣는다.
+        // 한 실행의 단계가 같은 프롬프트 입력을 나눠 쓰므로 다른 제공사와 섞지 않는다.
+        string? workFolder = null;
+        if (cliSteps > 0)
+        {
+            if (cliSteps != plan.Count)
+                return $"[모드 '{modeName}'] claude-cli 에이전트와 다른 제공사 에이전트를 한 모드에 섞을 수 없습니다.";
+            if (loadedImages.Count > 0)
+                return $"[모드 '{modeName}'] claude-cli 단계는 images를 받지 않습니다.";
+            var (folder, focus, folderError) = ReviewWorkFolder.Create(ReviewWorkFolder.BaseFor(runner.LogPath), context, Options.Context, Environment.CurrentDirectory, ct);
+            if (folderError is not null) return $"[첨부 코드 오류] {folderError}";
+            workFolder = folder;
+            promptInput = promptInput with { Context = focus! };
+            meta = meta with { WorkFolder = folder };
+        }
 
         // 세션별 실행 횟수 (대시보드 '세션' 화면 표시용, 한도 없음): 검증을 다 통과한 실행만 센다.
         sessions.Count(modeName);
@@ -95,19 +115,26 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
 
         string? note = null;
         List<StepResult> results;
-        switch (mode.Flow)
+        try
         {
-            case ModeFlow.Concurrent:
-                results = await RunConcurrentAsync(runId, modeName, plan, promptInput, meta, ct);
-                break;
-            case ModeFlow.Debate:
-                (results, note) = await RunDebateAsync(runId, modeName, mode, plan, promptInput, meta, ct);
-                break;
-            default:
-                results = await RunSequentialAsync(runId, modeName, plan, promptInput, meta, ct);
-                if (results.Count < plan.Count)
-                    note = $"(단계 {results.Count}에서 실패해 이후 {plan.Count - results.Count}단계는 실행하지 않음)";
-                break;
+            switch (mode.Flow)
+            {
+                case ModeFlow.Concurrent:
+                    results = await RunConcurrentAsync(runId, modeName, plan, promptInput, meta, ct);
+                    break;
+                case ModeFlow.Debate:
+                    (results, note) = await RunDebateAsync(runId, modeName, mode, plan, promptInput, meta, ct);
+                    break;
+                default:
+                    results = await RunSequentialAsync(runId, modeName, plan, promptInput, meta, ct);
+                    if (results.Count < plan.Count)
+                        note = $"(단계 {results.Count}에서 실패해 이후 {plan.Count - results.Count}단계는 실행하지 않음)";
+                    break;
+            }
+        }
+        finally
+        {
+            ReviewWorkFolder.TryDelete(workFolder);
         }
 
         // ── 3. 반환: Last면 마지막 결과만 (Claude 쪽 토큰 절약) ─────────────────

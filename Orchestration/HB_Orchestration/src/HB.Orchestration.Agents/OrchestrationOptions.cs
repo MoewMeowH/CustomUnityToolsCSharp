@@ -395,6 +395,9 @@ public sealed class ProviderOptions
     /// <summary>API 키를 담은 환경 변수 이름. 로컬 모델처럼 키가 필요 없으면 비운다.</summary>
     public string? ApiKeyEnv { get; set; }
 
+    /// <summary>claude-cli 전용: Claude Code 실행 파일. 비우면 PATH의 claude.</summary>
+    public string? ExecutablePath { get; set; }
+
     /// <summary>요청 하나의 네트워크 타임아웃(초). 에이전트에 값이 없을 때 쓴다. 비우면 SDK 기본값 100초.</summary>
     public int? TimeoutSeconds { get; set; }
 
@@ -481,6 +484,12 @@ public sealed class AgentOptions
     /// 실행마다 run_mode reasoning · 골든 --reasoning으로 덮어쓸 수 있다.
     /// </summary>
     public string? ReasoningEffort { get; set; }
+
+    /// <summary>claude-cli 전용: 도구를 쓰는 턴 상한 (--max-turns). 비우면 40.</summary>
+    public int? MaxTurns { get; set; }
+
+    /// <summary>claude-cli 전용: 실행 1회 비용 상한 USD (--max-budget-usd, CLI의 추정 기준이라 한 응답만큼 넘을 수 있다). 비우면 걸지 않는다.</summary>
+    public decimal? MaxBudgetUsd { get; set; }
 }
 
 /// <summary>

@@ -68,6 +68,10 @@ public static class RetryClassifier
             case IOException:
                 return new FailureInfo(ErrorKind.Network, true, null, null);
 
+            // claude-cli 제공사: 결과 JSON에서 이미 종류를 정했다.
+            case Providers.ClaudeCliException cli:
+                return new FailureInfo(cli.Kind, cli.Retryable, cli.Status, null);
+
             default:
                 return new FailureInfo(null, false, null, null);
         }

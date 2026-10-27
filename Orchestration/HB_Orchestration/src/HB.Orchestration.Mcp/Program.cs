@@ -55,6 +55,7 @@ builder.Services.AddSingleton(new OrchestrationSource(
 // 제공사 구현. 전용 SDK가 필요한 제공사가 생기면 여기에 추가.
 builder.Services.AddSingleton<IChatClientProvider, OpenAICompatibleProvider>();
 builder.Services.AddSingleton<IChatClientProvider, OpenAIResponsesProvider>(); // 웹검색 단계 (Responses API)
+builder.Services.AddSingleton<IChatClientProvider, ClaudeCliProvider>(); // claude --bare -p 읽기 전용 검토 (sub_* 모드)
 
 builder.Services.AddSingleton<AgentCatalog>();
 builder.Services.AddSingleton<AgentRunner>();

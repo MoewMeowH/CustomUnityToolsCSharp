@@ -19,6 +19,7 @@ public static class UsageExtractor
         ["prompt_tokens_details", "cache_creation_tokens"],
         ["input_tokens_details", "cache_write_tokens"],
         ["cache_write_tokens"],
+        ["usage", "cache_creation_input_tokens"], // claude-cli 결과 JSON
     ];
 
     /// <summary>캐시 적중 토큰 후보 경로. UsageDetails.CachedInputTokenCount가 비었을 때(OpenAI 호환 Gemini 등)만 쓴다.</summary>
@@ -41,6 +42,7 @@ public static class UsageExtractor
                 {
                     case AgentResponse agent: raw = agent.RawRepresentation; break;
                     case ChatResponse chat: raw = chat.RawRepresentation; break;
+                    case Providers.ClaudeCliRawResponse cli: return cli.Json;
                     case ChatCompletion completion:
                         return completion.Usage is null ? null : ModelReaderWriter.Write(completion.Usage).ToString();
 #pragma warning disable OPENAI001 // Responses 형식은 SDK에서 평가용 표시 (웹검색 단계만 씀)
