@@ -1,0 +1,108 @@
+@page "{id}"
+@model RoomModel
+@{
+    var room = Model.Room;
+    ViewData["Title"] = $"채팅방 · {room.Title}";
+    var seenRuns = new HashSet<string>(StringComparer.Ordinal);
+}
+
+<style>
+    .room-head { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline; padding: 12px 16px; margin-bottom: 14px; }
+    .room-head h2 { margin: 0; font-size: 17px; }
+    .chat { display: flex; flex-direction: column; gap: 10px; max-width: 920px; margin: 0 auto; }
+    .msg { display: flex; gap: 10px; align-items: flex-start; }
+    .msg.user { flex-direction: row-reverse; }
+    .avatar { flex: 0 0 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+              font-weight: 650; font-size: 14px; color: #fff; background: var(--muted); }
+    .bubble { min-width: 0; max-width: min(760px, 86%); background: var(--panel); border: 1px solid var(--line);
+              border-radius: 14px; padding: 8px 12px; overflow-wrap: anywhere; }
+    .msg.user .bubble { background: color-mix(in srgb, var(--accent) 14%, var(--panel)); }
+    .msg.error .bubble { border-color: var(--err); }
+    .who { font-size: 12.5px; margin-bottom: 2px; }
+    .who b { font-weight: 650; }
+    .who .when, .who .detail { color: var(--muted); }
+    .who a { margin-left: 6px; font-size: 12px; }
+    .body > :first-child { margin-top: 0; } .body > :last-child { margin-bottom: 0; }
+    .body pre { margin: 6px 0; } .body table { width: auto; }
+    .body blockquote { margin: 6px 0; padding-left: 10px; border-left: 3px solid var(--line); color: var(--muted); }
+    .sticker { display: block; margin-top: 6px; object-fit: contain; }
+    .sticker-text { display: inline-block; margin-top: 6px; padding: 1px 8px; border-radius: 999px; font-size: 12px;
+                    border: 1px dashed var(--muted); color: var(--muted); }
+    .tools { font-size: 12px; color: var(--muted); text-align: center; }
+    .run-head { margin: 8px 0 0; font-size: 12.5px; color: var(--muted); border-top: 1px dashed var(--line); padding-top: 8px; }
+    .system { text-align: center; font-size: 12.5px; color: var(--muted); }
+    .system .body { display: inline; } .system .body p { display: inline; margin: 0; }
+    .user .avatar { background: var(--accent); }
+    .conductor .avatar { background: #c26b3a; }
+    .external .avatar { background: #2f8f6f; }
+    .apireview .avatar { background: #7a5bd1; }
+    .subagent .avatar { background: #b04a8a; }
+    .verdict .avatar { background: #8a6d1f; }
+    details.long > summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
+</style>
+
+<p><a href="/Rooms">← 채팅방</a></p>
+
+<section class="panel room-head">
+    <h2>@room.Title</h2>
+    <span class="muted mono">@room.SessionId</span>
+    <span class="muted" title="@room.Transcript.Cwd">@SubagentsModel.ProjectName(room.Transcript.Cwd)</span>
+    <span class="muted">말 @room.Messages.Count · 실행 @room.RunIds.Count</span>
+    <a href="/ClaudeSession?id=@room.SessionId">세션 상세</a>
+    <a href="/Room/@room.SessionId" style="margin-left:auto">새로고침</a>
+</section>
+
+@if (room.Transcript.FormatError is not null)
+{
+    <div class="panel" style="padding:10px 14px;margin-bottom:12px;border-color:var(--warn)">세션 기록을 읽지 못했습니다: @room.Transcript.FormatError</div>
+}
+
+<div class="chat">
+    @foreach (var m in room.Messages)
+    {
+        if (m.RunId is { } runId && seenRuns.Add(runId))
+        {
+            <div class="run-head" id="run-@runId">실행 <span class="mono">@runId</span>@if (room.EstimatedRunIds.Contains(runId)) { <span class="badge warn" title="세션 기록과 시각 · 입력으로 추정한 연결 (확정 아님)">추정</span> }</div>
+        }
+        if (m.ToolsBefore > 0)
+        {
+            <div class="tools">도구 @(m.ToolsBefore)개</div>
+        }
+        if (m.Role == RoomRole.System)
+        {
+            <div class="system">
+                <span class="body">@Model.Render(m)</span>
+                @if (m.Link is { } sysLink) { <a href="@sysLink">@m.LinkLabel</a> }
+                <span class="when">@m.At?.ToLocalTime().ToString("HH:mm")</span>
+            </div>
+            continue;
+        }
+        <div class="msg @RoomModel.RoleClass(m.Role) @(m.IsError ? "error" : null)">
+            <div class="avatar" title="@m.Name">@RoomModel.Initial(m)</div>
+            <div class="bubble">
+                <div class="who">
+                    <b>@m.Name</b>
+                    @if (m.Detail is { } detail) { <span class="detail">@detail</span> }
+                    <span class="when">@m.At?.ToLocalTime().ToString("MM-dd HH:mm:ss")</span>
+                    @if (m.Link is { } link) { <a href="@link">@m.LinkLabel</a> }
+                </div>
+                @if (RoomModel.Folds(m))
+                {
+                    <details class="long">
+                        <summary>펼치기 · @m.Markdown.Length.ToString("N0")자</summary>
+                        <div class="body">@Model.Render(m)</div>
+                    </details>
+                }
+                else
+                {
+                    <div class="body">@Model.Render(m)</div>
+                }
+                @if (m.Sticker is { } sticker) { @Model.Sticker(sticker) }
+            </div>
+        </div>
+    }
+    @if (room.Messages.Count == 0)
+    {
+        <p class="muted">이 세션에는 보여 줄 대화가 없습니다.</p>
+    }
+</div>

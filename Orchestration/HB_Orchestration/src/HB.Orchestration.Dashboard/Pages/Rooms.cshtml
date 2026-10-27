@@ -1,0 +1,42 @@
+@page
+@model RoomsModel
+@{
+    ViewData["Title"] = "HB Orchestration · 채팅방";
+}
+
+<style>
+    .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }
+    .btn { font: inherit; font-size: 12.5px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--line);
+           background: var(--panel); color: var(--text); text-decoration: none; }
+    .room-title { font-weight: 600; }
+</style>
+
+<div class="toolbar">
+    <span class="muted">Claude 세션 하나가 방 하나입니다. 사용자 · 지휘자 대화와 그 세션의 외부 에이전트 · API 리뷰 · 서브에이전트 · 판정을 시간순으로 보여 줍니다. 파일은 읽기만 합니다.</span>
+    <a class="btn" href="/Rooms" style="margin-left:auto">새로고침</a>
+</div>
+
+<section class="panel table-scroll">
+    <table>
+        <thead>
+        <tr><th>최근 수정 (로컬)</th><th>방</th><th>프로젝트</th><th class="num">말</th><th class="num">실행</th><th></th></tr>
+        </thead>
+        <tbody>
+        @foreach (var r in Model.Rooms)
+        {
+            <tr>
+                <td class="mono">@r.Session.LastWriteUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
+                <td><a class="room-title" href="/Room/@r.Session.FileSessionId">@r.Title</a></td>
+                <td class="muted" title="@r.Session.Cwd">@SubagentsModel.ProjectName(r.Session.Cwd)</td>
+                <td class="num">@r.Chat.Entries.Count</td>
+                <td class="num">@r.RunCount</td>
+                <td><a class="muted" href="/ClaudeSession?id=@r.Session.FileSessionId">세션 상세</a></td>
+            </tr>
+        }
+        @if (Model.Rooms.Count == 0)
+        {
+            <tr><td colspan="6" class="muted">세션 기록이 없습니다.</td></tr>
+        }
+        </tbody>
+    </table>
+</section>

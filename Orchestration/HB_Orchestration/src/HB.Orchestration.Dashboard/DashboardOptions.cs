@@ -56,6 +56,9 @@ public sealed class DashboardOptions
     /// <summary>'청구 대조' 화면 설정 (Admin 키 환경 변수 이름).</summary>
     public BillingOptions Billing { get; set; } = new();
 
+    /// <summary>'채팅방' 화면의 스티커 (폴더 · 태그 → 파일 · 자동 스티커). 폴더 경로는 appsettings.local.json에 둔다.</summary>
+    public StickerOptions Stickers { get; set; } = new();
+
     /// <summary>
     /// Admin 키 값. 프로세스 환경 변수 → (Windows) 사용자 환경 변수 순으로 읽는다.
     /// 사용자 환경 변수를 직접 읽으므로 키를 새로 넣어도 대시보드를 다시 켜지 않아도 된다. 화면·로그에 쓰지 않는다.

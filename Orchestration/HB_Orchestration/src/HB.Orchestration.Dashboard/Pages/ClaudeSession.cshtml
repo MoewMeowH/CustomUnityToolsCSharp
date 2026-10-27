@@ -21,6 +21,7 @@
     <span>시작 @(s.StartedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "-")</span>
     <span class="muted">버전 @(s.Version ?? "-")</span>
     <span class="muted" title="@s.Cwd">@(s.Cwd ?? "-")</span>
+    <a href="/Room/@s.FileSessionId" style="margin-left:auto">채팅방에서 보기</a>
 </section>
 
 @if (s.FormatError is not null)

@@ -1,0 +1,308 @@
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+
+namespace HB.Orchestration.Shared;
+
+/// <summary>채팅방 말풍선의 화자 (세션 기록에서 읽는 것만).</summary>
+public enum ChatSpeaker
+{
+    User,
+    Conductor,
+    /// <summary>백그라운드 작업 알림 · 대화 압축 같은 안내.</summary>
+    System,
+}
+
+/// <summary>
+/// 세션 기록에서 읽은 말 하나.
+/// ToolsBefore: 바로 앞 말 이후 지휘자가 쓴 도구 수 (채팅방에 "도구 N개"로 접어 보인다).
+/// </summary>
+public sealed record ChatEntry(int Line, DateTimeOffset? Timestamp, ChatSpeaker Speaker, string Text, int ToolsBefore);
+
+/// <summary>
+/// 채팅방용 세션 기록 (계획서 2026-10-27_에이전트-채팅방). <see cref="TranscriptSummary"/>와 달리 대화 본문을 담는다:
+/// 사용자 글 · 지휘자 글(text 블록)만. 도구 호출 · 결과 · thinking · system-reminder · isMeta 줄은 넣지 않는다.
+/// </summary>
+public sealed record ChatTranscript
+{
+    public required string FilePath { get; init; }
+    public string? SessionId { get; init; }
+    public string? Cwd { get; init; }
+
+    /// <summary>세션 이름 (custom-title → ai-title 순, 마지막 값).</summary>
+    public string? Title { get; init; }
+
+    public IReadOnlyList<ChatEntry> Entries { get; init; } = [];
+
+    /// <summary>record_verdicts로 이 세션에 이어진 실행 (입력 runId · /self-review가 만든 "기록 runId: …").</summary>
+    public IReadOnlyList<string> VerdictRunIds { get; init; } = [];
+
+    public int UnknownLines { get; init; }
+    public string? FormatError { get; init; }
+
+    public string FileSessionId => Path.GetFileNameWithoutExtension(FilePath);
+}
+
+/// <summary>
+/// 세션 기록에서 채팅방에 쓸 대화 본문만 읽는다. 읽기 전용이고 예외를 던지지 않는다 (형식은 <see cref="ClaudeTranscriptReader"/>와 같은 관찰에 기댄다).
+/// </summary>
+public static partial class ClaudeChatReader
+{
+    /// <summary>record_verdicts 도구 이름 접미사 (서버 이름이 바뀌어도 잡히게).</summary>
+    public const string RecordVerdictsToolSuffix = "__record_verdicts";
+
+    public static ChatTranscript Read(string path, CancellationToken ct = default)
+    {
+        var s = new State();
+        try
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            foreach (var (lineNo, line) in ClaudeTranscriptReader.Utf8Lines(fs))
+            {
+                ct.ThrowIfCancellationRequested();
+                if (line is null) { s.Unknown++; continue; }
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                ReadLine(line, lineNo, s);
+            }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            return new ChatTranscript { FilePath = path, FormatError = $"{ex.GetType().Name}: {ex.Message}" };
+        }
+
+        return new ChatTranscript
+        {
+            FilePath = path,
+            SessionId = s.SessionId,
+            Cwd = s.Cwd,
+            Title = s.CustomTitle ?? s.AiTitle,
+            Entries = s.Entries,
+            VerdictRunIds = s.VerdictRuns.ToList(),
+            UnknownLines = s.Unknown,
+        };
+    }
+
+    private sealed class State
+    {
+        public string? SessionId, Cwd, CustomTitle, AiTitle;
+        public int Unknown, PendingTools;
+        public readonly List<ChatEntry> Entries = [];
+        public readonly HashSet<string> VerdictUses = new(StringComparer.Ordinal);
+        public readonly SortedSet<string> VerdictRuns = new(StringComparer.Ordinal);
+
+        public void Add(int line, DateTimeOffset? ts, ChatSpeaker speaker, string text)
+        {
+            text = text.Trim();
+            if (text.Length == 0) return;
+            Entries.Add(new ChatEntry(line, ts, speaker, text, PendingTools));
+            PendingTools = 0;
+        }
+    }
+
+    private static void ReadLine(string line, int lineNo, State s)
+    {
+        JsonDocument doc;
+        try { doc = JsonDocument.Parse(line); }
+        catch (JsonException) { s.Unknown++; return; }
+
+        using (doc)
+        {
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) { s.Unknown++; return; }
+            try
+            {
+                s.SessionId ??= Str(root, "sessionId");
+                s.Cwd ??= Str(root, "cwd");
+                // 서브에이전트(사이드체인) · 메타 줄 · 압축 요약은 대화가 아니다.
+                if (Bool(root, "isSidechain") || Bool(root, "isMeta")) return;
+                var ts = Str(root, "timestamp") is { } t && DateTimeOffset.TryParse(t, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AssumeUniversal, out var parsed) ? parsed : (DateTimeOffset?)null;
+
+                switch (Str(root, "type"))
+                {
+                    case "custom-title":
+                        s.CustomTitle = Str(root, "customTitle") ?? s.CustomTitle;
+                        break;
+                    case "ai-title":
+                        s.AiTitle = Str(root, "aiTitle") ?? s.AiTitle;
+                        break;
+                    case "attachment":
+                        // 작업 중에 보낸 사용자 글 (2026-10-27 세션 기록 확인: attachment.type = queued_command, commandMode = prompt).
+                        if (root.TryGetProperty("attachment", out var att) && att.ValueKind == JsonValueKind.Object
+                            && Str(att, "type") == "queued_command" && Str(att, "commandMode") is null or "prompt"
+                            && Str(att, "prompt") is { } queued)
+                            s.Add(lineNo, ts, ChatSpeaker.User, CleanUserText(queued));
+                        break;
+                    case "assistant":
+                        ReadAssistant(root, lineNo, ts, s);
+                        break;
+                    case "user":
+                        if (Bool(root, "isCompactSummary")) { s.Add(lineNo, ts, ChatSpeaker.System, "대화가 압축됐습니다 (앞 내용 요약)"); break; }
+                        ReadUser(root, lineNo, ts, s);
+                        break;
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                s.Unknown++;
+            }
+        }
+    }
+
+    private static void ReadAssistant(JsonElement root, int lineNo, DateTimeOffset? ts, State s)
+    {
+        foreach (var block in ContentBlocks(root))
+        {
+            switch (Str(block, "type"))
+            {
+                case "text" when Str(block, "text") is { } text:
+                    s.Add(lineNo, ts, ChatSpeaker.Conductor, text);
+                    break;
+                case "tool_use":
+                    s.PendingTools++;
+                    if (Str(block, "name") is { } name && name.EndsWith(RecordVerdictsToolSuffix, StringComparison.Ordinal) && Str(block, "id") is { } id)
+                    {
+                        s.VerdictUses.Add(id);
+                        if (block.TryGetProperty("input", out var input) && input.ValueKind == JsonValueKind.Object
+                            && Str(input, "runId") is { } runId && RunIdRegex().IsMatch(runId.Trim()))
+                            s.VerdictRuns.Add(runId.Trim());
+                    }
+                    break;
+            }
+        }
+    }
+
+    private static void ReadUser(JsonElement root, int lineNo, DateTimeOffset? ts, State s)
+    {
+        if (!root.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object) return;
+        if (!message.TryGetProperty("content", out var content)) return;
+
+        if (content.ValueKind == JsonValueKind.String)
+        {
+            ReadUserString(content.GetString()!, lineNo, ts, s);
+            return;
+        }
+        if (content.ValueKind != JsonValueKind.Array) { s.Unknown++; return; }
+
+        var text = new StringBuilder();
+        foreach (var block in ContentBlocks(root))
+        {
+            switch (Str(block, "type"))
+            {
+                case "text" when Str(block, "text") is { } t:
+                    text.Append(t).Append('\n');
+                    break;
+                case "image":
+                    text.Append("[이미지]\n");
+                    break;
+                case "tool_result" when Str(block, "tool_use_id") is { } useId && s.VerdictUses.Contains(useId):
+                    // /self-review는 runId 없이 부르고 서버가 만든 runId를 결과 첫 줄에 알려 준다.
+                    foreach (Match m in CreatedRunRegex().Matches(ResultText(block)))
+                        s.VerdictRuns.Add(m.Groups[1].Value);
+                    break;
+            }
+        }
+        if (text.Length > 0) ReadUserString(text.ToString(), lineNo, ts, s);
+    }
+
+    private static void ReadUserString(string raw, int lineNo, DateTimeOffset? ts, State s)
+    {
+        var trimmed = raw.TrimStart();
+        if (trimmed.StartsWith("<task-notification>", StringComparison.Ordinal))
+        {
+            var summary = TagText(trimmed, "summary");
+            s.Add(lineNo, ts, ChatSpeaker.System, summary is null ? "백그라운드 작업 알림" : $"백그라운드 작업: {summary}");
+            return;
+        }
+        if (trimmed.StartsWith("<command-name>", StringComparison.Ordinal) || trimmed.StartsWith("<command-message>", StringComparison.Ordinal))
+        {
+            var name = TagText(trimmed, "command-name") ?? "";
+            var args = TagText(trimmed, "command-args") ?? "";
+            s.Add(lineNo, ts, ChatSpeaker.User, $"`{(name.StartsWith('/') ? name : "/" + name)}` {args}");
+            return;
+        }
+        if (trimmed.StartsWith("<bash-input>", StringComparison.Ordinal))
+        {
+            s.Add(lineNo, ts, ChatSpeaker.User, $"`! {TagText(trimmed, "bash-input")}`");
+            return;
+        }
+        // 명령 · 셸 출력은 말이 아니다.
+        if (trimmed.StartsWith("<local-command-stdout>", StringComparison.Ordinal) || trimmed.StartsWith("<local-command-stderr>", StringComparison.Ordinal)
+            || trimmed.StartsWith("<bash-stdout>", StringComparison.Ordinal) || trimmed.StartsWith("<bash-stderr>", StringComparison.Ordinal))
+            return;
+        // 하네스가 넣는 중단 문구 ("[Request interrupted by user]" · "… for tool use]")는 사용자가 쓴 글이 아니다.
+        if (InterruptedRegex().IsMatch(trimmed.TrimEnd()))
+        {
+            s.Add(lineNo, ts, ChatSpeaker.System, "사용자가 중단함");
+            return;
+        }
+
+        s.Add(lineNo, ts, ChatSpeaker.User, CleanUserText(raw));
+    }
+
+    /// <summary>
+    /// system-reminder를 빼고, 붙여 넣은 글은 코드 블록으로 감싼다 (로그 · 코드의 줄과 #·*·- 기호를 원문 그대로 보이게).
+    /// 울타리는 본문에 있는 가장 긴 백틱 줄보다 하나 길게.
+    /// </summary>
+    internal static string CleanUserText(string raw)
+    {
+        var text = SystemReminderRegex().Replace(raw, "");
+        return PastedRegex().Replace(text, m =>
+        {
+            var body = m.Groups[1].Value.Trim('\r', '\n').Replace("\r\n", "\n");
+            var longest = BacktickRunRegex().Matches(body).Select(r => r.Length).DefaultIfEmpty(0).Max();
+            var fence = new string('`', Math.Max(3, longest + 1));
+            return $"\n\n**붙여 넣은 글**\n\n{fence}text\n{body}\n{fence}\n\n";
+        });
+    }
+
+    private static string? TagText(string text, string tag) =>
+        Regex.Match(text, $"<{Regex.Escape(tag)}>(.*?)</{Regex.Escape(tag)}>", RegexOptions.Singleline) is { Success: true } m
+            ? m.Groups[1].Value.Trim()
+            : null;
+
+    private static string ResultText(JsonElement block)
+    {
+        if (!block.TryGetProperty("content", out var c)) return "";
+        if (c.ValueKind == JsonValueKind.String) return c.GetString()!;
+        if (c.ValueKind != JsonValueKind.Array) return "";
+        var sb = new StringBuilder();
+        foreach (var part in c.EnumerateArray())
+            if (part.ValueKind == JsonValueKind.Object && Str(part, "text") is { } t) sb.Append(t);
+        return sb.ToString();
+    }
+
+    private static IEnumerable<JsonElement> ContentBlocks(JsonElement root)
+    {
+        if (!root.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object) yield break;
+        if (!message.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array) yield break;
+        foreach (var block in content.EnumerateArray())
+            if (block.ValueKind == JsonValueKind.Object) yield return block;
+    }
+
+    private static string? Str(JsonElement obj, string name) =>
+        obj.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+
+    private static bool Bool(JsonElement obj, string name) =>
+        obj.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.True;
+
+    [GeneratedRegex(@"^[0-9a-f]{10}$")]
+    private static partial Regex RunIdRegex();
+
+    /// <summary>VerdictRecorder.Commit의 "… 기록 runId: xxxxxxxxxx" 줄.</summary>
+    [GeneratedRegex(@"기록 runId: ([0-9a-f]{10})")]
+    private static partial Regex CreatedRunRegex();
+
+    [GeneratedRegex(@"<system-reminder>.*?</system-reminder>", RegexOptions.Singleline)]
+    private static partial Regex SystemReminderRegex();
+
+    [GeneratedRegex(@"<pasted_content[^>]*>(.*?)</pasted_content[^>]*>", RegexOptions.Singleline)]
+    private static partial Regex PastedRegex();
+
+    [GeneratedRegex(@"`+")]
+    private static partial Regex BacktickRunRegex();
+
+    [GeneratedRegex(@"^\[Request interrupted by user[^\]\n]*\]$")]
+    private static partial Regex InterruptedRegex();
+}

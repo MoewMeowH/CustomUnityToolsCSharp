@@ -30,3 +30,5 @@ GoldenSet/
 .claude/push_guard.local.txt
 # Sync-ProjectFiles -All 대상 목록 (이 PC의 경로)
 Orchestration/HB_Orchestration/tools/sync-targets.local.txt
+# 대시보드 개인 설정 (스티커 폴더 경로 등, 이 PC에만)
+appsettings.local.json

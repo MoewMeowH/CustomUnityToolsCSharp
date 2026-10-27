@@ -1,0 +1,11 @@
+@page "/Room/Run/{runId}"
+@model RoomRunModel
+@{
+    ViewData["Title"] = "HB Orchestration · 채팅방";
+}
+
+<p><a href="/Rooms">← 채팅방</a></p>
+<div class="panel" style="padding:14px 16px">
+    실행 <span class="mono">@Model.RunId</span>은 어느 Claude 세션에도 이어지지 않았습니다 (골든 · 다른 PC · 연결 후보가 여럿인 실행 등).
+    <a href="/">호출 기록</a>에서 찾아보세요.
+</div>

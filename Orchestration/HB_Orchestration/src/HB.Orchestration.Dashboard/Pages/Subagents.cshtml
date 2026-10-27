@@ -40,7 +40,12 @@
         <h3>@r.AgentType · @SubagentsModel.ProjectName(r.ProjectDir) · @(r.ReturnedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "-")
             <a class="muted" style="font-size:12px;font-weight:normal" href="?Days=@Model.Days&Agent=@Model.Agent&Unrecorded=@Model.Unrecorded">닫기</a></h3>
         <p class="muted" style="margin:0 0 8px">
-            @r.Description · 세션 <span class="mono">@r.SessionId</span> · agent <span class="mono">@r.AgentId</span> · @r.Message.Length.ToString("N0")자<br />
+            @r.Description · 세션 <span class="mono">@r.SessionId</span> · agent <span class="mono">@r.AgentId</span> · @r.Message.Length.ToString("N0")자
+            @if (r.SessionId is { Length: > 0 } roomId)
+            {
+                <text> · </text><a href="/Room/@roomId">채팅방에서 보기</a>
+            }
+            <br />
             <span class="mono" style="font-size:12px">@r.Cwd</span>
         </p>
         <pre>@r.Message</pre>
