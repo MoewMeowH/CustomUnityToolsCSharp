@@ -806,6 +806,7 @@ public static class RoomRules
         (level == PermissionLevel.Command
             ? "명령을 실행하면 사용자가 그 자리에서 카드로 허용 · 거절한다. 거절되면 같은 명령을 다시 시도하지 말고, 거절 이유를 보고 다른 방법을 묻는다."
             : "승인을 물을 곳이 없어서 허용되지 않은 도구 호출은 자동으로 거절된다 — 거절되면 다시 시도하지 말고, 무엇이 필요한지 사용자에게 말한다.") +
+        Widgets.Rule + // 위젯 형식 (2-2 f)
         // 첨부 (2-2 d): 말 끝의 [첨부] 줄 — 대화 단계는 도구가 없어 받지 않는다
         (level == PermissionLevel.Chat ? "" :
             $" 사용자 말 끝의 \"{Attachments.Marker.Trim()} 경로\" 줄은 사용자가 이 화면에서 올린 파일이다 — 내용이 필요하면 Read로 연다 (그림도 Read로 볼 수 있다)." +

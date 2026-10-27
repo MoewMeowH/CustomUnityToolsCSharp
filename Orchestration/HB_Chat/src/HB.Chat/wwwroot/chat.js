@@ -149,8 +149,84 @@
         tmp.innerHTML = html;
         return tmp.querySelector("#chat");
     }
+    // ---- 위젯 (2-2 f): 지휘자 말풍선의 ```widget 코드 블록을 격리된 iframe에 그린다 ----
+    // 처음에는 sandbox=""(스크립트 없음, HTML · CSS만). 틀 위 "실행"을 누르면 sandbox="allow-scripts"로 다시 그린다 — WebRTC(STUN · TURN)는
+    // CSP · sandbox로 막을 수 없어, 오염된 위젯이 사용자 모르게 글을 밖으로 보내지 못하게 (/self-review security 803e5f13eb C3 · abc6cec3a6 C1).
+    // 어느 쪽이든 allow-same-origin 없음 → 불투명 출처: 앱 쿠키 · antiforgery · 같은 출처 요청 · 부모 DOM 접근 없음, 폼 전송 · 새 창 ·
+    // 맨 위 이동 · 모달 · 내려받기도 없음. 문서 CSP는 네트워크를 다 막고 인라인 스크립트 · 스타일 · data: 그림만.
+    // 위젯이 스스로 다른 주소로 이동하는 것은 페이지 CSP frame-src 'none'(Widgets.cs)이 막는다. 소스는 서버가 이스케이프한 글의 textContent.
+    // 틀 위 표시 · 단추 · "코드 보기" 글은 CSS로 넣는다 — 인용 답장이 innerText로 본문을 읽을 때 섞이지 않게 (803e5f13eb C4).
+    const WidgetMaxChars = 200000, WidgetMinHeight = 40, WidgetMaxHeight = 1200;
+    const WidgetCsp = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; " +
+        "font-src data:; media-src data: blob:; form-action 'none'; base-uri 'none'";
+    function widgetDoc(source) {
+        return "<!doctype html><html><head><meta charset=\"utf-8\">" +
+            "<meta http-equiv=\"Content-Security-Policy\" content=\"" + WidgetCsp + "\">" +
+            "<meta name=\"color-scheme\" content=\"light dark\">" +
+            // 위젯 CSS의 100vh 높이는 풀어 둔다 — 틀을 키우면 창 높이도 커져 상한까지 계속 자라는 되먹임 (803e5f13eb C2)
+            "<style>html,body{margin:0}html{height:auto!important}body{height:auto!important;min-height:0!important;" +
+            "padding:8px;font:14px/1.5 system-ui,\"Malgun Gothic\",sans-serif}</style>" +
+            // 높이 알림(실행한 위젯만): body 높이 + 위아래 여백. documentElement는 창 높이 아래로 줄지 않아, 한 번 커진 틀이 다시 줄지 않았다 (실제 확인).
+            // 부모는 보낸 창이 그 iframe인지 보고, 높이를 상한 안으로 자른다 (위젯이 꾸며 보내도 제 높이만 바뀐다)
+            "<script>(()=>{const s=()=>{const b=document.body,c=getComputedStyle(b);parent.postMessage({hbWidgetHeight:" +
+            "Math.ceil(b.getBoundingClientRect().height+parseFloat(c.marginTop)+parseFloat(c.marginBottom))},\"*\");};" +
+            "addEventListener(\"load\",()=>{s();new ResizeObserver(s).observe(document.body);});})()<\/script>" +
+            "</head><body>" + source + "</body></html>";
+    }
+    window.addEventListener("message", (e) => {
+        const h = e.data !== null && typeof e.data === "object" ? e.data.hbWidgetHeight : undefined;
+        if (typeof h !== "number" || !Number.isFinite(h)) return;
+        for (const frame of document.querySelectorAll("iframe.widget-frame")) {
+            if (frame.contentWindow !== e.source) continue;
+            // 맨 아래를 보던 중이면 틀이 커진 뒤에도 맨 아래로 — 늦게 오는 높이에 마지막 위젯이 잘려 있었다 (803e5f13eb C1)
+            const scroller = frame.closest(".scroll");
+            const follow = scroller && scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 120;
+            frame.style.height = Math.min(Math.max(Math.ceil(h), WidgetMinHeight), WidgetMaxHeight) + "px";
+            if (follow) scroller.scrollTop = scroller.scrollHeight;
+            return;
+        }
+    });
+    function widgetFrame(source, run) {
+        const frame = el("iframe", "widget-frame" + (run ? " running" : ""));
+        frame.setAttribute("sandbox", run ? "allow-scripts" : "");
+        frame.setAttribute("referrerpolicy", "no-referrer");
+        frame.setAttribute("loading", "lazy");
+        frame.title = run ? "위젯 (실행 중)" : "위젯 (스크립트 꺼짐)";
+        frame.srcdoc = widgetDoc(source);
+        return frame;
+    }
+    function widgets(container) {
+        container.querySelectorAll(".msg.conductor .body pre > code.language-widget").forEach(code => {
+            const pre = code.parentElement;
+            if (pre.closest(".widget")) return;
+            const box = el("div", "widget");
+            const source = code.textContent;
+            pre.replaceWith(box);
+            if (source.length > WidgetMaxChars) {
+                const note = el("div", "muted widget-note");
+                note.dataset.note = `위젯이 너무 커서(${source.length.toLocaleString()}자) 코드로만 보입니다.`;
+                box.append(note, pre);
+                return;
+            }
+            const bar = el("div", "widget-bar");
+            const run = el("button", "widget-run");
+            run.type = "button";
+            run.setAttribute("aria-label", "위젯 스크립트 실행");
+            bar.append(run);
+            const frame = widgetFrame(source, false);
+            run.addEventListener("click", () => {
+                box.querySelector("iframe.widget-frame").replaceWith(widgetFrame(source, true));
+                box.classList.add("running");
+                run.remove();
+            });
+            const details = el("details", "widget-code");
+            details.append(el("summary"), pre);
+            box.append(bar, frame, details);
+        });
+    }
     // 코드 블록 복사 단추 (2-2 b). 글자는 CSS ::after로 넣는다 — 인용 답장이 innerText로 본문을 읽을 때 섞이지 않게.
     function decorate(container) {
+        widgets(container);
         container.querySelectorAll(".body pre").forEach(pre => {
             if (pre.querySelector(":scope > .copy")) return;
             const b = el("button", "copy");

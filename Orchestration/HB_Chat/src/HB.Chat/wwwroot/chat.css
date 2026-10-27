@@ -92,6 +92,24 @@ select, input[type=text], textarea { background: var(--panel); border: 1px solid
 .quote-x { padding: 0 8px; }
 #live .approval { max-width: 760px; margin-left: 44px; }
 
+/* 위젯 (2-2 f): 격리 iframe. 스크립트 꺼진 처음 틀은 240px(아래 모서리로 늘림), 실행하면 위젯이 알린 높이(40~1200px).
+   글자는 ::before · ::after로 — 인용 답장(innerText)에 섞이지 않게 */
+.widget { margin: 6px 0; width: 560px; max-width: 100%; }
+.widget-bar { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+/* 틀 밖(앱 쪽) 표시: 위젯 안 단추 · 입력칸이 앱 기능처럼 보이지 않게 (abc6cec3a6 C2) */
+.widget-bar::before { content: "지휘자가 만든 위젯 · 안의 단추 · 입력칸은 앱 기능이 아닙니다"; }
+.widget.running .widget-bar::before { content: "지휘자가 만든 위젯 (실행 중) · 안의 단추 · 입력칸은 앱 기능이 아닙니다"; }
+.widget-run { font-size: 12px; padding: 1px 10px; border-radius: 6px; }
+.widget-run::after { content: "▶ 실행"; }
+/* 높이는 안쪽 높이 — 테두리를 빼면 2px 모자라 스크롤 막대가 생겼다 (실제 확인) */
+.widget-frame { display: block; box-sizing: content-box; width: calc(100% - 2px); height: 240px; border: 1px solid var(--line);
+                border-radius: 8px; background: var(--panel); resize: vertical; overflow: auto; }
+.widget-frame.running { height: 160px; resize: none; }
+.widget-code > summary { cursor: pointer; font-size: 12px; color: var(--muted); margin-top: 4px; }
+.widget-code > summary::after { content: "코드 보기"; }
+.widget-note { font-size: 12px; margin-bottom: 4px; }
+.widget-note::before { content: attr(data-note); }
+
 /* 외부 에이전트 말풍선 (2-2 e): 색은 _ChatStyles(.external · .apireview · .subagent), 시작 줄은 안내 */
 .run-start a { margin-left: 6px; font-size: 12px; }
 .msg.external .bubble, .msg.apireview .bubble, .msg.subagent .bubble { max-width: min(820px, 92%); }

@@ -84,6 +84,9 @@ PurgeTrash();
 using var purgeTimer = new Timer(_ => PurgeTrash(), null, TimeSpan.FromDays(1), TimeSpan.FromDays(1));
 
 app.UseSameOriginGuard();
+// 위젯 (2-2 f): 말풍선 안 격리 iframe(srcdoc)이 스스로 다른 주소로 이동하지 못하게 (위젯 글을 밖으로 실어 나르는 길).
+// srcdoc은 가져오기가 아니라 막히지 않는다. 이 앱 화면에는 다른 iframe이 없다.
+app.UseWidgetCsp();
 // 첨부 올리기만 본문 상한을 첨부 상한 + 여유로 — 폼 바인딩이 본문을 먼저 다 읽으므로 핸들러 검사 전에 막는다 (지휘자 검토 R1).
 // 다른 요청은 Kestrel 기본(30MB) 그대로.
 app.Use(async (ctx, next) =>

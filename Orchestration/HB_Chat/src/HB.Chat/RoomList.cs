@@ -234,6 +234,7 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
     public static string Preview(string text)
     {
         var s = StickerTag().Replace(text, " ");
+        s = WidgetBlock().Replace(s, " [위젯] "); // 위젯 HTML은 한 줄로 읽을 글이 아니다 (2-2 f 실제 확인: 목록에 <!DOCTYPE html>이 보였음)
         s = Fence().Replace(s, " ");
         s = Link().Replace(s, "$1");
         s = LineMark().Replace(s, "");
@@ -248,6 +249,12 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
 
     [GeneratedRegex(@"^\s*(```|~~~)[^\n]*$", RegexOptions.Multiline)]
     private static partial Regex Fence();
+
+    // 화면(Markdig)이 위젯으로 그리는 모양과 맞춘다: ``` · ~~~ 세 개 이상, 언어 이름이 정확히 widget, 닫는 울타리는 같은 글자로 그 길이 이상,
+    // 닫히지 않았으면 글 끝까지(중지된 턴), CRLF (803e5f13eb C6)
+    [GeneratedRegex(@"^[ \t]*(?<f>(?<c>[`~])\k<c>{2,})[ \t]*widget(?:[ \t][^\n]*)?\r?$.*?(?:^[ \t]*\k<f>\k<c>*[ \t]*\r?$|\z)",
+        RegexOptions.Multiline | RegexOptions.Singleline)]
+    private static partial Regex WidgetBlock();
 
     [GeneratedRegex(@"!?\[([^\]\n]*)\]\([^)\n]*\)")]
     private static partial Regex Link();
