@@ -9,9 +9,12 @@ namespace HB.Orchestration.Dashboard.Pages;
 /// 채팅방 목록: 최근 Claude 세션마다 방 하나 (계획서 2026-10-27_에이전트-채팅방).
 /// ?handler=Stamp · List는 실시간 갱신용 (계획서 2026-10-27_채팅방-실시간-갱신 결정: 방 목록도 실시간).
 /// </summary>
-public sealed class RoomsModel(ChatRoomService rooms, IOptions<DashboardOptions> options) : PageModel
+public sealed class RoomsModel(ChatRoomService rooms, ChatAppRooms appRooms, IOptions<DashboardOptions> options) : PageModel
 {
     public IReadOnlyList<ChatRoomService.RoomSummary> Rooms { get; private set; } = [];
+
+    /// <summary>그 세션이 채팅 앱(HB_Chat)의 방이면 그 방 (표시 · 앱 링크).</summary>
+    public ChatAppRoom? AppRoom(ChatRoomService.RoomSummary r) => appRooms.For(r.Session.FileSessionId);
 
     public LiveView Live { get; private set; } = null!;
 

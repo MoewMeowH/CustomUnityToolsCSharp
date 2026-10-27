@@ -10,7 +10,14 @@
         {
             <tr data-key="@r.Session.FileSessionId">
                 <td class="mono">@r.Session.LastWriteUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
-                <td><a class="room-title" href="/Room/@r.Session.FileSessionId">@r.Title</a></td>
+                <td>
+                    <a class="room-title" href="/Room/@r.Session.FileSessionId">@r.Title</a>
+                    @if (Model.AppRoom(r) is { } app)
+                    {
+                        <span class="badge" title="채팅 앱(HB_Chat)이 만든 세션 — 말은 앱에서 보낸다">채팅 앱</span>
+                        @if (app.Link is { } appLink) { <a class="muted" href="@appLink" target="_blank" rel="noopener">앱에서 열기</a> }
+                    }
+                </td>
                 <td class="muted" title="@r.Session.Cwd">@SubagentsModel.ProjectName(r.Session.Cwd)</td>
                 <td class="num">@r.Chat.Entries.Count</td>
                 <td class="num">@r.RunCount</td>

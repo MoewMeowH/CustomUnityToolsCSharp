@@ -64,6 +64,15 @@ public sealed class DashboardOptions
     public StickerOptions Stickers { get; set; } = new();
 
     /// <summary>
+    /// 채팅 앱(HB_Chat) 방 색인 rooms.json. 비우면 %LOCALAPPDATA%/HB_Chat/rooms.json. 대시보드는 읽기만 한다
+    /// (계획서 2026-10-27_대화형-채팅-앱 "대시보드와의 경계"). 파일이 없거나 깨졌으면 표시하지 않는다.
+    /// </summary>
+    public string? ChatAppRoomsPath { get; set; }
+
+    /// <summary>채팅 앱 주소 (방 목록 · 채팅방의 "앱에서 열기" 링크). 비우면 링크 없이 표시만.</summary>
+    public string? ChatAppUrl { get; set; } = "http://localhost:5290";
+
+    /// <summary>
     /// Admin 키 값. 프로세스 환경 변수 → (Windows) 사용자 환경 변수 순으로 읽는다.
     /// 사용자 환경 변수를 직접 읽으므로 키를 새로 넣어도 대시보드를 다시 켜지 않아도 된다. 화면·로그에 쓰지 않는다.
     /// </summary>

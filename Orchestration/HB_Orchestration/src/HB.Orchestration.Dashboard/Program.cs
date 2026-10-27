@@ -24,6 +24,7 @@ builder.Services.AddSingleton<SubagentResultsService>();
 builder.Services.AddSingleton<BillingStore>();
 builder.Services.AddSingleton(sp => new StickerCatalog(() => sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<DashboardOptions>>().CurrentValue.Stickers));
 builder.Services.AddSingleton<ChatRoomService>();
+builder.Services.AddSingleton<ChatAppRooms>();
 builder.Services.AddHttpClient<BillingApi>(c => c.Timeout = TimeSpan.FromSeconds(30))
     .AddTypedClient((http, sp) => new BillingApi(http, () => sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<DashboardOptions>>().Value.ReadAdminKey()));
 

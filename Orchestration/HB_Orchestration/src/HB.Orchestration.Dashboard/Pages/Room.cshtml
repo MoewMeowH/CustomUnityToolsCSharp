@@ -19,6 +19,11 @@
     <span class="muted" title="@room.Transcript.Cwd">@SubagentsModel.ProjectName(room.Transcript.Cwd)</span>
     <span class="muted">말 <span id="count-messages">@room.Messages.Count</span> · 실행 <span id="count-runs">@room.RunIds.Count</span></span>
     <a href="/ClaudeSession?id=@room.SessionId">세션 상세</a>
+    @if (Model.AppRoom is { } app)
+    {
+        <span class="badge" title="채팅 앱(HB_Chat)이 만든 세션 — 말은 앱에서 보낸다">채팅 앱</span>
+        @if (app.Link is { } appLink) { <a href="@appLink" target="_blank" rel="noopener">앱에서 열기</a> }
+    }
     <span style="margin-left:auto"></span>
     <partial name="_LiveControl" model="Model.Live" />
     <a href="/Room/@room.SessionId">새로고침</a>
