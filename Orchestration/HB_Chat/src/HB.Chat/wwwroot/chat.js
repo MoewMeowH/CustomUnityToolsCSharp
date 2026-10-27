@@ -178,6 +178,7 @@
         const form = $("#send-form");
         const textBox = $("#text");
         const stopBtn = $("#stop");
+        const interruptBtn = $("#interrupt");
         const live = $("#live");
         const notice = $("#notice");
         const conn = $("#conn");
@@ -372,9 +373,9 @@
         scroller.addEventListener("scroll", onScroll);
         document.addEventListener("visibilitychange", markRead);
 
-        // 진행 중 턴: 보낸 말(흐리게) + 지휘자 말풍선(입력 중 점 → 흘림 글, 위에 도구 칩) + 승인 카드 · 거절 줄 + 대기 줄.
-        // 흘림 글은 글자 그대로이고, 끝나면 세션 기록의 말풍선으로 바뀐다.
-        let stream = null, chips = null, queueLine = null;
+        // 진행 중 턴: 보낸 말(흐리게) + 지휘자 말풍선(입력 중 점 → 흘림 글, 위에 도구 칩) + 승인 카드 · 거절 줄.
+        // 흘림 글은 글자 그대로이고, 끝나면 세션 기록의 말풍선으로 바뀐다. 기다리는 말은 입력칸 위 목록(#queue, 2-2 d).
+        let stream = null, chips = null;
         function bubble(cls, who, text) {
             const m = el("div", "msg " + cls), b = el("div", "bubble");
             m.append(el("div", "avatar", cls.startsWith("user") ? "나" : "C"), b);
@@ -403,21 +404,56 @@
             c.dataset.name = name; c.dataset.count = "1";
             chips.append(c);
         }
-        function showQueue(pending) {
-            if (!pending || pending.length === 0) { queueLine?.remove(); queueLine = null; return; }
-            if (!queueLine) { queueLine = el("div", "live-line"); }
-            queueLine.textContent = "기다리는 말 " + pending.length + "개";
-            live.append(queueLine);
+        // 기다리는 말 목록 (2-2 d): 말마다 × — 누르면 그 말만 취소 (서버 CancelQueued, 목록은 queued 알림으로 다시 그린다)
+        const queueBox = $("#queue");
+        function showQueue(items) {
+            queueBox.replaceChildren();
+            if (!items || items.length === 0) { queueBox.hidden = true; return; }
+            queueBox.hidden = false;
+            queueBox.append(el("span", "muted", "기다리는 말 " + items.length));
+            for (const item of items) {
+                const oneLine = displayText(item.text).replace(/\s+/g, " ").trim();
+                // 글은 span에서 줄임표 — ×가 잘리지 않게 (/self-review 5b26cff7df C1)
+                const chip = el("span", "chip queued");
+                chip.append(el("span", "t", oneLine.length > 40 ? oneLine.slice(0, 40) + "…" : oneLine));
+                chip.title = displayText(item.text).slice(0, 500);
+                const x = el("button", "queue-x", "×");
+                x.type = "button"; x.title = "이 말 취소"; x.setAttribute("aria-label", "이 말 취소");
+                x.addEventListener("click", async () => {
+                    x.disabled = true;
+                    const data = new FormData(); data.append("queued", item.id);
+                    if (!await post("CancelQueued", data)) x.disabled = false;
+                });
+                chip.append(x);
+                queueBox.append(chip);
+            }
+        }
+        function setBusy(busy) { stopBtn.disabled = !busy; interruptBtn.disabled = !busy; }
+        // 보낸 글의 끝 [첨부] 줄을 "파일 n개: 이름"으로 — 절대 경로를 그대로 보이지 않게 (5b26cff7df C7, 서버 Attachments.Split과 같은 규칙)
+        function displayText(text) {
+            const lines = text.replace(/\r\n/g, "\n").split("\n");
+            const names = [];
+            let end = lines.length;
+            while (end > 0) {
+                const line = lines[end - 1];
+                if (!line.trim()) { end--; continue; }
+                if (!line.startsWith("[첨부] ") || !line.slice(5).trim()) break;
+                names.unshift(line.slice(5).trim().split(/[\\/]/).pop());
+                end--;
+            }
+            if (names.length === 0) return text;
+            const body = lines.slice(0, end).join("\n").trimEnd();
+            return (body ? body + "\n" : "") + "📎 파일 " + names.length + "개: " + names.join(", ");
         }
         function startTurn(prompt, partial, pending) {
             const follow = atBottom();
             live.replaceChildren();
             cards.clear(); // 카드도 live 안에 있었다
-            chips = null; queueLine = null;
-            if (prompt) bubble("user pending", "나", prompt);
+            chips = null;
+            if (prompt) bubble("user pending", "나", displayText(prompt));
             stream = bubble("conductor", "지휘자", partial || null);
             if (!partial) { stream.dataset.empty = "1"; stream.append(typing()); }
-            stopBtn.disabled = false;
+            setBusy(true);
             showQueue(pending);
             if (follow) toBottom();
         }
@@ -514,7 +550,7 @@
             card.append(acts);
             card.dataset.expires = String(Date.parse(a.expiresAt));
             card.left = left;
-            live.insertBefore(card, queueLine);
+            live.append(card);
             cards.set(a.id, card);
             tickApprovals();
             if (follow) toBottom();
@@ -587,8 +623,8 @@
                     scheduleList();
                     await refreshMessages();
                     cards.forEach(c => c.remove()); cards.clear(); // 기다리는 카드는 snapshot 뒤 approval로 다시 온다
-                    if (ev.busy) startTurn(ev.prompt, ev.text, ev.pending);
-                    else { live.replaceChildren(); stream = null; chips = null; queueLine = null; stopBtn.disabled = true; }
+                    if (ev.busy) startTurn(ev.prompt, ev.text, ev.pendingItems);
+                    else { live.replaceChildren(); stream = null; chips = null; setBusy(false); showQueue([]); }
                     if (ev.face) setFace(ev.face);
                     break;
                 case "face":
@@ -606,7 +642,7 @@
                 case "start":
                     $("#last-error")?.remove();
                     notice.hidden = true;
-                    startTurn(ev.prompt, "", ev.pending);
+                    startTurn(ev.prompt, "", ev.pendingItems);
                     break;
                 case "delta": {
                     if (!stream) startTurn(null, "", null);
@@ -624,10 +660,10 @@
                     break;
                 case "denied":
                 case "retry":
-                    live.insertBefore(el("div", "live-line " + ev.kind, (ev.kind === "denied" ? "거절됨 — " : "") + ev.text), queueLine);
+                    live.append(el("div", "live-line " + ev.kind, (ev.kind === "denied" ? "거절됨 — " : "") + ev.text));
                     break;
                 case "queued":
-                    showQueue(ev.pending);
+                    showQueue(ev.pendingItems);
                     break;
                 case "notice":
                     notice.textContent = ev.text; notice.hidden = false;
@@ -646,7 +682,7 @@
                     break;
                 }
                 case "idle":
-                    stopBtn.disabled = true;
+                    setBusy(false);
                     showQueue([]);
                     break;
             }
@@ -686,25 +722,105 @@
                 }
             } finally { revealing = false; }
         }
-        form.addEventListener("submit", async (e) => {
+        // ---- 첨부 (2-2 d): 고르면 바로 그 방 첨부 폴더에 올리고(?handler=Attach), 보낼 때 본문 끝에 [첨부] 경로 줄로 붙인다 ----
+        const composer = $(".composer");
+        const canAttach = composer.dataset.attach === "1";
+        const attachMax = Number(composer.dataset.attachMax || 10), attachBytes = Number(composer.dataset.attachBytes || 0);
+        const attachBox = $("#attach-chips");
+        let attached = []; // { name, path, url, image }
+        let uploading = 0; // 올리는 중인 파일 수 — 그동안은 보내지 않는다 (/self-review 5b26cff7df C2)
+        function renderAttached() {
+            attachBox.replaceChildren();
+            attachBox.hidden = attached.length === 0 && uploading === 0;
+            for (const a of attached) {
+                const chip = el("span", "chip attach-chip");
+                if (a.image) { const img = el("img"); img.src = a.url; img.alt = ""; chip.append(img); }
+                chip.append(el("span", "t", a.name)); // 글은 줄임표, ×는 줄지 않게 (C1)
+                const x = el("button", "queue-x", "×");
+                x.type = "button"; x.title = "첨부 빼기 (올린 파일은 방 첨부 폴더에 남음)";
+                x.addEventListener("click", () => { attached = attached.filter(b => b !== a); renderAttached(); });
+                chip.append(x);
+                attachBox.append(chip);
+            }
+            if (uploading > 0) attachBox.append(el("span", "muted", "올리는 중 " + uploading + "개…"));
+        }
+        async function upload(files) {
+            // 막힌 이유는 서버가 준다 — 대화 단계 · 휴지통 (C8)
+            if (!canAttach) { if (files.length) alert(composer.dataset.attachWhy || "이 방은 첨부를 받지 않습니다."); return; }
+            for (const f of files) {
+                if (attached.length + uploading >= attachMax) { alert("첨부는 한 말에 " + attachMax + "개까지입니다."); return; }
+                if (attachBytes && f.size > attachBytes) { alert(f.name + ": 파일 하나는 " + Math.round(attachBytes / 1048576) + "MB까지입니다."); continue; }
+                const data = new FormData();
+                // 캡처 붙여 넣기는 이름이 image.png 같은 것뿐이라 그대로 두면 시각_image.png로 저장된다
+                data.append("file", f, f.name || "capture.png");
+                uploading++; renderAttached();
+                try {
+                    const res = await post("Attach", data, false, true);
+                    if (res?.path && !disposed) attached = [...attached, res];
+                } finally {
+                    uploading--;
+                    if (!disposed) renderAttached();
+                }
+            }
+        }
+        if (saved?.attached?.length) { attached = saved.attached; renderAttached(); } // 방을 바꿨다 돌아온 초안
+        if (canAttach) {
+            const input = $("#attach-input");
+            $("#attach-btn").addEventListener("click", () => input.click());
+            input.addEventListener("change", () => { upload([...input.files]); input.value = ""; });
+        }
+        // 끌어 놓기: 방 칸 어디에 놓아도
+        root.addEventListener("dragover", (e) => { if (e.dataTransfer?.types?.includes("Files")) { e.preventDefault(); root.classList.add("dropping"); } });
+        root.addEventListener("dragleave", (e) => { if (e.target === root || !root.contains(e.relatedTarget)) root.classList.remove("dropping"); });
+        root.addEventListener("drop", (e) => {
+            root.classList.remove("dropping");
+            if (!e.dataTransfer?.files?.length) return;
             e.preventDefault();
+            upload([...e.dataTransfer.files]);
+        });
+        // 캡처 붙여 넣기: 클립보드에 파일(그림)만 있으면 올린다. 글자가 같이 있으면(Excel · Word 복사 등) 보통 붙여 넣기 (C3)
+        textBox.addEventListener("paste", (e) => {
+            const cd = e.clipboardData;
+            const files = [...(cd?.files || [])];
+            if (files.length === 0 || [...(cd?.types || [])].some(t => t === "text/plain" || t === "text/html")) return;
+            e.preventDefault();
+            upload(files);
+        });
+
+        // 보내기 · 끼어들기 (2-2 d) 공통: 인용 블록 + 글 + 첨부 줄. 보내기 전에 입력칸을 바로 비운다 —
+        // 응답을 기다리는 사이 이어 쓴 글이 앞 글에 붙어 같이 나가지 않게 (실제 확인에서 발견). 실패하면 비어 있을 때만 되돌린다.
+        // 인용 · 첨부는 보낸 뒤에만 지운다.
+        async function sendNow(handler) {
             const text = textBox.value;
-            if (!text.trim()) return;
-            // 보내기 전에 바로 비운다: 응답을 기다리는 사이 이어 쓴 글이 앞 글에 붙어 같이 나가지 않게 (실제 확인에서 발견).
-            // 실패하면 비어 있을 때만 되돌린다. 인용은 보낸 뒤에만 지운다.
-            const q = quote;
+            if (!text.trim() && attached.length === 0) return;
+            // 올리는 중에 보내면 그 파일이 다음 말로 넘어간다 — 다 올라간 뒤에 보낸다 (C2)
+            if (uploading > 0) { alert("첨부를 올리는 중입니다 — 다 올라간 뒤 보내세요."); return; }
+            const q = quote, files = [...attached]; // 보낸 것만 나중에 뺀다 (그사이 바뀌어도)
             textBox.value = "";
-            const data = new FormData(); data.append("text", q ? quoteBlock(q) + "\n\n" + text : text);
-            if (await post("Send", data)) {
+            let full = q ? quoteBlock(q) + "\n\n" + text : text;
+            if (files.length) full = (full.trim() ? full.replace(/\s+$/, "") + "\n\n" : "") + files.map(a => "[첨부] " + a.path).join("\n");
+            const data = new FormData(); data.append("text", full);
+            if (await post(handler, data)) {
                 if (quote === q) setQuote(null);
-                // 보내는 사이 방을 바꿨으면 dispose가 이 인용을 초안에 넣었다 — 이미 보냈으니 뺀다 (83b453653b C7)
+                attached = attached.filter(a => !files.includes(a));
+                if (!disposed) renderAttached();
+                // 보내는 사이 방을 바꿨으면 dispose가 이 인용 · 첨부를 초안에 넣었다 — 이미 보냈으니 뺀다 (83b453653b C7)
                 const d = drafts.get(roomId);
-                if (disposed && d?.quote === q) { d.quote = null; if (!d.text) drafts.delete(roomId); }
+                if (disposed && d) {
+                    if (d.quote === q) d.quote = null;
+                    if (d.attached) d.attached = d.attached.filter(a => !files.includes(a));
+                    if (!d.text && !d.quote && !d.attached?.length) drafts.delete(roomId);
+                }
                 return;
             }
             // 그사이 방을 바꿨으면 이 입력칸은 이미 떨어져 나갔다 — 그 방의 초안으로 되돌린다 (C6).
-            if (disposed) { if (!drafts.get(roomId)?.text) drafts.set(roomId, { text, quote: q }); }
+            if (disposed) { if (!drafts.get(roomId)?.text) drafts.set(roomId, { text, quote: q, attached: files }); }
             else if (!textBox.value) textBox.value = text;
+        }
+        form.addEventListener("submit", (e) => { e.preventDefault(); sendNow("Send"); });
+        interruptBtn.addEventListener("click", () => {
+            if (!textBox.value.trim() && attached.length === 0) { textBox.focus(); return; }
+            sendNow("Interrupt");
         });
         textBox.addEventListener("keydown", (e) => {
             // 한글 조합 중 Enter는 글자 확정이다 — 보내지 않는다.
@@ -720,7 +836,7 @@
             reveal,
             dispose() {
                 disposed = true;
-                if (textBox.value || quote) drafts.set(roomId, { text: textBox.value, quote });
+                if (textBox.value || quote || attached.length) drafts.set(roomId, { text: textBox.value, quote, attached });
                 es.close();
                 clearInterval(ticker);
                 clearTimeout(readTimer);

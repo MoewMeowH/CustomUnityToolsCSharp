@@ -83,6 +83,24 @@ PurgeTrash();
 using var purgeTimer = new Timer(_ => PurgeTrash(), null, TimeSpan.FromDays(1), TimeSpan.FromDays(1));
 
 app.UseSameOriginGuard();
+// 첨부 올리기만 본문 상한을 첨부 상한 + 여유로 — 폼 바인딩이 본문을 먼저 다 읽으므로 핸들러 검사 전에 막는다 (지휘자 검토 R1).
+// 다른 요청은 Kestrel 기본(30MB) 그대로.
+app.Use(async (ctx, next) =>
+{
+    if (HttpMethods.IsPost(ctx.Request.Method) && string.Equals(ctx.Request.Query["handler"], "Attach", StringComparison.OrdinalIgnoreCase))
+    {
+        const long limit = Attachments.MaxBytes + 1024 * 1024;
+        if (ctx.Request.ContentLength is > limit)
+        {
+            ctx.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
+            await ctx.Response.WriteAsync($"파일 하나는 {Attachments.MaxBytes / 1024 / 1024}MB까지입니다.");
+            return;
+        }
+        if (ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } body)
+            body.MaxRequestBodySize = limit; // chunked도 이 크기에서 끊긴다
+    }
+    await next();
+});
 // 화면 스크립트 · CSS (wwwroot). 배치는 프로젝트 폴더에서 dotnet run으로 띄워 content root = 프로젝트 폴더다.
 app.UseStaticFiles();
 app.MapRazorPages();

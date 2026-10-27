@@ -146,7 +146,7 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
         var lastAt = new[] { last?.Timestamp, room.LastRunAt, room.CreatedAt }.Max() ?? room.CreatedAt;
         var preview = last is null ? null
             : IsStoppedTurn(last) ? "중지된 턴"
-            : (last.Speaker == ChatSpeaker.User ? "나: " : "") + Preview(last.Text);
+            : last.Speaker == ChatSpeaker.User ? "나: " + Preview(Attachments.WithoutLines(last.Text)) : Preview(last.Text); // 첨부 경로는 빼고 (2-2 d)
         // ReadUpTo null(이 필드 전의 방, 켤 때 옮기므로 남지 않음)은 모두 읽음으로 — 잘못 세면 안 읽음이 쏟아지는 쪽보다 낫다.
         var unread = entries.Count(e => e.Speaker == ChatSpeaker.Conductor && !IsStoppedTurn(e) && e.Line > (room.ReadUpTo ?? int.MaxValue));
         return new RoomSummary(room.Id, TitleOf(room, transcript), preview, lastAt, unread, activity,
@@ -213,7 +213,8 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
     {
         if (room.Title is { } title) return title;
         if (transcript?.Title is { } sessionTitle) return sessionTitle;
-        var text = transcript?.Entries.FirstOrDefault(e => e.Speaker == ChatSpeaker.User)?.Text;
+        var first = transcript?.Entries.FirstOrDefault(e => e.Speaker == ChatSpeaker.User)?.Text;
+        var text = first is null ? null : Attachments.WithoutLines(first); // 첨부만 보낸 첫 말이면 "첨부 n개" (5b26cff7df C7)
         if (string.IsNullOrWhiteSpace(text)) return "새 방";
         var line = text.Trim().Split('\n')[0].Trim();
         return line.Length > 60 ? line[..60] + "…" : line;

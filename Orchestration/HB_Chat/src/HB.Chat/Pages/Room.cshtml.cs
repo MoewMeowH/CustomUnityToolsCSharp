@@ -169,6 +169,7 @@ public sealed class RoomModel(
     public IActionResult OnPostSend(string id, string? text)
     {
         if (!RoomStore.IsRoomId(id)) return NotFound();
+        if (TooManyAttachments(text)) return BadRequest($"첨부는 한 말에 {Attachments.MaxPerMessage}개까지입니다.");
         return hub.Send(id, text ?? "") is { } error ? BadRequest(error) : new JsonResult(new { ok = true });
     }
 
@@ -202,6 +203,72 @@ public sealed class RoomModel(
         return hub.RemoveRule(id, rule) is { } error ? BadRequest(error) : new JsonResult(new { ok = true });
     }
 
+    /// <summary>끼어들기 (계획서 2-2 d): 지금 턴을 멈추고 이 말을 바로 보낸다. 큐의 다른 말은 남는다.</summary>
+    public IActionResult OnPostInterrupt(string id, string? text)
+    {
+        if (!RoomStore.IsRoomId(id)) return NotFound();
+        if (TooManyAttachments(text)) return BadRequest($"첨부는 한 말에 {Attachments.MaxPerMessage}개까지입니다.");
+        return hub.Interrupt(id, text ?? "") is { } error ? BadRequest(error) : new JsonResult(new { ok = true });
+    }
+
+    /// <summary>기다리는 말 하나 취소 (계획서 2-2 d).</summary>
+    public IActionResult OnPostCancelQueued(string id, string? queued)
+    {
+        if (!RoomStore.IsRoomId(id) || string.IsNullOrEmpty(queued)) return NotFound();
+        return hub.CancelQueued(id, queued) is { } error ? BadRequest(error) : new JsonResult(new { ok = true });
+    }
+
+    /// <summary>
+    /// 파일 첨부 (계획서 2-2 d): 하나씩 받아 그 방 첨부 폴더에 저장하고 절대 경로를 돌려준다 — 화면이 보낼 때 [첨부] 줄로 붙인다.
+    /// 대화 단계 방 · 휴지통 방은 받지 않는다. 20MB 넘으면 거절.
+    /// </summary>
+    public async Task<IActionResult> OnPostAttach(string id, IFormFile? file)
+    {
+        if (!RoomStore.IsRoomId(id) || store.Get(id) is not { } room) return NotFound();
+        if (room.Level == PermissionLevel.Chat) return BadRequest("대화 단계 방은 파일을 열 도구가 없어 첨부를 받지 않습니다.");
+        if (room.DeletedAt is not null) return BadRequest("휴지통에 있는 방입니다.");
+        if (Request.ContentLength is > Attachments.MaxBytes + 64 * 1024 || file is { Length: > Attachments.MaxBytes })
+            return StatusCode(StatusCodes.Status413PayloadTooLarge, $"파일 하나는 {Attachments.MaxBytes / 1024 / 1024}MB까지입니다.");
+        if (file is not { Length: > 0 }) return BadRequest("빈 파일입니다.");
+        try
+        {
+            await using var stream = file.OpenReadStream();
+            var path = await Attachments.SaveAsync(Attachments.Folder(options.Value.DataFolder, id), file.FileName, stream, DateTimeOffset.Now,
+                HttpContext.RequestAborted);
+            var name = Path.GetFileName(path);
+            return new JsonResult(new
+            {
+                ok = true, name, path, image = Attachments.IsImage(name),
+                url = $"/Room/{id}?handler=Attachment&name={Uri.EscapeDataString(name)}",
+            });
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return BadRequest($"첨부를 저장하지 못했습니다: {ex.Message}");
+        }
+        catch (OperationCanceledException)
+        {
+            return new EmptyResult(); // 화면이 요청을 끊었다 — 임시 파일은 SaveAsync가 지웠다 (5b26cff7df C4)
+        }
+    }
+
+    /// <summary>
+    /// 첨부 보기: 그 방 폴더 안의 파일만. 그림(png · jpg · gif · webp)은 화면에, 나머지는 내려받기. nosniff.
+    /// </summary>
+    public IActionResult OnGetAttachment(string id, string? name)
+    {
+        if (!RoomStore.IsRoomId(id) || store.Get(id) is null) return NotFound();
+        if (Attachments.Resolve(Attachments.Folder(options.Value.DataFolder, id), name) is not { } path) return NotFound();
+        Response.Headers.XContentTypeOptions = "nosniff";
+        Response.Headers["Cross-Origin-Resource-Policy"] = "same-origin"; // 다른 사이트의 <img>로 있는지 떠보지 못하게 (0c3b7e3514 C4)
+        Response.Headers.CacheControl = "private, max-age=3600";
+        return Attachments.Images.TryGetValue(Path.GetExtension(path), out var type)
+            ? PhysicalFile(path, type)
+            : PhysicalFile(path, "application/octet-stream", Path.GetFileName(path));
+    }
+
+    private static bool TooManyAttachments(string? text) => text is not null && Attachments.Split(text).Paths.Count > Attachments.MaxPerMessage;
+
     private bool Load(string id)
     {
         if (!RoomStore.IsRoomId(id) || store.Get(id) is not { } room) return false;
@@ -225,8 +292,30 @@ public sealed class RoomModel(
     public long EndFaceLeftMs => (long)(hub.EndFaceLeft(Room.Id)?.TotalMilliseconds ?? 0);
     public static long EndFaceMs => (long)RoomHub.EndFaceFor.TotalMilliseconds;
 
-    public HtmlString Render(ChatEntry e) =>
-        new(StickerRenderer.Replace(SafeMarkdown.ToHtml(e.Text, e.Speaker == ChatSpeaker.User ? SafeMarkdown.KeepLineBreaks : SafeMarkdown.Default), stickers));
+    public HtmlString Render(ChatEntry e)
+    {
+        if (e.Speaker != ChatSpeaker.User)
+            return new(StickerRenderer.Replace(SafeMarkdown.ToHtml(e.Text, SafeMarkdown.Default), stickers));
+        // 사용자 말의 [첨부] 줄은 칩으로 (2-2 d): 이 방 첨부 폴더의 파일만 링크 · 그림 미리보기, 그 밖의 경로는 글자 그대로
+        var (body, paths) = Attachments.Split(e.Text);
+        var html = new System.Text.StringBuilder(StickerRenderer.Replace(SafeMarkdown.ToHtml(body, SafeMarkdown.KeepLineBreaks), stickers));
+        if (paths.Count == 0) return new(html.ToString());
+        var folder = Attachments.Folder(options.Value.DataFolder, Room.Id);
+        var enc = System.Text.Encodings.Web.HtmlEncoder.Default;
+        html.Append("<div class=\"attach-list\">");
+        foreach (var path in paths)
+        {
+            if (Attachments.NameInFolder(folder, path) is { } name && Attachments.Resolve(folder, name) is not null)
+            {
+                var url = enc.Encode($"/Room/{Room.Id}?handler=Attachment&name={Uri.EscapeDataString(name)}");
+                html.Append("<a class=\"attach\" target=\"_blank\" rel=\"noopener\" href=\"").Append(url).Append("\" title=\"").Append(enc.Encode(path)).Append("\">");
+                if (Attachments.IsImage(name)) html.Append("<img src=\"").Append(url).Append("\" alt=\"\" loading=\"lazy\" />");
+                html.Append("<span>").Append(enc.Encode(name)).Append("</span></a>");
+            }
+            else html.Append("<span class=\"attach missing\" title=\"이 방 첨부 폴더에 없는 파일\">").Append(enc.Encode(path)).Append("</span>");
+        }
+        return new(html.Append("</div>").ToString());
+    }
 
     /// <summary>중지한 턴의 자리표시 답 — 지휘자 말풍선 대신 안내 한 줄로 (<see cref="RoomList.IsStoppedTurn"/>).</summary>
     public static bool IsStoppedTurn(ChatEntry e) => RoomList.IsStoppedTurn(e);

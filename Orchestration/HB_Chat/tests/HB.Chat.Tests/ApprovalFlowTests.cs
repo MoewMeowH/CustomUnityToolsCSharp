@@ -274,6 +274,23 @@ public sealed class ApprovalFlowTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Interrupt_DeniesPendingCard()
+    {
+        // 끼어들기는 기다리던 승인을 "끼어들기"로 거절하고 지금 실행을 끝낸다 (계획서 2-2 d)
+        var room = CommandRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "approve please");
+        var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        Assert.Null(_hub.Interrupt(room.Id, "hello instead"));
+        var done = await Until(ch, e => e.Kind == "approval-done");
+        Assert.Equal(card.Id, done.Last().Approval!.Id);
+        Assert.Equal("끼어들기", done.Last().Text);
+        var seen = await Until(ch, e => e.Kind == "start");
+        Assert.Equal("hello instead", seen.Last().Prompt);
+        await Until(ch, e => e.Kind == "idle");
+    }
+
+    [Fact]
     public async Task SnapshotShowsPendingCard()
     {
         var room = CommandRoom();

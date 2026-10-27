@@ -21,6 +21,9 @@ public sealed record RunSpec(
 {
     /// <summary>갈래 방의 첫 실행: 이어받을 원래 세션 ID (Resume이 아닐 때만 쓴다, 계획서 2-2 c).</summary>
     public string? ForkFrom { get; init; }
+
+    /// <summary>그 방 첨부 폴더 (절대 경로, 계획서 2-2 d). 대화 단계가 아니면 --add-dir로 더해 Read로 열 수 있게 한다.</summary>
+    public string? AttachDir { get; init; }
 }
 
 /// <summary>
@@ -60,6 +63,17 @@ public static partial class ClaudeArgs
             "-p", "--output-format", "stream-json", "--include-partial-messages", "--verbose",
             "--model", spec.Model,
         };
+        // 첨부 폴더: 작업 폴더 밖이라 없으면 Read가 거절된다 (2-2 0번 실측). 대화 단계는 도구가 없어 넣지 않는다 (사용자 결정 2).
+        // --add-dir는 여러 값을 받으므로 바로 뒤에 다른 플래그가 온다.
+        string? attachDeny = null;
+        if (spec.AttachDir is { } attach && spec.Level != PermissionLevel.Chat)
+        {
+            if (!Path.IsPathFullyQualified(attach)) throw new ArgumentException($"첨부 폴더는 절대 경로여야 한다: {attach}");
+            args.AddRange(["--add-dir", attach]);
+            // 편집 · 명령 방은 그 폴더 편집을 막는다: 추가 폴더의 .claude/skills를 CLI가 불러와, 써 두면 다음 턴부터 실린다
+            // (/self-review 0c3b7e3514 C2 실측). 편집 금지 목록 끝에 붙는다.
+            attachDeny = $"Edit({AbsoluteRulePath(attach)}/**)";
+        }
         if (spec.Resume) args.AddRange(["--resume", spec.SessionId]);
         else if (spec.ForkFrom is { } source)
         {
@@ -88,6 +102,7 @@ public static partial class ClaudeArgs
                 args.AddRange(["--tools", "Read,Grep,Glob,Edit,Write", "--permission-mode", "acceptEdits"]);
                 args.Add("--disallowedTools");
                 args.AddRange(EditDenied.Select(p => $"Edit({p})"));
+                if (attachDeny is not null) args.Add(attachDeny);
                 AddMcp(args, spec);
                 break;
             case PermissionLevel.Command:
@@ -100,6 +115,7 @@ public static partial class ClaudeArgs
                 args.AddRange(["--tools", "Read,Grep,Glob,Edit,Write,Bash,PowerShell"]);
                 args.Add("--disallowedTools");
                 args.AddRange(EditDenied.Select(p => $"Edit({p})"));
+                if (attachDeny is not null) args.Add(attachDeny);
                 AddMcp(args, spec);
                 // --allowedTools 가변 인자(AddMcp의 MCP 규칙 뒤)에 작업 폴더 안 편집과 "항상 허용" 규칙을 이어 붙인다. 규칙 모양은 저장할 때 검사했지만 다시 거른다.
                 args.Add(CommandEditAllow);
@@ -116,6 +132,18 @@ public static partial class ClaudeArgs
         foreach (var a in args)
             if (DangerousArg().IsMatch(a)) throw new InvalidOperationException($"금지된 인자가 만들어졌다: {a}");
         return args;
+    }
+
+    /// <summary>
+    /// 권한 규칙의 절대 경로 모양: <c>C:\Users\x</c> → <c>//c/Users/x</c> (드라이브 소문자 · 콜론 없음).
+    /// 2-2 d 실측(2.1.311): <c>Edit(//c/…/**)</c>는 듣고 <c>Edit(//C:/…/**)</c>는 안 듣는다. 드라이브가 없는 경로는 <c>//</c> + 경로.
+    /// </summary>
+    public static string AbsoluteRulePath(string path)
+    {
+        var full = Path.GetFullPath(path).Replace('\\', '/').TrimEnd('/');
+        return full.Length >= 2 && char.IsAsciiLetter(full[0]) && full[1] == ':'
+            ? "//" + char.ToLowerInvariant(full[0]) + full[2..]
+            : "/" + full;
     }
 
     /// <summary>명령 단계에서 작업 폴더 안 편집을 묻지 않게 하는 규칙 (Edit 규칙은 Write 도구에도 걸린다 — 2026-10-28 실측).</summary>

@@ -159,6 +159,96 @@ public sealed class RoomHubTests : IDisposable
     }
 
     [Fact]
+    public async Task CancelQueued_RemovesOnlyThatMessage()
+    {
+        var room = NewRoom();
+        var ch = _hub.Subscribe(room.Id);
+        Assert.Null(_hub.Send(room.Id, "sleep please"));
+        await Until(ch, e => e.Kind == "delta");
+        Assert.Null(_hub.Send(room.Id, "hello one"));
+        Assert.Null(_hub.Send(room.Id, "hello two"));
+        var items = (await Until(ch, e => e.Kind == "queued" && e.PendingItems!.Count == 2)).Last().PendingItems!;
+
+        Assert.Null(_hub.CancelQueued(room.Id, items[0].Id));
+        var after = (await Until(ch, e => e.Kind == "queued")).Last();
+        Assert.Equal(["hello two"], after.Pending);
+        Assert.Equal(items[1].Id, Assert.Single(after.PendingItems!).Id);
+        Assert.NotNull(_hub.CancelQueued(room.Id, items[0].Id)); // 이미 취소함
+        Assert.NotNull(_hub.CancelQueued(room.Id, "nope"));
+
+        _hub.Stop(room.Id);
+        await Until(ch, e => e.Kind == "idle");
+    }
+
+    [Fact]
+    public async Task Interrupt_StopsCurrent_RunsFirst_KeepsQueue()
+    {
+        var room = NewRoom();
+        var ch = _hub.Subscribe(room.Id);
+        Assert.Null(_hub.Send(room.Id, "sleep please"));
+        await Until(ch, e => e.Kind == "delta");
+        Assert.Null(_hub.Send(room.Id, "hello later"));
+        await Until(ch, e => e.Kind == "queued");
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        Assert.Null(_hub.Interrupt(room.Id, "hello now"));
+        var seen = await Until(ch, e => e.Kind == "idle");
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(20), $"끼어들기가 {sw.Elapsed} 걸렸다");
+
+        // 지금 턴은 중지로 끝나고(끼어든 말이 큐 맨 앞), 그다음 기다리던 말이 돈다
+        Assert.Equal("Stopped", seen.First(e => e.Kind == "end").Face);
+        Assert.Equal(["hello now", "hello later"], seen.Where(e => e.Kind == "start").Select(e => e.Prompt));
+        Assert.Equal(3, seen.Count(e => e.Kind == "end")); // 끊긴 턴 · 끼어든 말 · 기다리던 말
+    }
+
+    [Fact]
+    public async Task Interrupt_WhenIdle_IsPlainSend()
+    {
+        var room = NewRoom();
+        var ch = _hub.Subscribe(room.Id);
+        Assert.Null(_hub.Interrupt(room.Id, "hello idle"));
+        var seen = await Until(ch, e => e.Kind == "idle");
+        Assert.Equal("hello idle", seen.Single(e => e.Kind == "start").Prompt);
+    }
+
+    [Fact]
+    public async Task AttachDir_InSpecWhenFolderExists()
+    {
+        // 첨부는 읽기 단계 이상 (대화 단계는 받지 않음) — 읽기 방은 작업 폴더 .mcp.json이 있어야 돈다
+        File.WriteAllText(Path.Combine(_dir, "ws", ".mcp.json"), """{"mcpServers":{"hb-orchestration":{"command":"dotnet","args":["x.dll"]}}}""");
+        var room = _store.Create("ws", PermissionLevel.Read, "opus", null);
+        var ch = _hub.Subscribe(room.Id);
+        Assert.Null(_hub.Send(room.Id, "hello no attach"));
+        await Until(ch, e => e.Kind == "idle");
+        Assert.Null(_specs[0].AttachDir);
+
+        var folder = Attachments.Folder(Path.Combine(_dir, "data"), room.Id);
+        Directory.CreateDirectory(folder);
+        Assert.Null(_hub.Send(room.Id, "hello attach"));
+        await Until(ch, e => e.Kind == "idle");
+        Assert.Equal(Path.GetFullPath(folder), _specs[1].AttachDir);
+
+        // .claude가 생긴 첨부 폴더는 열지 않고 알린다 (/self-review 0c3b7e3514 C2 — CLI가 추가 폴더의 스킬을 불러옴)
+        Directory.CreateDirectory(Path.Combine(folder, ".claude"));
+        Assert.Null(_hub.Send(room.Id, "hello claude dir"));
+        var seen = await Until(ch, e => e.Kind == "idle");
+        Assert.Null(_specs[2].AttachDir);
+        Assert.Contains(".claude", seen.Single(e => e.Kind == "notice").Text);
+    }
+
+    [Fact]
+    public async Task Interrupt_EndTextSaysInterrupted()
+    {
+        var room = NewRoom();
+        var ch = _hub.Subscribe(room.Id);
+        Assert.Null(_hub.Send(room.Id, "sleep please"));
+        await Until(ch, e => e.Kind == "delta");
+        Assert.Null(_hub.Interrupt(room.Id, "hello now"));
+        var seen = await Until(ch, e => e.Kind == "idle");
+        Assert.Equal("끼어들기로 멈춤", seen.First(e => e.Kind == "end").Text); // "중지됨"이 아니라 (지휘자 검토 R5)
+    }
+
+    [Fact]
     public void Search_SkipsTrash()
     {
         var kept = _store.Create("ws", PermissionLevel.Chat, "opus", "빌드 방 하나");

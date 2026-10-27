@@ -92,6 +92,22 @@ select, input[type=text], textarea { background: var(--panel); border: 1px solid
 .quote-x { padding: 0 8px; }
 #live .approval { max-width: 760px; margin-left: 44px; }
 
+/* 보내기 제어 · 첨부 (2-2 d) */
+.queue, .attach-chips { max-width: 920px; margin: 0 auto 6px; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; font-size: 12px; }
+/* 칩 글은 span에서 줄임표, ×는 줄지 않게 — 긴 한글에서 ×가 잘렸다 (/self-review 5b26cff7df C1) */
+.chip.queued, .chip.attach-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 320px; white-space: nowrap; }
+.chip .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.chip.attach-chip img { width: 22px; height: 22px; object-fit: cover; border-radius: 4px; flex: none; }
+.queue-x { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0 2px; font-size: 13px; line-height: 1; flex: none; }
+.queue-x:hover { color: var(--err); }
+.attach-btn { align-self: flex-end; }
+.room.dropping .scroll { outline: 2px dashed var(--accent); outline-offset: -6px; }
+.attach-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.attach { display: inline-flex; flex-direction: column; gap: 2px; font-size: 12px; padding: 4px 6px; border: 1px solid var(--line);
+          border-radius: 8px; background: var(--panel); color: var(--text); text-decoration: none; max-width: 220px; overflow-wrap: anywhere; }
+.attach img { max-width: 200px; max-height: 140px; object-fit: contain; border-radius: 4px; }
+.attach.missing { color: var(--muted); }
+
 /* 방 관리 (2-2 c): 검색 · 휴지통 · 회사 모드 · 방 메뉴 */
 .search-box { padding: 8px 12px; border-bottom: 1px solid var(--line); }
 .search-box input { width: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
@@ -167,4 +183,8 @@ input.rename { font-size: 15px; font-weight: 600; min-width: 200px; }
     .mobile-only { display: block; }
     .room-head .head-session { display: none; }
     .scroll, .room-head, .composer { padding-left: 10px; padding-right: 10px; }
+    /* 단추가 넷(첨부 · 보내기 · 끼어들기 · 중지)이라 입력칸을 한 줄 위로 (2-2 d 실제 확인) */
+    .composer form { flex-wrap: wrap; justify-content: flex-end; }
+    .composer textarea { flex-basis: 100%; order: -1; }
+    .composer .attach-btn { margin-right: auto; }
 }
