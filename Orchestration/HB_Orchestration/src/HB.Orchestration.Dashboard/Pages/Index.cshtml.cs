@@ -5,7 +5,8 @@ using Microsoft.Extensions.Options;
 
 namespace HB.Orchestration.Dashboard.Pages;
 
-public sealed class IndexModel(IOptions<DashboardOptions> options, PricingService pricing, CallLogCache log, VerdictLogCache verdicts) : PageModel
+public sealed class IndexModel(IOptions<DashboardOptions> options, PricingService pricing, CallLogCache log, VerdictLogCache verdicts,
+    SubagentResultsService subagents) : PageModel
 {
     public DashboardOptions Opt => options.Value;
     public PricingService Pricing => pricing;
@@ -80,6 +81,9 @@ public sealed class IndexModel(IOptions<DashboardOptions> options, PricingServic
     /// <summary>오늘 기록 중 단가가 없어 비용에 넣지 못한 건수.</summary>
     public int TodayUnpriced { get; private set; }
 
+    /// <summary>최근 7일 검토형 서브에이전트 결과 중 서버 기록에 없는 수 (계획서 2026-10-27_서브에이전트-결과-보존).</summary>
+    public int UnrecordedSubagents { get; private set; }
+
     /// <summary>RunId·Step별 시도 수. 2 이상이면 그 단계에 재시도가 있었다 (시도마다 기록이 한 줄씩 남는다).</summary>
     private Dictionary<(string RunId, int Step), int> _attempts = [];
 
@@ -133,6 +137,7 @@ public sealed class IndexModel(IOptions<DashboardOptions> options, PricingServic
             .ToHashSet();
 
         _verdictCounts = verdicts.Latest.GroupBy(v => v.RunId).ToDictionary(g => g.Key, g => g.Count());
+        UnrecordedSubagents = subagents.UnrecordedRecent(all);
 
         _attempts = all
             .Where(c => c.RunId is not null && c.Step is not null)

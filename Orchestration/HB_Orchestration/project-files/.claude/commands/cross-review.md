@@ -18,6 +18,7 @@ argument-hint: [main|high] [파일/커밋 범위, 비우면 현재 미커밋 변
    - `ownReview`: **서브에이전트 결과 원문만** 넣는다. 둘이면 self-reviewer 결과 뒤에 security-reviewer 결과를 그대로 이어 붙인다 (사이에 구분 줄 · 제목을 넣지 않는다 — H4가 '## 읽은 파일' 절의 '- ' 아닌 줄을 막는다).
    - `reason`: 맨 앞에 `[ownReview:self-reviewer]`(둘이면 `[ownReview:self-reviewer+security-reviewer]`)를 붙이고 부른 이유 한 줄.
    - 종합·판정에서 "Claude만 지적"은 두 서브에이전트가 찾고 외부가 놓친 것이다. 어느 서브에이전트의 지적인지 작업 로그에 적는다.
+   - **`run_mode`가 실행되지 않았으면** (응답이 안전 필터에 막힘 · `[`로 시작하는 실패 · 사용자가 외부 없이 종합을 고름) 서브에이전트 결과가 ownReview로 남지 않는다. 종합 뒤 서브에이전트마다 `record_verdicts`를 `selfReview`(`agent`에 그 이름, `review`에 그 결과 원문)로 **따로** 부르고, `selfReview.reason` 맨 앞에 `[외부 미실행]`을 붙인다. 판정은 그 서브에이전트가 낸 지적만 그 실행에 단다 (`steps` [1]). 지휘자 추가는 self-reviewer 실행에 `steps` 없이. 원문이 막혀 못 넣으면 고쳐 쓰지 말고 멈추고 보고한다 — 대시보드 '서브에이전트 결과'에 원문이 "기록 없음"으로 남아 있다 (계획서 `Orchestration/HB_Orchestration/docs/plans/2026-10-27_서브에이전트-결과-보존.md`).
 4. CLAUDE.md의 "결과 종합" 형식으로 최종 리뷰를 출력한다.
    - "Claude만 지적"은 self-reviewer가 찾고 외부가 놓친 것이다. 너만 찾은 것은 **"지휘자 추가"**로 따로 묶는다.
    - `record_verdicts`의 `claudeAlsoFound`는 **self-reviewer 결과에 있었는지**로 정한다. 지휘자 추가 항목은 `steps` 없이 남기고 `reason` 맨 앞에 `[지휘자 추가]`를 붙인다.

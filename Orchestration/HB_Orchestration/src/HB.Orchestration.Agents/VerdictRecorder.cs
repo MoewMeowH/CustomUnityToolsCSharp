@@ -44,8 +44,11 @@ public static class VerdictRecorder
     public const string SelfReviewRole = "SelfReviewer";
     public const string SelfReviewAgent = "self-reviewer";
 
-    /// <summary>selfReview.agent로 받는 검토형 서브에이전트 (계획서 2026-10-23_서브에이전트-종류-추가). 대시보드가 에이전트별 채택률을 낸다.</summary>
-    public static readonly IReadOnlyList<string> SelfReviewAgents = [SelfReviewAgent, "perf-reviewer", "security-reviewer", "direction-reviewer"];
+    /// <summary>
+    /// selfReview.agent로 받는 검토형 서브에이전트 (계획서 2026-10-23_서브에이전트-종류-추가). 대시보드가 에이전트별 채택률을 낸다.
+    /// 대시보드 '서브에이전트 결과'가 보관하는 대상과 같은 목록 (계획서 2026-10-27_서브에이전트-결과-보존).
+    /// </summary>
+    public static IReadOnlyList<string> SelfReviewAgents => SubagentArchive.ReviewerTypes;
     public const string SelfReviewProvider = "claude-subagent";
 
     /// <summary>같은 self-reviewer 원문을 중복으로 보는 기간 (일).</summary>

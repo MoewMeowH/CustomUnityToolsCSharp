@@ -204,6 +204,7 @@ SDK 자동 재시도(기본 3회, 기록에 안 남음)는 끄고 서버가 직�
 | `inflight/<기록 Id>.json` | 호출 중 표시 (위 "끊긴 호출 비용 추정") |
 | `verdicts.jsonl` | `record_verdicts` 판정. 같은 키는 마지막 줄이 이긴다. `HB_ORCH_VERDICTS_PATH`로 따로 둘 수 있다 |
 | `sessions/<pid>.json` | 서버 프로세스별 모드 실행 횟수 |
+| `subagents/<agentId>_<호출 id>.json` | 검토형 서브에이전트(self · perf · security · direction-reviewer)가 지휘자에게 넘긴 결과 원문의 보관본 (7절 "서브에이전트 결과"). 한 번 쓰면 바꾸지 않는다. `_state/scanned.json` = 보관을 마친 검토형 기록 (경로 → 크기:수정 시각, 지워진 기록은 빠진다) |
 | `dumps/` | `Debug.DumpToolResults`가 켜졌을 때만 |
 | `config-backup/<시각>/` | 배치 publish 전 설정 백업 (최근 20개, 8절) |
 
@@ -640,6 +641,17 @@ unity skill install --help
 - 세션 기록 형식은 비공식이다. JSON이 아니거나 모양이 다른 줄은 "알 수 없는 줄 n", 알아볼 줄이 하나도 없는 파일은 "알 수 없는 형식"으로 표시한다. 줄마다 엄격한 UTF-8로 읽고, 잘못된 바이트가 있는 줄은 알 수 없는 줄로 센다.
 - 설정: `Dashboard:ClaudeProjectsDir` (비우면 `CLAUDE_CONFIG_DIR/projects` → `%USERPROFILE%\.claude\projects`), `Dashboard:ClaudeSessionLimit` (목록에 보일 최근 세션 수, 기본 50. 연결은 전체 세션으로 계산).
 - `/Sessions`(살아 있는 MCP 서버)와는 다른 화면이다.
+
+**서브에이전트 결과** (`/Subagents`) — 검토형 서브에이전트가 넘긴 원문과 서버 기록 여부 (계획서 `docs/plans/2026-10-27_서브에이전트-결과-보존.md`)
+- `/cross-review` · `perf_*`에서 서브에이전트 결과는 `run_mode`의 `ownReview`로만 남는다. 외부 호출이 실행되지 않으면(안전 필터 · 실패) 결과가 어디에도 안 남았다 → Claude Code가 남기는 서브에이전트 기록(`~/.claude/projects/<프로젝트>/<세션>/subagents/agent-<id>.jsonl` + `.meta.json`의 `SubagentHandback`)에서 **원문을 그대로 복사**해 데이터 폴더 `subagents/`에 보관한다. Claude Code가 세션 기록을 지워도(`cleanupPeriodDays`) 남는다.
+- 보관은 MCP 서버 시작 때(백그라운드, 실패해도 서버는 뜸)와 이 화면 · 첫 화면을 열 때(30초에 한 번) 한다. 바뀐 세션 기록만 다시 읽는다. 이어 부른 서브에이전트는 넘길 때마다 따로 남는다. 대상은 검토형 4종만 (`SubagentArchive.ReviewerTypes` = `record_verdicts selfReview.agent` 목록).
+- 서버 기록 칸: 원문이 `self_review` 기록 응답이거나 `run_mode` ownReview 안에 그대로 있으면 그 runId(줄바꿈 · 줄 끝 공백만 정리해 비교, 200자 미만 원문은 통째로 같을 때만). 글자는 다르지만 20자 이상인 줄(`## 읽은 파일` 절 제외)의 80% 이상이 한 기록에 있으면 **거의 같음 n%**(지휘자가 형식을 맞추며 고쳐 넣은 경우). 아니면 **기록 없음** + 가장 비슷한 기록 · 일치율(참고).
+  - 후보 기록: `self_review`는 같은 에이전트의 기록만. 어느 쪽이든 결과를 넘긴 시각 −5분 ~ +2일 안에 기록된 것만 (self_review = 기록 시각, run_mode = 실행 시작). 재검토 결과가 1차 기록에 붙거나 다른 작업의 기록에 붙지 않게.
+  - 2026-10-27 실측: 102건 = 같음 62 · 거의 같음 12 · 기록 없음 26 · 진행 중일 수 있음 2 (시험 · 파일럿 포함).
+- 넘긴 지 1시간 안의 기록 없음은 "진행 중일 수 있음"으로 따로 보인다 (지휘자가 run_mode · 판정을 끝내야 기록된다).
+- 첫 화면에 최근 7일 "기록 없는 서브에이전트 결과 n건" 안내가 뜬다 (진행 중일 수 있는 것 제외). 기록은 화면이 하지 않는다 — 확인 뒤 필요하면 그 세션에서 `record_verdicts selfReview`로 남긴다 (`/cross-review` 3단계).
+- 형식이 바뀐 것으로 보이면(meta.json 없음 · agentType 없음 · 끝났는데 결과 없음) 화면 아래 "보관 오류"와 MCP 로그 경고로 보이고, 그 기록은 다음 보관 때 다시 읽는다 (리더를 고치면 되살아남).
+- 이 화면은 결과 **본문**을 보여 준다 (Claude 세션 화면과 다름). 리뷰 대상 코드 조각이 들어 있으니 대시보드는 localhost로만 연다.
 
 **청구 대조** (`/Billing`) — OpenAI 실제 청구와 기록 기준 계산 비교
 - 기간: 7일 · 3일 · 1일(UTC 날짜별 금액·토큰) · 시간별 24시간(토큰과 기록 기준 계산, 오늘 누적 청구는 한 줄로). OpenAI 비용은 UTC 자정 기준 하루 버킷이고, 하루가 끝나기 전에도 몇 분 지연으로 누적값이 갱신된다.

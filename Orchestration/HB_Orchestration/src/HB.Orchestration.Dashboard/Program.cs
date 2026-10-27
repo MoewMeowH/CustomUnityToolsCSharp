@@ -10,6 +10,7 @@ builder.Services.AddSingleton<VerdictLogCache>();
 builder.Services.AddSingleton<RiderProjects>();
 builder.Services.AddSingleton<PricingService>();
 builder.Services.AddSingleton<ClaudeSessionsService>();
+builder.Services.AddSingleton<SubagentResultsService>();
 builder.Services.AddSingleton<BillingStore>();
 builder.Services.AddHttpClient<BillingApi>(c => c.Timeout = TimeSpan.FromSeconds(30))
     .AddTypedClient((http, sp) => new BillingApi(http, () => sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<DashboardOptions>>().Value.ReadAdminKey()));

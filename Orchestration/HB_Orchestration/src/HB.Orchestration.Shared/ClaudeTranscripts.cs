@@ -60,6 +60,12 @@ public static partial class ClaudeTranscriptReader
     /// <summary>세션 기록 파일 이름: &lt;GUID&gt;.jsonl (orphaned 등 다른 이름은 대상이 아니다).</summary>
     public static bool IsSessionFileName(string fileName) => SessionFileRegex().IsMatch(fileName);
 
+    /// <summary>세션 기록 폴더 기본값: CLAUDE_CONFIG_DIR/projects → %USERPROFILE%/.claude/projects (MCP 서버 · 대시보드 공통).</summary>
+    public static string DefaultProjectsRoot() =>
+        Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR") is { Length: > 0 } config
+            ? Path.Combine(config, "projects")
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", "projects");
+
     /// <summary>
     /// 프로젝트 경로 → 폴더 이름. 영숫자가 아닌 문자를 모두 '-'로 바꾼다
     /// (확인: F:\AI\ToolCreate → F--AI-ToolCreate, …\HB_Orchestration → …-HB-Orchestration). 되돌릴 수 없는 변환이다.
@@ -114,7 +120,7 @@ public static partial class ClaudeTranscriptReader
     /// '\n'으로 나눈 줄을 엄격한 UTF-8로 디코딩한다 (끝의 '\r'은 뗀다). 디코딩에 실패한 줄은 null.
     /// 줄 하나를 통째로 메모리에 올리므로 큰 파일도 줄 크기만큼만 쓴다.
     /// </summary>
-    private static IEnumerable<(int LineNo, string? Text)> Utf8Lines(Stream stream)
+    internal static IEnumerable<(int LineNo, string? Text)> Utf8Lines(Stream stream)
     {
         var buffer = new byte[64 * 1024];
         var pending = new MemoryStream();

@@ -1,0 +1,112 @@
+@page
+@model SubagentsModel
+@using HB.Orchestration.Shared
+@{
+    ViewData["Title"] = "HB Orchestration · 서브에이전트 결과";
+    var snap = Model.Snapshot;
+}
+
+<style>
+    .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }
+    .toolbar select { font: inherit; padding: 5px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--text); }
+    .desc { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    tr.selected td { background: var(--code); }
+    .detail { padding: 14px 16px; margin-bottom: 16px; }
+    .detail h3 { margin: 0 0 8px; font-size: 15px; }
+</style>
+
+<form method="get" class="toolbar">
+    <select name="Days" onchange="this.form.submit()">
+        @foreach (var (v, label) in new[] { (1, "최근 24시간"), (7, "최근 7일"), (30, "최근 30일"), (0, "전체") })
+        {
+            <option value="@v" selected="@(Model.Days == v)">@label</option>
+        }
+    </select>
+    <select name="Agent" onchange="this.form.submit()">
+        <option value="">모든 검토형</option>
+        @foreach (var a in SubagentArchive.ReviewerTypes)
+        {
+            <option value="@a" selected="@(Model.Agent == a)">@a</option>
+        }
+    </select>
+    <label class="muted"><input type="checkbox" name="Unrecorded" value="true" checked="@Model.Unrecorded" onchange="this.form.submit()" /> 기록 없음만</label>
+    <span class="muted">지휘자에게 넘긴 결과 원문입니다. <b>기록 없음</b>은 selfReview · ownReview 어디에도 들어가지 않은 결과 — 확인 뒤 필요하면 그 세션에서 <span class="mono">record_verdicts selfReview</span>로 남깁니다.</span>
+</form>
+
+@if (Model.Selected is { } sel)
+{
+    var r = sel.Result;
+    <section class="panel detail">
+        <h3>@r.AgentType · @SubagentsModel.ProjectName(r.ProjectDir) · @(r.ReturnedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "-")
+            <a class="muted" style="font-size:12px;font-weight:normal" href="?Days=@Model.Days&Agent=@Model.Agent&Unrecorded=@Model.Unrecorded">닫기</a></h3>
+        <p class="muted" style="margin:0 0 8px">
+            @r.Description · 세션 <span class="mono">@r.SessionId</span> · agent <span class="mono">@r.AgentId</span> · @r.Message.Length.ToString("N0")자<br />
+            <span class="mono" style="font-size:12px">@r.Cwd</span>
+        </p>
+        <pre>@r.Message</pre>
+    </section>
+}
+
+<section class="panel table-scroll">
+    <table>
+        <thead>
+        <tr><th>넘긴 시각 (로컬)</th><th>프로젝트</th><th>에이전트</th><th>위임 설명</th><th class="num">크기</th><th>서버 기록</th><th></th></tr>
+        </thead>
+        <tbody>
+        @foreach (var v in Model.Views)
+        {
+            var r = v.Result;
+            var l = v.Link;
+            <tr class="@(Model.Selected?.Result.Key == r.Key ? "selected" : "")">
+                <td class="mono">@(r.ReturnedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "-")</td>
+                <td title="@r.ProjectDir">@SubagentsModel.ProjectName(r.ProjectDir)</td>
+                <td>@r.AgentType</td>
+                <td class="desc" title="@r.Description">@r.Description</td>
+                <td class="num muted">@r.Message.Length.ToString("N0")</td>
+                <td>
+                    @switch (l.Kind)
+                    {
+                        case SubagentLinkKind.Exact:
+                            <a class="badge" href="/?Run=@l.RunId&Days=0" title="원문 그대로 기록됨">@l.Via <span class="mono">@l.RunId</span></a>
+                            break;
+                        case SubagentLinkKind.Near:
+                            <a class="badge" href="/?Run=@l.RunId&Days=0" title="글자는 다르지만 줄 @SubagentsModel.Percent(l.Similarity)가 이 기록에 있음 (지휘자가 고쳐 넣음)">@l.Via <span class="mono">@l.RunId</span> · 거의 같음 @SubagentsModel.Percent(l.Similarity)</a>
+                            break;
+                        default:
+                            if (SubagentResultsService.MaybePending(v))
+                            {
+                                <span class="badge" title="넘긴 지 1시간 안 — 지휘자가 아직 run_mode · 판정을 끝내지 않았을 수 있음">기록 없음 · 진행 중일 수 있음</span>
+                            }
+                            else
+                            {
+                                <span class="badge warn">기록 없음</span>
+                            }
+                            if (l.RunId is not null && l.Similarity > 0)
+                            {
+                                <span class="muted" style="font-size:12px"> 가장 비슷한 <a href="/?Run=@l.RunId&Days=0" class="mono">@l.RunId</a> @SubagentsModel.Percent(l.Similarity)</span>
+                            }
+                            break;
+                    }
+                </td>
+                <td><a href="?Days=@Model.Days&Agent=@Model.Agent&Unrecorded=@Model.Unrecorded&Id=@r.Key">원문</a></td>
+            </tr>
+        }
+        </tbody>
+    </table>
+    @if (Model.Views.Count == 0)
+    {
+        <p class="muted" style="padding:20px;text-align:center">이 조건의 결과가 없습니다.</p>
+    }
+</section>
+
+<p class="muted mono" style="font-size:12px">
+    @snap.Folder · 보관 @(snap.Views.Count)건@(snap.Unreadable > 0 ? $" · 읽지 못한 파일 {snap.Unreadable}개" : "")
+    @if (snap.LastSync is { } s)
+    {
+        <text> · 마지막 보관 @(snap.LastSyncAt?.ToString("HH:mm:ss")) (새로 @s.Added · 읽은 기록 @s.Scanned@(s.NoResult > 0 ? $" · 결과 없음 {s.NoResult}" : ""))</text>
+        @if (s.Errors.Count > 0)
+        {
+            <br /><span class="err">보관 오류: @string.Join(" | ", s.Errors)</span>
+        }
+    }
+</p>

@@ -24,15 +24,8 @@ public sealed class ClaudeSessionsService(IOptions<DashboardOptions> options, IL
         int TotalFiles);
 
     /// <summary>설정 → CLAUDE_CONFIG_DIR/projects → %USERPROFILE%/.claude/projects 순.</summary>
-    public string Root
-    {
-        get
-        {
-            if (!string.IsNullOrWhiteSpace(options.Value.ClaudeProjectsDir)) return options.Value.ClaudeProjectsDir!;
-            if (Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR") is { Length: > 0 } config) return Path.Combine(config, "projects");
-            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", "projects");
-        }
-    }
+    public string Root =>
+        string.IsNullOrWhiteSpace(options.Value.ClaudeProjectsDir) ? ClaudeTranscriptReader.DefaultProjectsRoot() : options.Value.ClaudeProjectsDir!;
 
     /// <summary>최근 수정된 세션 기록 N개(Dashboard:ClaudeSessionLimit)를 읽고 호출 기록과 연결한다.</summary>
     public Snapshot Load(IReadOnlyList<CallRecord> calls)

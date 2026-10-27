@@ -25,9 +25,12 @@ public sealed class IndexPagingTests : IDisposable
                 Id = $"id{i:D4}", Timestamp = now.AddSeconds(-i), Tool = "review", Model = "m", Prompt = "p", Success = true,
                 InputTokens = 10, OutputTokens = 1, RunId = $"run{i / 3}", Step = i % 3 + 1,
             }, log);
-        var options = Options.Create(new DashboardOptions { LogPath = log, McpConfigDir = _dir });
+        // 서브에이전트 결과 Sync가 실제 ~/.claude/projects를 읽지 않게 빈 폴더를 준다.
+        var options = Options.Create(new DashboardOptions { LogPath = log, McpConfigDir = _dir, ClaudeProjectsDir = Path.Combine(_dir, "projects") });
         var modes = new ModesConfigService(options, _ => null);
-        var model = new IndexModel(options, new PricingService(options, modes), new CallLogCache(options, Microsoft.Extensions.Logging.Abstractions.NullLogger<CallLogCache>.Instance), new VerdictLogCache(options))
+        var model = new IndexModel(options, new PricingService(options, modes), new CallLogCache(options, Microsoft.Extensions.Logging.Abstractions.NullLogger<CallLogCache>.Instance), new VerdictLogCache(options),
+            new SubagentResultsService(options, new ClaudeSessionsService(options, Microsoft.Extensions.Logging.Abstractions.NullLogger<ClaudeSessionsService>.Instance),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<SubagentResultsService>.Instance))
         {
             P = page, Q = q,
         };

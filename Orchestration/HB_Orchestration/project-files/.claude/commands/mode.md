@@ -15,6 +15,7 @@ argument-hint: <모드 이름> <요청>
    - 대상이 디스크에 없는 설계안뿐이면 지휘자 의견을 ownReview로 쓰고 reason에 태그를 붙이지 않는다. 의견은 `## 지휘자 의견` 제목으로 쓴다 (`## 지적` 제목이 있으면 H4가 서브에이전트 요약으로 보고 막는다).
 3. `run_mode` 실행. `reason`에 부른 이유 한 줄. `[ownReview 필수]` 모드면 2에서 정리한 너의 의견 원문을 `ownReview`에 넣는다.
    - perf-reviewer를 썼으면 `ownReview`에는 **perf-reviewer 결과 원문만**, `reason` 맨 앞에 `[ownReview:perf-reviewer]` (H4 훅이 검사).
+   - `run_mode`가 실행되지 않았으면 (안전 필터 · `[` 실패 · 외부 없이 종합) perf-reviewer 결과는 `/cross-review` 3단계와 같이 `record_verdicts selfReview`(`agent: "perf-reviewer"`, `reason` 맨 앞 `[외부 미실행]`)로 따로 남긴다.
 4. 결과 정리:
    - perf_* (perf-reviewer): CLAUDE.md "결과 종합" 형식. "Claude만 지적"은 perf-reviewer가 찾고 외부가 놓친 것, 너만 찾은 것은 "지휘자 추가". 성능 밖 지적은 범위 밖으로 기각한다. `record_verdicts`의 `claudeAlsoFound`는 perf-reviewer 결과에 있었는지, 지휘자 추가는 `steps` 없이 `reason` 맨 앞 `[지휘자 추가]`. 끝나면 `subagent_in/<날짜>_<주제>/`를 지운다.
    - design_*: 반론과 검증 결과를 반영해 최종 권고와 이유

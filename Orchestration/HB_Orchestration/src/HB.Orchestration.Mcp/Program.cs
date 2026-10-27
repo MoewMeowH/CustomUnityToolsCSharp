@@ -94,5 +94,25 @@ app.Services.GetRequiredService<AgentCatalog>();
 var sessions = app.Services.GetRequiredService<SessionTracker>();
 app.Services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping.Register(sessions.Remove);
 
+// 검토형 서브에이전트 결과를 호출 기록 옆으로 보관한다 (Claude Code가 세션 기록을 지우기 전에). 시작을 막지 않고, 실패해도 서버는 돈다.
+// 계획서 2026-10-27_서브에이전트-결과-보존 — 대시보드도 읽을 때 같은 Sync를 하므로 여기는 대시보드를 안 켜는 날의 보험이다.
+var archiveLog = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("SubagentArchive");
+var archiveStopping = app.Services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping;
+_ = Task.Run(() =>
+{
+    try
+    {
+        var report = HB.Orchestration.Shared.SubagentArchive.Sync(HB.Orchestration.Shared.ClaudeTranscriptReader.DefaultProjectsRoot(),
+            HB.Orchestration.Shared.SubagentArchive.FolderFor(app.Services.GetRequiredService<AgentRunner>().LogPath), archiveStopping);
+        if (report.Errors.Count > 0)
+            archiveLog.LogWarning("서브에이전트 결과 보관: 새로 {Added}건 · 읽은 기록 {Scanned} · 결과 없음 {NoResult} · 오류 {Errors}",
+                report.Added, report.Scanned, report.NoResult, string.Join(" | ", report.Errors));
+        else if (report.Added > 0 || report.NoResult > 0)
+            archiveLog.LogInformation("서브에이전트 결과 보관: 새로 {Added}건 · 읽은 기록 {Scanned} · 결과 없음 {NoResult}", report.Added, report.Scanned, report.NoResult);
+    }
+    catch (OperationCanceledException) { }
+    catch (Exception ex) { archiveLog.LogWarning(ex, "서브에이전트 결과 보관 실패"); }
+});
+
 await app.RunAsync();
 return 0;
