@@ -21,6 +21,10 @@ public sealed class RoomModel(RoomStore store, RoomHub hub, ChatTranscripts tran
     public string? DashboardLink =>
         options.Value.DashboardUrl is { Length: > 0 } url ? $"{url.TrimEnd('/')}/Room/{Room.SessionId}" : null;
 
+    /// <summary>명령 방: 작업 폴더 · 사용자 설정이 이미 미리 허용한 명령 (카드 없이 실행됨).</summary>
+    public IReadOnlyList<(string Source, string Rule)> InheritedRules =>
+        Room.Level == PermissionLevel.Command ? hub.InheritedCommandRules(Room) : [];
+
     public IActionResult OnGet(string id)
     {
         if (!Load(id)) return NotFound();
@@ -47,6 +51,29 @@ public sealed class RoomModel(RoomStore store, RoomHub hub, ChatTranscripts tran
         if (!RoomStore.IsRoomId(id)) return NotFound();
         hub.Stop(id);
         return new JsonResult(new { ok = true });
+    }
+
+    /// <summary>승인 카드 단추: choice = allow · always · deny, reason은 거절 이유 (선택).</summary>
+    public IActionResult OnPostApprove(string id, string? approval, string? choice, string? reason)
+    {
+        if (!RoomStore.IsRoomId(id) || string.IsNullOrEmpty(approval)) return NotFound();
+        ApprovalChoice? parsed = choice switch
+        {
+            "allow" => ApprovalChoice.Allow,
+            "always" => ApprovalChoice.AlwaysAllow,
+            "deny" => ApprovalChoice.Deny,
+            _ => null,
+        };
+        if (parsed is null) return BadRequest("알 수 없는 선택입니다.");
+        if (reason is { Length: > 500 }) reason = reason[..500];
+        return hub.Decide(id, approval, parsed.Value, reason) is { } error ? BadRequest(error) : new JsonResult(new { ok = true });
+    }
+
+    /// <summary>"이 방에서 항상 허용" 규칙 지우기.</summary>
+    public IActionResult OnPostRemoveRule(string id, string? rule)
+    {
+        if (!RoomStore.IsRoomId(id) || string.IsNullOrEmpty(rule)) return NotFound();
+        return hub.RemoveRule(id, rule) is { } error ? BadRequest(error) : new JsonResult(new { ok = true });
     }
 
     private bool Load(string id)

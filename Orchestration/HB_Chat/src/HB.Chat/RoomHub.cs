@@ -5,8 +5,8 @@ namespace HB.Chat;
 
 /// <summary>
 /// 방 화면에 보내는 실시간 알림 (SSE data 한 줄 = JSON 하나).
-/// kind: snapshot · start · delta · tool · denied · retry · end · queued · notice · idle.
-/// Prompt는 지금 처리 중인 사용자 말, Pending은 큐에서 기다리는 말들.
+/// kind: snapshot · start · delta · tool · denied · retry · end · queued · notice · idle · approval · approval-done.
+/// Prompt는 지금 처리 중인 사용자 말, Pending은 큐에서 기다리는 말들. Approval은 승인 카드(approval) · 끝난 카드의 ID(approval-done, Text = 결정).
 /// </summary>
 public sealed record LiveEvent(string Kind)
 {
@@ -17,7 +17,17 @@ public sealed record LiveEvent(string Kind)
     public int? Queued { get; init; }
     public double? CostUsd { get; init; }
     public IReadOnlyList<string>? Pending { get; init; }
+    public ApprovalView? Approval { get; init; }
+
+    /// <summary>rules 알림: 이 방의 "항상 허용" 규칙 전체 (바뀐 뒤 화면 목록을 다시 그린다).</summary>
+    public IReadOnlyList<string>? Rules { get; init; }
 }
+
+/// <summary>
+/// 화면의 승인 카드 하나. Rule이 있으면 "이 방에서 항상 허용" 단추와 저장될 규칙을 보인다.
+/// Truncated면 명령이 너무 길어 잘린 것 — 거절만 보인다 (서버도 허용을 받지 않는다).
+/// </summary>
+public sealed record ApprovalView(string Id, string Tool, string Summary, string? Description, string? Rule, DateTimeOffset ExpiresAt, bool Truncated);
 
 /// <summary>
 /// 방마다 한 번에 한 턴 (계획서 3번). 실행 중에 온 말은 큐에 넣고 끝나면 차례로 보낸다.
@@ -44,6 +54,22 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         public string? Tool;
         public string? Notice;
         public readonly List<Channel<LiveEvent>> Subscribers = [];
+
+        /// <summary>지금 명령 단계 실행의 승인 토큰 (실행마다 새로, 끝나거나 중지하면 비움). 이 값과 맞는 승인 요청만 받는다.</summary>
+        public string? RunToken;
+        public readonly Dictionary<string, PendingApproval> Approvals = [];
+    }
+
+    private sealed class PendingApproval(ApprovalRequest request, DateTimeOffset expiresAt)
+    {
+        public readonly string Id = Guid.NewGuid().ToString("N")[..10];
+        public readonly ApprovalRequest Request = request;
+        public readonly DateTimeOffset ExpiresAt = expiresAt;
+        public readonly TaskCompletionSource<ApprovalAnswer> Answer = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        /// <summary>카드에 남길 결정 (허용 · 항상 허용 · 거절 …). 답을 정한 쪽이 적는다.</summary>
+        public string? Label;
+
+        public ApprovalView View => new(Id, Request.Tool, Request.Summary, Request.Description, Request.Rule, ExpiresAt, Request.Truncated);
     }
 
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Live> _rooms = new();
@@ -53,6 +79,15 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     /// 이 실행기를 바꿀 때 (테스트: 가짜 claude). 기본은 claude 실행 파일 + <see cref="ClaudeArgs"/> 인자.
     /// </summary>
     public Func<Room, RunSpec, string, ProcessSpec>? ProcessFactory { get; init; }
+
+    /// <summary>승인 기록 (없으면 남기지 않음).</summary>
+    public ApprovalLog? Log { get; init; }
+
+    /// <summary>
+    /// 승인 훅이 부를 이 앱의 주소 (예: http://127.0.0.1:5290). 앱이 켜진 뒤 실제 주소로 채운다.
+    /// 비어 있으면 명령 단계 실행을 시작하지 않는다.
+    /// </summary>
+    public string? ApprovalBaseUrl { get; set; }
 
     public bool IsBusy(string roomId) => _rooms.TryGetValue(roomId, out var live) && live.Busy;
 
@@ -80,7 +115,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         return null;
     }
 
-    /// <summary>중지: 큐를 비우고 진행 중 실행을 끝낸다.</summary>
+    /// <summary>중지: 큐를 비우고 진행 중 실행을 끝낸다. 기다리던 승인은 거절로 돌려준다.</summary>
     public void Stop(string roomId)
     {
         if (!_rooms.TryGetValue(roomId, out var live)) return;
@@ -88,8 +123,172 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         {
             live.Generation++;
             live.Pending.Clear();
+            EndApprovals(live, "중지됨");
             live.Cts?.Cancel();
         }
+    }
+
+    /// <summary>
+    /// 승인 요청 (PermissionRequest 훅 → /approve). 토큰이 그 방의 지금 실행과 맞지 않으면 null (엔드포인트가 403).
+    /// 카드를 띄우고 답 · 시간 초과 · 훅 쪽 끊김(aborted) · 중지 중 먼저 오는 것으로 끝낸다. 답은 기록에도 남긴다.
+    /// </summary>
+    public async Task<ApprovalAnswer?> RequestApprovalAsync(string roomId, string token, ApprovalRequest request, CancellationToken aborted)
+    {
+        if (!_rooms.TryGetValue(roomId, out var live)) return null;
+        var timeout = TimeSpan.FromSeconds(Math.Max(1, options.Value.ApprovalTimeoutSeconds));
+        PendingApproval pending;
+        lock (live.Gate)
+        {
+            if (live.RunToken is not { } current || !TokenEquals(current, token)) return null;
+            pending = new PendingApproval(request, DateTimeOffset.Now + timeout);
+            live.Approvals[pending.Id] = pending;
+            Broadcast(live, new LiveEvent("approval") { Approval = pending.View });
+        }
+
+        using var wait = CancellationTokenSource.CreateLinkedTokenSource(aborted);
+        wait.CancelAfter(timeout);
+        try
+        {
+            await pending.Answer.Task.WaitAsync(wait.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // claude 쪽 훅이 먼저 끊겼으면 답을 돌려줘도 버려진다 (0번 실측). 아니면 시간 초과 — 둘 다 거절.
+            var (label, message) = aborted.IsCancellationRequested
+                ? ("끊김", "승인 요청이 claude 쪽에서 먼저 끊겼습니다.")
+                : ("시간 초과", "사용자가 시간 안에 답하지 않아 거절했습니다. 필요하면 다시 요청하세요.");
+            lock (live.Gate)
+            {
+                if (pending.Answer.TrySetResult(new ApprovalAnswer(false, message))) pending.Label = label;
+            }
+        }
+
+        var answer = await pending.Answer.Task;
+        lock (live.Gate)
+        {
+            live.Approvals.Remove(pending.Id);
+            Broadcast(live, new LiveEvent("approval-done") { Approval = pending.View, Text = pending.Label });
+        }
+        Log?.Write(roomId, request, pending.Label ?? (answer.Allow ? "허용" : "거절"));
+        return answer;
+    }
+
+    /// <summary>
+    /// 카드 단추. 오류 문구(null이면 받음). 잘린 명령은 허용을 받지 않는다 (사용자가 다 보지 못함).
+    /// 항상 허용은 답이 정해진 뒤에만 규칙을 저장한다 — 같은 순간 시간 초과로 거절됐는데 규칙만 남는 일이 없게 (지휘자 검토 R3).
+    /// 저장에 실패하면 이번 허용은 그대로 두고 오류를 알린다.
+    /// </summary>
+    public string? Decide(string roomId, string approvalId, ApprovalChoice choice, string? reason)
+    {
+        if (!_rooms.TryGetValue(roomId, out var live)) return "없는 방입니다.";
+        string? rule = null;
+        lock (live.Gate)
+        {
+            if (!live.Approvals.TryGetValue(approvalId, out var pending) || pending.Answer.Task.IsCompleted)
+                return "이미 끝난 승인 요청입니다.";
+            if (choice != ApprovalChoice.Deny && pending.Request.Truncated)
+                return "명령이 너무 길어 다 보이지 않습니다 — 거절만 할 수 있습니다.";
+            if (choice == ApprovalChoice.AlwaysAllow && (rule = pending.Request.Rule) is null)
+                return "이 요청에는 항상 허용할 규칙이 없습니다.";
+            var label = choice switch { ApprovalChoice.Allow => "허용", ApprovalChoice.AlwaysAllow => "항상 허용", _ => "거절" };
+            var message = string.IsNullOrWhiteSpace(reason) ? "사용자가 거절했습니다." : $"사용자가 거절했습니다: {reason.Trim()}";
+            if (!pending.Answer.TrySetResult(new ApprovalAnswer(choice != ApprovalChoice.Deny, choice == ApprovalChoice.Deny ? message : null)))
+                return "이미 끝난 승인 요청입니다.";
+            pending.Label = label;
+        }
+        if (rule is null) return null;
+        try
+        {
+            var room = store.Update(roomId, r => r with { AllowRules = r.AllowRules.Contains(rule) ? r.AllowRules : [.. r.AllowRules, rule] });
+            BroadcastRules(live, room);
+            return null;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            return $"이번은 허용했지만 규칙을 저장하지 못했습니다: {ex.Message}";
+        }
+    }
+
+    /// <summary>"항상 허용" 규칙 지우기. 오류 문구(null이면 지움).</summary>
+    public string? RemoveRule(string roomId, string rule)
+    {
+        try
+        {
+            var room = store.Update(roomId, r => r with { AllowRules = [.. r.AllowRules.Where(x => x != rule)] });
+            if (room is null) return "없는 방입니다.";
+            if (_rooms.TryGetValue(roomId, out var live)) BroadcastRules(live, room);
+            return null;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            return $"규칙을 지우지 못했습니다: {ex.Message}"; // 저장 실패를 500 대신 이유로 (/self-review 36e4e20e04 C8)
+        }
+    }
+
+    /// <summary>규칙 목록이 바뀌면 열린 화면에 새 목록을 보낸다 (새로고침 없이 — /self-review 36e4e20e04 C9).</summary>
+    private static void BroadcastRules(Live live, Room? room)
+    {
+        if (room is null) return;
+        lock (live.Gate) Broadcast(live, new LiveEvent("rules") { Rules = room.AllowRules });
+    }
+
+    /// <summary>엔드포인트가 본문을 읽기 전에 보는 토큰 검사: 그 방의 지금 실행 토큰과 같은지.</summary>
+    public bool IsCurrentToken(string roomId, string token)
+    {
+        if (token.Length == 0 || !_rooms.TryGetValue(roomId, out var live)) return false;
+        lock (live.Gate) return live.RunToken is { } current && TokenEquals(current, token);
+    }
+
+    /// <summary>테스트용: 그 방의 지금 실행 토큰.</summary>
+    internal string? CurrentToken(string roomId)
+    {
+        if (!_rooms.TryGetValue(roomId, out var live)) return null;
+        lock (live.Gate) return live.RunToken;
+    }
+
+    /// <summary>
+    /// 작업 폴더 · 사용자 설정이 이미 미리 허용한 명령 규칙 (Bash · PowerShell). 명령 방에서는 이 규칙과 맞는 명령이 카드 없이 실행되므로
+    /// 방 화면에 보인다 (/self-review ab79e61df5 C3 — 프로젝트 훅이 필요해 설정 출처를 줄이지는 않는다). 읽지 못한 파일은 건너뛴다.
+    /// </summary>
+    public IReadOnlyList<(string Source, string Rule)> InheritedCommandRules(Room room)
+    {
+        var files = new List<(string Source, string Path)>
+        {
+            ("사용자", System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", "settings.json")),
+        };
+        if (options.Value.WorkspacePath(room.Workspace) is { } ws)
+        {
+            files.Add(("작업 폴더", System.IO.Path.Combine(ws, ".claude", "settings.json")));
+            files.Add(("작업 폴더 local", System.IO.Path.Combine(ws, ".claude", "settings.local.json")));
+        }
+        var rules = new List<(string, string)>();
+        foreach (var (source, path) in files)
+        {
+            try
+            {
+                if (!File.Exists(path)) continue;
+                using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(path));
+                if (!doc.RootElement.TryGetProperty("permissions", out var p) || !p.TryGetProperty("allow", out var allow) ||
+                    allow.ValueKind != System.Text.Json.JsonValueKind.Array) continue;
+                foreach (var a in allow.EnumerateArray())
+                    if (a.GetString() is { } rule && (rule.StartsWith("Bash", StringComparison.Ordinal) || rule.StartsWith("PowerShell", StringComparison.Ordinal)))
+                        rules.Add((source, rule));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidOperationException) { }
+        }
+        return rules;
+    }
+
+    private static bool TokenEquals(string a, string b) =>
+        System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+            System.Text.Encoding.UTF8.GetBytes(a), System.Text.Encoding.UTF8.GetBytes(b));
+
+    /// <summary>실행이 끝나거나 중지될 때: 토큰을 비우고 기다리던 승인을 모두 거절로 끝낸다 (잠금 안에서 부른다).</summary>
+    private static void EndApprovals(Live live, string label)
+    {
+        live.RunToken = null;
+        foreach (var p in live.Approvals.Values)
+            if (p.Answer.TrySetResult(new ApprovalAnswer(false, $"{label} — 승인 요청을 거절했습니다."))) p.Label = label;
     }
 
     /// <summary>SSE 구독. 먼저 지금 상태(snapshot)를 넣어 준다. 끝나면 <see cref="Unsubscribe"/>.</summary>
@@ -109,6 +308,8 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             });
             if (live.Busy && live.Tool is { } tool) ch.Writer.TryWrite(new LiveEvent("tool") { Text = tool });
             if (live.Notice is { } notice) ch.Writer.TryWrite(new LiveEvent("notice") { Text = notice });
+            foreach (var p in live.Approvals.Values.Where(p => !p.Answer.Task.IsCompleted))
+                ch.Writer.TryWrite(new LiveEvent("approval") { Approval = p.View });
             live.Subscribers.Add(ch);
         }
         return ch;
@@ -170,6 +371,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             lock (live.Gate)
             {
                 live.Cts = null;
+                EndApprovals(live, "실행 끝남");
                 Broadcast(live, new LiveEvent("end") { Ok = result.Ok, Text = result.Error, CostUsd = result.CostUsd });
             }
             cts.Dispose();
@@ -213,7 +415,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         }
 
         string? mcpConfig = null;
-        if (room.Level is PermissionLevel.Read or PermissionLevel.Edit)
+        if (room.Level is PermissionLevel.Read or PermissionLevel.Edit or PermissionLevel.Command)
         {
             try
             {
@@ -225,7 +427,23 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             }
         }
 
-        var spec = new RunSpec(room.Level, room.Model, room.SessionId, resume, mcpConfig, o.McpServer, RoomRules.For(room.Level));
+        // 명령 단계: 이 실행에만 맞는 토큰을 만들어 승인 훅 주소에 넣는다. 끝나거나 중지하면 LoopAsync · Stop이 비운다.
+        string? hookUrl = null;
+        if (room.Level == PermissionLevel.Command)
+        {
+            if (ApprovalBaseUrl is not { Length: > 0 } baseUrl)
+                return Record(room, new RunResult(false, false, "승인 주소를 아직 모릅니다 — 앱이 다 켜진 뒤 다시 보내세요.", null, null, null, 0, 0, null));
+            var token = Convert.ToHexStringLower(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16));
+            lock (live.Gate)
+            {
+                if (live.Generation != generation) return new RunResult(false, true, "중지됨", null, null, null, 0, 0, null);
+                live.RunToken = token;
+            }
+            hookUrl = $"{baseUrl.TrimEnd('/')}/approve?room={room.Id}&token={token}";
+        }
+
+        var spec = new RunSpec(room.Level, room.Model, room.SessionId, resume, mcpConfig, o.McpServer, RoomRules.For(room.Level),
+            hookUrl, Math.Max(1, o.ApprovalTimeoutSeconds) + 30, room.AllowRules);
         ProcessSpec process;
         try
         {
@@ -320,6 +538,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             {
                 live.Generation++;
                 live.Pending.Clear();
+                EndApprovals(live, "앱 종료");
                 live.Cts?.Cancel();
                 foreach (var ch in live.Subscribers) ch.Writer.TryComplete();
                 live.Subscribers.Clear();
@@ -334,13 +553,16 @@ public static class RoomRules
     public static string For(PermissionLevel level) =>
         "이 대화는 HB_Chat 채팅 앱의 방이다. 사용자는 브라우저 채팅 화면으로 읽고 말한다. " +
         $"이 방의 권한: {Describe(level)}. " +
-        "승인을 물을 곳이 없어서 허용되지 않은 도구 호출은 자동으로 거절된다 — 거절되면 다시 시도하지 말고, 무엇이 필요한지 사용자에게 말한다.";
+        (level == PermissionLevel.Command
+            ? "명령을 실행하면 사용자가 그 자리에서 카드로 허용 · 거절한다. 거절되면 같은 명령을 다시 시도하지 말고, 거절 이유를 보고 다른 방법을 묻는다."
+            : "승인을 물을 곳이 없어서 허용되지 않은 도구 호출은 자동으로 거절된다 — 거절되면 다시 시도하지 말고, 무엇이 필요한지 사용자에게 말한다.");
 
     public static string LevelName(PermissionLevel level) => level switch
     {
         PermissionLevel.Chat => "대화",
         PermissionLevel.Read => "읽기",
         PermissionLevel.Edit => "편집",
+        PermissionLevel.Command => "명령",
         _ => level.ToString(),
     };
 
@@ -357,6 +579,10 @@ public static class RoomRules
         PermissionLevel.Edit =>
             "읽기 단계 + 작업 폴더 파일 편집. 이 앱 · MCP 서버 설정, appsettings, CLAUDE.md 같은 지시 파일, 스크립트(.bat · .cmd · .ps1), " +
             ".claude · .mcp.json은 편집이 막힌다. 명령 실행은 없고 작업 폴더 밖 쓰기는 거절",
+        PermissionLevel.Command =>
+            "읽기 단계 + 작업 폴더 파일 편집(묻지 않음) + 명령 실행(Bash · PowerShell). 명령은 실행 전에 방의 카드로 사용자가 허용 · 거절한다 " +
+            "(답이 없으면 약 10분 뒤 거절, 읽기 전용 명령과 작업 폴더 설정이 미리 허용한 명령은 묻지 않음). 편집 금지 경로는 Edit · Write 도구에만 걸리고, " +
+            "명령으로 쓰는 것은 카드가 막는다. \"이 방에서 항상 허용\" 규칙은 이 방에만 적용되며, 그 명령이 돌리는 파일이 바뀌어도 다시 묻지 않는다",
         _ => level.ToString(),
     };
 }

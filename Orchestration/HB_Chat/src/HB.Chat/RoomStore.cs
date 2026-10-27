@@ -28,6 +28,9 @@ public sealed record Room
     /// 그 실행이 쓴 세션 기록 때문에 크기가 달라도 "앱 밖에서 바뀜"이 아니다 (Job Object 실제 확인에서 발견).
     /// </summary>
     public DateTimeOffset? RunStartedAt { get; init; }
+
+    /// <summary>명령 단계의 "이 방에서 항상 허용" 규칙 (예: <c>Bash(git status)</c>). 다음 실행부터 --allowedTools로 들어간다.</summary>
+    public IReadOnlyList<string> AllowRules { get; init; } = [];
 }
 
 /// <summary>

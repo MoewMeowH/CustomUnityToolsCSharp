@@ -1,6 +1,8 @@
-# 가짜 claude: stdin 프롬프트의 첫 낱말로 동작을 고르고 stream-json 줄을 낸다 (RoomHubTests).
-# 인자: 세션 ID 하나 (그 뒤에 붙는 인자는 무시). 줄 모양은 0번 실측(Claude Code 2.1.311)에서 본 것만 흉내 낸다.
-param([string]$Sid)
+# 가짜 claude: stdin 프롬프트의 첫 낱말로 동작을 고르고 stream-json 줄을 낸다 (RoomHubTests · ApprovalFlowTests).
+# 인자: 세션 ID, 승인 훅 주소(명령 단계만, 없으면 빈 값). 줄 모양은 0번 실측(Claude Code 2.1.311)에서 본 것만 흉내 낸다.
+# approve 모드: 2차 0번 실측 A의 훅 본문 모양으로 승인 훅을 부르고, 허용이면 성공 · 거절이면 오류 결과를 낸다.
+param([string]$Sid, [string]$HookUrl)
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
 $prompt = [Console]::In.ReadToEnd()
 $mode = ($prompt.Trim() -split '\s+')[0]
 
@@ -23,6 +25,25 @@ switch ($mode) {
     }
     'other' {
         Start-Sleep -Seconds 60
+    }
+    'approve' {
+        Emit '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","name":"Bash"}}}'
+        $body = '{"session_id":"' + $Sid + '","hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"git status","description":"Show status"},' +
+            '"permission_suggestions":[{"type":"addRules","rules":[{"toolName":"Bash","ruleContent":"git status"}],"behavior":"allow","destination":"localSettings"}]}'
+        try {
+            $r = Invoke-RestMethod -Method Post -Uri $HookUrl -Body ([Text.Encoding]::UTF8.GetBytes($body)) -ContentType 'application/json; charset=utf-8' -TimeoutSec 120
+            $d = $r.hookSpecificOutput.decision
+        } catch {
+            $d = $null
+        }
+        if ($d -and $d.behavior -eq 'allow') {
+            Emit '{"type":"result","subtype":"success","is_error":false,"result":"allowed","total_cost_usd":0.001,"permission_denials":[]}'
+        } elseif ($d) {
+            $msg = ($d.message -replace '"', "'")
+            Emit ('{"type":"result","subtype":"error_during_execution","is_error":true,"result":"denied: ' + $msg + '","total_cost_usd":0.001,"permission_denials":[{"tool_name":"Bash"}]}')
+        } else {
+            Emit '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"hook error","total_cost_usd":0.001,"permission_denials":[{"tool_name":"Bash"}]}'
+        }
     }
     default {
         Emit '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","name":"Read"}}}'

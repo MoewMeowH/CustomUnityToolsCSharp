@@ -36,7 +36,14 @@ builder.Services.AddSingleton(sp => new StickerCatalog(() => sp.GetRequiredServi
 
 builder.Services.AddSingleton(sp => new RoomStore(Path.Combine(sp.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder, "rooms.json")));
 builder.Services.AddSingleton(sp => new ChatTranscripts(() => sp.GetRequiredService<IOptions<ChatOptions>>().Value.ProjectsRoot));
-builder.Services.AddSingleton<RoomHub>();
+builder.Services.AddSingleton(sp =>
+{
+    var options = sp.GetRequiredService<IOptions<ChatOptions>>();
+    return new RoomHub(sp.GetRequiredService<RoomStore>(), sp.GetRequiredService<ChatTranscripts>(), options)
+    {
+        Log = new ApprovalLog(() => options.Value.DataFolder),
+    };
+});
 
 var app = builder.Build();
 
@@ -47,6 +54,16 @@ if (ProcessJob.AttachCurrentProcess() is { } jobError)
 app.UseSameOriginGuard();
 app.MapRazorPages();
 app.MapStickerImages();
+app.MapApprovals();
+
+// 승인 훅이 부를 주소: 실제로 연 주소에서 고른다 (localhost는 127.0.0.1로 — AllowedHosts에 있고 IPv6 해석을 피한다).
+app.Lifetime.ApplicationStarted.Register(() =>
+{
+    var addresses = app.Services.GetRequiredService<Microsoft.AspNetCore.Hosting.Server.IServer>()
+        .Features.Get<Microsoft.AspNetCore.Hosting.Server.Features.IServerAddressesFeature>()?.Addresses;
+    if (addresses?.FirstOrDefault(a => a.StartsWith("http://", StringComparison.OrdinalIgnoreCase)) is { } address)
+        app.Services.GetRequiredService<RoomHub>().ApprovalBaseUrl = ApprovalEndpoint.LoopbackUrl(address);
+});
 
 // 방 실시간 알림 (SSE). 흘림 글 · 도구 상태 · 거절 · 끝. 끝나면 화면이 세션 기록으로 말풍선을 다시 받는다.
 var sseJson = new JsonSerializerOptions(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };

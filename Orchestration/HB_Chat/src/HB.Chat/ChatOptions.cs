@@ -11,6 +11,8 @@ public enum PermissionLevel
     Read,
     /// <summary>읽기 + 작업 폴더 파일 편집(acceptEdits). 명령 실행은 없음.</summary>
     Edit,
+    /// <summary>편집 + 명령 실행(Bash · PowerShell). 명령은 실행 전에 방의 카드로 승인한다 (2차 계획서 2-1).</summary>
+    Command,
 }
 
 /// <summary>
@@ -43,6 +45,12 @@ public sealed class ChatOptions
 
     /// <summary>스티커 설정을 읽을 대시보드 폴더 (appsettings.json · appsettings.local.json의 Dashboard:Stickers). 비우면 글자 배지.</summary>
     public string? StickerSettingsDir { get; set; }
+
+    /// <summary>
+    /// 승인 카드가 답을 기다리는 시간(초). 넘으면 거절한다. claude 쪽 훅 제한 시간은 이보다 30초 길게 준다 —
+    /// 훅이 먼저 끊기면 claude는 그냥 거절하고 카드만 남는다 (0번 실측: 제한 시간을 넘긴 답은 연결이 끊겨 버려진다).
+    /// </summary>
+    public int ApprovalTimeoutSeconds { get; set; } = 570;
 
     public IReadOnlyList<string> ModelList => Models.Count > 0 ? Models : ["opus", "sonnet", "haiku"];
 

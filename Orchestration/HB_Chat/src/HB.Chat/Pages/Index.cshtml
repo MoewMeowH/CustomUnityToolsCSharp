@@ -29,6 +29,7 @@
                 <option value="Chat">대화</option>
                 <option value="Read" selected>읽기</option>
                 <option value="Edit">편집</option>
+                <option value="Command">명령 (승인)</option>
             </select>
         </label>
         <label>모델
@@ -45,6 +46,7 @@
     <p class="muted" style="margin:8px 0 0;font-size:12.5px">
         읽기: @RoomRules.Describe(PermissionLevel.Read).<br />
         편집: @RoomRules.Describe(PermissionLevel.Edit).<br />
+        명령: @RoomRules.Describe(PermissionLevel.Command).<br />
         방의 세션은 이 앱 전용입니다 — Claude 앱 · CLI에서 이어 쓰지 마세요.
     </p>
 </section>
