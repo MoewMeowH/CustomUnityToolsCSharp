@@ -752,7 +752,7 @@ dotnet <publish 폴더>\HB.Orchestration.Mcp.dll --golden score <사례> --from 
 
 | 파일 | 내용 |
 |---|---|
-| `case.json` | `id`(폴더 이름과 같게), `kind`(`record` 판정 기록 · `seeded` 고친 결함을 되돌린 코드 · `crash` 원인이 알려진 크래시, 아래), `mode`(기본 review_main, 예전 이름은 새 이름으로 읽음), `source`, `description` |
+| `case.json` | `id`(폴더 이름과 같게), `kind`(`record` 판정 기록 · `seeded` 고친 결함을 되돌린 코드 · `crash` 원인이 알려진 크래시 · `replay` 과거 검토형 리뷰 복원, 아래), `mode`(기본 review_main, 예전 이름은 새 이름으로 읽음), `source`, `description` |
 | `input.md` | 에이전트에게 보낼 프롬프트 원문 (그대로 보냄) |
 | `expected.json` | 기대 지적 `[{ id, summary, files, lines: [시작, 끝], locations?, required?, keywords, severity, origin? }]` — `locations`는 `[{ file, from, to }]` 여러 곳(원인·증상 지점, 하나라도 맞으면 위치 일치, 비우면 files × lines), `required`는 그 결함에만 맞는 말(동의어 묶음, 하나라도 맞으면 됨, 있으면 `keywords`는 보조), `severity` critical·major·minor·nit, `origin`은 정답 출처(record · later-commit · self-review · conductor · common · ds · sol · seeded — 모델 비교 집합용) |
 | `traps.json` | (선택) 과거에 기각된 지적, 같은 형식 + `why`(기각 이유) |
@@ -766,6 +766,14 @@ dotnet <publish 폴더>\HB.Orchestration.Mcp.dll --golden score <사례> --from 
 - 중복(`duplicates`): 함정 대조 뒤 남은 지적이 이미 찾은 기대 지적과 강도 3(위치 + 필수 키워드)이고 필수 키워드가 제목에 있으면 짝 없음 대신 중복으로 센다. 엄격한 규칙이라 지금 정답지에서는 거의 0이다 (2026-10-22 검증: 제목 조건 없이 19개 중 14개가 틀린 중복 → 조건 추가 뒤 0, 줄이 먼 실제 중복은 놓침).
 - 결과: 화면 표 + `<골든 폴더>/results/<날짜>_<라벨>.jsonl` (사례별 점수·짝 근거·runId·모델·토큰·입력 해시·정답지 해시 `keySha256`(expected+traps)·`scorerVersion`·provenance). 자동 짝은 틀릴 수 있으니 근거를 보고 확인한다.
 - **정답지 묶음 해시** (동결 표시, `GoldenCaseLoader.SetKeyHash`, 합계 줄에 보임): 사례 폴더 이름 순으로 사례마다 `<사례>/expected.json\n` + 원본 바이트, traps.json이 있으면 `<사례>/traps.json\n` + 원본 바이트를 이어 붙인 SHA-256 앞 16자리. **2026-10-22 동결 `b5cb66d4e82ecfb0`부터 expected+traps 기준** — 그 전 동결(`aab21c2e23ed4e5a` · `61c79cbf9388aba5`)은 expected.json만 이어 붙인 값이라 함정 변경을 잡지 못했다. 동결은 묶음 해시 + `scorerVersion`으로 표시한다.
+
+**replay 사례** (`kind: replay`, `mode: sub_self` · `sub_perf` · `sub_security` · `sub_direction` — 계획서 `docs/plans/2026-10-27_리플레이-골든.md`)
+- 과거 검토형 서브에이전트 리뷰를 당시 코드 · 위임 메시지 그대로 복원해 API 리뷰(claude-cli)로 다시 돌린다. **역할 프롬프트(Sub*) · 정의 색인 · 모델 · effort를 바꾸면 replay 세트를 1회** 돌려 기준점과 비교한다 (1회 약 $6, 사례당 $0.1~1.2).
+- 만들기: `--golden replay-build [runId|all] [--exclude 글자 ...] [--dir 폴더] [--yes]` (외부 호출 없음, `--yes` 없으면 후보와 건너뛸 이유만). 보관된 결과 원문이 selfReview 실행과 같은 것만 잇는다 (cross-review ownReview는 아직 안 함). 세션 기록의 첫 사용자 메시지 = `input.md`(위임 폴더 경로는 상대로), Read 결과 = `files/`(위임 폴더 기준, 나눠 읽은 범위가 전체를 덮으면 이어 붙임), `context.json` = 파일마다 전체 범위. 일부만 읽은 파일 · 위임 폴더 밖 파일 · 이어 부른 결과 · 같은 원문의 판정 있는 실행이 여럿이면 건너뛴다. 이미 있는 사례 폴더는 건드리지 않는다.
+- 정답지: 리뷰어 지적 채택 · 부분 = expected(origin self-review), 기각 = traps(why = 기각 이유), 지휘자 추가 채택 = expected(origin conductor). 위치는 지적 머리의 모든 `파일:줄`(locations), required는 지적 문장의 코드 이름 자동 추출 — **사례를 만든 뒤 한국어 개념어 · 구체 이름으로 보강해야** 찾음이 제대로 잡힌다 (2026-10-27 보강 전 3/8 → 보강 후 5/8, 지휘자가 읽은 값 5/8 + 부분 1).
+- 실행: `run`이 replay 사례를 `ModeRunner.RunAsync(rootDir = 사례 files/, tool = golden)`로 돌리고 응답 `## 지적`을 self-reviewer 형식으로 읽어 채점한다. `--no-guidelines`는 받지 않는다. 입력 해시(`inputSha256`)는 input.md + context.json + files/를 함께 해시한다.
+- 사례는 GoldenSet(로컬, push 훅이 막음)에 남는다 — 회사 코드는 `--exclude MoJak`처럼 뺀다 (프로젝트 폴더 · 위임 폴더 · 위임 메시지에 그 글자가 있으면 제외).
+- 기준점 2026-10-27 (`results/2026-10-27_replay-baseline.jsonl`, sub_self · sub_perf · sub_security · sub_direction = claude-opus-5-5 high): 사례 11개 찾음 47/75 (63%) — 리뷰어 출처 47/70 · 지휘자 출처 0/5, 줄만 맞음 8, 함정 1, $6.07.
 
 **crash 사례** (`kind: crash`, `mode: crash` — 계획서 `2026-10-19_골든-crash사례`)
 - 모드 전체(Sequential, 분류 → 웹검색)를 run_mode와 같은 프롬프트 조립으로 돌린다. `input.md`는 run_mode의 `input`이다 (서버가 `## 요청`으로 감쌈, 첨부 없음). `score` 명령은 안 된다 (검색 기록이 필요).
