@@ -1,0 +1,210 @@
+@page "{id}"
+@model RoomModel
+@{
+    var room = Model.Room;
+    ViewData["Title"] = $"HB Chat · {Model.Title}";
+}
+
+<partial name="_ChatStyles" />
+<style>
+    .room-head { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; padding: 10px 14px; margin-bottom: 12px; }
+    .room-head h2 { margin: 0; font-size: 16px; }
+    #notice { padding: 8px 12px; margin-bottom: 12px; border-color: var(--warn); }
+    #live { max-width: 920px; margin: 10px auto 0; display: flex; flex-direction: column; gap: 10px; }
+    #live .msg.pending .bubble { opacity: .7; }
+    #live .stream { white-space: pre-wrap; }
+    .live-line { text-align: center; font-size: 12.5px; color: var(--muted); }
+    .live-line.denied { color: var(--warn); }
+    .composer { position: sticky; bottom: 0; background: var(--bg); padding: 10px 0 6px; margin-top: 12px; }
+    .composer form { max-width: 920px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end; }
+    .composer textarea { flex: 1; min-height: 44px; max-height: 40vh; resize: vertical; }
+    .composer .hint { max-width: 920px; margin: 4px auto 0; font-size: 12px; color: var(--muted); }
+</style>
+
+<p style="margin:0 0 8px"><a href="/">← 방 목록</a></p>
+
+<section class="panel room-head">
+    <h2 id="room-title">@Model.Title</h2>
+    <span class="muted">@room.Workspace</span>
+    <span class="badge" title="@RoomRules.Describe(room.Level)">@RoomRules.LevelName(room.Level)</span>
+    <span class="mono muted">@room.Model</span>
+    <span class="mono muted" title="이 앱 전용 세션 — Claude 앱 · CLI에서 이어 쓰지 마세요">@room.SessionId</span>
+    <span class="muted" title="claude가 알려 준 세션 누적 비용 (클라이언트 추정)" id="cost">@(room.TotalCostUsd is { } cost ? "≈$" + cost.ToString("0.000") : "")</span>
+    @if (Model.DashboardLink is { } dash)
+    {
+        <a href="@dash" target="_blank" rel="noopener">대시보드에서 보기</a>
+    }
+    <span class="muted" id="conn" style="margin-left:auto"></span>
+</section>
+
+<div class="panel" id="notice" hidden></div>
+@if (room.LastError is { } lastError)
+{
+    <div class="panel" style="padding:8px 12px;margin-bottom:12px;border-color:var(--err)" id="last-error">마지막 실행 실패: @lastError</div>
+}
+
+<partial name="_Messages" model="Model" />
+<div id="live"></div>
+
+<div class="composer">
+    <form id="send-form" autocomplete="off">
+        @Html.AntiForgeryToken()
+        <textarea id="text" name="text" placeholder="지휘자에게 말하기 (Enter 보내기 · Shift+Enter 줄바꿈)" maxlength="@RoomHub.MaxPromptChars"></textarea>
+        <button class="btn primary" type="submit" id="send">보내기</button>
+        <button class="btn" type="button" id="stop" disabled>중지</button>
+    </form>
+    <div class="hint">@RoomRules.Describe(room.Level)</div>
+</div>
+
+<script>
+(() => {
+    const roomId = @Json.Serialize(room.Id);
+    const self = "/Room/" + roomId;
+    const form = document.getElementById("send-form");
+    const textBox = document.getElementById("text");
+    const stopBtn = document.getElementById("stop");
+    const live = document.getElementById("live");
+    const notice = document.getElementById("notice");
+    const conn = document.getElementById("conn");
+    const token = form.querySelector("input[name=__RequestVerificationToken]").value;
+
+    const atBottom = () => window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 120;
+    const toBottom = () => window.scrollTo(0, document.documentElement.scrollHeight);
+    const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+
+    // 진행 중 턴: 보낸 말(흐리게) + 흘림 글(글자 그대로, 끝나면 세션 기록의 말풍선으로 바뀐다) + 도구 · 거절 줄 + 대기 줄.
+    let stream = null, toolLine = null, queueLine = null;
+    function bubble(cls, who, text) {
+        const m = el("div", "msg " + cls), b = el("div", "bubble");
+        m.append(el("div", "avatar", cls.startsWith("user") ? "나" : "C"), b);
+        const w = el("div", "who"); w.append(el("b", null, who)); b.append(w);
+        const body = el("div", "body stream", text); b.append(body);
+        live.append(m);
+        return body;
+    }
+    function showQueue(pending) {
+        if (!pending || pending.length === 0) { queueLine?.remove(); queueLine = null; return; }
+        if (!queueLine) { queueLine = el("div", "live-line"); }
+        queueLine.textContent = "기다리는 말 " + pending.length + "개";
+        live.append(queueLine);
+    }
+    function startTurn(prompt, partial, pending) {
+        const follow = atBottom();
+        live.replaceChildren();
+        toolLine = null; queueLine = null;
+        if (prompt) bubble("user pending", "나", prompt);
+        stream = bubble("conductor", "지휘자", partial || "…");
+        if (!partial) stream.dataset.empty = "1";
+        stopBtn.disabled = false;
+        showQueue(pending);
+        if (follow) toBottom();
+    }
+    async function refreshMessages() {
+        const follow = atBottom();
+        try {
+            const res = await fetch(self + "?handler=Messages", { cache: "no-store" });
+            if (!res.ok) return false;
+            const html = await res.text();
+            const tmp = document.createElement("div");
+            tmp.innerHTML = html; // 서버가 SafeMarkdown · Razor 인코딩으로 만든 같은 출처 HTML
+            const fresh = tmp.querySelector("#chat");
+            if (fresh) {
+                document.getElementById("chat").replaceWith(fresh);
+                if (fresh.dataset.title) { document.getElementById("room-title").textContent = fresh.dataset.title; }
+            }
+            if (follow) toBottom();
+            return true;
+        } catch { return false; }
+    }
+
+    // 알림은 온 차례대로 하나씩 처리한다. EventSource는 onmessage가 끝나기를 기다리지 않아,
+    // end의 말풍선 다시 받기(fetch) 중에 다음 턴의 start가 먼저 그려졌다가 지워지는 일이 있었다 (/self-review 0a3b1d5155 C1).
+    let chain = Promise.resolve();
+    function connect() {
+        const es = new EventSource("/events/" + roomId);
+        es.onopen = () => { conn.textContent = ""; };
+        es.onerror = () => { conn.textContent = "연결 끊김 · 다시 시도 중"; };
+        es.onmessage = (msg) => {
+            const ev = JSON.parse(msg.data);
+            chain = chain.then(() => handle(ev)).catch(() => { });
+        };
+    }
+    async function handle(ev) {
+        switch (ev.kind) {
+            case "snapshot":
+                // 처음 붙거나 다시 붙을 때: 그사이 끝난 턴이 있을 수 있으니 말풍선부터 다시 받는다 (0a3b1d5155 C3).
+                await refreshMessages();
+                if (ev.busy) startTurn(ev.prompt, ev.text, ev.pending);
+                else { live.replaceChildren(); stream = null; toolLine = null; queueLine = null; stopBtn.disabled = true; }
+                break;
+            case "start":
+                document.getElementById("last-error")?.remove();
+                notice.hidden = true;
+                startTurn(ev.prompt, "", ev.pending);
+                break;
+            case "delta": {
+                if (!stream) startTurn(null, "", null);
+                const follow = atBottom();
+                if (stream.dataset.empty) { stream.textContent = ""; delete stream.dataset.empty; }
+                stream.append(ev.text); // 글 조각을 텍스트 노드로 덧붙인다 (+= 는 매번 전체를 다시 만든다 — C11)
+                if (follow) toBottom();
+                break;
+            }
+            case "tool":
+                if (!toolLine) { toolLine = el("div", "live-line"); live.insertBefore(toolLine, queueLine); }
+                toolLine.textContent = "도구: " + ev.text;
+                break;
+            case "denied":
+            case "retry":
+                live.insertBefore(el("div", "live-line " + ev.kind, (ev.kind === "denied" ? "거절됨 — " : "") + ev.text), queueLine);
+                break;
+            case "queued":
+                showQueue(ev.pending);
+                break;
+            case "notice":
+                notice.textContent = ev.text; notice.hidden = false;
+                break;
+            case "end": {
+                // 이 턴의 말은 세션 기록으로 다시 그린다. 다시 받지 못하면 진행 중 말풍선을 남겨 둔다 (지휘자 검토 R7).
+                // 실패 · 중지면 이유를 한 줄 남긴다.
+                const refreshed = await refreshMessages();
+                if (refreshed) live.querySelectorAll(".msg").forEach(m => m.remove());
+                else live.prepend(el("div", "live-line denied", "말풍선을 다시 받지 못했습니다 — 새로고침하면 보입니다."));
+                stream = null; toolLine?.remove(); toolLine = null;
+                if (!ev.ok && ev.text) live.prepend(el("div", "live-line denied", ev.text));
+                if (ev.costUsd != null) { const c = document.getElementById("cost"); if (c) c.textContent = "≈$" + ev.costUsd.toFixed(3); }
+                break;
+            }
+            case "idle":
+                stopBtn.disabled = true;
+                showQueue([]);
+                break;
+        }
+    }
+
+    async function post(handler, data) {
+        data.append("__RequestVerificationToken", token);
+        const res = await fetch(self + "?handler=" + handler, { method: "POST", body: data });
+        if (!res.ok) { alert(await res.text() || ("요청 실패 " + res.status)); return false; }
+        return true;
+    }
+    form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const text = textBox.value;
+        if (!text.trim()) return;
+        // 보내기 전에 바로 비운다: 응답을 기다리는 사이 이어 쓴 글이 앞 글에 붙어 같이 나가지 않게 (실제 확인에서 발견).
+        // 실패하면 비어 있을 때만 되돌린다.
+        textBox.value = "";
+        const data = new FormData(); data.append("text", text);
+        if (!await post("Send", data) && !textBox.value) textBox.value = text;
+    });
+    textBox.addEventListener("keydown", (e) => {
+        // 한글 조합 중 Enter는 글자 확정이다 — 보내지 않는다.
+        if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); form.requestSubmit(); }
+    });
+    stopBtn.addEventListener("click", () => post("Stop", new FormData()));
+
+    toBottom();
+    connect();
+})();
+</script>

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@(ViewData["Title"] ?? "HB Chat")</title>
+    @* 색 변수는 대시보드 _Layout과 같은 값 (말풍선 CSS _ChatStyles가 이 변수를 쓴다). *@
+    <style>
+        :root {
+            --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #6b7385; --line: #e3e6ec;
+            --accent: #3b6ef5; --ok: #1f9d55; --err: #d64545; --warn: #b7791f; --code: #f1f3f6;
+            --mono: ui-monospace, "JetBrains Mono", Consolas, monospace;
+        }
+        @@media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #16181d; --panel: #1e2128; --text: #e4e7ee; --muted: #8b93a5; --line: #2d313b;
+                --accent: #6b93ff; --ok: #4ccb84; --err: #ff6b6b; --warn: #e3b341; --code: #262a33;
+            }
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; background: var(--bg); color: var(--text);
+               font: 14px/1.55 system-ui, -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; }
+        header { border-bottom: 1px solid var(--line); background: var(--panel); }
+        header .wrap { display: flex; align-items: center; gap: 16px; height: 48px; }
+        header a.brand { font-weight: 650; color: var(--text); text-decoration: none; }
+        .wrap { max-width: 1000px; margin: 0 auto; padding: 0 16px; }
+        main.wrap { padding-top: 16px; padding-bottom: 24px; }
+        a { color: var(--accent); }
+        .muted { color: var(--muted); }
+        .mono { font-family: var(--mono); font-size: 12.5px; }
+        .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+        .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px;
+                 border: 1px solid var(--line); background: var(--code); }
+        .badge.warn { color: var(--warn); border-color: var(--warn); }
+        .badge.err { color: var(--err); border-color: var(--err); }
+        .ok { color: var(--ok); } .err { color: var(--err); }
+        pre { background: var(--code); padding: 12px 14px; border-radius: 8px; overflow-x: auto;
+              font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; word-break: break-word; margin: 0; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+        th { font-weight: 600; color: var(--muted); font-size: 12.5px; }
+        tr:last-child td { border-bottom: 0; }
+        .table-scroll { overflow-x: auto; }
+        button, select, input, textarea { font: inherit; color: var(--text); }
+        .btn { font-size: 13px; padding: 5px 12px; border-radius: 6px; border: 1px solid var(--line);
+               background: var(--panel); cursor: pointer; }
+        .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+        .btn:disabled { opacity: .5; cursor: default; }
+        select, input[type=text], textarea { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+    </style>
+    @await RenderSectionAsync("Head", required: false)
+</head>
+<body>
+<header><div class="wrap"><a class="brand" href="/">HB Chat</a><span class="muted">지휘자와 대화</span></div></header>
+<main class="wrap">
+    @RenderBody()
+</main>
+</body>
+</html>

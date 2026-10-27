@@ -1,0 +1,41 @@
+@model RoomModel
+@*
+    말풍선 목록 (세션 기록의 사용자 · 지휘자 글). 첫 화면과 ?handler=Messages가 같이 쓴다.
+*@
+<div class="chat" id="chat" data-count="@(Model.Transcript?.Entries.Count ?? 0)" data-title="@Model.Title">
+    @if (Model.Transcript?.FormatError is { } formatError)
+    {
+        <div class="panel" style="padding:10px 14px;border-color:var(--warn)">세션 기록을 읽지 못했습니다: @formatError</div>
+    }
+    @foreach (var e in Model.Transcript?.Entries ?? [])
+    {
+        if (e.ToolsBefore > 0)
+        {
+            <div class="tools">도구 @(e.ToolsBefore)개</div>
+        }
+        if (RoomModel.IsStoppedTurn(e))
+        {
+            <div class="system"><span class="body">중지된 턴</span> <span class="when">@e.Timestamp?.ToLocalTime().ToString("HH:mm")</span></div>
+            continue;
+        }
+        if (e.Speaker == ChatSpeaker.System)
+        {
+            <div class="system"><span class="body">@Model.Render(e)</span> <span class="when">@e.Timestamp?.ToLocalTime().ToString("HH:mm")</span></div>
+            continue;
+        }
+        <div class="msg @RoomModel.RoleClass(e.Speaker)">
+            <div class="avatar">@(e.Speaker == ChatSpeaker.User ? "나" : "C")</div>
+            <div class="bubble">
+                <div class="who">
+                    <b>@(e.Speaker == ChatSpeaker.User ? "나" : "지휘자")</b>
+                    <span class="when">@e.Timestamp?.ToLocalTime().ToString("MM-dd HH:mm:ss")</span>
+                </div>
+                <div class="body">@Model.Render(e)</div>
+            </div>
+        </div>
+    }
+    @if ((Model.Transcript?.Entries.Count ?? 0) == 0 && Model.Transcript?.FormatError is null)
+    {
+        <p class="muted" style="text-align:center">아직 대화가 없습니다. 아래에 첫 말을 쓰세요.</p>
+    }
+</div>
