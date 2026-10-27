@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -132,12 +133,14 @@ public static partial class ClaudeTranscriptReader
     /// <summary>
     /// '\n'으로 나눈 줄을 엄격한 UTF-8로 디코딩한다 (끝의 '\r'은 뗀다). 디코딩에 실패한 줄은 null.
     /// 줄 하나를 통째로 메모리에 올리므로 큰 파일도 줄 크기만큼만 쓴다.
+    /// consumed를 주면 '\n'으로 끝난 줄만 내고(쓰는 중인 마지막 줄은 다음 읽기로), 낸 줄까지의 바이트 수를 거기에 적는다 — 이어 읽기용.
     /// </summary>
-    internal static IEnumerable<(int LineNo, string? Text)> Utf8Lines(Stream stream)
+    internal static IEnumerable<(int LineNo, string? Text)> Utf8Lines(Stream stream, StrongBox<long>? consumed = null)
     {
         var buffer = new byte[64 * 1024];
         var pending = new MemoryStream();
         var lineNo = 0;
+        long offset = 0;
         int read;
         while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
         {
@@ -151,12 +154,14 @@ public static partial class ClaudeTranscriptReader
                     break;
                 }
                 pending.Write(buffer, start, nl - start);
+                if (consumed is not null) consumed.Value = offset + nl + 1;
                 yield return (++lineNo, Decode(pending));
                 pending.SetLength(0);
                 start = nl + 1;
             }
+            offset += read;
         }
-        if (pending.Length > 0) yield return (++lineNo, Decode(pending));
+        if (pending.Length > 0 && consumed is null) yield return (++lineNo, Decode(pending));
 
         static string? Decode(MemoryStream line)
         {

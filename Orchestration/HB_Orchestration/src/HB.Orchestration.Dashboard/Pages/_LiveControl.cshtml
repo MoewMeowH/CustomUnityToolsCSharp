@@ -1,0 +1,19 @@
+@model LiveView
+@*
+    실시간 갱신 표시 · 끄기 단추 (채팅방 · 방 목록, 계획서 2026-10-27_채팅방-실시간-갱신). 동작은 _LiveScript가 이 요소의 data-*를 읽는다.
+    Seconds가 0이면(설정으로 끔) 아무것도 그리지 않는다.
+*@
+<style>
+    .live-btn { font: inherit; font-size: 12.5px; padding: 3px 10px; border-radius: 6px; border: 1px solid var(--line);
+                background: var(--panel); color: var(--text); cursor: pointer; }
+    .live-state { font-size: 12.5px; color: var(--muted); }
+    .live-state.off { color: var(--warn); }
+</style>
+@if (Model.Seconds > 0)
+{
+    <span id="live" data-stamp="@Model.Stamp" data-stamp-url="@Model.StampUrl" data-content-url="@Model.ContentUrl"
+          data-target="@Model.TargetId" data-seconds="@Model.Seconds" data-follow="@(Model.Follow ? "1" : "0")">
+        <span class="live-state" id="live-state">실시간 · @(Model.Seconds)초</span>
+        <button type="button" class="live-btn" id="live-toggle">끄기</button>
+    </span>
+}

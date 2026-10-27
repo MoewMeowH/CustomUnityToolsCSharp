@@ -1,0 +1,112 @@
+@*
+    실시간 갱신 (계획서 2026-10-27_채팅방-실시간-갱신). #live의 data-*를 읽어 Seconds마다 Stamp만 묻고, 바뀌면 내용 부분만 다시 받아 target 요소를 바꾼다.
+    - 탭이 안 보이면 묻지 않는다. 실패하면 간격을 늘리고 "연결 끊김".
+    - data-follow="1"(채팅방): 맨 아래에 있었으면 따라 내려가고, 아니면 "새 말 N개" 단추. 펼친 긴 응답(details)은 data-key로 다시 펼친다.
+    - 끄기는 이 브라우저에만 기억한다 (localStorage, 쓸 수 없으면 이번 화면만).
+    받은 HTML은 이 대시보드가 같은 Razor · SafeMarkdown 경로로 만든 것이고, 같은 출처에만 요청한다.
+*@
+<script>
+(() => {
+    const live = document.getElementById("live");
+    if (!live) return;
+    const seconds = Number(live.dataset.seconds) || 0;
+    if (seconds <= 0) return;
+    const stampUrl = live.dataset.stampUrl, contentUrl = live.dataset.contentUrl, targetId = live.dataset.target;
+    const follow = live.dataset.follow === "1";
+    const state = document.getElementById("live-state");
+    const toggle = document.getElementById("live-toggle");
+    const pill = document.getElementById("live-new");
+    const pillCount = document.getElementById("live-new-count");
+    const storeKey = "hb-live-off";
+    let stamp = live.dataset.stamp;
+    let failures = 0, pending = 0, timer = 0, busy = false;
+    let on = true;
+    try { on = localStorage.getItem(storeKey) !== "1"; } catch { }
+
+    const atBottom = () => window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 80;
+    const show = (text, warn) => { state.textContent = text; state.classList.toggle("off", !!warn); };
+    const schedule = () => {
+        clearTimeout(timer);
+        if (on) timer = setTimeout(tick, seconds * 1000 * Math.min(8, 2 ** failures));
+    };
+
+    async function refresh() {
+        const current = document.getElementById(targetId);
+        const keys = el => [...el.querySelectorAll("[data-key]")].map(e => e.dataset.key);
+        const known = new Set(keys(current));
+        const open = new Set([...current.querySelectorAll("details[open]")].map(d => d.closest("[data-key]")?.dataset.key).filter(Boolean));
+        const wasBottom = atBottom();
+
+        const res = await fetch(contentUrl, { cache: "no-store" });
+        if (!res.ok) throw new Error(String(res.status));
+        const html = await res.text();
+        if (!on) return false; // 받는 동안 꺼졌으면 화면을 바꾸지 않는다
+        const tpl = document.createElement("template");
+        tpl.innerHTML = html;
+        const next = tpl.content.getElementById(targetId);
+        if (!next) throw new Error("no target");
+        for (const el of next.querySelectorAll("[data-key]"))
+            if (open.has(el.dataset.key)) el.querySelector("details")?.setAttribute("open", "");
+        const added = keys(next).filter(k => !known.has(k)).length;
+        current.replaceWith(next);
+
+        for (const [attr, id] of [["messages", "count-messages"], ["runs", "count-runs"], ["title", "room-title"]]) {
+            const el = document.getElementById(id);
+            if (el && next.dataset[attr] !== undefined) el.textContent = next.dataset[attr];
+        }
+        if (next.dataset.title !== undefined) document.title = "채팅방 · " + next.dataset.title;
+        if (!follow) return true;
+        if (wasBottom) window.scrollTo(0, document.documentElement.scrollHeight);
+        else if (added > 0 && pill) {
+            pending += added;
+            pillCount.textContent = String(pending);
+            pill.hidden = false;
+        }
+        return true;
+    }
+
+    async function tick() {
+        if (!on) return;
+        if (document.hidden || busy) return schedule();
+        busy = true;
+        try {
+            const res = await fetch(stampUrl, { cache: "no-store" });
+            if (!res.ok) throw new Error(String(res.status));
+            const next = await res.text();
+            // 받는 동안 꺼졌으면 화면 · 표시를 건드리지 않는다 (/self-review bcba4ebfcb C3). 다시 켜면 처음부터 묻는다.
+            if (next !== stamp && on && await refresh()) stamp = next;
+            if (!on) return;
+            failures = 0;
+            show(`실시간 · ${seconds}초`, false);
+        } catch {
+            if (!on) return;
+            failures++;
+            show("연결 끊김 · 다시 시도 중", true);
+        } finally {
+            busy = false;
+        }
+        schedule();
+    }
+
+    function setOn(value) {
+        on = value;
+        try { value ? localStorage.removeItem(storeKey) : localStorage.setItem(storeKey, "1"); } catch { }
+        toggle.textContent = on ? "끄기" : "켜기";
+        if (on) { failures = 0; show(`실시간 · ${seconds}초`, false); tick(); }
+        else { clearTimeout(timer); show("실시간 꺼짐", true); }
+    }
+
+    toggle.addEventListener("click", () => setOn(!on));
+    pill?.addEventListener("click", () => {
+        pending = 0;
+        pill.hidden = true;
+        window.scrollTo(0, document.documentElement.scrollHeight);
+    });
+    window.addEventListener("scroll", () => {
+        if (pill && !pill.hidden && atBottom()) { pending = 0; pill.hidden = true; }
+    }, { passive: true });
+    document.addEventListener("visibilitychange", () => { if (!document.hidden && on) tick(); });
+
+    setOn(on);
+})();
+</script>

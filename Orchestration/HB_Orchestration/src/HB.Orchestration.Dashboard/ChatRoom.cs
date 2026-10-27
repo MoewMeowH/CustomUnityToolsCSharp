@@ -28,6 +28,8 @@ public enum RoomRole
 /// </summary>
 public sealed record RoomMessage
 {
+    /// <summary>방 안에서 말풍선을 가리키는 안정된 키 (실시간 갱신이 펼침 상태 · 새 말을 가린다). 같은 입력이면 같다.</summary>
+    public required string Key { get; init; }
     public required DateTimeOffset? At { get; init; }
     public required RoomRole Role { get; init; }
     public required string Name { get; init; }
@@ -77,10 +79,15 @@ public static class ChatRoomBuilder
         var runSet = runIds.ToHashSet(StringComparer.Ordinal);
         var messages = new List<RoomMessage>();
 
+        // 한 줄(assistant 메시지 하나)에 text 블록이 여럿일 수 있어 줄 번호 + 줄 안 순번.
+        var (prevLine, inLine) = (-1, 0);
         foreach (var e in transcript.Entries)
         {
+            inLine = e.Line == prevLine ? inLine + 1 : 0;
+            prevLine = e.Line;
             messages.Add(new RoomMessage
             {
+                Key = $"s{e.Line}.{inLine}",
                 At = e.Timestamp,
                 Role = e.Speaker switch { ChatSpeaker.User => RoomRole.User, ChatSpeaker.Conductor => RoomRole.Conductor, _ => RoomRole.System },
                 Name = e.Speaker switch { ChatSpeaker.User => "나", ChatSpeaker.Conductor => "지휘자", _ => "안내" },
@@ -108,6 +115,7 @@ public static class ChatRoomBuilder
             {
                 messages.Add(new RoomMessage
                 {
+                    Key = $"r{run.Key}",
                     At = first.Timestamp,
                     Role = RoomRole.System,
                     Name = "실행",
@@ -132,6 +140,7 @@ public static class ChatRoomBuilder
             var linkedRun = v.Link.RunId is { } r && runSet.Contains(r) ? r : null;
             messages.Add(new RoomMessage
             {
+                Key = $"a{v.Result.Key}",
                 At = v.Result.ReturnedAt,
                 Role = RoomRole.Subagent,
                 Name = v.Result.AgentType,
@@ -149,7 +158,8 @@ public static class ChatRoomBuilder
         foreach (var batch in verdicts.Where(v => runSet.Contains(v.RunId))
                      .GroupBy(v => (v.RunId, At: new DateTimeOffset(v.Timestamp.UtcTicks - v.Timestamp.UtcTicks % TimeSpan.TicksPerSecond, TimeSpan.Zero))))
         {
-            messages.Add(FromVerdicts(batch.Key.RunId, batch.ToList(), firstCallOfRun.GetValueOrDefault(batch.Key.RunId), auto));
+            messages.Add(FromVerdicts(batch.Key.RunId, batch.ToList(), firstCallOfRun.GetValueOrDefault(batch.Key.RunId), auto)
+                with { Key = $"v{batch.Key.RunId}.{batch.Key.At.UtcTicks}" });
         }
 
         // 시각이 없는 말(형식 변경)은 맨 앞으로 몰리지 않게 바로 앞 말의 시각을 이어 쓴다 (안정 정렬).
@@ -205,6 +215,7 @@ public static class ChatRoomBuilder
 
         return new RoomMessage
         {
+            Key = $"c{c.Id}",
             At = c.Timestamp.AddMilliseconds(Math.Max(0, c.ElapsedMs)),
             Role = role,
             Name = c.Agent ?? c.Model,
@@ -239,6 +250,7 @@ public static class ChatRoomBuilder
 
         return new RoomMessage
         {
+            Key = "", // 부르는 쪽이 묶음 키로 채운다
             At = batch.Max(v => v.Timestamp),
             Role = RoomRole.Verdict,
             Name = "지휘자 판정",
@@ -307,6 +319,78 @@ public sealed class ChatRoomService(
             with { EstimatedRunIds = EstimatedRunIds(session, snap.Links) };
     }
 
+    /// <summary>
+    /// 방 하나의 바뀜 표시 (실시간 갱신, 계획서 2026-10-27_채팅방-실시간-갱신): 세션 파일 + 호출 · 판정 기록 + 서브에이전트 보관 폴더의
+    /// (크기 · 수정 시각)만. 파일을 읽지 않는다. 세션이 없으면 null.
+    /// </summary>
+    public string? RoomStamp(string sessionId)
+    {
+        if (SessionPath(sessionId) is not { } path) return null;
+        return FileStamp(path) + "|" + LogsStamp();
+    }
+
+    /// <summary>방 목록의 바뀜 표시: 모든 세션 파일 + 기록들의 (크기 · 수정 시각).</summary>
+    public string ListStamp()
+    {
+        var sb = new StringBuilder();
+        foreach (var file in SessionFiles().OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+            sb.Append(FileStamp(file)).Append(';');
+        return sb.Append('|').Append(LogsStamp()).ToString();
+    }
+
+    private readonly ConcurrentDictionary<string, string> _paths = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>세션 ID → 파일 경로. 찾은 경로는 기억해 두고, 파일이 없어졌으면 다시 찾는다.</summary>
+    private string? SessionPath(string sessionId)
+    {
+        if (!Guid.TryParse(sessionId, out _)) return null;
+        if (_paths.TryGetValue(sessionId, out var known) && File.Exists(known)) return known;
+        var found = SessionFiles().FirstOrDefault(f => string.Equals(Path.GetFileNameWithoutExtension(f), sessionId, StringComparison.OrdinalIgnoreCase));
+        if (found is not null) _paths[sessionId] = found;
+        return found;
+    }
+
+    private IEnumerable<string> SessionFiles()
+    {
+        var root = sessions.Root;
+        try
+        {
+            return Directory.Exists(root)
+                ? Directory.EnumerateDirectories(root)
+                    .SelectMany(d => Directory.EnumerateFiles(d, "*.jsonl", SearchOption.TopDirectoryOnly))
+                    .Where(f => ClaudeTranscriptReader.IsSessionFileName(Path.GetFileName(f)))
+                    .ToList()
+                : [];
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
+    }
+
+    private string LogsStamp()
+    {
+        var log = options.Value.ResolvedLogPath;
+        return FileStamp(log) + ";" + FileStamp(VerdictLog.PathFor(log)) + ";" + DirStamp(subagents.Folder);
+    }
+
+    private static string FileStamp(string path)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            return info.Exists ? $"{info.Length}:{info.LastWriteTimeUtc.Ticks}" : "-";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return "?"; }
+    }
+
+    /// <summary>폴더 수정 시각 (파일을 더하거나 빼면 바뀐다).</summary>
+    private static string DirStamp(string path)
+    {
+        try { return Directory.Exists(path) ? Directory.GetLastWriteTimeUtc(path).Ticks.ToString() : "-"; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return "?"; }
+    }
+
     /// <summary>실행이 이어진 세션 ID. 어느 세션에도 없으면 null.</summary>
     public string? SessionOfRun(string runId) => RunRooms().GetValueOrDefault(runId)?.SessionId;
 
@@ -365,43 +449,59 @@ public sealed class ChatRoomService(
 }
 
 /// <summary>
-/// 세션 본문 캐시. (경로 · 크기 · 수정 시각)이 같으면 다시 읽지 않고, 상한을 넘으면 가장 오래 안 쓴 것부터 뺀다.
+/// 세션 본문 캐시. (경로 · 크기 · 수정 시각)이 같으면 다시 읽지 않고, 파일이 커졌으면 붙은 줄만 이어 읽는다
+/// (진행 중인 세션, 계획서 2026-10-27_채팅방-실시간-갱신). 상한을 넘으면 가장 오래 안 쓴 것부터 뺀다.
 /// 상한은 넣을 때마다 limit()으로 묻는다 (대시보드는 IOptions라 켤 때 값 그대로). 읽기에 실패한 본문(FormatError)은 넣지 않는다 —
 /// 잠금 같은 일시적 실패가 파일이 바뀔 때까지 빈 방으로 남지 않게 (/self-review 20b90a0a65 C4).
+/// 같은 파일은 항목 잠금으로 한 번에 하나만 읽는다 (이어 읽기 위치를 함께 고쳐 쓰므로).
 /// </summary>
-public sealed class ChatTranscriptCache(Func<int> limit, Func<string, ChatTranscript>? read = null)
+public sealed class ChatTranscriptCache(Func<int> limit, ChatTranscriptCache.Reader? read = null)
 {
-    private sealed class Entry(long length, DateTime writeUtc, ChatTranscript chat)
+    /// <summary>from이 있으면 이어 읽고, 없으면 처음부터. Resume이 null이면 다음엔 처음부터 읽는다.</summary>
+    public delegate (ChatTranscript Chat, ChatResume? Resume) Reader(string path, ChatResume? from);
+
+    private sealed class Entry
     {
-        public readonly long Length = length;
-        public readonly DateTime WriteUtc = writeUtc;
-        public readonly ChatTranscript Chat = chat;
+        public long Length;
+        public DateTime WriteUtc;
+        public ChatTranscript? Chat;
+        public ChatResume? Resume;
         public long LastUsed;
     }
 
     private readonly ConcurrentDictionary<string, Entry> _entries = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Func<string, ChatTranscript> _read = read ?? (path => ClaudeChatReader.Read(path));
+    private readonly Reader _read = read ?? ((path, from) => ClaudeChatReader.ReadMore(path, from));
     private long _clock;
 
-    public int Count => _entries.Count;
+    public int Count => _entries.Count(kv => kv.Value.Chat is not null);
 
-    public bool Contains(string path) => _entries.ContainsKey(path);
+    public bool Contains(string path) => _entries.TryGetValue(path, out var e) && e.Chat is not null;
 
     public ChatTranscript Get(TranscriptSummary session)
     {
         var path = session.FilePath;
-        if (_entries.TryGetValue(path, out var hit) && hit.Length == session.FileBytes && hit.WriteUtc == session.LastWriteUtc)
+        var entry = _entries.GetOrAdd(path, _ => new Entry());
+        ChatTranscript chat;
+        lock (entry)
         {
-            hit.LastUsed = Interlocked.Increment(ref _clock);
-            return hit.Chat;
+            entry.LastUsed = Interlocked.Increment(ref _clock);
+            if (entry.Chat is not null && entry.Length == session.FileBytes && entry.WriteUtc == session.LastWriteUtc) return entry.Chat;
+
+            // 이어 읽을지: 작아진 파일은 ReadMore가 실제 크기로 잡는다 (요청 시점 크기는 동시 요청 사이에 낡을 수 있어 쓰지 않는다,
+            // /self-review bcba4ebfcb C4). 크기는 같은데 수정 시각만 다르면 제자리에서 다시 쓰인 것으로 보고 처음부터 (같은 리뷰 C2).
+            var rewritten = entry.Chat is not null && entry.Length == session.FileBytes && entry.WriteUtc != session.LastWriteUtc;
+            (chat, var resume) = _read(path, rewritten ? null : entry.Resume);
+            if (chat.FormatError is not null)
+            {
+                entry.Chat = null;
+                entry.Resume = null;
+                _entries.TryRemove(new KeyValuePair<string, Entry>(path, entry));
+                return chat;
+            }
+            // 늦게 도착한 요청의 낡은 크기 · 시각으로 되돌리지 않는다 (C4).
+            if (entry.Chat is null || session.LastWriteUtc >= entry.WriteUtc) (entry.Length, entry.WriteUtc) = (session.FileBytes, session.LastWriteUtc);
+            (entry.Chat, entry.Resume) = (chat, resume);
         }
-        var chat = _read(path);
-        if (chat.FormatError is not null)
-        {
-            _entries.TryRemove(path, out _);
-            return chat;
-        }
-        _entries[path] = new Entry(session.FileBytes, session.LastWriteUtc, chat) { LastUsed = Interlocked.Increment(ref _clock) };
         Trim();
         return chat;
     }

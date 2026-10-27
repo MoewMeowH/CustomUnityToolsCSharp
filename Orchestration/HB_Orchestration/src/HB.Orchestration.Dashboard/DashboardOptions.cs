@@ -53,6 +53,9 @@ public sealed class DashboardOptions
     /// <summary>'Claude 세션' 화면에서 읽을 최근 세션 기록 수 (수정 시각 순). 기본 50.</summary>
     public int ClaudeSessionLimit { get; set; } = 50;
 
+    /// <summary>채팅방 · 방 목록 실시간 갱신 간격(초). 0이면 끔. 기본 3 (계획서 2026-10-27_채팅방-실시간-갱신).</summary>
+    public int RoomPollSeconds { get; set; } = 3;
+
     /// <summary>'청구 대조' 화면 설정 (Admin 키 환경 변수 이름).</summary>
     public BillingOptions Billing { get; set; } = new();
 

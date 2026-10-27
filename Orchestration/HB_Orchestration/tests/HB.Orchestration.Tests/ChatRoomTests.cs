@@ -401,7 +401,7 @@ public sealed class ChatRoomTests : IDisposable
     public void ChatCache_RereadsOnChange_AndDropsLeastRecentlyUsed()
     {
         var reads = new List<string>();
-        var cache = new ChatTranscriptCache(() => 2, path => { reads.Add(path); return new ChatTranscript { FilePath = path }; });
+        var cache = new ChatTranscriptCache(() => 2, (path, _) => { reads.Add(path); return (new ChatTranscript { FilePath = path }, null); });
         var a = Summary("a");
         var b = Summary("b");
         var c = Summary("c");
@@ -422,14 +422,31 @@ public sealed class ChatRoomTests : IDisposable
     }
 
     [Fact]
+    public void ChatCache_ResumesOnGrowth_RereadsWhenOnlyTimeChanged_IgnoresStaleSnapshots()
+    {
+        var froms = new List<ChatResume?>();
+        var token = new ChatResume();
+        var cache = new ChatTranscriptCache(() => 10, (path, from) => { froms.Add(from); return (new ChatTranscript { FilePath = path }, token); });
+        var t0 = new DateTime(2026, 10, 27, 7, 0, 0, DateTimeKind.Utc);
+        var a = Summary("a") with { FileBytes = 100, LastWriteUtc = t0 };
+
+        cache.Get(a);                                                        // 처음: from 없음
+        cache.Get(a with { FileBytes = 150, LastWriteUtc = t0.AddSeconds(1) }); // 커짐: 이어 읽기
+        cache.Get(a);                                                        // 늦게 온 낡은 요청: 이어 읽기 (처음부터 아님)
+        cache.Get(a with { FileBytes = 150, LastWriteUtc = t0.AddSeconds(5) }); // 크기 같고 시각만 다름: 처음부터
+
+        Assert.Equal([null, token, token, null], froms);
+    }
+
+    [Fact]
     public void ChatCache_DoesNotKeepFailedReads()
     {
         var fail = true;
         var reads = 0;
-        var cache = new ChatTranscriptCache(() => 10, path =>
+        var cache = new ChatTranscriptCache(() => 10, (path, _) =>
         {
             reads++;
-            return new ChatTranscript { FilePath = path, FormatError = fail ? "IOException: 잠김" : null };
+            return (new ChatTranscript { FilePath = path, FormatError = fail ? "IOException: 잠김" : null }, null);
         });
         var a = Summary("a");
 
@@ -439,6 +456,119 @@ public sealed class ChatRoomTests : IDisposable
         Assert.Null(cache.Get(a).FormatError); // 파일이 그대로여도 다시 읽는다
         Assert.True(cache.Contains(a.FilePath));
         Assert.Equal(2, reads);
+    }
+
+    // ── 실시간 갱신: 이어 읽기 · 말풍선 키 · 바뀜 표시 (계획서 2026-10-27_채팅방-실시간-갱신) ──
+
+    private static readonly UTF8Encoding Utf8NoBom = new(false);
+
+    [Fact]
+    public void ReadMore_AppendedLines_EqualFullRead_AndWaitsForPartialLine()
+    {
+        var path = Path.Combine(_dir, Session + ".jsonl");
+        File.WriteAllText(path, User(1, "첫 말") + "\n" + Assistant(2, Use("t1", "Bash", new { command = "ls" })) + "\n", Utf8NoBom);
+
+        var (chat1, resume) = ClaudeChatReader.ReadMore(path, null);
+        Assert.Single(chat1.Entries);
+        Assert.NotNull(resume);
+
+        var partial = User(5, "<pasted_content id=\"x\">\n로그\n</pasted_content id=\"x\">");
+        File.AppendAllText(path,
+            Assistant(3, Text("둘째"), Text("셋째")) + "\n" + Line(new { type = "custom-title", sessionId = Session, customTitle = "제목" }) + "\n" + partial[..10],
+            Utf8NoBom);
+        var (chat2, resume2) = ClaudeChatReader.ReadMore(path, resume);
+
+        Assert.Equal(3, chat2.Entries.Count);           // 쓰는 중인 마지막 줄은 아직 읽지 않는다
+        Assert.Equal(1, chat2.Entries[1].ToolsBefore);   // 앞 읽기에서 센 도구 수(t1)를 이어 받는다
+        Assert.Single(chat1.Entries);                    // 앞서 돌려준 결과는 그대로
+        Assert.Equal("제목", chat2.Title);
+
+        File.AppendAllText(path, partial[10..] + "\n", Utf8NoBom);
+        var (chat3, _) = ClaudeChatReader.ReadMore(path, resume2);
+        var full = ClaudeChatReader.Read(path);
+
+        Assert.Equal(full.Entries, chat3.Entries);
+        Assert.Equal(full.Title, chat3.Title);
+        Assert.Equal(full.UnknownLines, chat3.UnknownLines);
+        Assert.Contains("```text\n로그\n```", chat3.Entries[^1].Text);
+    }
+
+    [Fact]
+    public void ReadMore_ShrunkFile_ReadsFromStart()
+    {
+        var path = Path.Combine(_dir, Session + ".jsonl");
+        File.WriteAllText(path, User(1, "하나") + "\n" + User(2, "둘") + "\n", Utf8NoBom);
+        var (_, resume) = ClaudeChatReader.ReadMore(path, null);
+
+        File.WriteAllText(path, User(1, "새로") + "\n", Utf8NoBom);
+        var (chat, _) = ClaudeChatReader.ReadMore(path, resume);
+
+        Assert.Equal(ClaudeChatReader.Read(path).Entries, chat.Entries);
+        Assert.Equal("새로", Assert.Single(chat.Entries).Text);
+    }
+
+    [Fact]
+    public void Build_MessageKeys_StableUniqueAndKeptWhenMessagesAdded()
+    {
+        var entries = new List<ChatEntry>
+        {
+            new(1, At(1), ChatSpeaker.User, "리뷰해 줘", 0),
+            new(2, At(2), ChatSpeaker.Conductor, "블록 1", 0),
+            new(2, At(2), ChatSpeaker.Conductor, "블록 2", 0), // 한 줄에 text 블록 둘
+        };
+        var calls = new[] { Call("c1", "r1", 1, 5) };
+        var verdicts = new[] { Verdict("r1", "1-F1", Verdicts.Adopted, 20) };
+
+        var first = ChatRoomBuilder.Build(Transcript([.. entries]), ["r1"], calls, [], verdicts, _ => null);
+        var again = ChatRoomBuilder.Build(Transcript([.. entries]), ["r1"], calls, [], verdicts, _ => null);
+        entries.Add(new ChatEntry(9, At(30), ChatSpeaker.Conductor, "새 말", 0));
+        var grown = ChatRoomBuilder.Build(Transcript([.. entries]), ["r1"], calls, [], verdicts, _ => null);
+
+        var keys = first.Messages.Select(m => m.Key).ToList();
+        Assert.Equal(keys, again.Messages.Select(m => m.Key));
+        Assert.Equal(keys.Count, keys.Distinct().Count());
+        Assert.DoesNotContain("", keys);
+        Assert.Contains("s2.0", keys);
+        Assert.Contains("s2.1", keys);
+        Assert.Equal(keys.Count + 1, grown.Messages.Count);
+        Assert.Subset(grown.Messages.Select(m => m.Key).ToHashSet(), keys.ToHashSet());
+    }
+
+    [Fact]
+    public void Service_StampsChangeWithFiles_AndRoomReadsAppendedLines()
+    {
+        var root = Path.Combine(_dir, "projects");
+        var folder = Path.Combine(root, "F--proj");
+        Directory.CreateDirectory(folder);
+        var session = Path.Combine(folder, Session + ".jsonl");
+        File.WriteAllText(session, User(1, "처음") + "\n", Utf8NoBom);
+        var log = Path.Combine(_dir, "data", "calls.jsonl");
+        Directory.CreateDirectory(Path.GetDirectoryName(log)!);
+        var options = Microsoft.Extensions.Options.Options.Create(new DashboardOptions { LogPath = log, ClaudeProjectsDir = root });
+        var sessions = new ClaudeSessionsService(options, Microsoft.Extensions.Logging.Abstractions.NullLogger<ClaudeSessionsService>.Instance);
+        var service = new ChatRoomService(
+            new CallLogCache(options, Microsoft.Extensions.Logging.Abstractions.NullLogger<CallLogCache>.Instance),
+            new VerdictLogCache(options),
+            sessions,
+            new SubagentResultsService(options, sessions, Microsoft.Extensions.Logging.Abstractions.NullLogger<SubagentResultsService>.Instance),
+            Catalog(),
+            options);
+
+        var room1 = service.RoomStamp(Session);
+        var list1 = service.ListStamp();
+        Assert.NotNull(room1);
+        Assert.Null(service.RoomStamp("../" + Session));
+        Assert.Null(service.RoomStamp("00000000-0000-0000-0000-000000000000"));
+        Assert.Single(service.Room(Session)!.Messages);
+
+        File.AppendAllText(session, Assistant(2, Text("답")) + "\n", Utf8NoBom);
+        var room2 = service.RoomStamp(Session);
+        Assert.NotEqual(room1, room2);
+        Assert.NotEqual(list1, service.ListStamp());
+        Assert.Equal(2, service.Room(Session)!.Messages.Count);
+
+        File.WriteAllText(log, "\n", Utf8NoBom); // 호출 기록이 생기거나 바뀌어도
+        Assert.NotEqual(room2, service.RoomStamp(Session));
     }
 
     private static string RoleName(RoomRole role) => role.ToString().ToLowerInvariant();

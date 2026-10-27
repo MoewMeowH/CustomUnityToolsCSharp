@@ -40,6 +40,14 @@ public sealed record ChatTranscript
     public string FileSessionId => Path.GetFileNameWithoutExtension(FilePath);
 }
 
+/// <summary>이어 읽기 위치: 읽은 바이트 수 · 줄 수와 읽던 상태. 밖에서는 Offset만 본다.</summary>
+public sealed class ChatResume
+{
+    public long Offset { get; internal set; }
+    internal int LineNo;
+    internal readonly ClaudeChatReader.State State = new();
+}
+
 /// <summary>
 /// 세션 기록에서 채팅방에 쓸 대화 본문만 읽는다. 읽기 전용이고 예외를 던지지 않는다 (형식은 <see cref="ClaudeTranscriptReader"/>와 같은 관찰에 기댄다).
 /// </summary>
@@ -52,35 +60,72 @@ public static partial class ClaudeChatReader
         {
             using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             foreach (var (lineNo, line) in ClaudeTranscriptReader.Utf8Lines(fs))
-            {
-                ct.ThrowIfCancellationRequested();
-                if (line is null) { s.Unknown++; continue; }
-                if (string.IsNullOrWhiteSpace(line)) continue;
-                ReadLine(line, lineNo, s);
-            }
+                Feed(lineNo, line, s, ct);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
             return new ChatTranscript { FilePath = path, FormatError = $"{ex.GetType().Name}: {ex.Message}" };
         }
-
-        return new ChatTranscript
-        {
-            FilePath = path,
-            SessionId = s.SessionId,
-            Cwd = s.Cwd,
-            Title = s.CustomTitle ?? s.AiTitle,
-            Entries = s.Entries,
-            UnknownLines = s.Unknown,
-        };
+        return s.ToTranscript(path);
     }
 
-    private sealed class State
+    /// <summary>
+    /// 이어 읽기 (계획서 2026-10-27_채팅방-실시간-갱신): from이 있으면 그 바이트 위치부터 붙은 줄만 읽어 앞 결과에 더한다.
+    /// '\n'으로 끝난 줄만 읽고 쓰는 중인 마지막 줄은 다음 읽기로 넘긴다. 파일이 from보다 작아졌으면(다시 쓰임) 처음부터.
+    /// from은 이 호출이 고쳐 쓴다 — 같은 from을 두 곳에서 동시에 넘기지 않는다 (호출자가 잠근다).
+    /// 읽다 실패하면(FormatError · 취소 예외) from에는 일부 줄이 이미 더해졌을 수 있다 — 그 from은 버리고 다음엔 처음부터 읽는다.
+    /// </summary>
+    public static (ChatTranscript Chat, ChatResume? Resume) ReadMore(string path, ChatResume? from, CancellationToken ct = default)
+    {
+        var resume = from ?? new ChatResume();
+        try
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            if (fs.Length < resume.Offset) resume = new ChatResume();
+            fs.Seek(resume.Offset, SeekOrigin.Begin);
+            var consumed = new System.Runtime.CompilerServices.StrongBox<long>();
+            var lastLine = 0;
+            foreach (var (lineNo, line) in ClaudeTranscriptReader.Utf8Lines(fs, consumed))
+            {
+                lastLine = lineNo;
+                Feed(resume.LineNo + lineNo, line, resume.State, ct);
+            }
+            resume.Offset += consumed.Value;
+            resume.LineNo += lastLine;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            return (new ChatTranscript { FilePath = path, FormatError = $"{ex.GetType().Name}: {ex.Message}" }, null);
+        }
+        return (resume.State.ToTranscript(path), resume);
+    }
+
+    private static void Feed(int lineNo, string? line, State s, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (line is null) { s.Unknown++; return; }
+        if (string.IsNullOrWhiteSpace(line)) return;
+        ReadLine(line, lineNo, s);
+    }
+
+    internal sealed class State
     {
         public string? SessionId, Cwd, CustomTitle, AiTitle;
         public int Unknown, PendingTools;
         public readonly List<ChatEntry> Entries = [];
+
+        /// <summary>목록은 복사한다 — 이어 읽기가 같은 State에 계속 더하므로, 앞서 돌려준 결과가 바뀌지 않게.</summary>
+        public ChatTranscript ToTranscript(string path) => new()
+        {
+            FilePath = path,
+            SessionId = SessionId,
+            Cwd = Cwd,
+            Title = CustomTitle ?? AiTitle,
+            Entries = Entries.ToList(),
+            UnknownLines = Unknown,
+        };
 
         public void Add(int line, DateTimeOffset? ts, ChatSpeaker speaker, string text)
         {

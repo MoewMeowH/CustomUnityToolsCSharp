@@ -3,7 +3,6 @@
 @{
     var room = Model.Room;
     ViewData["Title"] = $"채팅방 · {room.Title}";
-    var seenRuns = new HashSet<string>(StringComparer.Ordinal);
 }
 
 <style>
@@ -39,70 +38,23 @@
     .subagent .avatar { background: #b04a8a; }
     .verdict .avatar { background: #8a6d1f; }
     details.long > summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
+    .new-msgs { position: fixed; right: 16px; bottom: 16px; z-index: 5; }
 </style>
 
 <p><a href="/Rooms">← 채팅방</a></p>
 
 <section class="panel room-head">
-    <h2>@room.Title</h2>
+    <h2 id="room-title">@room.Title</h2>
     <span class="muted mono">@room.SessionId</span>
     <span class="muted" title="@room.Transcript.Cwd">@SubagentsModel.ProjectName(room.Transcript.Cwd)</span>
-    <span class="muted">말 @room.Messages.Count · 실행 @room.RunIds.Count</span>
+    <span class="muted">말 <span id="count-messages">@room.Messages.Count</span> · 실행 <span id="count-runs">@room.RunIds.Count</span></span>
     <a href="/ClaudeSession?id=@room.SessionId">세션 상세</a>
-    <a href="/Room/@room.SessionId" style="margin-left:auto">새로고침</a>
+    <span style="margin-left:auto"></span>
+    <partial name="_LiveControl" model="Model.Live" />
+    <a href="/Room/@room.SessionId">새로고침</a>
 </section>
 
-@if (room.Transcript.FormatError is not null)
-{
-    <div class="panel" style="padding:10px 14px;margin-bottom:12px;border-color:var(--warn)">세션 기록을 읽지 못했습니다: @room.Transcript.FormatError</div>
-}
+<partial name="_RoomMessages" model="Model" />
 
-<div class="chat">
-    @foreach (var m in room.Messages)
-    {
-        if (m.RunId is { } runId && seenRuns.Add(runId))
-        {
-            <div class="run-head" id="run-@runId">실행 <span class="mono">@runId</span>@if (room.EstimatedRunIds.Contains(runId)) { <span class="badge warn" title="세션 기록과 시각 · 입력으로 추정한 연결 (확정 아님)">추정</span> }</div>
-        }
-        if (m.ToolsBefore > 0)
-        {
-            <div class="tools">도구 @(m.ToolsBefore)개</div>
-        }
-        if (m.Role == RoomRole.System)
-        {
-            <div class="system">
-                <span class="body">@Model.Render(m)</span>
-                @if (m.Link is { } sysLink) { <a href="@sysLink">@m.LinkLabel</a> }
-                <span class="when">@m.At?.ToLocalTime().ToString("HH:mm")</span>
-            </div>
-            continue;
-        }
-        <div class="msg @RoomModel.RoleClass(m.Role) @(m.IsError ? "error" : null)">
-            <div class="avatar" title="@m.Name">@RoomModel.Initial(m)</div>
-            <div class="bubble">
-                <div class="who">
-                    <b>@m.Name</b>
-                    @if (m.Detail is { } detail) { <span class="detail">@detail</span> }
-                    <span class="when">@m.At?.ToLocalTime().ToString("MM-dd HH:mm:ss")</span>
-                    @if (m.Link is { } link) { <a href="@link">@m.LinkLabel</a> }
-                </div>
-                @if (RoomModel.Folds(m))
-                {
-                    <details class="long">
-                        <summary>펼치기 · @m.Markdown.Length.ToString("N0")자</summary>
-                        <div class="body">@Model.Render(m)</div>
-                    </details>
-                }
-                else
-                {
-                    <div class="body">@Model.Render(m)</div>
-                }
-                @if (m.Sticker is { } sticker) { @Model.Sticker(sticker) }
-            </div>
-        </div>
-    }
-    @if (room.Messages.Count == 0)
-    {
-        <p class="muted">이 세션에는 보여 줄 대화가 없습니다.</p>
-    }
-</div>
+<button type="button" class="live-btn new-msgs" id="live-new" hidden>새 말 <span id="live-new-count">0</span>개 ↓</button>
+<partial name="_LiveScript" />

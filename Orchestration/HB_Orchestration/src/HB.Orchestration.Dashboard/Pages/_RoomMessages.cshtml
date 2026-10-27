@@ -1,0 +1,63 @@
+@model RoomModel
+@*
+    채팅방 말풍선 목록. 첫 화면(Room.cshtml)과 실시간 갱신(?handler=Messages)이 같이 쓴다 (계획서 2026-10-27_채팅방-실시간-갱신).
+    말풍선마다 data-key: 갱신 뒤 펼친 긴 응답을 다시 펼치고 새 말을 센다.
+*@
+@{
+    var room = Model.Room;
+    var seenRuns = new HashSet<string>(StringComparer.Ordinal);
+}
+<div class="chat" id="chat" data-messages="@room.Messages.Count" data-runs="@room.RunIds.Count" data-title="@room.Title">
+    @if (room.Transcript.FormatError is not null)
+    {
+        @* 첫 화면에서만 보인다 — 실시간 갱신은 읽기에 실패하면 503을 받아 앞 화면을 그대로 둔다 (/self-review bcba4ebfcb C1). *@
+        <div class="panel" style="padding:10px 14px;border-color:var(--warn)">세션 기록을 읽지 못했습니다: @room.Transcript.FormatError</div>
+    }
+    @foreach (var m in room.Messages)
+    {
+        if (m.RunId is { } runId && seenRuns.Add(runId))
+        {
+            <div class="run-head" id="run-@runId">실행 <span class="mono">@runId</span>@if (room.EstimatedRunIds.Contains(runId)) { <span class="badge warn" title="세션 기록과 시각 · 입력으로 추정한 연결 (확정 아님)">추정</span> }</div>
+        }
+        if (m.ToolsBefore > 0)
+        {
+            <div class="tools">도구 @(m.ToolsBefore)개</div>
+        }
+        if (m.Role == RoomRole.System)
+        {
+            <div class="system" data-key="@m.Key">
+                <span class="body">@Model.Render(m)</span>
+                @if (m.Link is { } sysLink) { <a href="@sysLink">@m.LinkLabel</a> }
+                <span class="when">@m.At?.ToLocalTime().ToString("HH:mm")</span>
+            </div>
+            continue;
+        }
+        <div class="msg @RoomModel.RoleClass(m.Role) @(m.IsError ? "error" : null)" data-key="@m.Key">
+            <div class="avatar" title="@m.Name">@RoomModel.Initial(m)</div>
+            <div class="bubble">
+                <div class="who">
+                    <b>@m.Name</b>
+                    @if (m.Detail is { } detail) { <span class="detail">@detail</span> }
+                    <span class="when">@m.At?.ToLocalTime().ToString("MM-dd HH:mm:ss")</span>
+                    @if (m.Link is { } link) { <a href="@link">@m.LinkLabel</a> }
+                </div>
+                @if (RoomModel.Folds(m))
+                {
+                    <details class="long">
+                        <summary>펼치기 · @m.Markdown.Length.ToString("N0")자</summary>
+                        <div class="body">@Model.Render(m)</div>
+                    </details>
+                }
+                else
+                {
+                    <div class="body">@Model.Render(m)</div>
+                }
+                @if (m.Sticker is { } sticker) { @Model.Sticker(sticker) }
+            </div>
+        </div>
+    }
+    @if (room.Messages.Count == 0)
+    {
+        <p class="muted">이 세션에는 보여 줄 대화가 없습니다.</p>
+    }
+</div>

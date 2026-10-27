@@ -1,0 +1,26 @@
+@model RoomsModel
+@* 방 목록 표. 첫 화면(Rooms.cshtml)과 실시간 갱신(?handler=List)이 같이 쓴다. *@
+<section class="panel table-scroll" id="room-list">
+    <table>
+        <thead>
+        <tr><th>최근 수정 (로컬)</th><th>방</th><th>프로젝트</th><th class="num">말</th><th class="num">실행</th><th></th></tr>
+        </thead>
+        <tbody>
+        @foreach (var r in Model.Rooms)
+        {
+            <tr data-key="@r.Session.FileSessionId">
+                <td class="mono">@r.Session.LastWriteUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
+                <td><a class="room-title" href="/Room/@r.Session.FileSessionId">@r.Title</a></td>
+                <td class="muted" title="@r.Session.Cwd">@SubagentsModel.ProjectName(r.Session.Cwd)</td>
+                <td class="num">@r.Chat.Entries.Count</td>
+                <td class="num">@r.RunCount</td>
+                <td><a class="muted" href="/ClaudeSession?id=@r.Session.FileSessionId">세션 상세</a></td>
+            </tr>
+        }
+        @if (Model.Rooms.Count == 0)
+        {
+            <tr><td colspan="6" class="muted">세션 기록이 없습니다.</td></tr>
+        }
+        </tbody>
+    </table>
+</section>
