@@ -9,14 +9,18 @@ namespace HB.Chat.Pages;
 
 /// <summary>
 /// 방 하나. 말풍선은 세션 기록에서 읽는다 (앱은 말 본문을 따로 저장하지 않는다). 진행 중 턴은 /events/{id} SSE로 흘린다.
-/// ?handler=Messages: 턴이 끝난 뒤 화면이 말풍선 목록만 다시 받는다. Send · Stop은 POST (antiforgery + 같은 출처).
+/// ?handler=Messages: 턴이 끝난 뒤 화면이 말풍선 목록만 다시 받는다. ?handler=Pane: 방 전환 때 오른쪽 칸만 (계획서 2-2 a).
+/// Send · Stop · MarkRead는 POST (antiforgery + 같은 출처).
 /// </summary>
-public sealed class RoomModel(RoomStore store, RoomHub hub, ChatTranscripts transcripts, StickerCatalog stickers, IOptions<ChatOptions> options)
+public sealed class RoomModel(RoomStore store, RoomHub hub, RoomList list, ChatTranscripts transcripts, StickerCatalog stickers, IOptions<ChatOptions> options)
     : PageModel
 {
     public Room Room { get; private set; } = null!;
     public ChatTranscript? Transcript { get; private set; }
-    public string Title => Room.Title ?? Transcript?.Title ?? FirstUserLine() ?? "새 방";
+    public string Title => RoomList.TitleOf(Room, Transcript);
+
+    /// <summary>왼쪽 방 목록 (첫 화면에서만 만든다 — 방 전환 · 말풍선 다시 받기에는 쓰지 않음).</summary>
+    public SidebarView Sidebar => new(list.All(), Room.Id);
     /// <summary>대시보드 채팅방 (세션 기록이 생긴 뒤부터 보인다 — 첫 말 전에는 대시보드가 404).</summary>
     public string? DashboardLink =>
         options.Value.DashboardUrl is { Length: > 0 } url ? $"{url.TrimEnd('/')}/Room/{Room.SessionId}" : null;
@@ -29,6 +33,34 @@ public sealed class RoomModel(RoomStore store, RoomHub hub, ChatTranscripts tran
     {
         if (!Load(id)) return NotFound();
         return Page();
+    }
+
+    public IActionResult OnGetPane(string id)
+    {
+        Response.Headers.CacheControl = "no-store";
+        if (!Load(id)) return NotFound();
+        return Partial("_RoomPane", this);
+    }
+
+    /// <summary>
+    /// 읽음 표시: 화면이 맨 아래를 보고 있을 때 마지막 말의 줄 번호를 보낸다. 세션 기록 마지막 줄로 자르고 앞으로만 간다
+    /// (늦게 온 작은 값이 되돌리지 않게). 바뀌었을 때만 저장하고 목록 알림을 낸다 (<see cref="RoomList.NextReadUpTo"/>).
+    /// </summary>
+    public IActionResult OnPostMarkRead(string id, int line)
+    {
+        if (!RoomStore.IsRoomId(id) || line < 0 || store.Get(id) is not { } current) return NotFound();
+        if (RoomList.NextReadUpTo(current.ReadUpTo, line, RoomList.LastLine(transcripts.Read(current.SessionId))) is not { } next)
+            return new JsonResult(new { ok = true });
+        try
+        {
+            if (store.Update(id, r => next > (r.ReadUpTo ?? int.MinValue) ? r with { ReadUpTo = next } : r) is null) return NotFound();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            return BadRequest($"읽음 표시를 저장하지 못했습니다: {ex.Message}");
+        }
+        hub.Touch(id);
+        return new JsonResult(new { ok = true });
     }
 
     public IActionResult OnGetMessages(string id)
@@ -84,23 +116,11 @@ public sealed class RoomModel(RoomStore store, RoomHub hub, ChatTranscripts tran
         return true;
     }
 
-    private string? FirstUserLine()
-    {
-        var text = Transcript?.Entries.FirstOrDefault(e => e.Speaker == ChatSpeaker.User)?.Text;
-        if (string.IsNullOrWhiteSpace(text)) return null;
-        var line = text.Trim().Split('\n')[0].Trim();
-        return line.Length > 60 ? line[..60] + "…" : line;
-    }
-
     public HtmlString Render(ChatEntry e) =>
         new(StickerRenderer.Replace(SafeMarkdown.ToHtml(e.Text, e.Speaker == ChatSpeaker.User ? SafeMarkdown.KeepLineBreaks : SafeMarkdown.Default), stickers));
 
-    /// <summary>
-    /// 중지한 턴 뒤 다음 말을 이으면 CLI가 답 없는 앞 턴에 넣는 자리표시 답 (조사 로그 2026-10-27 "No response requested." 관찰, 실제 확인에서도 봄).
-    /// 지휘자 말풍선 대신 안내 한 줄로 보인다.
-    /// </summary>
-    public static bool IsStoppedTurn(ChatEntry e) =>
-        e.Speaker == ChatSpeaker.Conductor && e.Text.Trim() == "No response requested.";
+    /// <summary>중지한 턴의 자리표시 답 — 지휘자 말풍선 대신 안내 한 줄로 (<see cref="RoomList.IsStoppedTurn"/>).</summary>
+    public static bool IsStoppedTurn(ChatEntry e) => RoomList.IsStoppedTurn(e);
 
     public static string RoleClass(ChatSpeaker s) => s switch
     {

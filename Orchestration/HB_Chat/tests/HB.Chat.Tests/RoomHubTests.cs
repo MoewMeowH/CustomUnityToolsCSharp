@@ -45,12 +45,96 @@ public sealed class RoomHubTests : IDisposable
 
     private Room NewRoom() => _store.Create("ws", PermissionLevel.Chat, "opus", null);
 
-    private static async Task<List<LiveEvent>> Until(Channel<LiveEvent> ch, Func<LiveEvent, bool> last)
+    private static async Task<List<string>> Collect(Channel<string> ch, int count)
+    {
+        var seen = new List<string>();
+        using var cts = new CancellationTokenSource(Wait);
+        await foreach (var id in ch.Reader.ReadAllAsync(cts.Token))
+        {
+            seen.Add(id);
+            if (seen.Count >= count) break;
+        }
+        return seen;
+    }
+
+    [Fact]
+    public async Task AppEvents_TurnTouchesRoom_AndActivityFollows()
+    {
+        var room = NewRoom();
+        var other = NewRoom();
+        var all = _hub.SubscribeAll();
+        var ch = _hub.Subscribe(room.Id);
+        Assert.Equal(RoomActivity.Idle, _hub.ActivityOf(room.Id));
+
+        Assert.Null(_hub.Send(room.Id, "sleep now"));
+        await Until(ch, e => e.Kind == "start");
+        Assert.Equal(RoomActivity.Busy, _hub.ActivityOf(room.Id));
+        Assert.Equal(RoomActivity.Idle, _hub.ActivityOf(other.Id));
+
+        _hub.Touch(other.Id); // 이름 바꾸기 · 읽음 같은 화면 쪽 변경
+        _hub.Stop(room.Id);
+        await Until(ch, e => e.Kind == "idle");
+        Assert.Equal(RoomActivity.Idle, _hub.ActivityOf(room.Id));
+
+        // start · (Touch) · end · idle — 흘림 글(delta)은 앱 전체 알림에 넣지 않는다.
+        var ids = await Collect(all, 4);
+        Assert.Equal([room.Id, other.Id, room.Id, room.Id], ids);
+        Assert.False(all.Reader.TryRead(out _));
+    }
+
+    [Fact]
+    public async Task RoomSubscriber_GetsListSignals_ForAnyRoom()
+    {
+        // 탭 하나 = SSE 하나: 연 방의 구독이 다른 방의 목록 신호도 받는다 (/self-review 5225b1ffaf C1).
+        var room = NewRoom();
+        var other = NewRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Touch(other.Id);
+        var seen = await Until(ch, e => e.Kind == "rooms", withRooms: true);
+        Assert.Equal(other.Id, seen.Last().Text);
+
+        _hub.Unsubscribe(room.Id, ch);
+        _hub.Touch(other.Id); // 끊은 구독에는 더 오지 않는다 (닫힌 채널)
+        Assert.True(ch.Reader.Completion.IsCompleted || !ch.Reader.TryRead(out _));
+    }
+
+    [Fact]
+    public void AppEvents_DisposeCompletesSubscribers()
+    {
+        var all = _hub.SubscribeAll();
+        _hub.Dispose();
+        Assert.True(all.Reader.Completion.IsCompleted);
+        Assert.True(_hub.SubscribeAll().Reader.Completion.IsCompleted); // 끈 뒤 새 구독은 바로 닫힌다
+    }
+
+    [Fact]
+    public void Send_RejectsRoomInTrash()
+    {
+        var room = NewRoom();
+        _store.Update(room.Id, r => r with { DeletedAt = DateTimeOffset.Now });
+        Assert.Contains("휴지통", _hub.Send(room.Id, "hello"));
+        Assert.False(_hub.IsBusy(room.Id));
+    }
+
+    [Fact]
+    public void RoomList_SkipsTrash_NewestFirst()
+    {
+        var older = NewRoom();
+        var newer = NewRoom();
+        var trashed = NewRoom();
+        _store.Update(older.Id, r => r with { CreatedAt = DateTimeOffset.Now.AddHours(-2) });
+        _store.Update(trashed.Id, r => r with { DeletedAt = DateTimeOffset.Now });
+        var list = new RoomList(_store, _hub, new ChatTranscripts(() => Path.Combine(_dir, "projects"))).All();
+        Assert.Equal([newer.Id, older.Id], list.Select(s => s.Id));
+    }
+
+    private static async Task<List<LiveEvent>> Until(Channel<LiveEvent> ch, Func<LiveEvent, bool> last, bool withRooms = false)
     {
         var seen = new List<LiveEvent>();
         using var cts = new CancellationTokenSource(Wait);
         await foreach (var ev in ch.Reader.ReadAllAsync(cts.Token))
         {
+            if (ev.Kind == "rooms" && !withRooms) continue; // 방 목록 신호는 따로 본다 (RoomSubscriber_GetsListSignals)
             seen.Add(ev);
             if (last(ev)) break;
         }
@@ -106,7 +190,7 @@ public sealed class RoomHubTests : IDisposable
         Assert.False(end.Ok);
         Assert.Equal("중지됨", end.Text);
         Assert.DoesNotContain(seen, e => e.Kind == "start"); // 큐에 있던 말은 돌지 않는다
-        Assert.Equal("중지됨", _store.Get(room.Id)!.LastError);
+        Assert.Null(_store.Get(room.Id)!.LastError); // 중지는 실패로 남기지 않는다 (목록 "실패" 표시 — 2-2 a)
 
         // 중지 뒤 새 말은 다시 돈다.
         Assert.Null(_hub.Send(room.Id, "hello again"));

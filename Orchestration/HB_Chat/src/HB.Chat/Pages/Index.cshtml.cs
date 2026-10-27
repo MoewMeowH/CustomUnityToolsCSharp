@@ -4,17 +4,24 @@ using Microsoft.Extensions.Options;
 
 namespace HB.Chat.Pages;
 
-/// <summary>방 목록 · 새 방 만들기.</summary>
-public sealed class IndexModel(RoomStore store, RoomHub hub, IOptions<ChatOptions> options) : PageModel
+/// <summary>
+/// 방을 고르지 않은 첫 화면: 왼쪽 방 목록 + 오른쪽 새 방 만들기.
+/// ?handler=RoomList: 앱 전체 알림을 받은 화면이 목록 부분만 다시 받는다 (계획서 2-2 a).
+/// </summary>
+public sealed class IndexModel(RoomStore store, RoomHub hub, RoomList list, IOptions<ChatOptions> options) : PageModel
 {
-    public IReadOnlyList<Room> Rooms { get; private set; } = [];
+    public SidebarView Sidebar { get; private set; } = new([], null);
     public ChatOptions Options => options.Value;
     public string? LoadError => store.LoadError;
     public string? Error { get; private set; }
 
-    public bool IsBusy(Room r) => hub.IsBusy(r.Id);
+    public void OnGet() => Sidebar = new SidebarView(list.All(), null);
 
-    public void OnGet() => Rooms = [.. store.All().OrderByDescending(r => r.LastRunAt ?? r.CreatedAt)];
+    public IActionResult OnGetRoomList(string? current)
+    {
+        Response.Headers.CacheControl = "no-store";
+        return Partial("_RoomList", new SidebarView(list.All(), RoomStore.IsRoomId(current) ? current : null));
+    }
 
     public IActionResult OnPostCreate(string workspace, PermissionLevel level, string model, string? title)
     {
@@ -29,6 +36,7 @@ public sealed class IndexModel(RoomStore store, RoomHub hub, IOptions<ChatOption
             try
             {
                 var room = store.Create(workspace, level, model, title);
+                hub.Touch(room.Id); // 다른 탭의 목록에도 보이게
                 return Redirect($"/Room/{room.Id}");
             }
             catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)

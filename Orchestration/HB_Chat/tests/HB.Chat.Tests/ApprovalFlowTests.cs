@@ -75,6 +75,7 @@ public sealed class ApprovalFlowTests : IAsyncLifetime
         using var cts = new CancellationTokenSource(Wait);
         await foreach (var ev in ch.Reader.ReadAllAsync(cts.Token))
         {
+            if (ev.Kind == "rooms") continue; // 방 목록 신호는 이 방의 흐름이 아니다 (RoomHubTests에서 따로 본다)
             seen.Add(ev);
             if (last(ev)) break;
         }

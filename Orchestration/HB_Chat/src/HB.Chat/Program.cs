@@ -44,6 +44,7 @@ builder.Services.AddSingleton(sp =>
         Log = new ApprovalLog(() => options.Value.DataFolder),
     };
 });
+builder.Services.AddSingleton<RoomList>();
 
 var app = builder.Build();
 
@@ -51,7 +52,20 @@ var app = builder.Build();
 if (ProcessJob.AttachCurrentProcess() is { } jobError)
     app.Logger.LogWarning("Job Object에 넣지 못했습니다 — 앱이 비정상 종료되면 claude 프로세스가 남을 수 있습니다: {Error}", jobError);
 
+// 이 필드 전에 만든 방은 마지막 줄까지 읽음으로 (안 그러면 업그레이드 직후 기존 방이 전부 안 읽음 — /self-review 5225b1ffaf C4).
+try
+{
+    if (RoomList.MarkLegacyRead(app.Services.GetRequiredService<RoomStore>(), app.Services.GetRequiredService<ChatTranscripts>()) is > 0 and var moved)
+        app.Logger.LogInformation("읽음 표시가 없던 방 {Count}개를 마지막 말까지 읽음으로 옮겼습니다.", moved);
+}
+catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+{
+    app.Logger.LogWarning("읽음 표시를 옮기지 못했습니다 — 기존 방의 안 읽은 수가 0으로 보입니다: {Error}", ex.Message);
+}
+
 app.UseSameOriginGuard();
+// 화면 스크립트 · CSS (wwwroot). 배치는 프로젝트 폴더에서 dotnet run으로 띄워 content root = 프로젝트 폴더다.
+app.UseStaticFiles();
 app.MapRazorPages();
 app.MapStickerImages();
 app.MapApprovals();
@@ -89,6 +103,30 @@ app.MapGet("/events/{id}", async (string id, RoomStore store, RoomHub hub, HttpC
     finally
     {
         hub.Unsubscribe(id, ch);
+    }
+});
+
+// 앱 전체 알림 (SSE, 계획서 2-2 a): 방 목록 줄이 바뀌었을 수 있는 방 ID. 화면은 받으면 목록을 다시 받는다.
+// 붙자마자 hello를 보낸다 — 끊긴 사이에 바뀐 것이 있을 수 있어 화면이 목록을 한 번 다시 받는다.
+app.MapGet("/events", async (RoomHub hub, HttpContext ctx) =>
+{
+    ctx.Response.Headers.ContentType = "text/event-stream";
+    ctx.Response.Headers.CacheControl = "no-store";
+    var ch = hub.SubscribeAll();
+    try
+    {
+        await ctx.Response.WriteAsync("data: {\"kind\":\"hello\"}\n\n", ctx.RequestAborted);
+        await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
+        await foreach (var id in ch.Reader.ReadAllAsync(ctx.RequestAborted))
+        {
+            await ctx.Response.WriteAsync($"data: {JsonSerializer.Serialize(new { kind = "room", id }, sseJson)}\n\n", ctx.RequestAborted);
+            await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
+        }
+    }
+    catch (OperationCanceledException) { }
+    finally
+    {
+        hub.UnsubscribeAll(ch);
     }
 });
 

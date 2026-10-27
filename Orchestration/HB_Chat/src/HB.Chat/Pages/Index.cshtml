@@ -1,78 +1,60 @@
 @page
 @model IndexModel
 @{
-    ViewData["Title"] = "HB Chat · 방";
+    ViewData["Title"] = "HB Chat";
 }
-
-@if (Model.LoadError is not null)
-{
-    <div class="panel" style="padding:10px 14px;border-color:var(--err);margin-bottom:12px">방 색인을 읽지 못했습니다 (덮어쓰지 않음): @Model.LoadError</div>
-}
-@if (Model.Error is not null)
-{
-    <div class="panel" style="padding:10px 14px;border-color:var(--warn);margin-bottom:12px">@Model.Error</div>
-}
-
-<section class="panel" style="padding:12px 14px;margin-bottom:16px">
-    <form method="post" asp-page-handler="Create" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
-        <b style="margin-right:4px">새 방</b>
-        <label>작업 폴더
-            <select name="workspace">
-                @foreach (var (name, path) in Model.Options.Workspaces)
-                {
-                    <option value="@name" title="@path">@name</option>
-                }
-            </select>
-        </label>
-        <label>권한
-            <select name="level">
-                <option value="Chat">대화</option>
-                <option value="Read" selected>읽기</option>
-                <option value="Edit">편집</option>
-                <option value="Command">명령 (승인)</option>
-            </select>
-        </label>
-        <label>모델
-            <select name="model">
-                @foreach (var m in Model.Options.ModelList)
-                {
-                    <option value="@m" selected="@(m == Model.Options.DefaultModel)">@m</option>
-                }
-            </select>
-        </label>
-        <input type="text" name="title" placeholder="제목 (비우면 첫 말)" maxlength="200" style="flex:1;min-width:160px" />
-        <button class="btn primary" type="submit">만들기</button>
-    </form>
-    <p class="muted" style="margin:8px 0 0;font-size:12.5px">
-        읽기: @RoomRules.Describe(PermissionLevel.Read).<br />
-        편집: @RoomRules.Describe(PermissionLevel.Edit).<br />
-        명령: @RoomRules.Describe(PermissionLevel.Command).<br />
-        방의 세션은 이 앱 전용입니다 — Claude 앱 · CLI에서 이어 쓰지 마세요.
-    </p>
-</section>
-
-<section class="panel table-scroll">
-    <table>
-        <thead><tr><th>방</th><th>작업 폴더</th><th>권한</th><th>모델</th><th>마지막</th><th>상태</th></tr></thead>
-        <tbody>
-        @foreach (var r in Model.Rooms)
-        {
-            <tr>
-                <td><a href="/Room/@r.Id">@(r.Title ?? "(제목 없음)")</a></td>
-                <td>@r.Workspace</td>
-                <td>@RoomRules.LevelName(r.Level)</td>
-                <td class="mono">@r.Model</td>
-                <td class="muted">@((r.LastRunAt ?? r.CreatedAt).ToLocalTime().ToString("MM-dd HH:mm"))</td>
-                <td>
-                    @if (Model.IsBusy(r)) { <span class="badge warn">실행 중</span> }
-                    else if (r.LastError is not null) { <span class="badge err" title="@r.LastError">실패</span> }
-                </td>
-            </tr>
-        }
-        @if (Model.Rooms.Count == 0)
-        {
-            <tr><td colspan="6" class="muted">아직 방이 없습니다.</td></tr>
-        }
-        </tbody>
-    </table>
-</section>
+@* 두 칸 화면의 첫 화면 (계획서 2-2 a): 왼쪽 방 목록 + 오른쪽 새 방 만들기. 좁은 폭에서는 목록만 보이고 "+ 새 방"이 이 칸을 연다. *@
+<div class="app@(Model.Error is not null || Model.Sidebar.Rooms.Count == 0 || Request.Query.ContainsKey("new") ? " in-room" : "")">
+    <partial name="_Sidebar" model="Model.Sidebar" />
+    <section class="pane" id="pane">
+        <div class="welcome">
+            <p class="mobile-only" style="margin:0 0 8px"><a class="back" href="/">← 방 목록</a></p>
+            @if (Model.LoadError is not null)
+            {
+                <div class="panel" style="padding:10px 14px;border-color:var(--err);margin-bottom:12px">방 색인을 읽지 못했습니다 (덮어쓰지 않음): @Model.LoadError</div>
+            }
+            @if (Model.Error is not null)
+            {
+                <div class="panel" style="padding:10px 14px;border-color:var(--warn);margin-bottom:12px">@Model.Error</div>
+            }
+            <section class="panel" style="padding:12px 14px">
+                <h2 style="margin:0 0 10px;font-size:16px">새 방</h2>
+                <form method="post" asp-page-handler="Create" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+                    <label>작업 폴더
+                        <select name="workspace">
+                            @foreach (var (name, path) in Model.Options.Workspaces)
+                            {
+                                <option value="@name" title="@path">@name</option>
+                            }
+                        </select>
+                    </label>
+                    <label>권한
+                        <select name="level">
+                            <option value="Chat">대화</option>
+                            <option value="Read" selected>읽기</option>
+                            <option value="Edit">편집</option>
+                            <option value="Command">명령 (승인)</option>
+                        </select>
+                    </label>
+                    <label>모델
+                        <select name="model">
+                            @foreach (var m in Model.Options.ModelList)
+                            {
+                                <option value="@m" selected="@(m == Model.Options.DefaultModel)">@m</option>
+                            }
+                        </select>
+                    </label>
+                    <input type="text" name="title" placeholder="제목 (비우면 첫 말)" maxlength="200" style="flex:1;min-width:160px" />
+                    <button class="btn primary" type="submit">만들기</button>
+                </form>
+                <p class="muted" style="margin:8px 0 0;font-size:12.5px">
+                    대화: @RoomRules.Describe(PermissionLevel.Chat).<br />
+                    읽기: @RoomRules.Describe(PermissionLevel.Read).<br />
+                    편집: @RoomRules.Describe(PermissionLevel.Edit).<br />
+                    명령: @RoomRules.Describe(PermissionLevel.Command).<br />
+                    방의 세션은 이 앱 전용입니다 — Claude 앱 · CLI에서 이어 쓰지 마세요.
+                </p>
+            </section>
+        </div>
+    </section>
+</div>

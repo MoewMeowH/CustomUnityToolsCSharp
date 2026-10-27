@@ -31,6 +31,16 @@ public sealed record Room
 
     /// <summary>명령 단계의 "이 방에서 항상 허용" 규칙 (예: <c>Bash(git status)</c>). 다음 실행부터 --allowedTools로 들어간다.</summary>
     public IReadOnlyList<string> AllowRules { get; init; } = [];
+
+    /// <summary>
+    /// 사용자가 본 마지막 말의 세션 기록 줄 번호 (<see cref="HB.Orchestration.Shared.ChatEntry.Line"/>). 안 읽은 수 = 이 줄 뒤의 지휘자 말 수 (계획서 2-2 a).
+    /// 새 방은 0(아무것도 안 읽음). null은 이 필드 전에 만든 방뿐이고, 켤 때 마지막 줄까지 읽음으로 옮긴다 (<see cref="RoomList.MarkLegacyRead"/>,
+    /// /self-review 5225b1ffaf C4 — 안 그러면 업그레이드 직후 기존 방이 전부 안 읽음으로 뜬다).
+    /// </summary>
+    public int? ReadUpTo { get; init; }
+
+    /// <summary>휴지통에 넣은 시각 (계획서 2-2 c). 있으면 목록에서 빠지고 말을 보내지 않는다.</summary>
+    public DateTimeOffset? DeletedAt { get; init; }
 }
 
 /// <summary>
@@ -86,6 +96,7 @@ public sealed class RoomStore
             Model = model,
             CreatedAt = DateTimeOffset.Now,
             Title = string.IsNullOrWhiteSpace(title) ? null : title.Trim(),
+            ReadUpTo = 0,
         };
         lock (_lock)
         {

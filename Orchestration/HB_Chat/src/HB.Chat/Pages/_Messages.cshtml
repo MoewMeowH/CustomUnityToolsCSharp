@@ -2,7 +2,8 @@
 @*
     말풍선 목록 (세션 기록의 사용자 · 지휘자 글). 첫 화면과 ?handler=Messages가 같이 쓴다.
 *@
-<div class="chat" id="chat" data-count="@(Model.Transcript?.Entries.Count ?? 0)" data-title="@Model.Title">
+<div class="chat" id="chat" data-count="@(Model.Transcript?.Entries.Count ?? 0)" data-title="@Model.Title"
+     data-last-line="@(Model.Transcript?.FormatError is null ? Model.Transcript?.Entries.LastOrDefault()?.Line ?? -1 : -1)">
     @if (Model.Transcript?.FormatError is { } formatError)
     {
         <div class="panel" style="padding:10px 14px;border-color:var(--warn)">세션 기록을 읽지 못했습니다: @formatError</div>

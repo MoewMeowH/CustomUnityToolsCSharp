@@ -5,7 +5,8 @@ namespace HB.Chat;
 
 /// <summary>
 /// 방 화면에 보내는 실시간 알림 (SSE data 한 줄 = JSON 하나).
-/// kind: snapshot · start · delta · tool · denied · retry · end · queued · notice · idle · approval · approval-done.
+/// kind: snapshot · start · delta · tool · denied · retry · end · queued · notice · idle · approval · approval-done · rules ·
+/// rooms(방 목록 줄이 바뀌었을 수 있음, Text = 그 방 ID — 어느 방이든).
 /// Prompt는 지금 처리 중인 사용자 말, Pending은 큐에서 기다리는 말들. Approval은 승인 카드(approval) · 끝난 카드의 ID(approval-done, Text = 결정).
 /// </summary>
 public sealed record LiveEvent(string Kind)
@@ -42,8 +43,9 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     /// <summary>진행 중 흘림 글을 화면용으로 들고 있는 상한 (글자). 넘으면 앞을 버린다 (끝나면 세션 기록으로 바뀐다).</summary>
     private const int MaxPartialChars = 200_000;
 
-    private sealed class Live
+    private sealed class Live(string id)
     {
+        public readonly string Id = id;
         public readonly Lock Gate = new();
         public int Generation;
         public bool Busy;
@@ -75,6 +77,19 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Live> _rooms = new();
     private bool _disposed;
 
+    /// <summary>앱 전체 구독 (방 목록 화면 · 2-3 알림): 목록 줄이 바뀌었을 수 있는 방 ID를 받는다.</summary>
+    private readonly Lock _appGate = new();
+    private readonly List<Channel<string>> _appSubscribers = [];
+
+    /// <summary>
+    /// 방 구독도 목록 신호(rooms)를 같이 받는다 — 탭 하나가 SSE를 하나만 열게 (HTTP/1.1 한 호스트 연결 6개 상한, /self-review 5225b1ffaf C1).
+    /// 잠금은 앱 잠금만 잡는다: 방 잠금을 잡은 채 Touch가 불려도 다른 방 잠금으로 가지 않는다.
+    /// </summary>
+    private readonly List<Channel<LiveEvent>> _roomListeners = [];
+
+    /// <summary>방 목록 줄을 바꾸는 알림 (바쁨 · 승인 · 끝). 흘림 글(delta) 같은 잦은 알림은 넣지 않는다.</summary>
+    private static readonly HashSet<string> ListKinds = ["start", "end", "idle", "approval", "approval-done", "queued"];
+
     /// <summary>
     /// 이 실행기를 바꿀 때 (테스트: 가짜 claude). 기본은 claude 실행 파일 + <see cref="ClaudeArgs"/> 인자.
     /// </summary>
@@ -91,15 +106,54 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
 
     public bool IsBusy(string roomId) => _rooms.TryGetValue(roomId, out var live) && live.Busy;
 
+    /// <summary>방 목록에 보일 실행 상태: 쉼 · 실행 중 · 승인 기다림 (실패는 방 색인의 LastError로 따로 본다).</summary>
+    public RoomActivity ActivityOf(string roomId)
+    {
+        if (!_rooms.TryGetValue(roomId, out var live)) return RoomActivity.Idle;
+        lock (live.Gate)
+            return live.Approvals.Values.Any(p => !p.Answer.Task.IsCompleted) ? RoomActivity.Approval
+                : live.Busy ? RoomActivity.Busy
+                : RoomActivity.Idle;
+    }
+
+    /// <summary>앱 전체 구독. 목록 줄이 바뀌었을 수 있는 방 ID가 온다. 끝나면 <see cref="UnsubscribeAll"/>.</summary>
+    public Channel<string> SubscribeAll()
+    {
+        var ch = Channel.CreateUnbounded<string>(new UnboundedChannelOptions { SingleReader = true });
+        lock (_appGate)
+        {
+            if (_disposed) ch.Writer.TryComplete();
+            else _appSubscribers.Add(ch);
+        }
+        return ch;
+    }
+
+    public void UnsubscribeAll(Channel<string> ch)
+    {
+        lock (_appGate) _appSubscribers.Remove(ch);
+        ch.Writer.TryComplete();
+    }
+
+    /// <summary>방 목록 줄이 바뀌었다고 알린다 (이름 바꾸기 · 읽음 · 방 만들기 같은, 실행 밖의 변경도 화면이 부른다).</summary>
+    public void Touch(string roomId)
+    {
+        lock (_appGate)
+        {
+            foreach (var ch in _appSubscribers) ch.Writer.TryWrite(roomId);
+            foreach (var ch in _roomListeners) ch.Writer.TryWrite(new LiveEvent("rooms") { Text = roomId });
+        }
+    }
+
     /// <summary>말 보내기. 실행 중이면 큐에 넣는다. 오류 문구(null이면 받음).</summary>
     public string? Send(string roomId, string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return "빈 글은 보내지 않습니다.";
         if (text.Length > MaxPromptChars) return $"글이 너무 깁니다 ({text.Length:N0}자, 상한 {MaxPromptChars:N0}자).";
-        if (store.Get(roomId) is null) return "없는 방입니다.";
+        if (store.Get(roomId) is not { } room) return "없는 방입니다.";
+        if (room.DeletedAt is not null) return "휴지통에 있는 방입니다 — 되살린 뒤 보내세요.";
         if (store.LoadError is not null) return "방 색인을 읽지 못해 보내지 않습니다.";
 
-        var live = _rooms.GetOrAdd(roomId, _ => new Live());
+        var live = _rooms.GetOrAdd(roomId, id => new Live(id));
         lock (live.Gate)
         {
             live.Pending.Enqueue(text);
@@ -226,7 +280,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     }
 
     /// <summary>규칙 목록이 바뀌면 열린 화면에 새 목록을 보낸다 (새로고침 없이 — /self-review 36e4e20e04 C9).</summary>
-    private static void BroadcastRules(Live live, Room? room)
+    private void BroadcastRules(Live live, Room? room)
     {
         if (room is null) return;
         lock (live.Gate) Broadcast(live, new LiveEvent("rules") { Rules = room.AllowRules });
@@ -294,7 +348,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     /// <summary>SSE 구독. 먼저 지금 상태(snapshot)를 넣어 준다. 끝나면 <see cref="Unsubscribe"/>.</summary>
     public Channel<LiveEvent> Subscribe(string roomId)
     {
-        var live = _rooms.GetOrAdd(roomId, _ => new Live());
+        var live = _rooms.GetOrAdd(roomId, id => new Live(id));
         var ch = Channel.CreateUnbounded<LiveEvent>(new UnboundedChannelOptions { SingleReader = true });
         lock (live.Gate)
         {
@@ -312,13 +366,19 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 ch.Writer.TryWrite(new LiveEvent("approval") { Approval = p.View });
             live.Subscribers.Add(ch);
         }
+        lock (_appGate)
+        {
+            if (_disposed) ch.Writer.TryComplete();
+            else _roomListeners.Add(ch);
+        }
         return ch;
     }
 
     public void Unsubscribe(string roomId, Channel<LiveEvent> ch)
     {
-        if (!_rooms.TryGetValue(roomId, out var live)) return;
-        lock (live.Gate) live.Subscribers.Remove(ch);
+        lock (_appGate) _roomListeners.Remove(ch);
+        if (_rooms.TryGetValue(roomId, out var live))
+            lock (live.Gate) live.Subscribers.Remove(ch);
         ch.Writer.TryComplete();
     }
 
@@ -495,7 +555,8 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             store.Update(room.Id, r => r with
             {
                 LastRunAt = DateTimeOffset.Now,
-                LastError = result.Ok ? null : result.Error,
+                // 사용자가 멈춘 실행은 실패가 아니다 — 목록의 "실패" 표시 · 방의 "마지막 실행 실패" 줄에 남기지 않는다 (2-2 a 실제 확인에서 발견).
+                LastError = result.Ok || result.Cancelled ? null : result.Error,
                 TotalCostUsd = result.CostUsd ?? r.TotalCostUsd,
                 KnownSize = size ?? r.KnownSize,
                 RunStartedAt = null,
@@ -521,9 +582,10 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         return new LiveEvent("tool") { Text = name };
     }
 
-    private static void Broadcast(Live live, LiveEvent ev)
+    private void Broadcast(Live live, LiveEvent ev)
     {
         foreach (var ch in live.Subscribers) ch.Writer.TryWrite(ev);
+        if (ListKinds.Contains(ev.Kind)) Touch(live.Id);
     }
 
     /// <summary>
@@ -544,7 +606,22 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 live.Subscribers.Clear();
             }
         }
+        lock (_appGate)
+        {
+            foreach (var ch in _appSubscribers) ch.Writer.TryComplete();
+            _appSubscribers.Clear();
+            _roomListeners.Clear(); // 방 구독 채널은 위에서 방마다 닫았다
+        }
     }
+}
+
+/// <summary>방 목록에 보일 실행 상태.</summary>
+public enum RoomActivity
+{
+    Idle,
+    Busy,
+    /// <summary>실행 중이고 승인 카드가 답을 기다린다.</summary>
+    Approval,
 }
 
 /// <summary>방 규칙: 첫 말 때 --append-system-prompt로 한 번 넣는다 (압축 전까지 바뀌지 않는다).</summary>

@@ -1,0 +1,11 @@
+@model SidebarView
+@*
+    왼쪽 방 목록 칸 (계획서 2-2 a). 목록 부분(_RoomList)은 앱 전체 알림(/events)을 받으면 화면이 ?handler=RoomList로 다시 받는다.
+*@
+<aside class="sidebar">
+    <div class="top">
+        <a class="brand" href="/">HB Chat</a>
+        <a class="btn" href="/?new=1" style="margin-left:auto" title="새 방 만들기">+ 새 방</a>
+    </div>
+    <partial name="_RoomList" model="Model" />
+</aside>

@@ -1,0 +1,57 @@
+@model SidebarView
+@*
+    방 목록 줄: 아바타(상태 점) · 제목 · 시각 · 미리보기 · 안 읽은 수. 미리보기는 RoomList.Preview로 걷은 글자 그대로 (Razor 인코딩).
+*@
+@{
+    var today = DateTimeOffset.Now.Date;
+    static string StateText(RoomSummary s) => s.Activity switch
+    {
+        RoomActivity.Approval => "승인 기다림",
+        RoomActivity.Busy => "실행 중",
+        _ => s.Failed ? "실패" : "",
+    };
+    static string StateClass(RoomSummary s) => s.Activity switch
+    {
+        RoomActivity.Approval => "approval",
+        RoomActivity.Busy => "busy",
+        _ => s.Failed ? "failed" : "",
+    };
+}
+<nav id="room-list">
+    @foreach (var s in Model.Rooms)
+    {
+        var local = s.LastAt.ToLocalTime();
+        var state = StateClass(s);
+        @* 접근성 이름은 링크 내용(제목 · 상태 · 미리보기 · 안 읽은 수) 그대로 — title · aria-label로 덮지 않는다 (/self-review 5225b1ffaf C10). *@
+        <a class="room-item@(s.Id == Model.CurrentId ? " active" : "")" href="/Room/@s.Id" data-room="@s.Id">
+            <div class="avatar conductor">
+                <span>C</span>
+                @if (state.Length > 0)
+                {
+                    <span class="dot @state"></span>
+                }
+            </div>
+            <div class="meta">
+                <div class="row">
+                    <span class="name">@s.Title</span>
+                    <span class="time">@(local.Date == today ? local.ToString("HH:mm") : local.ToString("MM-dd"))</span>
+                </div>
+                <div class="row">
+                    @if (state.Length > 0)
+                    {
+                        <span class="state @state">@StateText(s)</span>
+                    }
+                    <span class="preview">@(s.Preview ?? "아직 대화 없음")</span>
+                    @if (s.Unread > 0)
+                    {
+                        <span class="unread" title="안 읽은 지휘자 말">@(s.Unread > 99 ? "99+" : s.Unread.ToString())</span>
+                    }
+                </div>
+            </div>
+        </a>
+    }
+    @if (Model.Rooms.Count == 0)
+    {
+        <p class="muted" style="padding:12px">아직 방이 없습니다.</p>
+    }
+</nav>
