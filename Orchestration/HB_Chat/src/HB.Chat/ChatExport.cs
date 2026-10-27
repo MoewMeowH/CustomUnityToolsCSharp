@@ -1,0 +1,55 @@
+using System.Globalization;
+using System.Text;
+using HB.Orchestration.Shared;
+
+namespace HB.Chat;
+
+/// <summary>
+/// 방 대화를 Markdown 파일로 (계획서 2-2 c). 화자 · 시각 · 본문(세션 기록 글 그대로, 스티커 태그도 글자 그대로) · 도구 이름.
+/// 외부 에이전트 말풍선은 e 단계에서 더한다.
+/// </summary>
+public static class ChatExport
+{
+    public static string Markdown(Room room, ChatTranscript? transcript, DateTimeOffset now)
+    {
+        var sb = new StringBuilder();
+        sb.Append("# ").Append(RoomList.TitleOf(room, transcript)).Append("\n\n");
+        sb.Append("- 내보낸 시각: ").Append(now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)).Append('\n');
+        sb.Append("- 작업 폴더: ").Append(room.Workspace).Append(" · 권한: ").Append(RoomRules.LevelName(room.Level))
+          .Append(" · 모델: ").Append(room.Model).Append('\n');
+        sb.Append("- 세션: `").Append(room.SessionId).Append("`\n");
+        if (transcript?.FormatError is { } error) sb.Append("- 세션 기록을 다 읽지 못함: ").Append(error).Append('\n');
+        sb.Append('\n');
+
+        foreach (var e in transcript?.FormatError is null ? transcript?.Entries ?? [] : [])
+        {
+            var when = e.Timestamp?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) ?? "";
+            if (e.Tools.Count > 0)
+                sb.Append("_도구: ").Append(string.Join(", ", RoomList.ToolChips(e.Tools).Select(c => c.Count > 1 ? $"{c.Name} ×{c.Count}" : c.Name)))
+                  .Append("_\n\n");
+            if (RoomList.IsStoppedTurn(e))
+            {
+                sb.Append("> 중지된 턴 · ").Append(when).Append("\n\n");
+                continue;
+            }
+            if (e.Speaker == ChatSpeaker.System)
+            {
+                sb.Append("> 안내 · ").Append(when).Append(": ").Append(e.Text.Replace("\n", " ")).Append("\n\n");
+                continue;
+            }
+            sb.Append("### ").Append(e.Speaker == ChatSpeaker.User ? "나" : "지휘자").Append(" · ").Append(when).Append("\n\n");
+            sb.Append(e.Text.TrimEnd()).Append("\n\n");
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>내려받을 파일 이름: 제목(파일 이름에 못 쓰는 글자는 _ , 60자) + 날짜.</summary>
+    public static string FileName(string title, DateTimeOffset now)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var safe = new string([.. title.Select(c => invalid.Contains(c) || char.IsControl(c) ? '_' : c)]).Trim().Trim('.');
+        safe = RoomList.Cut(safe, 60);
+        if (safe.Length == 0) safe = "대화";
+        return $"{safe}_{now.ToString("yyyyMMdd-HHmm", CultureInfo.InvariantCulture)}.md";
+    }
+}

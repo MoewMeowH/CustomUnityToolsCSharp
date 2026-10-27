@@ -24,8 +24,11 @@
             const fresh = tmp.querySelector("#room-list"), old = document.getElementById("room-list");
             if (fresh && old && seq === listSeq) {
                 const top = old.scrollTop; // 목록을 내려 둔 자리를 지킨다
+                fresh.hidden = old.hidden; // 검색 중이면 목록은 가려 둔 채로
                 old.replaceWith(fresh);
                 fresh.scrollTop = top;
+                const trash = document.getElementById("trash-count");
+                if (trash && fresh.dataset.trash != null) trash.textContent = fresh.dataset.trash;
                 // 요청을 보낸 뒤 방을 바꿨을 수 있다 — 서버가 그린 강조 대신 지금 방으로 (/self-review 5225b1ffaf C3)
                 markActive(room?.id ?? null);
             }
@@ -47,21 +50,58 @@
     const drafts = new Map();
 
     document.addEventListener("click", (e) => {
-        const a = e.target.closest("a.room-item");
+        const a = e.target.closest("a.room-item, a.search-hit");
         if (!a || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
         e.preventDefault();
-        openRoom(a.dataset.room, true);
+        openRoom(a.dataset.room, true, a.dataset.line ? Number(a.dataset.line) : null);
     });
+
+    // ---- 검색 (2-2 c): 쓰는 동안 잠깐 멈추면 찾고, 결과를 목록 자리에. 비우거나 Esc면 목록으로 ----
+    const searchBox = document.getElementById("search");
+    const searchResults = document.getElementById("search-results");
+    let searchTimer = null, searchSeq = 0;
+    function showList() {
+        searchResults.hidden = true;
+        searchResults.replaceChildren();
+        const list = document.getElementById("room-list");
+        if (list) list.hidden = false;
+    }
+    async function runSearch() {
+        const q = searchBox.value.trim();
+        const seq = ++searchSeq;
+        if (!q) { showList(); return; }
+        try {
+            const res = await fetch("/?handler=Search&q=" + encodeURIComponent(q), { cache: "no-store" });
+            if (!res.ok || seq !== searchSeq) return;
+            searchResults.innerHTML = await res.text(); // 같은 출처, Razor 인코딩
+            searchResults.hidden = false;
+            const list = document.getElementById("room-list");
+            if (list) list.hidden = true;
+        } catch { /* 다음 입력 때 다시 */ }
+    }
+    searchBox?.addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(runSearch, 250); });
+    searchBox?.addEventListener("keydown", (e) => { if (e.key === "Escape") { searchBox.value = ""; searchSeq++; showList(); } });
+
+    // ---- 회사 모드 (2-2 c): 표정 · 스티커 숨김, 이 브라우저에만 저장 (사용자 결정). 켜는 건 _Layout이 그리기 전에 한다 ----
+    const company = document.getElementById("company");
+    if (company) {
+        company.checked = document.documentElement.classList.contains("company");
+        company.addEventListener("change", () => {
+            document.documentElement.classList.toggle("company", company.checked);
+            try { localStorage.setItem("hbchat.company", company.checked ? "1" : "0"); } catch { /* 저장 못 해도 이번 화면에는 적용 */ }
+        });
+    }
     window.addEventListener("popstate", () => {
         const m = location.pathname.match(/^\/Room\/([0-9a-f]{12})$/);
         if (m) openRoom(m[1], false); else location.reload();
     });
 
     // 마지막으로 누른 방만 붙인다: 먼저 보낸 요청이 늦게 와도 버린다 (/self-review 5225b1ffaf C2).
+    // line이 있으면 그 말까지 앞 쪽을 받아 보이고 강조한다 (검색 결과, 2-2 c).
     let openSeq = 0;
-    async function openRoom(id, push) {
+    async function openRoom(id, push, line) {
         const seq = ++openSeq;
-        if (room?.id === id) { app.classList.add("in-room"); return; }
+        if (room?.id === id) { app.classList.add("in-room"); if (line != null) room.reveal(line); return; }
         let html;
         try {
             const res = await fetch("/Room/" + id + "?handler=Pane", { cache: "no-store" });
@@ -81,7 +121,14 @@
             room = mountRoom(root);
             appEvents?.close(); // 이제 방 SSE가 목록 신호를 싣는다
             appEvents = null;
+            if (line != null) room.reveal(line);
         }
+    }
+    // 같은 방을 다시 받아 붙인다 (되살리기처럼 방 칸 모양이 바뀐 뒤)
+    function reopenRoom(id) {
+        room?.dispose();
+        room = null;
+        return openRoom(id, false);
     }
 
     // 도구 이름 짧게 (서버 RoomList.ShortTool과 같음): mcp__서버__도구 → 도구
@@ -159,8 +206,62 @@
         const saved = drafts.get(roomId);
         if (saved) { textBox.value = saved.text || ""; setQuote(saved.quote || null); drafts.delete(roomId); }
 
+        // ---- 방 관리 (2-2 c): 이름 바꾸기 · 복제 · 휴지통 · 되살리기 ----
+        const menu = $("details.menu");
+        function startRename() {
+            if (menu) menu.open = false;
+            const h2 = $("#room-title");
+            if (!h2 || h2.hidden) return;
+            const input = el("input", "rename");
+            input.type = "text"; input.maxLength = 200; input.value = h2.textContent;
+            input.placeholder = "비우면 첫 말로";
+            h2.hidden = true;
+            h2.after(input);
+            input.focus(); input.select();
+            let done = false;
+            const finish = async (save) => {
+                if (done) return;
+                done = true;
+                if (save && input.value.trim() !== h2.textContent) {
+                    const data = new FormData(); data.append("title", input.value);
+                    if (await post("Rename", data)) await refreshMessages(); // 제목(비우면 첫 말)은 새 말 받기의 data-title로 바뀐다
+                }
+                input.remove();
+                h2.hidden = false;
+            };
+            input.addEventListener("keydown", (ev) => {
+                if (ev.key === "Enter" && !ev.isComposing) { ev.preventDefault(); finish(true); }
+                else if (ev.key === "Escape") finish(false);
+            });
+            input.addEventListener("blur", () => finish(true));
+        }
+
+        // 메뉴 밖을 누르거나 내보내기를 누르면 닫는다 (95e8b1c242 C9)
+        const closeMenu = (e) => { if (menu?.open && !e.target.closest("details.menu")) menu.open = false; };
+        document.addEventListener("click", closeMenu);
+        menu?.querySelector("a[download]")?.addEventListener("click", () => setTimeout(() => { menu.open = false; }, 0));
+
         root.addEventListener("click", async (e) => {
             if (e.target.closest(".older")) { loadOlder(); return; }
+            if (e.target.closest("#room-title, .menu-rename")) { startRename(); return; }
+            if (e.target.closest(".menu-fork")) {
+                if (menu) menu.open = false;
+                // 갈라지는 때는 새 방에 첫 말을 보낼 때다 (95e8b1c242 C2) — 문구도 그대로
+                if (!confirm("이 방 대화를 이어받는 새 방을 만들까요?\n새 방에 첫 말을 보낼 때 그때까지의 이 방 대화가 복사됩니다 (그 전에 이 방에서 더 나눈 대화도 포함). '항상 허용' 규칙은 옮기지 않습니다.")) return;
+                const res = await post("Fork", new FormData(), false, true);
+                if (res?.id) openRoom(res.id, true);
+                return;
+            }
+            if (e.target.closest(".menu-trash")) {
+                if (menu) menu.open = false;
+                if (!confirm("이 방을 휴지통에 넣을까요?\n30일 뒤 방 목록에서 지웁니다 (세션 기록은 남음). 그 전에는 휴지통에서 되살릴 수 있습니다.")) return;
+                if (await post("Trash", new FormData())) location.href = "/";
+                return;
+            }
+            if (e.target.closest(".menu-restore")) {
+                if (await post("Restore", new FormData())) reopenRoom(roomId);
+                return;
+            }
             const reply = e.target.closest(".reply");
             if (reply) {
                 const msg = reply.closest(".msg");
@@ -229,16 +330,20 @@
         }
 
         // ---- 지난 대화 50개씩 (2-2 b): 위로 올리면 앞 쪽을 받아 붙이고 보던 자리를 지킨다 ----
-        let loadingOlder = false;
-        async function loadOlder() {
+        // 받는 중이면 그 요청을 같이 기다린다. 앞 쪽을 붙였으면 true (reveal이 실패 때 멈추게 — 95e8b1c242 C5).
+        let olderPromise = null;
+        function loadOlder() {
+            if (!olderPromise) olderPromise = fetchOlder().finally(() => { olderPromise = null; });
+            return olderPromise;
+        }
+        async function fetchOlder() {
             const chat = chatEl();
-            if (loadingOlder || disposed || chat?.dataset.hasMore !== "1") return;
-            loadingOlder = true;
+            if (disposed || chat?.dataset.hasMore !== "1") return false;
             try {
                 const res = await fetch(self + "?handler=Messages&before=" + chat.dataset.firstLine, { cache: "no-store" });
-                if (!res.ok || disposed) return;
+                if (!res.ok || disposed) return false;
                 const fresh = parseChat(await res.text());
-                if (!fresh || disposed || chatEl() !== chat) return;
+                if (!fresh || disposed || chatEl() !== chat) return false;
                 decorate(fresh);
                 const height = scroller.scrollHeight, top = scroller.scrollTop;
                 const hint = chat.querySelector(".older");
@@ -251,11 +356,12 @@
                 if (fresh.dataset.hasMore !== "1") hint?.remove();
                 scroller.scrollTop = top + (scroller.scrollHeight - height);
                 setTimeout(fillUp, 0);
-            } catch { /* 다음 스크롤 · 안내 누르기 때 다시 */ } finally { loadingOlder = false; }
+                return true;
+            } catch { return false; /* 다음 스크롤 · 안내 누르기 때 다시 */ }
         }
         // 칸이 다 차지 않으면 스크롤이 생기지 않아 위로 올릴 수 없다 — 찰 때까지 앞 쪽을 이어 받는다 (83b453653b C8).
         function fillUp() {
-            if (!disposed && scroller.scrollHeight <= scroller.clientHeight + 300) loadOlder();
+            if (!disposed && !revealing && scroller.scrollHeight <= scroller.clientHeight + 300) loadOlder();
         }
 
         let readTimer = null;
@@ -317,7 +423,8 @@
         }
         // 턴이 끝난 뒤: 마지막으로 본 줄 뒤의 새 말만 받아 붙인다. 기록이 다시 쓰였으면(줄이 줄었으면) 쪽 전체를 다시 받는다.
         async function refreshMessages() {
-            const follow = atBottom();
+            // 검색 결과로 옛 말을 보이는 중이면 맨 아래로 따라가지 않는다 (95e8b1c242 C4)
+            const follow = atBottom() && !revealing;
             const chat = chatEl();
             // 읽기 실패로 그린 쪽은 기준 줄을 모른다 — 쪽 전체를 다시 받는다 (83b453653b C6)
             if (chat.dataset.error) return await reloadMessages(follow);
@@ -327,6 +434,15 @@
                 const fresh = parseChat(await res.text());
                 if (!fresh || disposed || chatEl() !== chat) return false;
                 if (Number(fresh.dataset.lastLine) < Number(chat.dataset.lastLine)) return await reloadMessages(follow);
+                // 새 말이 한 쪽보다 많으면(갈래 첫 턴 등) 서버가 맨 끝 쪽을 준다 — 붙이지 않고 쪽을 바꾼다 (95e8b1c242 C3)
+                if (fresh.dataset.reset) {
+                    decorate(fresh);
+                    chat.replaceWith(fresh);
+                    setTitle(fresh.dataset.title);
+                    if (follow) toBottom();
+                    markRead();
+                    return true;
+                }
                 if (fresh.firstElementChild) {
                     chat.querySelector(".empty")?.remove();
                     decorate(fresh);
@@ -536,16 +652,39 @@
             }
         }
 
-        async function post(handler, data, quiet) {
+        // json이면 응답 JSON(실패면 null), 아니면 성공 여부
+        async function post(handler, data, quiet, json) {
             data.append("__RequestVerificationToken", token);
             try {
                 const res = await fetch(self + "?handler=" + handler, { method: "POST", body: data });
-                if (!res.ok) { if (!quiet) alert(await res.text() || ("요청 실패 " + res.status)); return false; }
-                return true;
+                if (!res.ok) { if (!quiet) alert(await res.text() || ("요청 실패 " + res.status)); return json ? null : false; }
+                return json ? await res.json() : true;
             } catch (e) {
                 if (!quiet) alert("요청 실패: " + e);
-                return false;
+                return json ? null : false;
             }
+        }
+
+        // 검색 결과의 말까지 앞 쪽을 받아 가운데에 보이고 잠깐 강조한다 (2-2 c)
+        // 앞 쪽을 받지 못했거나(실패) 더 나아가지 않으면 멈춘다 (95e8b1c242 C5).
+        let revealing = false;
+        async function reveal(line) {
+            revealing = true;
+            try {
+                for (let i = 0; i < 200 && !disposed; i++) {
+                    const chat = chatEl();
+                    const target = chat.querySelector(`.msg[data-line="${line}"], .system[data-line="${line}"]`);
+                    if (target) {
+                        target.scrollIntoView({ block: "center" });
+                        target.classList.add("hit");
+                        setTimeout(() => target.classList.remove("hit"), 2500);
+                        return;
+                    }
+                    if (chat.dataset.hasMore !== "1" || Number(chat.dataset.firstLine) <= line) return;
+                    const before = chat.dataset.firstLine;
+                    if (!await loadOlder() || chatEl().dataset.firstLine === before) return;
+                }
+            } finally { revealing = false; }
         }
         form.addEventListener("submit", async (e) => {
             e.preventDefault();
@@ -578,6 +717,7 @@
         fillUp();
         return {
             id: roomId,
+            reveal,
             dispose() {
                 disposed = true;
                 if (textBox.value || quote) drafts.set(roomId, { text: textBox.value, quote });
@@ -586,6 +726,7 @@
                 clearTimeout(readTimer);
                 clearTimeout(faceTimer);
                 document.removeEventListener("visibilitychange", markRead);
+                document.removeEventListener("click", closeMenu);
             },
         };
     }

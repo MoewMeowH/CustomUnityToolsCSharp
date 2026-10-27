@@ -18,7 +18,7 @@
         _ => s.Failed ? "failed" : "",
     };
 }
-<nav id="room-list">
+<nav id="room-list" data-trash="@Model.TrashCount">
     @foreach (var s in Model.Rooms)
     {
         var local = s.LastAt.ToLocalTime();
@@ -26,14 +26,12 @@
         @* 접근성 이름은 링크 내용(제목 · 상태 · 미리보기 · 안 읽은 수) 그대로 — title · aria-label로 덮지 않는다 (/self-review 5225b1ffaf C10). *@
         <a class="room-item@(s.Id == Model.CurrentId ? " active" : "")" href="/Room/@s.Id" data-room="@s.Id">
             <div class="avatar conductor" title="@FaceCatalog.Label(s.Face)">
+                @* 글자는 늘 두고 그림이 있으면 CSS로 가린다 — 회사 모드는 그림을 숨기고 글자를 보인다 (2-2 c) *@
                 @if (Faces.Url(s.Face) is { } faceUrl)
                 {
                     <img class="face-img" src="@faceUrl" alt="" />
                 }
-                else
-                {
-                    <span>C</span>
-                }
+                <span class="face-letter">C</span>
                 @if (state.Length > 0)
                 {
                     <span class="dot @state"></span>

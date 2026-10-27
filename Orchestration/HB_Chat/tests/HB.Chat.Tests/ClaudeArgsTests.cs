@@ -25,6 +25,24 @@ public sealed class ClaudeArgsTests
     }
 
     [Fact]
+    public void Fork_FirstRunResumesSourceIntoThisSession()
+    {
+        // 갈래 방 첫 실행 (2-2 c, 0번 실측: fork-session + session-id → 그 ID로 갈라짐)
+        const string source = "2ac92fd3-e819-408f-a834-c33490b7c038";
+        var args = ClaudeArgs.Build(Spec(PermissionLevel.Chat, mcp: null) with { ForkFrom = source }, Models);
+        Assert.Contains("--resume | " + source + " | --fork-session | --session-id | " + Sid, Joined(args));
+        Assert.Single(args, a => a == "--session-id");
+
+        // 이어 쓰기(resume)면 갈래 인자를 쓰지 않는다
+        var resumed = ClaudeArgs.Build(Spec(PermissionLevel.Chat, resume: true, mcp: null) with { ForkFrom = source }, Models);
+        Assert.DoesNotContain("--fork-session", resumed);
+        Assert.Contains("--resume | " + Sid, Joined(resumed));
+
+        Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Chat, mcp: null) with { ForkFrom = "not-a-uuid" }, Models));
+        Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Chat, mcp: null) with { ForkFrom = Sid }, Models));
+    }
+
+    [Fact]
     public void Read_HasReadToolsAndOnlyTheOneMcpServer()
     {
         var args = ClaudeArgs.Build(Spec(PermissionLevel.Read), Models);

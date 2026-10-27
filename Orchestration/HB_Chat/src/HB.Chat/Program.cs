@@ -64,6 +64,24 @@ catch (Exception ex) when (ex is InvalidOperationException or IOException or Una
     app.Logger.LogWarning("읽음 표시를 옮기지 못했습니다 — 기존 방의 안 읽은 수가 0으로 보입니다: {Error}", ex.Message);
 }
 
+// 휴지통 30일 (계획서 2-2 c): 켤 때 한 번, 그 뒤 하루마다. 세션 기록은 남긴다 (Trash).
+void PurgeTrash()
+{
+    try
+    {
+        var removed = Trash.Purge(app.Services.GetRequiredService<RoomStore>(),
+            app.Services.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder, DateTimeOffset.Now);
+        if (removed.Count > 0)
+            app.Logger.LogWarning("휴지통에서 30일 지난 방 {Count}개를 지웠습니다 (방 색인 · 첨부, 세션 기록은 남김): {Ids}", removed.Count, string.Join(", ", removed));
+    }
+    catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+    {
+        app.Logger.LogWarning("휴지통을 비우지 못했습니다: {Error}", ex.Message);
+    }
+}
+PurgeTrash();
+using var purgeTimer = new Timer(_ => PurgeTrash(), null, TimeSpan.FromDays(1), TimeSpan.FromDays(1));
+
 app.UseSameOriginGuard();
 // 화면 스크립트 · CSS (wwwroot). 배치는 프로젝트 폴더에서 dotnet run으로 띄워 content root = 프로젝트 폴더다.
 app.UseStaticFiles();

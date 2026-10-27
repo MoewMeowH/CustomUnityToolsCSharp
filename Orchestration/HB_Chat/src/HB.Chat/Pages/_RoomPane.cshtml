@@ -17,7 +17,7 @@
             <span id="face-letter" @(faceUrl is null ? null : "hidden")>C</span>
         </div>
         <div class="head-title">
-            <h2 id="room-title">@Model.Title</h2>
+            <h2 id="room-title" title="눌러서 이름 바꾸기">@Model.Title</h2>
             <span class="muted" id="face-label">@FaceCatalog.Label(face)</span>
         </div>
         <span class="badge" title="@RoomRules.Describe(room.Level)">@RoomRules.LevelName(room.Level)</span>
@@ -33,10 +33,41 @@
         {
             <a href="@dash" target="_blank" rel="noopener" title="대시보드 채팅방 (run_mode 실행 · 판정 엮임)">대시보드</a>
         }
-        <span class="mono muted head-session" title="이 앱 전용 세션 — Claude 앱 · CLI에서 이어 쓰지 마세요">@room.SessionId</span>
+        @* 방 메뉴 (계획서 2-2 c) *@
+        <details class="menu">
+            <summary class="btn" title="방 메뉴">⋯</summary>
+            <div class="menu-items">
+                <button type="button" class="menu-rename">이름 바꾸기</button>
+                <button type="button" class="menu-fork" title="이 방 대화를 이어받는 새 방 (새 방에 첫 말을 보낼 때 그때까지의 대화가 복사됨)">방 복제 (갈래)</button>
+                <a href="/Room/@room.Id?handler=Export" download>Markdown 내보내기</a>
+                @if (room.DeletedAt is null)
+                {
+                    <button type="button" class="menu-trash">휴지통으로</button>
+                }
+                <span class="mono muted menu-session" title="이 앱 전용 세션 — Claude 앱 · CLI에서 이어 쓰지 마세요">세션 @room.SessionId</span>
+            </div>
+        </details>
     </section>
 
     <div class="scroll">
+        @if (room.DeletedAt is { } deletedAt)
+        {
+            <div class="panel banner" id="trash-banner">
+                휴지통에 있는 방입니다 — @Trash.DaysLeft(room, DateTimeOffset.Now)일 뒤 방 목록에서 완전히 지웁니다 (세션 기록은 남음). 말을 보내려면 되살리세요.
+                <button type="button" class="btn menu-restore">되살리기</button>
+            </div>
+        }
+        @if (room.ForkOf is { } forkOf)
+        {
+            @* 갈라지는 때는 첫 말을 보낼 때다 — 그 사이 원래 방이 더 진행됐으면 알린다 (/self-review 95e8b1c242 C2) *@
+            <div class="panel banner muted">
+                갈래 방 — 첫 말을 보낼 때 원래 방(세션 <span class="mono">@forkOf</span>)의 <b>그때까지</b> 대화를 이어받습니다.
+                @if (Model.ForkSourceGrew)
+                {
+                    <br /><span style="color:var(--warn)">원래 방이 이 갈래를 만든 뒤로 더 진행됐습니다 — 그 뒤 대화도 함께 이어받습니다.</span>
+                }
+            </div>
+        }
         <div class="panel" id="notice" hidden></div>
         @if (room.LastError is { } lastError)
         {
@@ -84,6 +115,7 @@
             <button class="btn primary" type="submit" id="send">보내기</button>
             <button class="btn" type="button" id="stop" disabled>중지</button>
         </form>
-        <div class="hint">@RoomRules.Describe(room.Level)</div>
+        @* 단계 설명은 접어 둔다 — 좁은 폭에서 입력칸 아래를 다 차지했다 (2-2 b 실제 확인) *@
+        <details class="hint"><summary>권한: @RoomRules.LevelName(room.Level)</summary>@RoomRules.Describe(room.Level)</details>
     </div>
 </div>

@@ -18,6 +18,8 @@
             }
         }
     </style>
+    @* 회사 모드 (계획서 2-2 c, 브라우저 저장): 그리기 전에 켜 둔다 — 스티커가 잠깐 보였다 사라지지 않게 *@
+    <script>try { if (localStorage.getItem("hbchat.company") === "1") document.documentElement.classList.add("company"); } catch { }</script>
     <partial name="_ChatStyles" />
     <link rel="stylesheet" href="~/chat.css" asp-append-version="true" />
     @await RenderSectionAsync("Head", required: false)

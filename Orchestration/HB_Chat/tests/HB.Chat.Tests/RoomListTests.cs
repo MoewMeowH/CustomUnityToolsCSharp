@@ -195,6 +195,163 @@ public sealed class RoomListTests : IDisposable
     }
 
     [Fact]
+    public void Search_TitleAndBody_CaseInsensitive_NewestFirst()
+    {
+        var a = NewRoom(title: "Unity 빌드") with { Id = "aaaaaaaaaaaa" };
+        var b = NewRoom() with { Id = "bbbbbbbbbbbb" };
+        var ta = Transcript(E(1, ChatSpeaker.User, "빌드 로그 봐 줘", 1), E(2, ChatSpeaker.Conductor, "UNITY 에러가 있습니다", 2));
+        var tb = Transcript(E(1, ChatSpeaker.User, "unity 테스트 돌려", 10), E(2, ChatSpeaker.Conductor, "No response requested.", 11));
+
+        var hits = RoomList.Search([(a, ta), (b, tb)], "  unity ");
+        // a 제목 · a 지휘자 말 · b 사용자 말 (중지된 턴 자리표시는 빼고, 이름 없는 b의 제목(= 첫 말)은 제목으로 따로 안 셈)
+        Assert.Equal(3, hits.Count);
+        Assert.Equal(("bbbbbbbbbbbb", 1), (hits[0].RoomId, hits[0].Line!.Value)); // 최근 것부터
+        Assert.Contains(hits, h => h.RoomId == "aaaaaaaaaaaa" && h.Line is null && h.Snippet == "Unity 빌드");
+        Assert.Contains(hits, h => h.RoomId == "aaaaaaaaaaaa" && h.Line == 2 && h.Speaker == ChatSpeaker.Conductor);
+
+        Assert.Empty(RoomList.Search([(a, ta)], "   "));
+        Assert.Empty(RoomList.Search([(a, ta)], new string('x', RoomList.QueryMax + 1)));
+        var many = Transcript([.. Enumerable.Range(1, 80).Select(i => E(i, ChatSpeaker.User, "찾는 말 " + i, i))]);
+        Assert.Equal(RoomList.SearchMax, RoomList.Search([(b, many)], "찾는").Count);
+    }
+
+    [Fact]
+    public void Snippet_CutsAroundMatch_OnOneLine()
+    {
+        var text = new string('가', 100) + "\n찾는 말\n" + new string('나', 100);
+        var s = RoomList.Snippet(text, text.IndexOf("찾는", StringComparison.Ordinal), 2, around: 5);
+        Assert.Equal("…가가가가 찾는 말 나나…", s); // 앞 5자(가 넷 + 줄바꿈) · 뒤 5자(공백 · 말 · 줄바꿈 · 나 둘)
+        Assert.Equal("찾는 말", RoomList.Snippet("찾는 말", 0, 2));
+    }
+
+    [Theory]
+    [InlineData("  새 이름  ", "새 이름", null)]
+    [InlineData("   ", null, null)]
+    [InlineData(null, null, null)]
+    [InlineData("줄\n바꿈", null, "줄바꿈")]
+    public void CleanTitle_TrimsAndRejects(string? input, string? title, string? errorPart)
+    {
+        var (t, error) = RoomList.CleanTitle(input);
+        Assert.Equal(title, t);
+        if (errorPart is null) Assert.Null(error); else Assert.Contains(errorPart, error);
+        Assert.NotNull(RoomList.CleanTitle(new string('가', 201)).Error);
+    }
+
+    [Fact]
+    public void Trash_PurgesOnlyExpired_AndTheirAttachments()
+    {
+        var data = Path.Combine(_dir, "data");
+        var store = new RoomStore(Path.Combine(data, "rooms.json"));
+        var now = DateTimeOffset.Now;
+        var old = store.Create("ws", PermissionLevel.Chat, "haiku", "오래됨");
+        var recent = store.Create("ws", PermissionLevel.Chat, "haiku", "최근");
+        var alive = store.Create("ws", PermissionLevel.Chat, "haiku", "살아 있음");
+        store.Update(old.Id, r => r with { DeletedAt = now.AddDays(-31) });
+        store.Update(recent.Id, r => r with { DeletedAt = now.AddDays(-29) });
+        Directory.CreateDirectory(Path.Combine(data, "attachments", old.Id));
+        File.WriteAllText(Path.Combine(data, "attachments", old.Id, "a.txt"), "x");
+        Directory.CreateDirectory(Path.Combine(data, "attachments", recent.Id));
+
+        Assert.Equal([old.Id], Trash.Purge(store, data, now));
+        Assert.Null(store.Get(old.Id));
+        Assert.False(Directory.Exists(Path.Combine(data, "attachments", old.Id)));
+        Assert.True(Directory.Exists(Path.Combine(data, "attachments", recent.Id)));
+        Assert.NotNull(new RoomStore(Path.Combine(data, "rooms.json")).Get(alive.Id)); // 저장도 됨
+        Assert.Equal(1, Trash.DaysLeft(store.Get(recent.Id)!, now)); // 29일 전에 넣음 → 하루 남음
+        Assert.Empty(Trash.Purge(store, data, now));
+    }
+
+    [Fact]
+    public void Export_Markdown_AndFileName()
+    {
+        var room = NewRoom(title: "빌드 확인");
+        var t = Transcript(
+            E(1, ChatSpeaker.User, "로그 봐 줘", 0),
+            new ChatEntry(3, T0.AddMinutes(1), ChatSpeaker.Conductor, "에러 없음\n\n[[icon:완료]]", 2) { Tools = ["Read", "Read"] },
+            E(4, ChatSpeaker.Conductor, "No response requested.", 2),
+            E(5, ChatSpeaker.System, "대화가 압축됐습니다", 3));
+        var md = ChatExport.Markdown(room, t, T0);
+        Assert.StartsWith("# 빌드 확인\n", md);
+        Assert.Contains("### 나 · ", md);
+        Assert.Contains("_도구: Read ×2_", md);
+        Assert.Contains("에러 없음\n\n[[icon:완료]]\n", md); // 글 그대로 (스티커 태그 포함)
+        Assert.Contains("> 중지된 턴", md);
+        Assert.Contains("> 안내 · ", md);
+        Assert.True(md.IndexOf("로그 봐 줘", StringComparison.Ordinal) < md.IndexOf("에러 없음", StringComparison.Ordinal));
+
+        Assert.Equal("a_b_c_20261028-1000.md", ChatExport.FileName("a/b:c", T0.ToOffset(TimeSpan.Zero)));
+        Assert.StartsWith("대화_", ChatExport.FileName("...", T0));
+    }
+
+    [Fact]
+    public void RoomStore_RemoveWhere_SavesAndChecksUnderLock()
+    {
+        var store = new RoomStore(Path.Combine(_dir, "rm", "rooms.json"));
+        var a = store.Create("ws", PermissionLevel.Chat, "haiku", null);
+        var b = store.Create("ws", PermissionLevel.Chat, "haiku", null);
+        Assert.Equal([a.Id], store.RemoveWhere(r => r.Id == a.Id));
+        Assert.Empty(store.RemoveWhere(r => r.Id == "ffffffffffff"));
+        Assert.Equal([b.Id], new RoomStore(Path.Combine(_dir, "rm", "rooms.json")).All().Select(r => r.Id));
+    }
+
+    [Fact]
+    public void Trash_RestoredRoomIsNotPurged()
+    {
+        // 지울 목록을 잠금 안에서 정한다 — 되살린 방(DeletedAt null)은 30일 기준에 안 걸린다 (95e8b1c242 C7)
+        var data = Path.Combine(_dir, "data2");
+        var store = new RoomStore(Path.Combine(data, "rooms.json"));
+        var now = DateTimeOffset.Now;
+        var room = store.Create("ws", PermissionLevel.Chat, "haiku", null);
+        store.Update(room.Id, r => r with { DeletedAt = now.AddDays(-40) });
+        store.Update(room.Id, r => r with { DeletedAt = null }); // 되살림
+        Assert.Empty(Trash.Purge(store, data, now));
+        Assert.NotNull(store.Get(room.Id));
+    }
+
+    [Fact]
+    public void Page_After_TooMany_ResetsToLastPage()
+    {
+        var entries = Enumerable.Range(1, 120).Select(i => E(i, ChatSpeaker.User, "말 " + i)).ToList();
+        var fresh = RoomList.Page(entries, null, after: 0); // 갈래 첫 턴 뒤 같은 경우
+        Assert.True(fresh.Reset);
+        Assert.Equal(50, fresh.Items.Count);
+        Assert.Equal(71, fresh.Items[0].Line);
+        Assert.True(fresh.HasMore);
+        Assert.False(RoomList.Page(entries, null, after: 70).Reset); // 50개까지는 붙인다
+    }
+
+    [Fact]
+    public void Snippet_StripsStickerTags_AndCutKeepsPairs()
+    {
+        Assert.Equal("끝났습니다", RoomList.Snippet("끝났습니다 [[icon:완료]]", 0, 3));
+        Assert.Equal("가가", RoomList.Cut("가가😀", 3)); // 이모지 앞에서 자름
+        Assert.Equal("가가😀", RoomList.Cut("가가😀", 4));
+    }
+
+    [Fact]
+    public void ReadUpToBeforeLastUser_InheritedReadThisTurnUnread()
+    {
+        var t = Transcript(
+            E(1, ChatSpeaker.User, "이어받은 질문"), E(2, ChatSpeaker.Conductor, "이어받은 답"),
+            E(5, ChatSpeaker.User, "이번 질문"), E(6, ChatSpeaker.Conductor, "이번 답"));
+        Assert.Equal(4, RoomList.ReadUpToBeforeLastUser(t));
+        Assert.Equal(1, RoomList.Build(NewRoom(readUpTo: 4), t, RoomActivity.Idle).Unread); // 이번 답만
+        Assert.Equal(2, RoomList.ReadUpToBeforeLastUser(Transcript(E(2, ChatSpeaker.Conductor, "답만"))));
+        Assert.Null(RoomList.ReadUpToBeforeLastUser(new ChatTranscript { FilePath = "x", FormatError = "잠김" }));
+        Assert.Null(RoomList.ReadUpToBeforeLastUser(null));
+    }
+
+    [Fact]
+    public void MarkLegacyRead_SkipsUnforkedForkRoom()
+    {
+        var store = new RoomStore(Path.Combine(_dir, "fk", "rooms.json"));
+        var fork = store.Create("ws", PermissionLevel.Chat, "haiku", null, forkOf: Guid.NewGuid().ToString("D"), forkSourceSize: 10);
+        Assert.Equal(10, fork.ForkSourceSize);
+        Assert.Equal(0, RoomList.MarkLegacyRead(store, new ChatTranscripts(() => Path.Combine(_dir, "none"))));
+        Assert.Null(store.Get(fork.Id)!.ReadUpTo); // 첫 턴이 끝날 때 정한다 (95e8b1c242 C1)
+    }
+
+    [Fact]
     public void Preview_DoesNotSplitSurrogatePair()
     {
         var text = new string('가', RoomList.PreviewChars - 1) + "😀끝"; // 이모지가 80자 경계에 걸침

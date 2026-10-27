@@ -16,10 +16,21 @@ public sealed record RoomSummary(
 }
 
 /// <summary>말풍선 한 쪽: 보일 말들과 그 앞에 더 있는지 (계획서 2-2 b, 50개씩 위로 불러오기).</summary>
-public sealed record MessagePage(IReadOnlyList<ChatEntry> Items, bool HasMore);
+public sealed record MessagePage(IReadOnlyList<ChatEntry> Items, bool HasMore)
+{
+    /// <summary>새 말 받기(after)인데 너무 많아 맨 끝 쪽으로 바꿨다 — 화면은 붙이지 않고 쪽 전체를 바꾼다 (/self-review 95e8b1c242 C3).</summary>
+    public bool Reset { get; init; }
+}
+
+/// <summary>검색 결과 하나 (계획서 2-2 c). Line이 없으면 방 제목에서 찾은 것.</summary>
+public sealed record SearchHit(string RoomId, string Title, int? Line, ChatSpeaker? Speaker, DateTimeOffset? At, string Snippet);
 
 /// <summary>왼쪽 방 목록 칸의 모델: 목록과 지금 연 방.</summary>
-public sealed record SidebarView(IReadOnlyList<RoomSummary> Rooms, string? CurrentId);
+public sealed record SidebarView(IReadOnlyList<RoomSummary> Rooms, string? CurrentId)
+{
+    /// <summary>휴지통에 있는 방 수 (목록 아래 "휴지통 N").</summary>
+    public int TrashCount { get; init; }
+}
 
 /// <summary>
 /// 방 목록 만들기. 세션 기록은 <see cref="ChatTranscripts"/>의 이어 읽기 캐시로 읽는다 (붙은 줄만).
@@ -37,6 +48,75 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
     public RoomSummary Summarize(Room room) =>
         Build(room, transcripts.Read(room.SessionId), hub.ActivityOf(room.Id)) with { Face = hub.FaceOf(room, transient: false) };
 
+    /// <summary>검색 결과 상한 · 검색어 길이 상한.</summary>
+    public const int SearchMax = 50, QueryMax = 100;
+
+    /// <summary>휴지통 밖 모든 방에서 찾기 (제목 + 말 본문, 대소문자 무시). 최근 것부터 <see cref="SearchMax"/>개.</summary>
+    public IReadOnlyList<SearchHit> Search(string query) =>
+        Search(store.All().Where(r => r.DeletedAt is null).Select(r => (r, transcripts.Read(r.SessionId))), query);
+
+    public static IReadOnlyList<SearchHit> Search(IEnumerable<(Room Room, ChatTranscript? Transcript)> rooms, string query)
+    {
+        var q = query.Trim();
+        if (q.Length == 0 || q.Length > QueryMax) return [];
+        var hits = new List<SearchHit>();
+        foreach (var (room, transcript) in rooms)
+        {
+            var title = TitleOf(room, transcript);
+            // 붙인 이름 · 세션 이름만 제목으로 찾는다 — 이름이 없으면 제목이 첫 말이라 같은 말이 두 번 나온다
+            if ((room.Title ?? transcript?.Title) is { } named && named.Contains(q, StringComparison.OrdinalIgnoreCase))
+                hits.Add(new SearchHit(room.Id, title, null, null, room.LastRunAt ?? room.CreatedAt, named));
+            if (transcript?.FormatError is not null) continue;
+            foreach (var e in transcript?.Entries ?? [])
+            {
+                if (IsStoppedTurn(e)) continue;
+                var at = e.Text.IndexOf(q, StringComparison.OrdinalIgnoreCase);
+                if (at >= 0) hits.Add(new SearchHit(room.Id, title, e.Line, e.Speaker, e.Timestamp, Snippet(e.Text, at, q.Length)));
+            }
+        }
+        return [.. hits.OrderByDescending(h => h.At ?? DateTimeOffset.MinValue).Take(SearchMax)];
+    }
+
+    /// <summary>찾은 곳 앞뒤 글 조각 (한 줄로, 앞뒤 잘렸으면 …).</summary>
+    public static string Snippet(string text, int at, int length, int around = 40)
+    {
+        var start = Math.Max(0, at - around);
+        var end = Math.Min(text.Length, at + length + around);
+        if (start > 0 && char.IsLowSurrogate(text[start])) start--;
+        if (end < text.Length && char.IsLowSurrogate(text[end])) end++;
+        // 스티커 태그는 걷는다 — 회사 모드에서도 글자로 보이지 않게 (95e8b1c242 C8)
+        var piece = Space().Replace(StickerTag().Replace(text[start..end], " "), " ").Trim();
+        return (start > 0 ? "…" : "") + piece + (end < text.Length ? "…" : "");
+    }
+
+    /// <summary>
+    /// 갈래 첫 턴 뒤의 읽음 위치: 이번 턴 사용자 말(기록의 마지막 사용자 말) 바로 앞 줄 — 이어받은 말은 읽음, 이번 턴부터 안 읽음
+    /// (/self-review 95e8b1c242 C1). 사용자 말이 없으면 마지막 줄, 기록을 못 읽으면 null.
+    /// </summary>
+    public static int? ReadUpToBeforeLastUser(ChatTranscript? transcript)
+    {
+        if (transcript is not { FormatError: null } t) return null;
+        var lastUser = t.Entries.LastOrDefault(e => e.Speaker == ChatSpeaker.User);
+        return lastUser is null ? LastLine(t) : lastUser.Line - 1;
+    }
+
+    /// <summary>max자에서 자르되 서로게이트 쌍(이모지 등) 가운데를 가르지 않는다 (95e8b1c242 C10).</summary>
+    public static string Cut(string s, int max)
+    {
+        if (s.Length <= max) return s;
+        return s[..(char.IsHighSurrogate(s[max - 1]) ? max - 1 : max)];
+    }
+
+    /// <summary>방 이름 바꾸기 값 검사: 앞뒤 공백 걷고, 비우면 null(첫 말로 돌아감), 200자 넘으면 오류.</summary>
+    public static (string? Title, string? Error) CleanTitle(string? title)
+    {
+        var t = title?.Trim();
+        if (string.IsNullOrEmpty(t)) return (null, null);
+        if (t.Length > 200) return (null, "제목이 너무 깁니다 (200자까지).");
+        if (t.Any(char.IsControl)) return (null, "제목에 줄바꿈 · 제어 문자를 넣을 수 없습니다.");
+        return (t, null);
+    }
+
     /// <summary>한 번에 그리는 말 수.</summary>
     public const int PageSize = 50;
 
@@ -46,7 +126,13 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
     /// </summary>
     public static MessagePage Page(IReadOnlyList<ChatEntry> entries, int? before, int? after, int size = PageSize)
     {
-        if (after is { } a) return new MessagePage([.. entries.Where(e => e.Line > a)], false);
+        if (after is { } a)
+        {
+            var fresh = entries.Where(e => e.Line > a).ToList();
+            // 갈래 첫 턴처럼 새 말이 한 쪽보다 많으면 다 붙이지 않고 맨 끝 쪽으로 바꾼다 (95e8b1c242 C3)
+            if (fresh.Count <= size) return new MessagePage(fresh, false);
+            return Page(entries, null, null, size) with { Reset = true };
+        }
         var end = before is { } b ? entries.Count(e => e.Line < b) : entries.Count; // 줄 번호는 늘어나기만 한다
         var start = Math.Max(0, end - size);
         while (start > 0 && start < end && entries[start - 1].Line == entries[start].Line) start--;
@@ -112,7 +198,8 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
     {
         if (store.LoadError is not null) return 0;
         var moved = 0;
-        foreach (var room in store.All().Where(r => r.ReadUpTo is null))
+        // 아직 갈라지지 않은 갈래 방은 건너뛴다 — 첫 턴이 끝날 때 읽음 위치를 정한다 (95e8b1c242 C1)
+        foreach (var room in store.All().Where(r => r.ReadUpTo is null && r.ForkOf is null))
         {
             var last = LastLine(transcripts.Read(room.SessionId));
             store.Update(room.Id, r => r.ReadUpTo is null ? r with { ReadUpTo = last } : r);
@@ -151,10 +238,8 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
         s = LineMark().Replace(s, "");
         s = s.Replace("**", "").Replace("__", "").Replace("`", "");
         s = Space().Replace(s, " ").Trim();
-        if (s.Length <= PreviewChars) return s;
         // 서로게이트 쌍(이모지 등) 가운데를 자르지 않는다 (/self-review 5225b1ffaf C9).
-        var cut = char.IsHighSurrogate(s[PreviewChars - 1]) ? PreviewChars - 1 : PreviewChars;
-        return s[..cut] + "…";
+        return s.Length <= PreviewChars ? s : Cut(s, PreviewChars) + "…";
     }
 
     [GeneratedRegex(@"\[\[icon:[^\]\r\n]*\]\]")]

@@ -125,6 +125,79 @@ public sealed class RoomHubTests : IDisposable
     }
 
     [Fact]
+    public async Task ForkRoom_FirstRunForks_ThenClears()
+    {
+        const string source = "2ac92fd3-e819-408f-a834-c33490b7c038";
+        var room = _store.Create("ws", PermissionLevel.Chat, "opus", "갈래", forkOf: source);
+        Assert.Null(room.ReadUpTo); // 이어받은 말은 읽은 것으로
+        var ch = _hub.Subscribe(room.Id);
+        Assert.Null(_hub.Send(room.Id, "hello fork"));
+        await Until(ch, e => e.Kind == "idle");
+        Assert.Equal(source, Assert.Single(_specs).ForkFrom);
+        Assert.Null(_store.Get(room.Id)!.ForkOf); // 성공하면 한 번으로 끝
+
+        Assert.Null(_hub.Send(room.Id, "hello again"));
+        await Until(ch, e => e.Kind == "idle");
+        Assert.Null(_specs[1].ForkFrom);
+    }
+
+    [Fact]
+    public async Task ForkRoom_RecordAlreadyThere_ResumesAndClearsFork()
+    {
+        // 중지 등으로 갈래 기록이 이미 생긴 방: 다음 실행은 resume이고 갈래 표시는 비운다 (중복 갈래 없음)
+        var room = _store.Create("ws", PermissionLevel.Chat, "opus", null, forkOf: "2ac92fd3-e819-408f-a834-c33490b7c038");
+        var dir = Path.Combine(_dir, "projects", "ws");
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, room.SessionId + ".jsonl"),
+            """{"type":"user","timestamp":"2026-10-28T00:00:00Z","message":{"role":"user","content":"이어받은 질문"}}""" + "\n");
+        var ch = _hub.Subscribe(room.Id);
+        Assert.Null(_hub.Send(room.Id, "hello fork"));
+        await Until(ch, e => e.Kind == "idle");
+        Assert.True(Assert.Single(_specs).Resume);
+        Assert.Null(_specs[0].ForkFrom);
+        Assert.Null(_store.Get(room.Id)!.ForkOf);
+    }
+
+    [Fact]
+    public void Search_SkipsTrash()
+    {
+        var kept = _store.Create("ws", PermissionLevel.Chat, "opus", "빌드 방 하나");
+        var trashed = _store.Create("ws", PermissionLevel.Chat, "opus", "빌드 방 둘");
+        _store.Update(trashed.Id, r => r with { DeletedAt = DateTimeOffset.Now });
+        var hits = new RoomList(_store, _hub, new ChatTranscripts(() => Path.Combine(_dir, "projects"))).Search("빌드");
+        Assert.Equal([kept.Id], hits.Select(h => h.RoomId));
+    }
+
+    [Fact]
+    public async Task ForkRoom_SourceBusy_RejectsFirstRun()
+    {
+        var source = NewRoom();
+        var sourceCh = _hub.Subscribe(source.Id);
+        Assert.Null(_hub.Send(source.Id, "sleep please"));
+        await Until(sourceCh, e => e.Kind == "delta");
+
+        var fork = _store.Create("ws", PermissionLevel.Chat, "opus", null, forkOf: source.SessionId);
+        var ch = _hub.Subscribe(fork.Id);
+        Assert.Null(_hub.Send(fork.Id, "hello fork"));
+        var end = (await Until(ch, e => e.Kind == "idle")).Single(e => e.Kind == "end");
+        Assert.False(end.Ok);
+        Assert.Contains("원래 방이 실행 중", end.Text);
+        Assert.NotNull(_store.Get(fork.Id)!.ForkOf); // 끝난 뒤 다시 보내면 갈래로
+        _hub.Stop(source.Id);
+        await Until(sourceCh, e => e.Kind == "idle");
+    }
+
+    [Fact]
+    public async Task ForkRoom_FailedFirstRun_KeepsFork()
+    {
+        var room = _store.Create("ws", PermissionLevel.Chat, "opus", null, forkOf: "2ac92fd3-e819-408f-a834-c33490b7c038");
+        var ch = _hub.Subscribe(room.Id);
+        Assert.Null(_hub.Send(room.Id, "fail now"));
+        await Until(ch, e => e.Kind == "idle");
+        Assert.NotNull(_store.Get(room.Id)!.ForkOf); // 다시 보내면 또 갈래로 시도
+    }
+
+    [Fact]
     public void FaceOf_IdleFailedSleep()
     {
         var room = NewRoom();

@@ -1,11 +1,20 @@
 @model SidebarView
 @*
-    왼쪽 방 목록 칸 (계획서 2-2 a). 목록 부분(_RoomList)은 앱 전체 알림(/events)을 받으면 화면이 ?handler=RoomList로 다시 받는다.
+    왼쪽 방 목록 칸 (계획서 2-2 a · c). 목록 부분(_RoomList)은 목록 신호를 받으면 화면이 ?handler=RoomList로 다시 받는다.
+    검색칸에 글을 쓰면 목록 대신 검색 결과(_SearchResults)를 보인다. 아래: 휴지통 · 회사 모드(브라우저 저장 — 사용자 결정).
 *@
 <aside class="sidebar">
     <div class="top">
         <a class="brand" href="/">HB Chat</a>
         <a class="btn" href="/?new=1" style="margin-left:auto" title="새 방 만들기">+ 새 방</a>
     </div>
+    <div class="search-box">
+        <input type="search" id="search" placeholder="방 · 말 검색" maxlength="@RoomList.QueryMax" autocomplete="off" />
+    </div>
+    <div id="search-results" hidden></div>
     <partial name="_RoomList" model="Model" />
+    <div class="side-foot">
+        <a href="/?trash=1" id="trash-link">휴지통 <span id="trash-count">@Model.TrashCount</span></a>
+        <label title="지휘자 표정 · 스티커를 숨깁니다 (이 브라우저에만 저장)"><input type="checkbox" id="company" /> 회사 모드</label>
+    </div>
 </aside>

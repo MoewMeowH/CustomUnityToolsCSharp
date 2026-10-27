@@ -4,7 +4,7 @@
     ViewData["Title"] = "HB Chat";
 }
 @* 두 칸 화면의 첫 화면 (계획서 2-2 a): 왼쪽 방 목록 + 오른쪽 새 방 만들기. 좁은 폭에서는 목록만 보이고 "+ 새 방"이 이 칸을 연다. *@
-<div class="app@(Model.Error is not null || Model.Sidebar.Rooms.Count == 0 || Request.Query.ContainsKey("new") ? " in-room" : "")">
+<div class="app@(Model.Error is not null || Model.ShowTrash || Model.Sidebar.Rooms.Count == 0 || Request.Query.ContainsKey("new") ? " in-room" : "")">
     <partial name="_Sidebar" model="Model.Sidebar" />
     <section class="pane" id="pane">
         <div class="welcome">
@@ -16,6 +16,27 @@
             @if (Model.Error is not null)
             {
                 <div class="panel" style="padding:10px 14px;border-color:var(--warn);margin-bottom:12px">@Model.Error</div>
+            }
+            @if (Model.ShowTrash)
+            {
+                @* 휴지통 (계획서 2-2 c): 30일이 지나면 방 목록에서 지운다 — 세션 기록은 남는다 (사용자 결정) *@
+                <section class="panel" style="padding:12px 14px;margin-bottom:16px">
+                    <h2 style="margin:0 0 6px;font-size:16px">휴지통</h2>
+                    <p class="muted" style="margin:0 0 10px;font-size:12.5px">넣은 지 30일이 지나면 방 목록 · 첨부를 지웁니다. 세션 기록(대시보드에서 보이는 대화)은 남습니다.</p>
+                    @if (Model.TrashRooms.Count == 0)
+                    {
+                        <p class="muted" style="margin:0">비어 있습니다.</p>
+                    }
+                    @foreach (var r in Model.TrashRooms)
+                    {
+                        <form method="post" asp-page-handler="Restore" class="trash-row">
+                            <input type="hidden" name="id" value="@r.Id" />
+                            <a href="/Room/@r.Id">@Model.TitleOf(r)</a>
+                            <span class="muted">@r.DeletedAt?.ToLocalTime().ToString("MM-dd HH:mm") · @Trash.DaysLeft(r, DateTimeOffset.Now)일 남음</span>
+                            <button class="btn" type="submit">되살리기</button>
+                        </form>
+                    }
+                </section>
             }
             <section class="panel" style="padding:12px 14px">
                 <h2 style="margin:0 0 10px;font-size:16px">새 방</h2>

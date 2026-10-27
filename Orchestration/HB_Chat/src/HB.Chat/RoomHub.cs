@@ -545,6 +545,11 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
 
         var size = transcripts.Size(room.SessionId);
         var resume = size is not null;
+        // 갈래 첫 실행: 원래 방이 턴 도중이면(기록을 쓰는 중) 갈라지지 않게 기다리게 한다 (/self-review 95e8b1c242 C2). 갈래 표시는 남는다.
+        if (!resume && room.ForkOf is { } source
+            && store.All().FirstOrDefault(r => string.Equals(r.SessionId, source, StringComparison.OrdinalIgnoreCase)) is { } sourceRoom
+            && IsBusy(sourceRoom.Id))
+            return Record(room, new RunResult(false, false, "원래 방이 실행 중입니다 — 그 턴이 끝난 뒤 다시 보내세요 (갈래는 그때까지의 대화를 이어받습니다).", null, null, null, 0, 0, null));
         if (resume && room.KnownSize is { } known && known != size)
         {
             // 앞 실행이 끝을 남기지 못했으면(앱 종료) 그 실행이 쓴 것이다. 아니면 다른 곳(Claude 앱 · CLI)에서
@@ -588,7 +593,10 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         }
 
         var spec = new RunSpec(room.Level, room.Model, room.SessionId, resume, mcpConfig, o.McpServer, RoomRules.For(room.Level),
-            hookUrl, Math.Max(1, o.ApprovalTimeoutSeconds) + 30, room.AllowRules);
+            hookUrl, Math.Max(1, o.ApprovalTimeoutSeconds) + 30, room.AllowRules)
+        {
+            ForkFrom = resume ? null : room.ForkOf, // 갈래 방의 첫 실행 (2-2 c)
+        };
         ProcessSpec process;
         try
         {
@@ -630,18 +638,25 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         }, stopOnMismatch.Token);
 
         if (mismatch is not null) result = result with { Ok = false, Cancelled = false, Error = mismatch };
-        return Record(room, result);
+        return Record(room, result, forked: spec.ForkFrom is not null && result.Ok);
     }
 
+    private int? ForkReadUpTo(string sessionId) => RoomList.ReadUpToBeforeLastUser(transcripts.Read(sessionId));
+
     /// <summary>실행 결과를 방에 남긴다. 세션 기록 크기는 이 앱이 쓴 뒤의 값으로 (다음 말 때 밖에서 바뀌었는지 볼 기준).</summary>
-    private RunResult Record(Room room, RunResult result)
+    private RunResult Record(Room room, RunResult result, bool forked = false)
     {
         var size = transcripts.Size(room.SessionId);
+        var forkRead = forked ? ForkReadUpTo(room.SessionId) : null;
         try
         {
             store.Update(room.Id, r => r with
             {
                 LastRunAt = DateTimeOffset.Now,
+                // 갈래는 한 번만: 성공했거나 이 방의 세션 기록이 생겼으면(중지돼도 CLI가 이미 갈라 썼다) 다음부터는 resume이다
+                ForkOf = forked || size is not null ? null : r.ForkOf,
+                // 갈래가 끝나면 이어받은 말은 읽은 것으로 — 이번 턴의 답만 안 읽음에 세진다 (/self-review 95e8b1c242 C1)
+                ReadUpTo = forkRead is { } f && r.ReadUpTo is null ? f : r.ReadUpTo,
                 // 사용자가 멈춘 실행은 실패가 아니다 — 목록의 "실패" 표시 · 방의 "마지막 실행 실패" 줄에 남기지 않는다 (2-2 a 실제 확인에서 발견).
                 LastError = result.Ok || result.Cancelled ? null : result.Error,
                 TotalCostUsd = result.CostUsd ?? r.TotalCostUsd,

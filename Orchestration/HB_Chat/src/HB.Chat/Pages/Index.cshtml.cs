@@ -8,19 +8,60 @@ namespace HB.Chat.Pages;
 /// 방을 고르지 않은 첫 화면: 왼쪽 방 목록 + 오른쪽 새 방 만들기.
 /// ?handler=RoomList: 앱 전체 알림을 받은 화면이 목록 부분만 다시 받는다 (계획서 2-2 a).
 /// </summary>
-public sealed class IndexModel(RoomStore store, RoomHub hub, RoomList list, IOptions<ChatOptions> options) : PageModel
+public sealed class IndexModel(RoomStore store, RoomHub hub, RoomList list, ChatTranscripts transcripts, IOptions<ChatOptions> options) : PageModel
 {
+    /// <summary>휴지통 목록의 방 제목 — 화면 다른 곳과 같은 규칙 (이름 없으면 첫 말, /self-review 95e8b1c242 C6).</summary>
+    public string TitleOf(Room room) => RoomList.TitleOf(room, transcripts.Read(room.SessionId));
+
     public SidebarView Sidebar { get; private set; } = new([], null);
     public ChatOptions Options => options.Value;
     public string? LoadError => store.LoadError;
     public string? Error { get; private set; }
 
-    public void OnGet() => Sidebar = new SidebarView(list.All(), null);
+    /// <summary>?trash=1이면 오른쪽에 휴지통 (계획서 2-2 c).</summary>
+    public bool ShowTrash { get; private set; }
+    public IReadOnlyList<Room> TrashRooms { get; private set; } = [];
+
+    /// <summary>trash는 문자열로 받는다 — bool 바인딩은 "1"을 받지 않아 휴지통이 안 보였다 (2-2 c 실제 확인).</summary>
+    public void OnGet(string? trash = null)
+    {
+        Sidebar = new SidebarView(list.All(), null) { TrashCount = store.All().Count(r => r.DeletedAt is not null) };
+        ShowTrash = trash is "1" or "true";
+        if (ShowTrash) TrashRooms = [.. store.All().Where(r => r.DeletedAt is not null).OrderByDescending(r => r.DeletedAt)];
+    }
 
     public IActionResult OnGetRoomList(string? current)
     {
         Response.Headers.CacheControl = "no-store";
-        return Partial("_RoomList", new SidebarView(list.All(), RoomStore.IsRoomId(current) ? current : null));
+        return Partial("_RoomList", new SidebarView(list.All(), RoomStore.IsRoomId(current) ? current : null)
+        {
+            TrashCount = store.All().Count(r => r.DeletedAt is not null),
+        });
+    }
+
+    /// <summary>검색 (계획서 2-2 c): 휴지통 밖 모든 방의 제목 · 말. 결과는 왼쪽 칸에 목록 대신.</summary>
+    public IActionResult OnGetSearch(string? q)
+    {
+        Response.Headers.CacheControl = "no-store";
+        return Partial("_SearchResults", list.Search(q ?? ""));
+    }
+
+    /// <summary>휴지통에서 되살리기 (휴지통 화면의 단추, 양식 POST).</summary>
+    public IActionResult OnPostRestore(string id)
+    {
+        if (!RoomStore.IsRoomId(id)) return NotFound();
+        try
+        {
+            store.Update(id, r => r with { DeletedAt = null });
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            Error = $"되살리지 못했습니다: {ex.Message}";
+            OnGet(trash: "1");
+            return Page();
+        }
+        hub.Touch(id);
+        return Redirect($"/Room/{id}");
     }
 
     public IActionResult OnPostCreate(string workspace, PermissionLevel level, string model, string? title)

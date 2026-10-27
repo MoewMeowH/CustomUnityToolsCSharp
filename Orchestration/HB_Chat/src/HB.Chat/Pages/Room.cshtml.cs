@@ -31,11 +31,15 @@ public sealed class RoomModel(
 
     public FaceCatalog Faces => faces;
 
+    /// <summary>갈래 방: 만든 뒤 원래 방이 더 진행됐는지 (첫 말 때 그 뒤 대화까지 이어받는다 — 95e8b1c242 C2).</summary>
+    public bool ForkSourceGrew =>
+        Room.ForkOf is { } source && Room.ForkSourceSize is { } then && transcripts.Size(source) is { } now && now != then;
+
     /// <summary>머리말 표정 (끝난 턴의 잠깐 표정 포함).</summary>
     public Face Face => hub.FaceOf(Room);
 
     /// <summary>왼쪽 방 목록 (첫 화면에서만 만든다 — 방 전환 · 말풍선 다시 받기에는 쓰지 않음).</summary>
-    public SidebarView Sidebar => new(list.All(), Room.Id);
+    public SidebarView Sidebar => new(list.All(), Room.Id) { TrashCount = store.All().Count(r => r.DeletedAt is not null) };
     /// <summary>대시보드 채팅방 (세션 기록이 생긴 뒤부터 보인다 — 첫 말 전에는 대시보드가 404).</summary>
     public string? DashboardLink =>
         options.Value.DashboardUrl is { Length: > 0 } url ? $"{url.TrimEnd('/')}/Room/{Room.SessionId}" : null;
@@ -64,6 +68,8 @@ public sealed class RoomModel(
     public IActionResult OnPostMarkRead(string id, int line)
     {
         if (!RoomStore.IsRoomId(id) || line < 0 || store.Get(id) is not { } current) return NotFound();
+        // 아직 갈라지지 않은 갈래 방은 읽음을 적지 않는다 — 빈 방의 0이 남으면 이어받은 말이 전부 안 읽음이 된다 (95e8b1c242 C1)
+        if (current.ForkOf is not null) return new JsonResult(new { ok = true });
         if (RoomList.NextReadUpTo(current.ReadUpTo, line, RoomList.LastLine(transcripts.Read(current.SessionId))) is not { } next)
             return new JsonResult(new { ok = true });
         try
@@ -85,8 +91,79 @@ public sealed class RoomModel(
         // 읽기 실패는 실패로 돌려준다: 화면이 앞 말풍선을 그대로 둔다 (대시보드 채팅방과 같은 처리).
         if (Transcript?.FormatError is not null) return StatusCode(StatusCodes.Status503ServiceUnavailable);
         Messages = RoomList.Page(Transcript?.Entries ?? [], before, after);
-        Fragment = before is not null || after is not null;
+        Fragment = (before is not null || after is not null) && !Messages.Reset;
         return Partial("_Messages", this);
+    }
+
+    /// <summary>방 이름 바꾸기 (비우면 첫 말로 돌아감). 목록 알림을 낸다.</summary>
+    public IActionResult OnPostRename(string id, string? title)
+    {
+        if (!RoomStore.IsRoomId(id)) return NotFound();
+        var (clean, error) = RoomList.CleanTitle(title);
+        if (error is not null) return BadRequest(error);
+        return Change(id, r => r with { Title = clean }, "이름을 바꾸지 못했습니다");
+    }
+
+    /// <summary>휴지통으로 (30일 뒤 완전히 지움). 실행 중인 방은 먼저 중지해야 한다 — 기다리는 승인 · 큐가 버려지지 않게.</summary>
+    public IActionResult OnPostTrash(string id)
+    {
+        if (!RoomStore.IsRoomId(id)) return NotFound();
+        if (hub.IsBusy(id)) return BadRequest("실행 중인 방입니다 — 중지한 뒤 휴지통에 넣으세요.");
+        return Change(id, r => r with { DeletedAt = DateTimeOffset.Now }, "휴지통에 넣지 못했습니다");
+    }
+
+    public IActionResult OnPostRestore(string id)
+    {
+        if (!RoomStore.IsRoomId(id)) return NotFound();
+        return Change(id, r => r with { DeletedAt = null }, "되살리지 못했습니다");
+    }
+
+    /// <summary>
+    /// 방 복제(갈래, 계획서 2-2 c): 지금까지 대화를 이어받는 새 방. 같은 작업 폴더 · 권한 · 모델, "항상 허용" 규칙은 옮기지 않는다.
+    /// 첫 말을 보낼 때 CLI가 대화를 복사한다 (--fork-session). 세션 기록이 없거나 실행 중이면 거절.
+    /// </summary>
+    public IActionResult OnPostFork(string id)
+    {
+        if (!Load(id)) return NotFound();
+        if (Room.DeletedAt is not null) return BadRequest("휴지통에 있는 방입니다.");
+        if (hub.IsBusy(id)) return BadRequest("실행 중인 방은 복제하지 않습니다 — 턴이 끝난 뒤 다시 하세요.");
+        if (transcripts.Size(Room.SessionId) is null) return BadRequest("아직 대화가 없어 복제할 것이 없습니다.");
+        var (title, _) = RoomList.CleanTitle(RoomList.Cut(Title, 190) + " (갈래)");
+        try
+        {
+            var fork = store.Create(Room.Workspace, Room.Level, Room.Model, title, forkOf: Room.SessionId,
+                forkSourceSize: transcripts.Size(Room.SessionId));
+            hub.Touch(fork.Id);
+            return new JsonResult(new { ok = true, id = fork.Id });
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            return BadRequest($"복제하지 못했습니다: {ex.Message}");
+        }
+    }
+
+    /// <summary>Markdown 내보내기 (내려받기).</summary>
+    public IActionResult OnGetExport(string id)
+    {
+        if (!Load(id)) return NotFound();
+        var now = DateTimeOffset.Now;
+        Response.Headers.CacheControl = "no-store";
+        return File(System.Text.Encoding.UTF8.GetBytes(ChatExport.Markdown(Room, Transcript, now)), "text/markdown; charset=utf-8",
+            ChatExport.FileName(Title, now));
+    }
+
+    private IActionResult Change(string id, Func<Room, Room> change, string failure)
+    {
+        try
+        {
+            if (store.Update(id, change) is null) return NotFound();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            return BadRequest($"{failure}: {ex.Message}");
+        }
+        hub.Touch(id);
+        return new JsonResult(new { ok = true });
     }
 
     public IActionResult OnPostSend(string id, string? text)

@@ -42,6 +42,15 @@ public sealed record Room
     /// <summary>휴지통에 넣은 시각 (계획서 2-2 c). 있으면 목록에서 빠지고 말을 보내지 않는다.</summary>
     public DateTimeOffset? DeletedAt { get; init; }
 
+    /// <summary>
+    /// 갈래 방(계획서 2-2 c 방 복제): 이어받을 원래 세션 ID. 첫 실행을 <c>--resume 원래 --fork-session --session-id 이 방</c>으로 하고,
+    /// 성공하면 비운다 (2-2 0번 실측: fork-session에 session-id를 주면 그 ID로 갈라진다).
+    /// </summary>
+    public string? ForkOf { get; init; }
+
+    /// <summary>갈래를 만들 때 원래 세션 기록의 크기. 첫 말 전에 원래 방이 더 진행됐는지 방 칸에 알리는 기준 (/self-review 95e8b1c242 C2).</summary>
+    public long? ForkSourceSize { get; init; }
+
     /// <summary>마지막 실행이 끝날 때의 컨텍스트 크기 · 창 (토큰, 계획서 2-2 b 컨텍스트 표시). 첫 턴 전에는 없다.</summary>
     public long? ContextTokens { get; init; }
     public int? ContextWindow { get; init; }
@@ -89,7 +98,10 @@ public sealed class RoomStore
         lock (_lock) return _rooms.FirstOrDefault(r => r.Id == id);
     }
 
-    public Room Create(string workspace, PermissionLevel level, string model, string? title)
+    /// <summary>
+    /// 새 방. forkOf가 있으면 그 세션의 대화를 이어받는 갈래 방 — 읽음 위치는 null(이어받은 말은 읽은 것으로, 켤 때 마지막 줄로 옮겨짐).
+    /// </summary>
+    public Room Create(string workspace, PermissionLevel level, string model, string? title, string? forkOf = null, long? forkSourceSize = null)
     {
         var room = new Room
         {
@@ -100,7 +112,9 @@ public sealed class RoomStore
             Model = model,
             CreatedAt = DateTimeOffset.Now,
             Title = string.IsNullOrWhiteSpace(title) ? null : title.Trim(),
-            ReadUpTo = 0,
+            ReadUpTo = forkOf is null ? 0 : null,
+            ForkOf = forkOf,
+            ForkSourceSize = forkOf is null ? null : forkSourceSize,
         };
         lock (_lock)
         {
@@ -139,6 +153,32 @@ public sealed class RoomStore
                 throw;
             }
             return _rooms[i];
+        }
+    }
+
+    /// <summary>
+    /// 조건에 맞는 방을 색인에서 뺀다 (휴지통 30일 지남). 뺀 방 ID 목록. 조건은 잠금 안에서 본다 — 같은 순간의 되살리기와 겹쳐도
+    /// 되살린 방은 지우지 않는다 (/self-review 95e8b1c242 C7). 저장에 실패하면 메모리도 되돌린다.
+    /// </summary>
+    public IReadOnlyList<string> RemoveWhere(Func<Room, bool> remove)
+    {
+        lock (_lock)
+        {
+            ThrowIfBroken();
+            var before = _rooms;
+            var removed = _rooms.Where(remove).Select(r => r.Id).ToList();
+            if (removed.Count == 0) return [];
+            _rooms = [.. _rooms.Where(r => !removed.Contains(r.Id))];
+            try
+            {
+                Save();
+            }
+            catch
+            {
+                _rooms = before;
+                throw;
+            }
+            return removed;
         }
     }
 

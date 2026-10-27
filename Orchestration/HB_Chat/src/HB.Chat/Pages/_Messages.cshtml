@@ -11,7 +11,7 @@
 @* data-error: 세션 기록을 읽지 못한 채 그린 쪽 — 화면은 다음 새 말 받기 대신 쪽 전체를 다시 받는다 (/self-review 83b453653b C6) *@
 <div class="chat" id="chat" data-title="@Model.Title" data-last-line="@Model.LastLine"
      data-first-line="@(items.Count > 0 ? items[0].Line : -1)" data-has-more="@(Model.Messages.HasMore ? "1" : "0")"
-     data-error="@(Model.Transcript?.FormatError is null ? null : "1")">
+     data-error="@(Model.Transcript?.FormatError is null ? null : "1")" data-reset="@(Model.Messages.Reset ? "1" : null)">
     @if (!Model.Fragment && Model.Transcript?.FormatError is { } formatError)
     {
         <div class="panel" style="padding:10px 14px;border-color:var(--warn)">세션 기록을 읽지 못했습니다: @formatError</div>

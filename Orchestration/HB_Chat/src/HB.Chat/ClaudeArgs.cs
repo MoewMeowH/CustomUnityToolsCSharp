@@ -17,7 +17,11 @@ public sealed record RunSpec(
     string? AppendSystemPrompt,
     string? ApprovalHookUrl = null,
     int HookTimeoutSeconds = 600,
-    IReadOnlyList<string>? AllowRules = null);
+    IReadOnlyList<string>? AllowRules = null)
+{
+    /// <summary>갈래 방의 첫 실행: 이어받을 원래 세션 ID (Resume이 아닐 때만 쓴다, 계획서 2-2 c).</summary>
+    public string? ForkFrom { get; init; }
+}
 
 /// <summary>
 /// 권한 단계 → claude 인자 (계획서 4번 표 + 0번 실측: 읽기 · 편집도 --strict-mcp-config로 claude.ai 커넥터 · 사용자 MCP를 막는다).
@@ -56,7 +60,15 @@ public static partial class ClaudeArgs
             "-p", "--output-format", "stream-json", "--include-partial-messages", "--verbose",
             "--model", spec.Model,
         };
-        args.AddRange(spec.Resume ? ["--resume", spec.SessionId] : ["--session-id", spec.SessionId]);
+        if (spec.Resume) args.AddRange(["--resume", spec.SessionId]);
+        else if (spec.ForkFrom is { } source)
+        {
+            // 갈래: 원래 세션을 이어받아 이 방의 ID로 새 세션을 만든다 (2-2 0번 실측 — init · result 모두 그 ID).
+            if (!Guid.TryParseExact(source, "D", out _) || string.Equals(source, spec.SessionId, StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException($"갈래의 원래 세션 ID가 올바르지 않다: {source}");
+            args.AddRange(["--resume", source, "--fork-session", "--session-id", spec.SessionId]);
+        }
+        else args.AddRange(["--session-id", spec.SessionId]);
         // 시스템 프롬프트는 첫 요청 때 세션에 기록되고 압축 전까지는 resume해도 기록된 값이 쓰인다. 그 뒤로는 그 실행에 준 값이 쓰인다 (문서)
         // → 방 규칙은 매 말 같은 값을 넣는다. 안 넣으면 압축 뒤 규칙이 빠진다 (/self-review 0a3b1d5155 C2).
         if (!string.IsNullOrWhiteSpace(spec.AppendSystemPrompt))
