@@ -77,6 +77,9 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         var (loadedImages, imageError) = ImageLoader.Load(images, Options.Images, Options.Context, Environment.CurrentDirectory, ct);
         if (imageError is not null) return $"[첨부 이미지 오류] {imageError}";
 
+        // 결과 머리말의 첨부 여유 (claude-cli는 첨부 본문을 보내지 않아 이 상한과 무관 — 표시하지 않음)
+        var headroom = cliSteps > 0 ? null : ResultFormatter.AttachmentHeadroom(attached!.Text.Length, input.Length, maxChars);
+
         // 첨부 자료는 input과 따로 들고 다니다가 프롬프트 맨 앞에 둔다 (같은 자료로 다시 물을 때 앞부분이 같아야 캐시에 걸린다).
         var promptInput = new PromptInput(input, attached!.Text, loadedImages!);
         var meta = new CallMeta(files, attached.Sources)
@@ -158,7 +161,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         if (FindingOverlap.Lines(results.SelectMany(r => r.Structured?.Findings ?? [])) is { Count: > 0 } overlaps)
             note = note is null ? string.Join("\n", overlaps) : $"{string.Join("\n", overlaps)}\n{note}";
 
-        return ResultFormatter.Format(runId, results, returnAll, note);
+        return ResultFormatter.Format(runId, results, returnAll, note, headroom);
     }
 
     /// <summary>

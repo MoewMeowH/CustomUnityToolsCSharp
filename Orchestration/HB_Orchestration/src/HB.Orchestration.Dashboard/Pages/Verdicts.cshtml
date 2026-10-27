@@ -92,7 +92,7 @@ else
     </section>
 }
 
-@if (s.Requests is { Total: > 0 } q)
+@if (s.Requests is { } q && (q.Total > 0 || q.Weeks.Count > 0))
 {
     <section class="panel block">
         <h2>자료 요청 처리</h2>
@@ -108,6 +108,27 @@ else
                 }
             </ul>
             @if (q.Open.Count > 30) { <p class="muted note">외 @(q.Open.Count - 30)건</p> }
+        }
+        @if (q.Weeks.Count > 0)
+        {
+            <h3>주별 자료 요청</h3>
+            <p class="muted note">review_* 실행(골든 평가 · 해석 실패 · 보충 단계 제외) 중 요청이 있는 실행의 비율. 2026-10-27 첨부 범위 규칙(정의 · 호출부 · 설정 · 테스트까지 첨부) 전후 비교용 — 그 전 기준: 리뷰 69건 중 24건(35%), 요청 59건. 위 기간 필터를 따르므로 가장 오래된 주는 일부만 세질 수 있다 (실행 수를 같이 본다).</p>
+            <table>
+                <thead><tr><th>주(월요일)</th><th class="num">실행</th><th class="num">요청 있는 실행</th><th class="num">비율</th><th class="num">요청</th><th class="num">실행당</th></tr></thead>
+                <tbody>
+                    @foreach (var w in q.Weeks)
+                    {
+                        <tr>
+                            <td class="mono">@w.WeekStart.ToString("yyyy-MM-dd")</td>
+                            <td class="num">@w.Runs</td>
+                            <td class="num">@w.RunsWithRequests</td>
+                            <td class="num">@((w.RunRate * 100).ToString("0", System.Globalization.CultureInfo.InvariantCulture))%</td>
+                            <td class="num">@w.Requests</td>
+                            <td class="num">@w.PerRun.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
         }
     </section>
 }

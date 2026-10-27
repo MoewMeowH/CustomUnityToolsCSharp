@@ -34,6 +34,7 @@ public sealed class FollowUpTests
         h.Client.Script = [ScriptedChatClient.Reply(FirstAnswer), ScriptedChatClient.Reply(SecondAnswer), ScriptedChatClient.Reply(SecondAnswer)];
         var result = await h.Run(mode);
         Assert.Contains("자료 요청 1-N1: Calls 수집부 (path src/Reader.cs) — 중복 처리", result);
+        Assert.Matches(@"^첨부 0자 \+ input [\d,]+자 = [\d,]+자 / 상한 350,000자 \(0%\)$", result.Split('\n')[1]);   // 첨부 여유 머리말 (기본 상한)
         return (h, result.Split('\n')[0]["runId: ".Length..].Trim());
     }
 
@@ -71,6 +72,7 @@ public sealed class FollowUpTests
             var result = await FollowUp(h, runId, ["1-N1"], [new ContextRange("fu_reader_tmp.cs", 1, 1)]);
 
             Assert.StartsWith($"runId: {runId}", result);
+            Assert.StartsWith("### 2.", result.Split('\n')[1]);                                  // followUp 결과에는 첨부 여유 줄 없음
             Assert.Contains("### 2. Rev · a1", result);
             Assert.Contains("- 2-F1 [major] Reader.cs:1 — 중복 id를 둘로 셈", result);
             Assert.Contains("보충한 요청 1-N1 · 보내지 않은 요청 1-N2", result);
@@ -260,6 +262,43 @@ public sealed class FollowUpTests
         Assert.Equal((1, 1.0), (row.Findings, row.Rate)); // 요청 판정(supplied)은 지적 수·채택률에 안 들어감
         Assert.Equal((2, 1, 0, 0), (s.Requests!.Total, s.Requests.Supplied, s.Requests.Declined, s.Requests.Deferred));
         Assert.Equal(["1-N2"], s.Requests.Open.Select(o => o.Id));
+
+        Assert.Empty(s.Requests.Weeks);   // 주별 표는 review_* 모드만 ('r'은 아님) — 아래 Weekly_request_rate_counts_review_runs_only
+    }
+
+    [Fact]
+    public void Weekly_request_rate_counts_review_runs_only()   // 계획서 2026-10-27_외부-첨부-범위-규칙, sub_self 11b9c52eba C1 · C2 · C5 · C6
+    {
+        var sunday = new DateTimeOffset(new DateTime(2026, 10, 25, 12, 0, 0, DateTimeKind.Local));
+        var monday = sunday.AddDays(1);
+        StructuredOutputRecord Out(int requests, string state = OutputStates.Complete) => new()
+        {
+            Format = "review", State = state, RequestedBy = "role",
+            Requests = [.. Enumerable.Range(1, requests).Select(i => new InfoRequest { Id = $"1-N{i}", What = "정의" })],
+        };
+        CallRecord Call(string run, DateTimeOffset at, string mode, int step, StructuredOutputRecord? output, string tool = "run_mode", int? followUpOf = null) => new()
+        {
+            Id = $"{run}-{step}", Timestamp = at.AddMinutes(step), Tool = tool, Mode = mode, RunId = run, Step = step,
+            Model = "m", Prompt = "p", Success = true, Structured = output, FollowUpOf = followUpOf,
+        };
+        CallRecord[] calls =
+        [
+            Call("r1", sunday, "review_main", 1, Out(2)),                       // 일요일 → 그 전 주 월요일(10-19)
+            Call("r2", monday, "review_main", 1, Out(0)),
+            Call("r2", monday, "review_main", 2, Out(1), followUpOf: 1),         // 보충 단계의 요청은 세지 않음
+            Call("r3", monday, "review_high", 1, Out(1)),
+            Call("r3", monday, "review_high", 2, Out(1)),                       // 두 단계 요청은 실행 하나로 합산
+            Call("r4", monday, "review_main", 1, Out(3), tool: GoldenCli.Tool),  // 골든 평가 제외
+            Call("r5", monday, "review_main", 1, Out(0, OutputStates.Failed)),  // 해석 실패 제외 ('요청 없음'으로 세지 않음)
+            Call("r6", monday, "perf_main", 1, Out(2)),                         // review_* 아님
+        ];
+
+        var weeks = VerdictStats.Build([], calls, _ => null).Requests!.Weeks;
+
+        Assert.Equal(
+            [(new DateOnly(2026, 10, 26), 2, 1, 2), (new DateOnly(2026, 10, 19), 1, 1, 2)],
+            weeks.Select(w => (w.WeekStart, w.Runs, w.RunsWithRequests, w.Requests)));
+        Assert.Equal((0.5, 1.0), (weeks[0].RunRate, weeks[0].PerRun));
     }
 
     [Fact]

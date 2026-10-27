@@ -98,6 +98,19 @@ public sealed record RequestSummary(int Total, int Supplied, int Declined, int D
 {
     /// <summary>보충 단계(followUp)가 새로 낸 요청 — 실행마다 1회라 다시 보충할 수 없어 Open에 넣지 않는다.</summary>
     public int FromFollowUps { get; init; }
+
+    /// <summary>주별 요청 비율 (최근 주가 먼저) — 첨부 범위 규칙 전후 비교용 (계획서 2026-10-27_외부-첨부-범위-규칙).</summary>
+    public IReadOnlyList<RequestWeek> Weeks { get; init; } = [];
+}
+
+/// <summary>
+/// 한 주(월요일 시작, 실행 시작 시각 로컬)의 review_* 실행당 자료 요청 (골든 · 해석 실패 제외). Runs = 구조화 결과를 낸 실행(보충 단계 제외),
+/// RunsWithRequests = 그중 요청이 하나라도 있는 실행, Requests = 요청 수.
+/// </summary>
+public sealed record RequestWeek(DateOnly WeekStart, int Runs, int RunsWithRequests, int Requests)
+{
+    public double RunRate => Runs == 0 ? 0 : (double)RunsWithRequests / Runs;
+    public double PerRun => Runs == 0 ? 0 : (double)Requests / Runs;
 }
 
 /// <summary>
@@ -186,15 +199,33 @@ public static class VerdictStats
             .GroupBy(x => (x.RunId, x.Id.ToUpperInvariant())).ToDictionary(g => g.Key, g => g.Last().Verdict);
         int total = 0, supplied = 0, declined = 0, deferred = 0, fromFollowUps = 0;
         var open = new List<OpenRequest>();
+        var weeks = new Dictionary<DateOnly, (int Runs, int WithRequests, int Requests)>();
         foreach (var (runId, run) in runs)
         {
             if (!inPeriod(runId)) continue;
             // followUp으로 보낸 요청은 지휘자가 따로 기록하지 않아도 보충한 것이다 (서버가 이미 안다).
             var sentByServer = run.Where(c => c.Success && c.FollowUpRequests is not null).SelectMany(c => c.FollowUpRequests!)
                 .Select(id => id.ToUpperInvariant()).ToHashSet();
-            foreach (var step in run.Where(c => c.Step is not null).Select(c => c.Step!.Value).Distinct())
+            var stepCalls = run.Where(c => c.Step is not null).Select(c => c.Step!.Value).Distinct()
+                .Select(s => StepCall(run, s)).OfType<CallRecord>().ToList();
+
+            // 주별 비율: 기준값(review 실행 단위)과 같은 조건 — review_* 모드, 골든 평가 제외, 처음 질문(보충 단계 제외)에서
+            // 구조화 결과를 해석한 단계만 (해석 실패는 요청이 비어 '요청 없음'으로 잘못 세진다 — sub_self 11b9c52eba C1 · C2 · C5)
+            var asked = ModeOf(run).StartsWith("review_", StringComparison.Ordinal) && run.All(c => c.Tool != Agents.GoldenCli.Tool)
+                ? stepCalls.Where(c => c is { Success: true, Structured.Parsed: true, FollowUpOf: null }).ToList()
+                : [];
+            if (asked.Count > 0)
             {
-                if (StepCall(run, step) is not { Success: true, Structured.Requests: { Count: > 0 } reqs } call) continue;
+                var day = DateOnly.FromDateTime(firsts[runId].Timestamp.LocalDateTime);
+                var week = day.AddDays(-(((int)day.DayOfWeek + 6) % 7));
+                var count = asked.Sum(c => c.Structured!.Requests?.Count ?? 0);
+                var w = weeks.GetValueOrDefault(week);
+                weeks[week] = (w.Runs + 1, w.WithRequests + (count > 0 ? 1 : 0), w.Requests + count);
+            }
+
+            foreach (var stepCall in stepCalls)
+            {
+                if (stepCall is not { Success: true, Structured.Requests: { Count: > 0 } reqs } call) continue;
                 foreach (var q in reqs)
                 {
                     total++;
@@ -216,6 +247,7 @@ public static class VerdictStats
         return new RequestSummary(total, supplied, declined, deferred, [.. open.OrderByDescending(o => firsts[o.RunId].Timestamp)])
         {
             FromFollowUps = fromFollowUps,
+            Weeks = [.. weeks.OrderByDescending(kv => kv.Key).Select(kv => new RequestWeek(kv.Key, kv.Value.Runs, kv.Value.WithRequests, kv.Value.Requests))],
         };
     }
 

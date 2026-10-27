@@ -356,6 +356,7 @@ public sealed class ClaudeCliTests : IDisposable
             var result = await h.Runner.RunAsync("cli", "변경 의도", null, null, [new ContextRange(name, 1, 1)], null, ModeRunnerHarness.DefaultReason, null, CancellationToken.None);
 
             Assert.Contains("문제 없음", result);
+            Assert.StartsWith("### 1.", result.Split('\n')[1]);                          // 첨부 여유 줄 없음 (첨부 본문을 보내지 않음 — sub_self 11b9c52eba C6)
             Assert.True(existedDuringCall);
             var received = h.Client.Received[^1];
             Assert.DoesNotContain(received.Messages, m => m.Role == ChatRole.System);   // 역할 프롬프트는 Instructions로만 (시스템 프롬프트 중복 없음 — 지휘자 K4)

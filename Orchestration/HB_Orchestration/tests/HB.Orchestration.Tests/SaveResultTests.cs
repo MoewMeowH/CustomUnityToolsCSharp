@@ -223,6 +223,22 @@ public class ResultFormatterTests
     }
 
     [Fact]
+    public void Headroom_line_goes_right_after_run_id()   // 계획서 2026-10-27_외부-첨부-범위-규칙
+    {
+        var header = ResultFormatter.AttachmentHeadroom(12_000, 3_000, 350_000);
+        Assert.Equal("첨부 12,000자 + input 3,000자 = 15,000자 / 상한 350,000자 (4%)", header);
+        Assert.Equal("첨부 0자 + input 10자 = 10자 / 상한 100자 (10%)", ResultFormatter.AttachmentHeadroom(0, 10, 100));
+        Assert.Null(ResultFormatter.AttachmentHeadroom(5, 5, 0));                                  // 상한 없음
+        Assert.Equal("첨부 50자 + input 0자 = 50자 / 상한 100자 (50%)", ResultFormatter.AttachmentHeadroom(50, 0, 100));   // 절반까지는 경고 없음
+        Assert.Equal("첨부 995자 + input 0자 = 995자 / 상한 1,000자 (99%) · followUp 여유 적음 (원래 프롬프트 + 응답 + 보충이 같은 상한)",
+            ResultFormatter.AttachmentHeadroom(995, 0, 1000));                                     // 내림 · 절반 넘으면 followUp 경고 (sub_self 11b9c52eba C3 · C8)
+
+        var lines = ResultFormatter.Format("dfa393514b", [Step(1)], returnAll: true, note: null, header).Split('\n');
+        Assert.Equal(["runId: dfa393514b", header!], lines[..2]);                                 // 첫 줄은 늘 runId만
+        Assert.StartsWith("### 1. Role1", lines[2]);
+    }
+
+    [Fact]
     public void LastMode_ShowsLastStepWithHeader_AndHiddenNoticesAtEnd()
     {
         var results = new[] { Step(1, failedKinds: ["Timeout"]), Step(2, text: "최종") };
