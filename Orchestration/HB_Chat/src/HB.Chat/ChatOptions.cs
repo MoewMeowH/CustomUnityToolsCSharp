@@ -52,6 +52,9 @@ public sealed class ChatOptions
     /// </summary>
     public int ApprovalTimeoutSeconds { get; set; } = 570;
 
+    /// <summary>지휘자 표정 → 스티커 태그 (상태 이름 Idle · Thinking · Writing · Tool · Approval · Done · Failed · Stopped · Sleep). 없는 상태는 기본값 (<see cref="FaceCatalog"/>).</summary>
+    public Dictionary<string, string> Expressions { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
     public IReadOnlyList<string> ModelList => Models.Count > 0 ? Models : ["opus", "sonnet", "haiku"];
 
     public string DataFolder =>

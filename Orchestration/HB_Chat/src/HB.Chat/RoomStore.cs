@@ -41,6 +41,10 @@ public sealed record Room
 
     /// <summary>휴지통에 넣은 시각 (계획서 2-2 c). 있으면 목록에서 빠지고 말을 보내지 않는다.</summary>
     public DateTimeOffset? DeletedAt { get; init; }
+
+    /// <summary>마지막 실행이 끝날 때의 컨텍스트 크기 · 창 (토큰, 계획서 2-2 b 컨텍스트 표시). 첫 턴 전에는 없다.</summary>
+    public long? ContextTokens { get; init; }
+    public int? ContextWindow { get; init; }
 }
 
 /// <summary>

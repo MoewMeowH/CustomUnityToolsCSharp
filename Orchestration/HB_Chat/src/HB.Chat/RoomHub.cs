@@ -22,6 +22,13 @@ public sealed record LiveEvent(string Kind)
 
     /// <summary>rules 알림: 이 방의 "항상 허용" 규칙 전체 (바뀐 뒤 화면 목록을 다시 그린다).</summary>
     public IReadOnlyList<string>? Rules { get; init; }
+
+    /// <summary>face 알림 · snapshot: 지휘자 표정 상태 (<see cref="HB.Chat.Face"/> 이름, 계획서 2-2 b).</summary>
+    public string? Face { get; init; }
+
+    /// <summary>end 알림: 이번 턴이 끝날 때의 컨텍스트 크기 · 창 (토큰).</summary>
+    public long? ContextTokens { get; init; }
+    public int? ContextWindow { get; init; }
 }
 
 /// <summary>
@@ -56,6 +63,11 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         public string? Tool;
         public string? Notice;
         public readonly List<Channel<LiveEvent>> Subscribers = [];
+
+        /// <summary>실행 중 표정 (생각 중 → 답 쓰는 중 · 도구 · 승인 기다림). 쉴 때는 LastEnd · 방 색인으로 정한다 (<see cref="FaceOf"/>).</summary>
+        public Face Phase = Face.Idle;
+        public Face? LastEnd;
+        public DateTimeOffset LastEndAt;
 
         /// <summary>지금 명령 단계 실행의 승인 토큰 (실행마다 새로, 끝나거나 중지하면 비움). 이 값과 맞는 승인 요청만 받는다.</summary>
         public string? RunToken;
@@ -114,6 +126,60 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             return live.Approvals.Values.Any(p => !p.Answer.Task.IsCompleted) ? RoomActivity.Approval
                 : live.Busy ? RoomActivity.Busy
                 : RoomActivity.Idle;
+    }
+
+    /// <summary>끝난 턴의 표정(끝남 · 실패 · 중지)을 보이는 시간. 그 뒤에는 쉼 · 실패 · 오래 쉼.</summary>
+    public static readonly TimeSpan EndFaceFor = TimeSpan.FromSeconds(10);
+
+    /// <summary>마지막 활동에서 이만큼 지나면 "오래 쉼" 표정.</summary>
+    public static readonly TimeSpan SleepAfter = TimeSpan.FromHours(1);
+
+    /// <summary>
+    /// 지휘자 표정 (계획서 2-2 b). 실행 중이면 그 단계, 쉬면 방금 끝난 턴(transient일 때만, <see cref="EndFaceFor"/> 안) → 마지막 실패 → 오래 쉼 → 쉼.
+    /// 목록은 transient 없이 쓴다 — 목록은 알림이 올 때만 다시 받아 "끝남"이 오래 남는다.
+    /// </summary>
+    public Face FaceOf(Room room, bool transient = true)
+    {
+        Face? running = null;
+        if (_rooms.TryGetValue(room.Id, out var live))
+            lock (live.Gate) running = LiveFace(live, transient);
+        return running ?? RestFace(room);
+    }
+
+    /// <summary>
+    /// 끝난 턴의 표정을 앞으로 얼마나 더 보일지 (화면이 처음 그릴 때의 타이머, /self-review 83b453653b C11). 아니면 null.
+    /// </summary>
+    public TimeSpan? EndFaceLeft(string roomId)
+    {
+        if (!_rooms.TryGetValue(roomId, out var live)) return null;
+        lock (live.Gate)
+        {
+            var left = EndFaceFor - (DateTimeOffset.Now - live.LastEndAt);
+            return !live.Busy && live.LastEnd is not null && left > TimeSpan.Zero ? left : null;
+        }
+    }
+
+    /// <summary>실행 중 · 방금 끝난 턴의 표정 (방 잠금 안에서 부른다). 쉬는 방이면 null.</summary>
+    private static Face? LiveFace(Live live, bool transient)
+    {
+        if (live.Busy) return live.Approvals.Values.Any(p => !p.Answer.Task.IsCompleted) ? Face.Approval : live.Phase;
+        if (transient && live.LastEnd is { } end && DateTimeOffset.Now - live.LastEndAt < EndFaceFor) return end;
+        return null;
+    }
+
+    /// <summary>쉬는 방의 표정: 마지막 실패 → 오래 쉼 → 쉼.</summary>
+    private static Face RestFace(Room room)
+    {
+        if (room.LastError is not null) return Face.Failed;
+        return DateTimeOffset.Now - (room.LastRunAt ?? room.CreatedAt) > SleepAfter ? Face.Sleep : Face.Idle;
+    }
+
+    /// <summary>표정이 바뀌면 방 화면에 face 알림 (잠금 안에서 부른다). 도구는 이름이 바뀔 때마다 (Text = 도구 이름).</summary>
+    private void SetFace(Live live, Face face, string? tool = null)
+    {
+        if (live.Phase == face && tool is null) return;
+        live.Phase = face;
+        Broadcast(live, new LiveEvent("face") { Face = face.ToString(), Text = tool });
     }
 
     /// <summary>앱 전체 구독. 목록 줄이 바뀌었을 수 있는 방 ID가 온다. 끝나면 <see cref="UnsubscribeAll"/>.</summary>
@@ -197,6 +263,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             pending = new PendingApproval(request, DateTimeOffset.Now + timeout);
             live.Approvals[pending.Id] = pending;
             Broadcast(live, new LiveEvent("approval") { Approval = pending.View });
+            SetFace(live, Face.Approval);
         }
 
         using var wait = CancellationTokenSource.CreateLinkedTokenSource(aborted);
@@ -222,6 +289,9 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         {
             live.Approvals.Remove(pending.Id);
             Broadcast(live, new LiveEvent("approval-done") { Approval = pending.View, Text = pending.Label });
+            // 다른 카드가 남았으면 그대로 승인 기다림, 아니면 도구 단계로 (허용이면 명령이 돈다, 거절이면 곧 다음 글).
+            // Busy가 아니라 Cts로 본다: 실행이 끝나는 잠금에서 Cts를 먼저 비우므로 end 뒤에 face가 나가지 않는다 (/self-review 83b453653b C3).
+            if (live.Cts is not null && live.Approvals.Count == 0) SetFace(live, Face.Tool);
         }
         Log?.Write(roomId, request, pending.Label ?? (answer.Allow ? "허용" : "거절"));
         return answer;
@@ -350,10 +420,14 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     {
         var live = _rooms.GetOrAdd(roomId, id => new Live(id));
         var ch = Channel.CreateUnbounded<LiveEvent>(new UnboundedChannelOptions { SingleReader = true });
+        var room = store.Get(roomId);
         lock (live.Gate)
         {
+            // 표정도 Busy · Partial과 같은 잠금에서 정한다 (/self-review 83b453653b C4)
+            var face = LiveFace(live, transient: true) ?? (room is null ? Face.Idle : RestFace(room));
             ch.Writer.TryWrite(new LiveEvent("snapshot")
             {
+                Face = face.ToString(),
                 Busy = live.Busy,
                 Text = live.Busy ? live.Partial.ToString() : null,
                 Prompt = live.Current,
@@ -415,6 +489,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 live.Notice = null;
                 cts = live.Cts = new CancellationTokenSource();
                 Broadcast(live, new LiveEvent("start") { Prompt = text, Queued = live.Pending.Count, Pending = [.. live.Pending] });
+                SetFace(live, Face.Thinking);
             }
 
             RunResult result;
@@ -427,12 +502,22 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 result = new RunResult(false, false, $"내부 오류: {ex.Message}", null, null, null, 0, 0, null);
             }
 
+            // 창을 모르는 턴(중지 · result 없음)은 방 색인에 남은 창으로 — 화면 막대가 0%로 떨어지지 않게 (/self-review 83b453653b C5)
+            var window = result.ContextWindow ?? store.Get(roomId)?.ContextWindow;
+
             // live.Cts를 잠금 안에서 먼저 비운 뒤 Dispose한다: Stop · Dispose가 해제된 CTS에 Cancel하지 않게 (0a3b1d5155 C4).
             lock (live.Gate)
             {
                 live.Cts = null;
                 EndApprovals(live, "실행 끝남");
-                Broadcast(live, new LiveEvent("end") { Ok = result.Ok, Text = result.Error, CostUsd = result.CostUsd });
+                live.LastEnd = result.Ok ? Face.Done : result.Cancelled ? Face.Stopped : Face.Failed;
+                live.LastEndAt = DateTimeOffset.Now;
+                live.Phase = Face.Idle; // 다음 턴의 start가 생각 중으로 바꾼다
+                Broadcast(live, new LiveEvent("end")
+                {
+                    Ok = result.Ok, Text = result.Error, CostUsd = result.CostUsd, Face = live.LastEnd.ToString(),
+                    ContextTokens = result.ContextTokens, ContextWindow = window,
+                });
             }
             cts.Dispose();
         }
@@ -530,6 +615,8 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             lock (live.Gate)
             {
                 if (live.Generation != generation) return;
+                if (ev is DeltaEvent) SetFace(live, Face.Writing);
+                else if (ev is ToolEvent te) SetFace(live, Face.Tool, te.Name); // 화면은 표정을 face 알림으로만 바꾼다 (83b453653b C1)
                 var shown = ev switch
                 {
                     DeltaEvent d => AppendPartial(live, d.Text),
@@ -558,6 +645,8 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 // 사용자가 멈춘 실행은 실패가 아니다 — 목록의 "실패" 표시 · 방의 "마지막 실행 실패" 줄에 남기지 않는다 (2-2 a 실제 확인에서 발견).
                 LastError = result.Ok || result.Cancelled ? null : result.Error,
                 TotalCostUsd = result.CostUsd ?? r.TotalCostUsd,
+                ContextTokens = result.ContextTokens ?? r.ContextTokens,
+                ContextWindow = result.ContextWindow ?? r.ContextWindow,
                 KnownSize = size ?? r.KnownSize,
                 RunStartedAt = null,
             });

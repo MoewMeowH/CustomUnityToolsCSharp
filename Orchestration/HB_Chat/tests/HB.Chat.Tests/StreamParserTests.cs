@@ -16,6 +16,27 @@ public sealed class StreamParserTests
     }
 
     [Fact]
+    public void AssistantUsage_IsContextSize_AndResultHasWindow()
+    {
+        // 2-2 0번 실측 모양 (haiku 5.5): 마지막 assistant usage = 그 요청의 컨텍스트, result modelUsage.contextWindow
+        var usage = Assert.IsType<UsageEvent>(StreamParser.Parse(
+            """{"type":"assistant","message":{"model":"claude-opus-5-5","usage":{"input_tokens":2,"cache_creation_input_tokens":381,"cache_read_input_tokens":7607,"cache_creation":{"ephemeral_1h_input_tokens":381},"output_tokens":8}},"session_id":"s"}"""));
+        Assert.Equal(7998, usage.ContextTokens);
+        Assert.Equal("claude-opus-5-5", usage.Model);
+        Assert.IsType<OtherEvent>(StreamParser.Parse("""{"type":"assistant","parent_tool_use_id":"toolu_1","message":{"usage":{"input_tokens":9}}}"""));
+        Assert.IsType<OtherEvent>(StreamParser.Parse("""{"type":"assistant","message":{"content":[]}}"""));
+
+        // 보조 모델(1M)이 섞여도 메시지 모델(200K)의 창 — 없으면 입력이 가장 많은 모델 (/self-review 83b453653b C2)
+        var result = Assert.IsType<ResultEvent>(StreamParser.Parse(
+            """{"type":"result","subtype":"success","is_error":false,"result":"ok","total_cost_usd":0.001,"permission_denials":[],"modelUsage":{"claude-haiku-5-5":{"inputTokens":50,"contextWindow":1000000},"claude-opus-5-5":{"inputTokens":2,"cacheReadInputTokens":90000,"contextWindow":200000}}}"""));
+        Assert.Equal(200000, result.WindowFor("claude-opus-5-5"));
+        Assert.Equal(200000, result.WindowFor("unknown")); // 입력 많은 쪽
+        Assert.Equal(200000, result.WindowFor(null));
+        Assert.Equal(1000000, result.WindowFor("claude-haiku-5-5"));
+        Assert.Null(Assert.IsType<ResultEvent>(StreamParser.Parse("""{"type":"result","subtype":"success","result":"ok"}""")).WindowFor("x"));
+    }
+
+    [Fact]
     public void TextDeltaAndToolStart()
     {
         Assert.Equal(new DeltaEvent("안녕"), StreamParser.Parse(

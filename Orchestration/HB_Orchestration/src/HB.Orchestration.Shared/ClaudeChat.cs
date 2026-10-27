@@ -16,8 +16,19 @@ public enum ChatSpeaker
 /// <summary>
 /// 세션 기록에서 읽은 말 하나.
 /// ToolsBefore: 바로 앞 말 이후 지휘자가 쓴 도구 수 (채팅방에 "도구 N개"로 접어 보인다).
+/// Tools: 그 도구들의 이름 (호출 차례, HB_Chat 도구 칩 — 계획서 2026-10-28_HB_Chat-2차 2-2 b).
 /// </summary>
-public sealed record ChatEntry(int Line, DateTimeOffset? Timestamp, ChatSpeaker Speaker, string Text, int ToolsBefore);
+public sealed record ChatEntry(int Line, DateTimeOffset? Timestamp, ChatSpeaker Speaker, string Text, int ToolsBefore)
+{
+    public IReadOnlyList<string> Tools { get; init; } = [];
+
+    /// <summary>값 비교: Tools는 목록 내용으로 (기본 레코드 비교는 참조라 이어 읽기 = 전체 읽기 검사가 깨진다).</summary>
+    public bool Equals(ChatEntry? other) =>
+        other is not null && Line == other.Line && Timestamp == other.Timestamp && Speaker == other.Speaker && Text == other.Text
+        && ToolsBefore == other.ToolsBefore && Tools.SequenceEqual(other.Tools);
+
+    public override int GetHashCode() => HashCode.Combine(Line, Timestamp, Speaker, Text, ToolsBefore, Tools.Count);
+}
 
 /// <summary>
 /// 채팅방용 세션 기록 (계획서 2026-10-27_에이전트-채팅방). <see cref="TranscriptSummary"/>와 달리 대화 본문을 담는다:
@@ -114,6 +125,7 @@ public static partial class ClaudeChatReader
     {
         public string? SessionId, Cwd, CustomTitle, AiTitle;
         public int Unknown, PendingTools;
+        public readonly List<string> PendingToolNames = [];
         public readonly List<ChatEntry> Entries = [];
 
         /// <summary>목록은 복사한다 — 이어 읽기가 같은 State에 계속 더하므로, 앞서 돌려준 결과가 바뀌지 않게.</summary>
@@ -131,8 +143,9 @@ public static partial class ClaudeChatReader
         {
             text = text.Trim();
             if (text.Length == 0) return;
-            Entries.Add(new ChatEntry(line, ts, speaker, text, PendingTools));
+            Entries.Add(new ChatEntry(line, ts, speaker, text, PendingTools) { Tools = [.. PendingToolNames] });
             PendingTools = 0;
+            PendingToolNames.Clear();
         }
     }
 
@@ -197,6 +210,7 @@ public static partial class ClaudeChatReader
                     break;
                 case "tool_use":
                     s.PendingTools++;
+                    s.PendingToolNames.Add(Str(block, "name") ?? "?");
                     break;
             }
         }

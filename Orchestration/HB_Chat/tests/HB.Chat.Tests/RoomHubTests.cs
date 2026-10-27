@@ -99,6 +99,56 @@ public sealed class RoomHubTests : IDisposable
     }
 
     [Fact]
+    public async Task OneTurn_FacesAndContext()
+    {
+        var room = NewRoom();
+        Assert.Equal(Face.Idle, _hub.FaceOf(room));
+        var ch = _hub.Subscribe(room.Id);
+        Assert.Null(_hub.Send(room.Id, "hello there"));
+        var seen = await Until(ch, e => e.Kind == "idle", withRooms: true);
+
+        // 생각 중 → 도구(Read) → 답 쓰는 중, 끝은 end에 실린다 (계획서 2-2 b). 도구 표정은 이름을 싣는다 (83b453653b C1)
+        Assert.Equal(["Thinking", "Tool", "Writing"], seen.Where(e => e.Kind == "face").Select(e => e.Face));
+        Assert.Equal("Read", seen.Single(e => e.Kind == "face" && e.Face == "Tool").Text);
+        Assert.NotNull(_hub.EndFaceLeft(room.Id)); // 끝난 직후 — 화면 타이머용 남은 시간
+        var end = seen.Single(e => e.Kind == "end");
+        Assert.Equal("Done", end.Face);
+        // 마지막 assistant usage 2 + 100 + 900 + 8 (서브에이전트 메시지는 뺌), modelUsage contextWindow
+        Assert.Equal(1010, end.ContextTokens);
+        Assert.Equal(200000, end.ContextWindow);
+        var saved = _store.Get(room.Id)!;
+        Assert.Equal(1010, saved.ContextTokens);
+        Assert.Equal(200000, saved.ContextWindow);
+
+        Assert.Equal(Face.Done, _hub.FaceOf(saved)); // 끝난 직후 잠깐
+        Assert.Equal(Face.Idle, _hub.FaceOf(saved, transient: false)); // 목록은 쉼
+    }
+
+    [Fact]
+    public void FaceOf_IdleFailedSleep()
+    {
+        var room = NewRoom();
+        Assert.Equal(Face.Failed, _hub.FaceOf(room with { LastError = "boom" }));
+        Assert.Equal(Face.Sleep, _hub.FaceOf(room with { CreatedAt = DateTimeOffset.Now.AddHours(-2) }));
+        Assert.Equal(Face.Idle, _hub.FaceOf(room with { CreatedAt = DateTimeOffset.Now.AddHours(-2), LastRunAt = DateTimeOffset.Now.AddMinutes(-5) }));
+    }
+
+    [Fact]
+    public async Task Stop_EndsWithStoppedFace_AndKeepsKnownWindow()
+    {
+        var room = NewRoom();
+        var ch = _hub.Subscribe(room.Id);
+        Assert.Null(_hub.Send(room.Id, "hello first")); // 창(200000)을 방 색인에 남긴다
+        await Until(ch, e => e.Kind == "idle");
+        Assert.Null(_hub.Send(room.Id, "sleep please"));
+        await Until(ch, e => e.Kind == "delta");
+        _hub.Stop(room.Id);
+        var end = (await Until(ch, e => e.Kind == "idle")).Single(e => e.Kind == "end");
+        Assert.Equal("Stopped", end.Face);
+        Assert.Equal(200000, end.ContextWindow); // result 없는 턴도 앞 창으로 (83b453653b C5)
+    }
+
+    [Fact]
     public void AppEvents_DisposeCompletesSubscribers()
     {
         var all = _hub.SubscribeAll();
@@ -134,7 +184,8 @@ public sealed class RoomHubTests : IDisposable
         using var cts = new CancellationTokenSource(Wait);
         await foreach (var ev in ch.Reader.ReadAllAsync(cts.Token))
         {
-            if (ev.Kind == "rooms" && !withRooms) continue; // 방 목록 신호는 따로 본다 (RoomSubscriber_GetsListSignals)
+            // 방 목록 신호 · 표정 알림은 따로 본다 (RoomSubscriber_GetsListSignals · OneTurn_FacesAndContext)
+            if (ev.Kind is "rooms" or "face" && !withRooms) continue;
             seen.Add(ev);
             if (last(ev)) break;
         }

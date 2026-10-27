@@ -92,6 +92,109 @@ public sealed class RoomListTests : IDisposable
     }
 
     [Fact]
+    public void Page_LastFifty_ThenOlder_KeepsSameLineTogether()
+    {
+        // 줄 1..120 (말 121개), 줄 71은 말 둘(assistant 메시지 하나에 text 블록 둘) — 끝 50개의 경계가 그 둘 사이에 온다
+        var entries = new List<ChatEntry>();
+        for (var line = 1; line <= 120; line++)
+        {
+            entries.Add(E(line, ChatSpeaker.Conductor, $"말 {line}"));
+            if (line == 71) entries.Add(E(71, ChatSpeaker.Conductor, "말 71-2"));
+        }
+
+        var last = RoomList.Page(entries, null, null);
+        Assert.Equal(51, last.Items.Count); // 끝 50개를 자르면 첫 말이 줄 71의 둘째 → 같은 줄 첫째도 함께
+        Assert.Equal(71, last.Items[0].Line);
+        Assert.Equal("말 71", last.Items[0].Text);
+        Assert.True(last.HasMore);
+
+        var older = RoomList.Page(entries, before: 71, after: null);
+        Assert.Equal(50, older.Items.Count);
+        Assert.Equal(21, older.Items[0].Line);
+        Assert.Equal(70, older.Items[^1].Line);
+        Assert.True(older.HasMore);
+
+        var first = RoomList.Page(entries, before: 21, after: null);
+        Assert.Equal(20, first.Items.Count);
+        Assert.False(first.HasMore);
+
+        var fresh = RoomList.Page(entries, before: null, after: 118);
+        Assert.Equal([119, 120], fresh.Items.Select(e => e.Line));
+        Assert.Empty(RoomList.Page(entries, null, after: 120).Items);
+        Assert.Empty(RoomList.Page([], null, null).Items);
+    }
+
+    [Fact]
+    public void ToolChips_ShortensMcpAndCounts()
+    {
+        Assert.Equal("run_mode", RoomList.ShortTool("mcp__hb-orchestration__run_mode"));
+        Assert.Equal("Read", RoomList.ShortTool("Read"));
+        Assert.Equal("mcp__x", RoomList.ShortTool("mcp__x"));
+        // 이어진 것만 묶는다 — 진행 중 칩(chat.js addChip)과 같은 규칙 (83b453653b C9)
+        Assert.Equal([("Read", 2), ("Grep", 1), ("Read", 1), ("run_mode", 1)],
+            RoomList.ToolChips(["Read", "Read", "Grep", "Read", "mcp__hb-orchestration__run_mode"]));
+    }
+
+    [Theory]
+    [InlineData(999, "999")]
+    [InlineData(7998, "8K")]
+    [InlineData(999_499, "999K")]
+    [InlineData(999_500, "1M")]  // "1000K"가 아니라 (83b453653b C10)
+    [InlineData(1_000_000, "1M")]
+    [InlineData(1_250_000, "1.3M")]
+    public void Tokens_Short(long n, string expected) => Assert.Equal(expected, HB.Chat.Pages.RoomModel.Tokens(n));
+
+    [Fact]
+    public void ChatEntry_ComparesToolsByContent()
+    {
+        var a = new ChatEntry(1, T0, ChatSpeaker.Conductor, "x", 2) { Tools = ["Read", "Grep"] };
+        Assert.Equal(a, new ChatEntry(1, T0, ChatSpeaker.Conductor, "x", 2) { Tools = new List<string> { "Read", "Grep" } });
+        Assert.Equal(a.GetHashCode(), (a with { Tools = ["Read", "Grep"] }).GetHashCode());
+        Assert.NotEqual(a, a with { Tools = ["Read"] });
+        Assert.NotEqual(a, a with { Text = "y" });
+    }
+
+    [Fact]
+    public void FaceCatalog_TagUrlAndJson()
+    {
+        var dir = Path.Combine(_dir, "stickers");
+        Directory.CreateDirectory(dir);
+        File.WriteAllBytes(Path.Combine(dir, "idle.png"), [0x89, 0x50, 0x4E, 0x47]);
+        File.WriteAllBytes(Path.Combine(dir, "think.png"), [0x89, 0x50, 0x4E, 0x47]);
+        var stickers = new HB.Orchestration.ChatUi.StickerCatalog(() => new HB.Orchestration.ChatUi.StickerOptions
+        {
+            Dir = dir,
+            Files = new() { ["대기"] = "idle.png", ["골똘"] = "think.png" },
+        });
+        var options = new ChatOptions { Expressions = new(StringComparer.OrdinalIgnoreCase) { ["thinking"] = "골똘" } };
+        var faces = new FaceCatalog(stickers, Microsoft.Extensions.Options.Options.Create(options));
+
+        Assert.Equal("대기", faces.Tag(Face.Idle));          // 기본값 (사용자 결정)
+        Assert.Equal("골똘", faces.Tag(Face.Thinking));      // 설정이 먼저 (대소문자 무시)
+        Assert.Equal("/sticker/" + Uri.EscapeDataString("대기"), faces.Url(Face.Idle));
+        Assert.Null(faces.Url(Face.Writing));                // 기본 태그 "설명"은 그림 없음 → 글자 아바타
+        using var json = System.Text.Json.JsonDocument.Parse(faces.Json());
+        Assert.Equal(Enum.GetValues<Face>().Length, json.RootElement.EnumerateObject().Count());
+        Assert.Equal("생각 중…", json.RootElement.GetProperty("Thinking").GetProperty("label").GetString());
+        Assert.Equal(System.Text.Json.JsonValueKind.Null, json.RootElement.GetProperty("Writing").GetProperty("url").ValueKind);
+    }
+
+    [Fact]
+    public void ChatReader_KeepsToolNamesBeforeText()
+    {
+        var path = Path.Combine(_dir, "s.jsonl");
+        File.WriteAllText(path,
+            """{"type":"user","timestamp":"2026-10-28T00:00:00Z","message":{"role":"user","content":"hi"}}""" + "\n" +
+            """{"type":"assistant","timestamp":"2026-10-28T00:00:01Z","message":{"role":"assistant","content":[{"type":"tool_use","name":"Read","id":"a","input":{}},{"type":"tool_use","name":"mcp__hb-orchestration__list_modes","id":"b","input":{}}]}}""" + "\n" +
+            """{"type":"assistant","timestamp":"2026-10-28T00:00:02Z","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}""" + "\n");
+        var chat = ClaudeChatReader.Read(path);
+        var reply = chat.Entries.Single(e => e.Speaker == ChatSpeaker.Conductor);
+        Assert.Equal(2, reply.ToolsBefore);
+        Assert.Equal(["Read", "mcp__hb-orchestration__list_modes"], reply.Tools);
+        Assert.Empty(chat.Entries.Single(e => e.Speaker == ChatSpeaker.User).Tools);
+    }
+
+    [Fact]
     public void Preview_DoesNotSplitSurrogatePair()
     {
         var text = new string('가', RoomList.PreviewChars - 1) + "😀끝"; // 이모지가 80자 경계에 걸침

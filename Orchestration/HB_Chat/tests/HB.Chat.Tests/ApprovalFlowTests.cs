@@ -75,7 +75,7 @@ public sealed class ApprovalFlowTests : IAsyncLifetime
         using var cts = new CancellationTokenSource(Wait);
         await foreach (var ev in ch.Reader.ReadAllAsync(cts.Token))
         {
-            if (ev.Kind == "rooms") continue; // 방 목록 신호는 이 방의 흐름이 아니다 (RoomHubTests에서 따로 본다)
+            if (ev.Kind is "rooms" or "face") continue; // 방 목록 신호 · 표정은 이 방 흐름 검사 밖 (RoomHubTests에서 따로 본다)
             seen.Add(ev);
             if (last(ev)) break;
         }
@@ -283,6 +283,8 @@ public sealed class ApprovalFlowTests : IAsyncLifetime
         var late = _hub.Subscribe(room.Id); // 화면을 새로 연 경우
         var first = await Until(late, e => e.Kind == "approval");
         Assert.Equal(card.Id, first.Last().Approval!.Id);
+        // 새로 연 화면의 표정은 승인 기다림 (tool 재전송이 덮지 않게 화면은 tool로 표정을 바꾸지 않는다 — 83b453653b C1)
+        Assert.Equal("Approval", first.Single(e => e.Kind == "snapshot").Face);
         _hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null);
         await Until(ch, e => e.Kind == "idle");
     }

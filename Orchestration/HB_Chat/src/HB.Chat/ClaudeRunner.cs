@@ -12,7 +12,14 @@ public sealed record ProcessSpec(string FileName, IReadOnlyList<string> Args, st
 /// UnknownLines는 화면에 쓰지 않은 줄 수 (형식이 바뀌었는지 볼 때).
 /// </summary>
 public sealed record RunResult(
-    bool Ok, bool Cancelled, string? Error, string? Text, double? CostUsd, string? SessionId, int Denials, int OtherLines, string? Stderr);
+    bool Ok, bool Cancelled, string? Error, string? Text, double? CostUsd, string? SessionId, int Denials, int OtherLines, string? Stderr)
+{
+    /// <summary>마지막 assistant 요청의 컨텍스트 크기 (토큰). 중지돼도 그때까지 본 값.</summary>
+    public long? ContextTokens { get; init; }
+
+    /// <summary>모델의 컨텍스트 창 (result modelUsage). result가 없으면 null.</summary>
+    public int? ContextWindow { get; init; }
+}
 
 /// <summary>
 /// claude -p를 숨긴 프로세스로 한 번 띄워 프롬프트를 stdin으로 넣고, stdout stream-json을 줄마다 읽어 넘긴다 (CodePet chat-agent-runner와 같은 구조).
@@ -69,6 +76,8 @@ public static class ClaudeRunner
 
             ResultEvent? result = null;
             string? sessionId = null;
+            long? context = null;
+            string? contextModel = null;
             var other = 0;
             while (await proc.StandardOutput.ReadLineAsync() is { } line)
             {
@@ -85,6 +94,7 @@ public static class ClaudeRunner
                     case OtherEvent: other++; break;
                     case InitEvent init: sessionId = init.SessionId; break;
                     case ResultEvent r: result = r; break;
+                    case UsageEvent u: (context, contextModel) = (u.ContextTokens, u.Model ?? contextModel); break;
                 }
                 try { onEvent(ev); } catch { /* 화면 쪽 실패가 실행을 멈추지 않게 */ }
             }
@@ -92,13 +102,14 @@ public static class ClaudeRunner
             await proc.WaitForExitAsync(CancellationToken.None);
             var stderr = await stderrTask;
             if (ct.IsCancellationRequested)
-                return new RunResult(false, true, "중지됨", null, result?.CostUsd, sessionId, result?.Denials ?? 0, other, stderr);
+                return new RunResult(false, true, "중지됨", null, result?.CostUsd, sessionId, result?.Denials ?? 0, other, stderr)
+                    { ContextTokens = context, ContextWindow = result?.WindowFor(contextModel) };
             if (error is null && result is null)
                 error = $"결과 없이 끝났습니다 (종료 코드 {proc.ExitCode}).";
             if (error is null && !result!.Ok)
                 error = $"실행 오류 ({result.Subtype}): {result.Text}";
             return new RunResult(error is null, false, error, result?.Text, result?.CostUsd, sessionId, result?.Denials ?? 0, other,
-                string.IsNullOrWhiteSpace(stderr) ? null : stderr);
+                string.IsNullOrWhiteSpace(stderr) ? null : stderr) { ContextTokens = context, ContextWindow = result?.WindowFor(contextModel) };
         }
     }
 

@@ -4,13 +4,29 @@
 *@
 @{
     var room = Model.Room;
+    var face = Model.Face;
+    var faceUrl = Model.Faces.Url(face);
 }
-<div class="room" data-room="@room.Id" data-title="@Model.Title" data-read-up-to="@(room.ReadUpTo ?? -1)">
+<div class="room" data-room="@room.Id" data-title="@Model.Title" data-read-up-to="@(room.ReadUpTo ?? -1)"
+     data-faces="@Model.Faces.Json()" data-face="@face" data-face-left="@Model.EndFaceLeftMs" data-end-face-ms="@RoomModel.EndFaceMs">
     <section class="room-head">
         <a class="back" href="/" title="방 목록">←</a>
-        <h2 id="room-title">@Model.Title</h2>
+        @* 지휘자 표정 (계획서 2-2 b): 상태마다 스티커 그림, 그림이 없으면 글자 아바타 *@
+        <div class="avatar face" id="face">
+            <img id="face-img" alt="" src="@faceUrl" @(faceUrl is null ? "hidden" : null) />
+            <span id="face-letter" @(faceUrl is null ? null : "hidden")>C</span>
+        </div>
+        <div class="head-title">
+            <h2 id="room-title">@Model.Title</h2>
+            <span class="muted" id="face-label">@FaceCatalog.Label(face)</span>
+        </div>
         <span class="badge" title="@RoomRules.Describe(room.Level)">@RoomRules.LevelName(room.Level)</span>
         <span class="mono muted">@room.Model</span>
+        <span class="ctx" id="ctx" title="마지막 턴이 끝날 때의 컨텍스트 크기 / 모델 컨텍스트 창 (토큰, claude stream-json usage)"
+              data-window="@(room.ContextWindow ?? 0)" @(room.ContextTokens is null ? "hidden" : null)>
+            <span class="ctx-bar"><span id="ctx-fill" style="width:@(room.ContextTokens is { } t && room.ContextWindow is > 0 and var w ? Math.Min(100, t * 100.0 / w).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) : "0")%"></span></span>
+            <span id="ctx-text">@(room.ContextTokens is { } tokens ? "컨텍스트 " + RoomModel.Tokens(tokens) + (room.ContextWindow is > 0 and var win ? " / " + RoomModel.Tokens(win) : "") : "")</span>
+        </span>
         <span class="muted" title="claude가 알려 준 세션 누적 비용 (클라이언트 추정)" id="cost">@(room.TotalCostUsd is { } cost ? "≈$" + cost.ToString("0.000") : "")</span>
         <span class="muted" id="conn" style="margin-left:auto"></span>
         @if (Model.DashboardLink is { } dash)
@@ -53,11 +69,15 @@
         }
 
         <partial name="_Messages" model="Model" />
+        @* 진행 중 턴: 보낸 말 · 흘림 글 · 도구 칩 · 승인 카드(흐름 안, 2-2 b) · 기다리는 말 *@
         <div id="live"></div>
-        <div id="approvals"></div>
     </div>
 
     <div class="composer">
+        <div class="quote" id="quote" hidden>
+            <span class="quote-text" id="quote-text"></span>
+            <button class="btn quote-x" type="button" id="quote-x" title="인용 빼기">×</button>
+        </div>
         <form id="send-form" autocomplete="off">
             @Html.AntiForgeryToken()
             <textarea id="text" name="text" placeholder="지휘자에게 말하기 (Enter 보내기 · Shift+Enter 줄바꿈)" maxlength="@RoomHub.MaxPromptChars"></textarea>

@@ -1,5 +1,7 @@
 /* HB Chat 화면 (계획서 2-2 a): 왼쪽 방 목록 + 오른쪽 방 두 칸. 색 변수는 _Layout의 :root, 말풍선은 ChatUi _ChatStyles. */
 * { box-sizing: border-box; }
+/* hidden 속성은 display를 주는 규칙(.ctx · .quote 등)보다 앞선다 (2-2 b 실제 확인: 빈 컨텍스트 막대가 보였음) */
+[hidden] { display: none !important; }
 html, body { height: 100%; }
 body { margin: 0; background: var(--bg); color: var(--text); overflow: hidden;
        font: 14px/1.55 system-ui, -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; }
@@ -49,9 +51,46 @@ select, input[type=text], textarea { background: var(--panel); border: 1px solid
 .pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .welcome { padding: 16px; overflow-y: auto; max-width: 920px; flex: 1; min-height: 0; }
 .room { display: flex; flex-direction: column; min-height: 0; flex: 1; }
-.room-head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; padding: 10px 16px;
+.room-head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; padding: 8px 16px;
              border-bottom: 1px solid var(--line); background: var(--panel); }
 .room-head h2 { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
+.head-title { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+.head-title #face-label { font-size: 12px; }
+
+/* 지휘자 표정 (2-2 b): 스티커 그림이 있으면 그림, 없으면 글자 */
+.avatar img, .avatar .face-img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block; }
+.avatar.face { flex: 0 0 44px; height: 44px; font-size: 16px; background: #c26b3a; overflow: hidden; }
+.avatar.face:has(img:not([hidden])), .room-item .avatar:has(.face-img) { background: var(--code); }
+.avatar [hidden] { display: none; }
+
+/* 입력 중 · 도구 칩 · 컨텍스트 · 코드 복사 · 인용 (2-2 b) */
+.typing { display: inline-flex; gap: 4px; padding: 4px 0; }
+.typing i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); animation: hb-typing 1.2s infinite ease-in-out; }
+.typing i:nth-child(2) { animation-delay: .15s; } .typing i:nth-child(3) { animation-delay: .3s; }
+@keyframes hb-typing { 0%, 60%, 100% { opacity: .3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
+.chips, .tools { display: flex; flex-wrap: wrap; gap: 4px; }
+.tools { justify-content: center; }
+.chips { margin: 2px 0 4px; }
+.chip { font-size: 11.5px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: var(--panel); }
+.ctx { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.ctx-bar { width: 56px; height: 6px; border-radius: 3px; background: var(--code); overflow: hidden; border: 1px solid var(--line); }
+.ctx-bar span { display: block; height: 100%; background: var(--accent); }
+.body pre { position: relative; padding-right: 52px; }
+.copy { position: absolute; top: 6px; right: 6px; font-size: 11.5px; padding: 1px 8px; border-radius: 6px;
+        border: 1px solid var(--line); background: var(--panel); color: var(--muted); cursor: pointer; }
+.copy::after { content: "복사"; } .copy.copied::after { content: "복사됨"; }
+.who .reply { margin-left: 6px; font-size: 11.5px; border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0;
+              opacity: 0; }
+.msg:hover .reply, .reply:focus { opacity: 1; }
+@media (hover: none) { .who .reply { opacity: 1; } }
+.older { display: block; margin: 0 auto; font-size: 12px; border: 0; background: none; cursor: pointer; color: var(--muted); }
+.older:hover { color: var(--accent); }
+.quote { max-width: 920px; margin: 0 auto 6px; display: flex; gap: 8px; align-items: center; font-size: 12.5px;
+         border-left: 3px solid var(--accent); padding: 2px 8px; background: var(--panel); border-radius: 0 6px 6px 0; }
+.quote[hidden] { display: none; }
+.quote-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.quote-x { padding: 0 8px; }
+#live .approval { max-width: 760px; margin-left: 44px; }
 .room-head .head-session { font-size: 11px; }
 .back { display: none; text-decoration: none; font-size: 18px; }
 .mobile-only { display: none; }
@@ -68,7 +107,6 @@ select, input[type=text], textarea { background: var(--panel); border: 1px solid
 .composer form { max-width: 920px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end; }
 .composer textarea { flex: 1; min-height: 44px; max-height: 40vh; resize: vertical; }
 .composer .hint { max-width: 920px; margin: 4px auto 0; font-size: 12px; color: var(--muted); }
-#approvals { max-width: 920px; margin: 10px auto 0; display: flex; flex-direction: column; gap: 8px; }
 .approval { border: 1px solid var(--warn); border-radius: 10px; padding: 8px 12px; background: color-mix(in srgb, var(--warn) 8%, var(--panel)); }
 .approval .head { font-size: 12.5px; color: var(--warn); display: flex; gap: 8px; }
 .approval .cmd { font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0;

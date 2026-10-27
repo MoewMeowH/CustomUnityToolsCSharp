@@ -9,7 +9,14 @@ namespace HB.Chat;
 /// </summary>
 public sealed record RoomSummary(
     string Id, string Title, string? Preview, DateTimeOffset LastAt, int Unread, RoomActivity Activity, bool Failed,
-    PermissionLevel Level, string Model);
+    PermissionLevel Level, string Model)
+{
+    /// <summary>목록 아바타의 지휘자 표정 (끝난 턴의 잠깐 표정은 빼고 — <see cref="RoomHub.FaceOf"/>).</summary>
+    public Face Face { get; init; } = Face.Idle;
+}
+
+/// <summary>말풍선 한 쪽: 보일 말들과 그 앞에 더 있는지 (계획서 2-2 b, 50개씩 위로 불러오기).</summary>
+public sealed record MessagePage(IReadOnlyList<ChatEntry> Items, bool HasMore);
 
 /// <summary>왼쪽 방 목록 칸의 모델: 목록과 지금 연 방.</summary>
 public sealed record SidebarView(IReadOnlyList<RoomSummary> Rooms, string? CurrentId);
@@ -28,7 +35,23 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
         [.. store.All().Where(r => r.DeletedAt is null).Select(Summarize).OrderByDescending(s => s.LastAt)];
 
     public RoomSummary Summarize(Room room) =>
-        Build(room, transcripts.Read(room.SessionId), hub.ActivityOf(room.Id));
+        Build(room, transcripts.Read(room.SessionId), hub.ActivityOf(room.Id)) with { Face = hub.FaceOf(room, transient: false) };
+
+    /// <summary>한 번에 그리는 말 수.</summary>
+    public const int PageSize = 50;
+
+    /// <summary>
+    /// 말풍선 한 쪽 고르기. after가 있으면 그 줄 뒤의 말 전부 (턴이 끝난 뒤 새 말만 붙이기). 아니면 before 줄 앞(없으면 끝)에서 size개 —
+    /// 한 줄(assistant 메시지 하나)의 여러 말이 쪽 경계에서 갈라지지 않게 같은 줄은 함께 넣는다 (다음 쪽은 "그 줄 앞"으로 받으므로).
+    /// </summary>
+    public static MessagePage Page(IReadOnlyList<ChatEntry> entries, int? before, int? after, int size = PageSize)
+    {
+        if (after is { } a) return new MessagePage([.. entries.Where(e => e.Line > a)], false);
+        var end = before is { } b ? entries.Count(e => e.Line < b) : entries.Count; // 줄 번호는 늘어나기만 한다
+        var start = Math.Max(0, end - size);
+        while (start > 0 && start < end && entries[start - 1].Line == entries[start].Line) start--;
+        return new MessagePage([.. entries.Skip(start).Take(end - start)], start > 0);
+    }
 
     public static RoomSummary Build(Room room, ChatTranscript? transcript, RoomActivity activity)
     {
@@ -42,6 +65,29 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
         var unread = entries.Count(e => e.Speaker == ChatSpeaker.Conductor && !IsStoppedTurn(e) && e.Line > (room.ReadUpTo ?? int.MaxValue));
         return new RoomSummary(room.Id, TitleOf(room, transcript), preview, lastAt, unread, activity,
             activity == RoomActivity.Idle && room.LastError is not null, room.Level, room.Model);
+    }
+
+    /// <summary>도구 이름 짧게: MCP 도구 <c>mcp__서버__도구</c>는 도구 이름만 (칩).</summary>
+    public static string ShortTool(string name)
+    {
+        if (!name.StartsWith("mcp__", StringComparison.Ordinal)) return name;
+        var cut = name.IndexOf("__", 5, StringComparison.Ordinal);
+        return cut > 0 && cut + 2 < name.Length ? name[(cut + 2)..] : name;
+    }
+
+    /// <summary>
+    /// 칩으로 묶기: 바로 이어진 같은 도구만 한 칩에 횟수 ("Read ×3"), 차례 그대로 — 진행 중 칩(chat.js addChip)과 같은 규칙이라
+    /// 턴이 끝나 기록으로 바뀌어도 모양이 같다 (/self-review 83b453653b C9).
+    /// </summary>
+    public static IReadOnlyList<(string Name, int Count)> ToolChips(IEnumerable<string> tools)
+    {
+        var chips = new List<(string Name, int Count)>();
+        foreach (var tool in tools.Select(ShortTool))
+        {
+            if (chips.Count > 0 && chips[^1].Name == tool) chips[^1] = (tool, chips[^1].Count + 1);
+            else chips.Add((tool, 1));
+        }
+        return chips;
     }
 
     /// <summary>세션 기록의 마지막 말 줄 번호 (기록이 없거나 읽지 못하면 0).</summary>

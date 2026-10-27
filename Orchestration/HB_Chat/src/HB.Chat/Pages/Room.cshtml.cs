@@ -9,15 +9,30 @@ namespace HB.Chat.Pages;
 
 /// <summary>
 /// 방 하나. 말풍선은 세션 기록에서 읽는다 (앱은 말 본문을 따로 저장하지 않는다). 진행 중 턴은 /events/{id} SSE로 흘린다.
-/// ?handler=Messages: 턴이 끝난 뒤 화면이 말풍선 목록만 다시 받는다. ?handler=Pane: 방 전환 때 오른쪽 칸만 (계획서 2-2 a).
-/// Send · Stop · MarkRead는 POST (antiforgery + 같은 출처).
+/// ?handler=Messages: 말풍선 한 쪽 — 맨 끝 50개, before=줄이면 그 앞 50개(위로 불러오기), after=줄이면 그 뒤 전부(턴이 끝난 뒤 새 말, 계획서 2-2 b).
+/// ?handler=Pane: 방 전환 때 오른쪽 칸만 (2-2 a). Send · Stop · MarkRead는 POST (antiforgery + 같은 출처).
 /// </summary>
-public sealed class RoomModel(RoomStore store, RoomHub hub, RoomList list, ChatTranscripts transcripts, StickerCatalog stickers, IOptions<ChatOptions> options)
+public sealed class RoomModel(
+    RoomStore store, RoomHub hub, RoomList list, ChatTranscripts transcripts, StickerCatalog stickers, FaceCatalog faces, IOptions<ChatOptions> options)
     : PageModel
 {
     public Room Room { get; private set; } = null!;
     public ChatTranscript? Transcript { get; private set; }
     public string Title => RoomList.TitleOf(Room, Transcript);
+
+    /// <summary>이번에 그릴 말풍선 쪽 (Load 뒤 맨 끝 50개, Messages 핸들러가 before · after로 바꾼다).</summary>
+    public MessagePage Messages { get; private set; } = new([], false);
+
+    /// <summary>after로 새 말만 붙이는 응답이면 true — 빈 방 안내 · 읽기 실패 줄을 그리지 않는다.</summary>
+    public bool Fragment { get; private set; }
+
+    /// <summary>세션 기록의 마지막 말 줄 번호 (읽음 표시 · 새 말 받기의 기준).</summary>
+    public int LastLine => RoomList.LastLine(Transcript);
+
+    public FaceCatalog Faces => faces;
+
+    /// <summary>머리말 표정 (끝난 턴의 잠깐 표정 포함).</summary>
+    public Face Face => hub.FaceOf(Room);
 
     /// <summary>왼쪽 방 목록 (첫 화면에서만 만든다 — 방 전환 · 말풍선 다시 받기에는 쓰지 않음).</summary>
     public SidebarView Sidebar => new(list.All(), Room.Id);
@@ -63,12 +78,14 @@ public sealed class RoomModel(RoomStore store, RoomHub hub, RoomList list, ChatT
         return new JsonResult(new { ok = true });
     }
 
-    public IActionResult OnGetMessages(string id)
+    public IActionResult OnGetMessages(string id, int? before, int? after)
     {
         Response.Headers.CacheControl = "no-store";
         if (!Load(id)) return NotFound();
         // 읽기 실패는 실패로 돌려준다: 화면이 앞 말풍선을 그대로 둔다 (대시보드 채팅방과 같은 처리).
         if (Transcript?.FormatError is not null) return StatusCode(StatusCodes.Status503ServiceUnavailable);
+        Messages = RoomList.Page(Transcript?.Entries ?? [], before, after);
+        Fragment = before is not null || after is not null;
         return Partial("_Messages", this);
     }
 
@@ -113,8 +130,23 @@ public sealed class RoomModel(RoomStore store, RoomHub hub, RoomList list, ChatT
         if (!RoomStore.IsRoomId(id) || store.Get(id) is not { } room) return false;
         Room = room;
         Transcript = transcripts.Read(room.SessionId);
+        Messages = RoomList.Page(Transcript?.FormatError is null ? Transcript?.Entries ?? [] : [], null, null);
         return true;
     }
+
+    /// <summary>토큰 수 짧게 (8K · 1.2M). K로 반올림해 1000이 되면 M으로 (/self-review 83b453653b C10 — "1000K"가 나오지 않게).</summary>
+    public static string Tokens(long n)
+    {
+        if (n < 1_000) return n.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var k = Math.Round(n / 1_000d);
+        return k < 1_000
+            ? k.ToString("0", System.Globalization.CultureInfo.InvariantCulture) + "K"
+            : (n / 1_000_000d).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "M";
+    }
+
+    /// <summary>끝난 턴 표정을 앞으로 보일 밀리초 (없으면 0) · 그 표정을 보이는 전체 시간 (화면 타이머, 83b453653b C11).</summary>
+    public long EndFaceLeftMs => (long)(hub.EndFaceLeft(Room.Id)?.TotalMilliseconds ?? 0);
+    public static long EndFaceMs => (long)RoomHub.EndFaceFor.TotalMilliseconds;
 
     public HtmlString Render(ChatEntry e) =>
         new(StickerRenderer.Replace(SafeMarkdown.ToHtml(e.Text, e.Speaker == ChatSpeaker.User ? SafeMarkdown.KeepLineBreaks : SafeMarkdown.Default), stickers));

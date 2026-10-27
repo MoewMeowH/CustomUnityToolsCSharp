@@ -1,42 +1,69 @@
 @model RoomModel
 @*
-    말풍선 목록 (세션 기록의 사용자 · 지휘자 글). 첫 화면과 ?handler=Messages가 같이 쓴다.
+    말풍선 한 쪽 (세션 기록의 사용자 · 지휘자 글, 계획서 2-2 b). 첫 화면 · 방 전환 · ?handler=Messages가 같이 쓴다.
+    data-first-line: 이 쪽 첫 말의 줄 번호 (위로 불러오기의 before), data-has-more: 그 앞에 더 있는지,
+    data-last-line: 세션 기록 마지막 말 줄 번호 (새 말 받기의 after · 읽음 표시). 말풍선 data-line은 같은 줄 번호.
+    Fragment(before · after 응답)면 빈 방 안내 · 읽기 실패 줄을 그리지 않는다 — 화면이 안의 말풍선만 옮겨 붙인다.
 *@
-<div class="chat" id="chat" data-count="@(Model.Transcript?.Entries.Count ?? 0)" data-title="@Model.Title"
-     data-last-line="@(Model.Transcript?.FormatError is null ? Model.Transcript?.Entries.LastOrDefault()?.Line ?? -1 : -1)">
-    @if (Model.Transcript?.FormatError is { } formatError)
+@{
+    var items = Model.Messages.Items;
+}
+@* data-error: 세션 기록을 읽지 못한 채 그린 쪽 — 화면은 다음 새 말 받기 대신 쪽 전체를 다시 받는다 (/self-review 83b453653b C6) *@
+<div class="chat" id="chat" data-title="@Model.Title" data-last-line="@Model.LastLine"
+     data-first-line="@(items.Count > 0 ? items[0].Line : -1)" data-has-more="@(Model.Messages.HasMore ? "1" : "0")"
+     data-error="@(Model.Transcript?.FormatError is null ? null : "1")">
+    @if (!Model.Fragment && Model.Transcript?.FormatError is { } formatError)
     {
         <div class="panel" style="padding:10px 14px;border-color:var(--warn)">세션 기록을 읽지 못했습니다: @formatError</div>
     }
-    @foreach (var e in Model.Transcript?.Entries ?? [])
+    @if (!Model.Fragment && Model.Messages.HasMore)
+    {
+        @* 눌러도 불러온다 — 맨 위에서 실패하면 스크롤 이벤트가 다시 안 나므로 (83b453653b C8) *@
+        <button type="button" class="older muted">앞 말 @(RoomList.PageSize)개 더 보기 (위로 올려도 됨)</button>
+    }
+    @foreach (var e in items)
     {
         if (e.ToolsBefore > 0)
         {
-            <div class="tools">도구 @(e.ToolsBefore)개</div>
+            <div class="tools" data-line="@e.Line">
+                @if (e.Tools.Count > 0)
+                {
+                    foreach (var (name, count) in RoomList.ToolChips(e.Tools))
+                    {
+                        <span class="chip">@(count > 1 ? $"{name} ×{count}" : name)</span>
+                    }
+                }
+                else
+                {
+                    <span class="chip">도구 @(e.ToolsBefore)개</span>
+                }
+            </div>
         }
         if (RoomModel.IsStoppedTurn(e))
         {
-            <div class="system"><span class="body">중지된 턴</span> <span class="when">@e.Timestamp?.ToLocalTime().ToString("HH:mm")</span></div>
+            <div class="system" data-line="@e.Line"><span class="body">중지된 턴</span> <span class="when">@e.Timestamp?.ToLocalTime().ToString("HH:mm")</span></div>
             continue;
         }
         if (e.Speaker == ChatSpeaker.System)
         {
-            <div class="system"><span class="body">@Model.Render(e)</span> <span class="when">@e.Timestamp?.ToLocalTime().ToString("HH:mm")</span></div>
+            <div class="system" data-line="@e.Line"><span class="body">@Model.Render(e)</span> <span class="when">@e.Timestamp?.ToLocalTime().ToString("HH:mm")</span></div>
             continue;
         }
-        <div class="msg @RoomModel.RoleClass(e.Speaker)">
+        var who = e.Speaker == ChatSpeaker.User ? "나" : "지휘자";
+        <div class="msg @RoomModel.RoleClass(e.Speaker)" data-line="@e.Line">
             <div class="avatar">@(e.Speaker == ChatSpeaker.User ? "나" : "C")</div>
             <div class="bubble">
                 <div class="who">
-                    <b>@(e.Speaker == ChatSpeaker.User ? "나" : "지휘자")</b>
+                    <b>@who</b>
                     <span class="when">@e.Timestamp?.ToLocalTime().ToString("MM-dd HH:mm:ss")</span>
+                    <button class="reply" type="button" title="이 말에 답장 (인용)">답장</button>
                 </div>
                 <div class="body">@Model.Render(e)</div>
             </div>
         </div>
     }
-    @if ((Model.Transcript?.Entries.Count ?? 0) == 0 && Model.Transcript?.FormatError is null)
+    @if (!Model.Fragment && items.Count == 0 && Model.Transcript?.FormatError is null)
     {
-        <p class="muted" style="text-align:center">아직 대화가 없습니다. 아래에 첫 말을 쓰세요.</p>
+        <p class="muted empty" style="text-align:center">아직 대화가 없습니다. 아래에 첫 말을 쓰세요.</p>
     }
 </div>

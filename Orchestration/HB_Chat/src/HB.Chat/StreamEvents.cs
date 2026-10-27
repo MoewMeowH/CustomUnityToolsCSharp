@@ -21,10 +21,35 @@ public sealed record DeniedEvent(string? Tool, string? Reason) : StreamEvent;
 public sealed record RetryEvent(int Attempt, string? Error) : StreamEvent;
 
 /// <summary>
+/// assistant 메시지의 usage: 그 요청의 컨텍스트 크기 = input + cache_creation_input + cache_read_input + output 토큰
+/// (2차 2-2 0번 실측 — result의 usage는 턴 안 요청들의 합이라 컨텍스트 크기로 쓰지 않는다). 서브에이전트(parent_tool_use_id) 메시지는 넣지 않는다.
+/// </summary>
+public sealed record UsageEvent(long ContextTokens) : StreamEvent
+{
+    /// <summary>그 메시지의 모델 (message.model). result modelUsage에서 이 모델의 창을 고른다.</summary>
+    public string? Model { get; init; }
+}
+
+/// <summary>result modelUsage 한 항목: 모델 · 컨텍스트 창 · 이 턴의 입력(input + cache 읽기 · 생성) 토큰.</summary>
+public sealed record ModelWindow(string Model, int Window, long Input);
+
+/// <summary>
 /// result: 턴 끝. CostUsd는 클라이언트 추정이고, resume한 세션이면 앞 실행까지 합친 값이다 (문서).
 /// Denials는 permission_denials 수 (훅이 막은 것도 들어간다 — 0번 실측 B).
+/// Models는 modelUsage의 모델별 창 (2-2 0번 실측: haiku 5.5 = 1,000,000). 보조 호출에 다른 모델이 섞일 수 있다.
 /// </summary>
-public sealed record ResultEvent(bool Ok, string? Text, string? Subtype, double? CostUsd, int Denials) : StreamEvent;
+public sealed record ResultEvent(bool Ok, string? Text, string? Subtype, double? CostUsd, int Denials) : StreamEvent
+{
+    public IReadOnlyList<ModelWindow> Models { get; init; } = [];
+
+    /// <summary>
+    /// 컨텍스트 창: 마지막 assistant 메시지의 모델과 같은 항목, 없으면 입력이 가장 많은 모델 (/self-review 83b453653b C2 —
+    /// 가장 큰 창을 고르면 보조 모델(예 1M)이 섞일 때 막대가 실제보다 여유 있어 보인다). 항목이 없으면 null.
+    /// </summary>
+    public int? WindowFor(string? model) =>
+        (model is null ? null : Models.FirstOrDefault(m => m.Model == model))?.Window
+        ?? Models.OrderByDescending(m => m.Input).FirstOrDefault()?.Window;
+}
 
 /// <summary>화면에 쓰지 않는 줄 (status · message_start · rate_limit_event · 모르는 종류 · 깨진 JSON).</summary>
 public sealed record OtherEvent(string Type) : StreamEvent;
@@ -48,12 +73,16 @@ public static class StreamParser
                 "system" when subtype == "init" => new InitEvent(Str(e, "session_id"), Str(e, "claude_code_version"), McpServers(e)),
                 "system" when subtype == "permission_denied" => new DeniedEvent(Str(e, "tool_name"), Str(e, "decision_reason")),
                 "system" when subtype == "api_retry" => new RetryEvent(Int(e, "attempt") ?? 0, Str(e, "error")),
+                "assistant" => ParseUsage(e),
                 "result" => new ResultEvent(
                     Ok: subtype == "success" && !(e.TryGetProperty("is_error", out var err) && err.ValueKind == JsonValueKind.True),
                     Text: Str(e, "result"),
                     Subtype: subtype,
                     CostUsd: e.TryGetProperty("total_cost_usd", out var cost) && cost.ValueKind == JsonValueKind.Number ? cost.GetDouble() : null,
-                    Denials: e.TryGetProperty("permission_denials", out var d) && d.ValueKind == JsonValueKind.Array ? d.GetArrayLength() : 0),
+                    Denials: e.TryGetProperty("permission_denials", out var d) && d.ValueKind == JsonValueKind.Array ? d.GetArrayLength() : 0)
+                {
+                    Models = ModelWindows(e),
+                },
                 _ => new OtherEvent(subtype is null ? type : $"{type}/{subtype}"),
             };
         }
@@ -73,6 +102,29 @@ public static class StreamParser
             return new ToolEvent(Str(block, "name") ?? "?");
         return new OtherEvent($"stream_event/{type}");
     }
+
+    private static StreamEvent ParseUsage(JsonElement e)
+    {
+        if (e.TryGetProperty("parent_tool_use_id", out var parent) && parent.ValueKind == JsonValueKind.String) return new OtherEvent("assistant/subagent");
+        if (!e.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object
+            || !message.TryGetProperty("usage", out var usage) || usage.ValueKind != JsonValueKind.Object) return new OtherEvent("assistant");
+        var total = Long(usage, "input_tokens") + Long(usage, "cache_creation_input_tokens") + Long(usage, "cache_read_input_tokens") + Long(usage, "output_tokens");
+        return total > 0 ? new UsageEvent(total) { Model = Str(message, "model") } : new OtherEvent("assistant");
+    }
+
+    private static IReadOnlyList<ModelWindow> ModelWindows(JsonElement e)
+    {
+        if (!e.TryGetProperty("modelUsage", out var models) || models.ValueKind != JsonValueKind.Object) return [];
+        var list = new List<ModelWindow>();
+        foreach (var m in models.EnumerateObject())
+            if (m.Value.ValueKind == JsonValueKind.Object && Int(m.Value, "contextWindow") is > 0 and var w)
+                list.Add(new ModelWindow(m.Name, w,
+                    Long(m.Value, "inputTokens") + Long(m.Value, "cacheReadInputTokens") + Long(m.Value, "cacheCreationInputTokens")));
+        return list;
+    }
+
+    private static long Long(JsonElement e, string name) =>
+        e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt64(out var l) && l > 0 ? l : 0;
 
     private static IReadOnlyList<(string, string)> McpServers(JsonElement e)
     {
