@@ -92,6 +92,7 @@
 
 Quota(`[실패] Quota` — 크레딧·한도 소진)나 429 실패 뒤에는 바로 재실행하지 않는다. 사용자가 충전했다고 해도
 가장 작은 호출 1회(예: 골든 리뷰 사례 하나)로 정상인지 확인한 다음 일괄 실행(골든 반복 등)을 한다.
+단, API 리뷰(`sub_*`, claude-cli)는 예외다: 서버가 Quota 뒤 1시간 동안 호출 없이 `[실패] Quota (최근)`를 돌려주고, 그 뒤 첫 리뷰가 확인 호출이 된다 — 따로 확인 호출을 하지 않고 그동안은 서브에이전트로 대신한다 (`/self-review` "API 리뷰").
 
 ## 서브에이전트 (Claude Code)
 
@@ -99,6 +100,7 @@ Quota(`[실패] Quota` — 크레딧·한도 소진)나 429 실패 뒤에는 바
 
 * 정의: `.claude/agents/`
   * 검토형(Opus, `subagent_in/` 격리 · 같은 출력 형식): `self-reviewer`(코드 리뷰 — `/self-review` · `/cross-review` 2단계), `perf-reviewer`(성능 — `/mode` perf_* ownReview · `/self-review perf`), `security-reviewer`(보안 — `/self-review security` · 보안 영역 `/cross-review`는 사용자에게 묻고 self-reviewer와 함께), `direction-reviewer`(요청 원문 대 계획서 방향 — 계획서를 쓴 뒤 승인 전에 `/self-review direction`을 **제안만**).
+  * **검토형은 기본이 API 리뷰**: 모드 `sub_self` · `sub_perf` · `sub_security` · `sub_direction`(claude --bare -p, 키 `HB_REVIEWER_API_KEY` — 구독 사용량을 쓰지 않음). 서브에이전트는 `/self-review sub …`로 고르거나 `[실패] Quota`(크레딧 소진) 때 대신 쓴다. 절차는 `/self-review` "API 리뷰".
   * 수집형: `web-searcher`(Sonnet, WebSearch · WebFetch만 — research 2단계 · crash 사전 조사 검색), `evidence-collector`(Opus, `/preflight` P4 근거 수집).
   * 모델: 맥락 편향 없이 봐야 하는 자리는 `opus`, 지휘자 컨텍스트 보호·반복 작업(조사·수집·추출)은 `sonnet`.
   * 정의 파일에는 `tools` 허용 목록이 반드시 있어야 한다 (생략하면 MCP 도구까지 상속 → `run_mode`를 부를 수 있음). `python -I .claude/scripts/check_agents.py`로 검사한다. `permissionMode` bypass 계열 금지.
@@ -121,7 +123,7 @@ Quota(`[실패] Quota` — 크레딧·한도 소진)나 429 실패 뒤에는 바
 * H1 `cleanup_guard.py`: 재귀 삭제는 단독 명령 · 절대 경로 · 셸의 현재 폴더 밖 대상만 ("명령 실행").
 * H2 `push_guard.py`: `git push`는 단독 명령만. 올라갈 커밋에 비밀 값 모양이나 `docs/image/`·`GoldenSet/`·`subagent_in/`·`review_tmp/` 아래 파일이 있으면 막는다. 개인 값 패턴은 `.claude/push_guard.local.txt`(`.gitignore` 등록).
 * H3 `run_mode_guard.py`: `review_*` 전에 오늘 계획서가 없으면 ("계획서와 작업 로그").
-* H4 `run_mode_guard.py`: `reason`이 `[ownReview:<서브에이전트>]`(둘이면 `+`)면 ownReview는 그 결과 원문이어야 한다 (`## 읽은 파일`은 경로 줄만, 설명은 `## 비고`). `review_*`는 태그가 필수다.
+* H4 `run_mode_guard.py`: `reason`이 `[ownReview:<서브에이전트>]`(둘이면 `+`)면 ownReview는 그 결과 원문이어야 한다 (`## 읽은 파일`은 경로 줄만, 설명은 `## 비고`). `review_*`는 태그가 필수다. API 리뷰 결과는 `[ownReview:sub_self]` · `[ownReview:sub_perf]` · `[ownReview:sub_self+sub_security]`(응답 본문만, 읽은 파일은 작업 폴더 기준 상대 경로) — 서브에이전트 이름과 섞지 않는다.
 * H5 `share_guard.py`: `slackplan`으로 나가는 글에 비밀 값 · 개인 값 · 프로젝트 패턴(`.claude/share_guard.local.txt`, `.gitignore` 등록) · 위 폴더 언급 · 로컬 절대 경로가 있거나, `--allow-warnings` · 지우는 명령의 `--yes`면 막는다. 호출은 단독 명령만, heredoc 본문에 slackplan이 있으면 데이터 전용 명령(cat · git commit 등)에만.
 * H6 `subagent_input_guard.py`: 서브에이전트를 부르거나 이어 부를 때(`Agent` · `SendMessage`) 메시지에 `subagent_in`이 나오면 `subagent_in/` 전체를 훑어, `CLAUDE.md` · `CLAUDE.local.md` · `.claude`나 폴더 링크 · 정션이 있거나 경로가 이 프로젝트 `subagent_in/` 밖이면. 그 파일들은 서브에이전트가 폴더를 읽을 때 하네스가 자동으로 불러온다.
 * 훅 등록은 `python -I .claude/scripts/check_agents.py`, 동작은 `python -I .claude/scripts/test_hooks.py`로 검사한다. settings.json을 고치면 새 세션에서 반영된다.

@@ -474,6 +474,73 @@ public sealed class ClaudeCliTests : IDisposable
         ReviewWorkFolder.TryDelete(folder);
     }
 
+    // ── 2차 설계: 크레딧 소진 대체 ────────────────────────────────────────
+
+    private static HB.Orchestration.Shared.CallRecord Rec(DateTimeOffset at, string provider, bool success, string? kind = null) => new()
+    {
+        Id = Guid.NewGuid().ToString("N")[..12], Timestamp = at, Tool = "sub_self", Mode = "sub_self", Provider = provider,
+        Model = "claude-opus-5-5", Prompt = "p", Success = success, ErrorKind = kind,
+    };
+
+    [Fact]
+    public async Task Recent_quota_is_found_only_within_hold_and_after_last_success()
+    {
+        var log = Path.Combine(_dir, "calls.jsonl");
+        var now = DateTimeOffset.Now;
+        var hold = ModeRunner.ClaudeCliQuotaHold;
+        Assert.Equal(TimeSpan.FromHours(1), hold);
+
+        await HB.Orchestration.Shared.CallLog.AppendAsync(Rec(now.AddHours(-3), "cli", true), log);
+        Assert.Null(ModeRunner.RecentQuota(["cli"], log, hold, now));
+
+        await HB.Orchestration.Shared.CallLog.AppendAsync(Rec(now.AddMinutes(-40), "cli", false, "Quota"), log);
+        await HB.Orchestration.Shared.CallLog.AppendAsync(Rec(now.AddMinutes(-20), "cli", false, "Timeout"), log);   // 크레딧 상태를 알려 주지 않음 → 건너뜀
+        await HB.Orchestration.Shared.CallLog.AppendAsync(Rec(now.AddMinutes(-10), "other", true), log);           // 다른 제공사
+        Assert.NotNull(ModeRunner.RecentQuota(["cli"], log, hold, now));
+        Assert.Null(ModeRunner.RecentQuota(["cli"], log, hold, now.AddMinutes(30)));                           // 1시간 지나면 다시 시도
+
+        await HB.Orchestration.Shared.CallLog.AppendAsync(Rec(now.AddMinutes(-5), "cli", true), log);            // 충전 뒤 성공
+        Assert.Null(ModeRunner.RecentQuota(["cli"], log, hold, now));
+    }
+
+    [Fact]
+    public async Task Cli_mode_after_recent_quota_fails_fast_without_calling()
+    {
+        using var h = new ModeRunnerHarness(CliModes, providerType: ClaudeCliProvider.TypeName);
+        await HB.Orchestration.Shared.CallLog.AppendAsync(Rec(DateTimeOffset.Now.AddMinutes(-5), "fake", false, "Quota"), h.LogPath);
+        var name = $"cli_quota_{Guid.NewGuid():N}.cs";
+        File.WriteAllText(Path.Combine(Environment.CurrentDirectory, name), "x\n");
+        try
+        {
+            var result = await h.Runner.RunAsync("cli", "의도", null, null, [new ContextRange(name, 1, 1)], null, ModeRunnerHarness.DefaultReason, null, CancellationToken.None);
+
+            Assert.StartsWith(AgentRunner.QuotaFailurePrefix, result);
+            Assert.Contains("서브에이전트", result);
+            Assert.Equal(0, h.Client.Calls);
+            Assert.Empty(Directory.Exists(ReviewWorkFolder.BaseFor(h.LogPath)) ? Directory.EnumerateDirectories(ReviewWorkFolder.BaseFor(h.LogPath)) : []);
+        }
+        finally
+        {
+            File.Delete(Path.Combine(Environment.CurrentDirectory, name));
+        }
+    }
+
+    [Fact]
+    public void Template_has_all_sub_review_modes_on_the_cli_agent()
+    {
+        var path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "HB.Orchestration.Mcp", "modes.json"));
+        using var doc = JsonDocument.Parse(File.ReadAllText(path));
+        foreach (var (mode, role) in new[] { ("sub_self", "SubSelf"), ("sub_perf", "SubPerf"), ("sub_security", "SubSecurity"), ("sub_direction", "SubDirection") })
+        {
+            var step = doc.RootElement.GetProperty("Modes").GetProperty(mode).GetProperty("Steps")[0];
+            Assert.Equal((role, "claude_cli_opus"), (step.GetProperty("Role").GetString(), step.GetProperty("Agent").GetString()));
+            var prompt = doc.RootElement.GetProperty("Roles").GetProperty(role).GetProperty("Prompt").GetString()!;
+            Assert.Contains("작업 폴더", prompt);
+            Assert.DoesNotContain("subagent_in", prompt);                                 // 서브에이전트용 폴더 지시가 남지 않게
+            Assert.Contains("## 지적", prompt);
+        }
+    }
+
     [Fact]
     public async Task Cli_mode_is_not_limited_by_unsent_excerpt_length()
     {

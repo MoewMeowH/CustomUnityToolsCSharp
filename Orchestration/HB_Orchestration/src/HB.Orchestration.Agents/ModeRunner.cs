@@ -98,6 +98,11 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
                 return $"[모드 '{modeName}'] claude-cli 에이전트와 다른 제공사 에이전트를 한 모드에 섞을 수 없습니다.";
             if (loadedImages.Count > 0)
                 return $"[모드 '{modeName}'] claude-cli 단계는 images를 받지 않습니다.";
+            // 크레딧 소진 대체 규칙 (계획서 2026-10-27_검토형-서브에이전트-API-전환 "2차 설계" 2b): 직전 판정 가능한 기록이 가까운 Quota면 부르지 않는다.
+            // 지휘자는 이 실패를 보고 서브에이전트로 대신한다 (self-review.md).
+            if (RecentQuota(plan.Select(p => p.Agent.Provider).Distinct(), runner.LogPath, ClaudeCliQuotaHold, DateTimeOffset.Now) is { } quotaAt)
+                return $"{AgentRunner.QuotaFailurePrefix} (최근) — claude-cli 크레딧 소진 기록 {quotaAt.ToLocalTime():MM-dd HH:mm}. " +
+                       $"{ClaudeCliQuotaHold.TotalHours:0}시간 동안은 호출하지 않는다 — 서브에이전트로 대신하라 (그 뒤 한 번 다시 시도).";
             var (folder, focus, folderError) = ReviewWorkFolder.Create(ReviewWorkFolder.BaseFor(runner.LogPath), context, Options.Context, Environment.CurrentDirectory, ct);
             if (folderError is not null) return $"[첨부 코드 오류] {folderError}";
             workFolder = folder;
@@ -154,6 +159,37 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             note = note is null ? string.Join("\n", overlaps) : $"{string.Join("\n", overlaps)}\n{note}";
 
         return ResultFormatter.Format(runId, results, returnAll, note);
+    }
+
+    /// <summary>
+    /// claude-cli Quota 뒤 호출을 쉬는 시간. 계속 막으면 성공 기록이 생길 수 없어 크레딧을 채워도 풀리지 않는다 —
+    /// 이 시간이 지나면 한 번 시도한다 (크레딧이 없으면 실패 호출 비용은 0). 충전한 뒤 풀릴 때까지의 최대 대기라 짧게 둔다
+    /// (12시간 → 1시간, 계획서 2026-10-27_검토형-서브에이전트-API-전환 '결정 (2차 리뷰 9ea51e562a 뒤)').
+    /// </summary>
+    public static readonly TimeSpan ClaudeCliQuotaHold = TimeSpan.FromHours(1);
+
+    /// <summary>
+    /// providers 중 하나라도, hold 안에서 가장 최근의 판정 가능한 기록(성공 또는 Quota)이 Quota면 그 시각. 아니면 null.
+    /// Timeout · Network 같은 실패는 크레딧 상태를 알려 주지 않아 건너뛴다 (GoldenCli.QuotaProviders와 같은 규칙). 기록을 못 읽으면 막지 않는다.
+    /// </summary>
+    public static DateTimeOffset? RecentQuota(IEnumerable<string> providers, string logPath, TimeSpan hold, DateTimeOffset now)
+    {
+        var wanted = providers.ToHashSet(StringComparer.Ordinal);
+        var decided = new HashSet<string>(StringComparer.Ordinal);
+        try
+        {
+            // ReadSince는 최신 기록이 앞에 온다.
+            foreach (var r in CallLog.ReadSince(now - hold, logPath))
+            {
+                if (r.Provider is not { } provider || !wanted.Contains(provider) || decided.Contains(provider)) continue;
+                var isQuota = r.ErrorKind == nameof(ErrorKind.Quota);
+                if (!r.Success && !isQuota) continue;
+                decided.Add(provider);
+                if (isQuota && r.Timestamp >= now - hold) return r.Timestamp;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        return null;
     }
 
     /// <summary>

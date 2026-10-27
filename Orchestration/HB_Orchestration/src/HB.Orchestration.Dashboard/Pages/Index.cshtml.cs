@@ -6,7 +6,7 @@ using Microsoft.Extensions.Options;
 namespace HB.Orchestration.Dashboard.Pages;
 
 public sealed class IndexModel(IOptions<DashboardOptions> options, PricingService pricing, CallLogCache log, VerdictLogCache verdicts,
-    SubagentResultsService subagents) : PageModel
+    SubagentResultsService subagents, ModesConfigService modes) : PageModel
 {
     public DashboardOptions Opt => options.Value;
     public PricingService Pricing => pricing;
@@ -84,6 +84,29 @@ public sealed class IndexModel(IOptions<DashboardOptions> options, PricingServic
     /// <summary>최근 7일 검토형 서브에이전트 결과 중 서버 기록에 없는 수 (계획서 2026-10-27_서브에이전트-결과-보존).</summary>
     public int UnrecordedSubagents { get; private set; }
 
+    /// <summary>API 리뷰(claude-cli 제공사) 이번 달(로컬) 실행 수 · 비용. 월 크레딧을 보며 쓰려고 (계획서 2026-10-27_검토형-서브에이전트-API-전환 2차 설계 2c).</summary>
+    public int SubReviewMonthRuns { get; private set; }
+    public decimal SubReviewMonthCost { get; private set; }
+
+    /// <summary>이번 달 API 리뷰 기록 중 단가가 없어 비용에 넣지 못한 건수.</summary>
+    public int SubReviewMonthUnpriced { get; private set; }
+
+    /// <summary>API 리뷰 기록 중 가장 최근의 판정 가능한 기록(성공 또는 Quota)이 Quota면 그 시각 — 크레딧 소진, 서브에이전트로 대체 중.</summary>
+    public DateTimeOffset? SubReviewQuotaAt { get; private set; }
+
+    /// <summary>Quota 뒤 서버가 호출을 쉬는 시간(ModeRunner.ClaudeCliQuotaHold)이 지났다 — 다음 호출에서 다시 시도한다.</summary>
+    public bool SubReviewQuotaHoldOver => SubReviewQuotaAt is { } at && DateTimeOffset.Now - at >= Agents.ModeRunner.ClaudeCliQuotaHold;
+
+    /// <summary>배지 링크: claude-cli 제공사가 하나면 그 제공사 · 이번 달 기간으로 거른 목록.</summary>
+    public string SubReviewLink { get; private set; } = "/";
+
+    private HashSet<string> _cliProviders = [];
+
+    /// <summary>API 리뷰 기록: 제공사 Type이 claude-cli (서버의 Quota 판정과 같은 기준). 설정을 못 읽으면 모드 이름 sub_*로 본다.</summary>
+    public bool IsSubReview(CallRecord c) => _cliProviders.Count > 0
+        ? c.Provider is { } p && _cliProviders.Contains(p)
+        : (c.Mode ?? c.Tool).StartsWith("sub_", StringComparison.Ordinal);
+
     /// <summary>RunId·Step별 시도 수. 2 이상이면 그 단계에 재시도가 있었다 (시도마다 기록이 한 줄씩 남는다).</summary>
     private Dictionary<(string RunId, int Step), int> _attempts = [];
 
@@ -138,6 +161,20 @@ public sealed class IndexModel(IOptions<DashboardOptions> options, PricingServic
 
         _verdictCounts = verdicts.Latest.GroupBy(v => v.RunId).ToDictionary(g => g.Key, g => g.Count());
         UnrecordedSubagents = subagents.UnrecordedRecent(all);
+
+        _cliProviders = modes.McpOptionsOrDefault().Providers
+            .Where(p => string.Equals(p.Value.Type, Agents.Providers.ClaudeCliProvider.TypeName, StringComparison.OrdinalIgnoreCase))
+            .Select(p => p.Key).ToHashSet(StringComparer.Ordinal);
+        var monthStart = new DateTimeOffset(new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1));
+        var subMonth = all.Where(c => IsSubReview(c) && c.Timestamp >= monthStart).ToList();
+        SubReviewMonthRuns = subMonth.Select(c => c.RunId ?? c.Id).Distinct().Count();
+        SubReviewMonthCost = subMonth.Sum(c => pricing.CostOf(c) ?? 0m);
+        SubReviewMonthUnpriced = subMonth.Count(c => pricing.CostOf(c) is null);
+        SubReviewLink = _cliProviders.Count == 1
+            ? $"?Provider={Uri.EscapeDataString(_cliProviders.First())}&Days={DateTime.Today.Day}"
+            : $"?Q=sub_&Days={DateTime.Today.Day}";
+        // all은 최신순이다.
+        SubReviewQuotaAt = all.Where(IsSubReview).FirstOrDefault(c => c.Success || c.ErrorKind == "Quota") is { Success: false } q ? q.Timestamp : null;
 
         _attempts = all
             .Where(c => c.RunId is not null && c.Step is not null)

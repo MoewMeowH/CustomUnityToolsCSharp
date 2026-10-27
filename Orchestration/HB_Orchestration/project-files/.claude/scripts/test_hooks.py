@@ -393,6 +393,21 @@ try:
     expect('H4 변형 제목 읽은 파일 절도 검사', h3('review_main', tag, good + '## 읽은 파일 (추가)\n- docs/worklog.md:1-5\n'), 2, 'subagent_in/ 밖')
     expect('H4 태그 없는 변형 제목', h3('perf_main', '이유', '## 지적\n- x\n## 읽은 파일 (추가)\n- subagent_in/x/a.cs\n'), 2, '태그가 없다')
     expect('H4 들여쓴 · ### 읽은 파일 절도 검사', h3('review_main', tag, good + '## 비고\n- 없음\n  ### 읽은 파일\n- docs/worklog.md:1-5\n'), 2, 'subagent_in/ 밖')
+    # API 리뷰(sub_*) 결과 — 작업 폴더 기준 상대 경로 (계획서 2026-10-27_검토형-서브에이전트-API-전환 '결정 (2차 리뷰 9ea51e562a 뒤)')
+    api = good.replace('subagent_in/2026-10-19_x/a.cs', 'Orchestration/src/a.cs')
+    api_tag = '[ownReview:sub_self] 이유'
+    expect('H4 sub_self 상대 경로', h3('review_main', api_tag, api), 0)
+    expect('H4 sub_perf', h3('perf_main', '[ownReview:sub_perf] 이유', api), 0)
+    expect('H4 sub_self+sub_security 이어 붙임', h3('review_main', '[ownReview:sub_self+sub_security] 이유', api + '\n' + api), 0)
+    expect('H4 sub_self 요약은 막음', h3('review_main', api_tag, '## 지적\n- C1 요약'), 2, "'## 지적'부터")
+    expect('H4 sub_self 절대 경로', h3('review_main', api_tag, api.replace('Orchestration/src/a.cs', 'C:\\Users\\x\\review_in\\a.cs')), 2, '상대 경로가 아닌')
+    expect('H4 sub_self / 로 시작', h3('review_main', api_tag, api.replace('Orchestration/src/a.cs', '/tmp/a.cs')), 2, '상대 경로가 아닌')
+    expect('H4 sub_self .. 로 나감', h3('review_main', api_tag, api.replace('Orchestration/src/a.cs', 'src/../../a.cs')), 2, '상대 경로가 아닌')
+    expect('H4 sub_self ~ 경로', h3('review_main', api_tag, api.replace('Orchestration/src/a.cs', '~/a.cs')), 2, '상대 경로가 아닌')
+    expect('H4 sub_self 읽은 파일의 머리 줄', h3('review_main', api_tag, api + 'runId: abc\n'), 2, "'- '로 시작하지 않는")
+    expect('H4 서브에이전트와 sub_* 섞음', h3('review_main', '[ownReview:self-reviewer+sub_security] 이유', good + '\n' + api), 2, '섞였다')
+    expect('H4 sub_direction은 모름', h3('review_main', '[ownReview:sub_direction] 이유', api), 2, '모른다')
+    expect('H4 서브에이전트 태그에 상대 경로는 계속 막음', h3('review_main', tag, api), 2, 'subagent_in/ 밖')
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

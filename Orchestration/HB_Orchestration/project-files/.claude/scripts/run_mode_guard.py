@@ -12,6 +12,9 @@
   '## 읽은 파일'의 설명 줄은 계속 막는다 (계획서 2026-10-22_self-reviewer-비고-칸, 느슨하게 만들지 않는다는 사용자 결정).
   '## 읽은 파일'에 '- '로 시작하지 않는 줄이 있어도 막는다. 태그가 없어도: review_*에 ownReview가 있거나, ownReview에
   '## 읽은 파일' 절이 있으면 막는다 — 태그를 빼면 검사를 건너뛰던 빈틈 (계획서 2026-10-23_H5-셸-문법-우회).
+  API 리뷰(run_mode sub_* — 서버 작업 폴더에서 읽음)는 태그에 모드 이름을 쓴다: [ownReview:sub_self] · [ownReview:sub_self+sub_security]
+  · [ownReview:sub_perf]. 형식 검사는 같고, 읽은 파일은 subagent_in/ 대신 작업 폴더 기준 상대 경로(절대 경로 · 드라이브 · '~' · '..' 없음)인지 본다.
+  서브에이전트 이름과 섞지 않는다 (계획서 2026-10-27_검토형-서브에이전트-API-전환 '결정 (2차 리뷰 9ea51e562a 뒤)').
 - 실패하면 막는다: 통과 판정일 때만 exit 0.
 
 입력: stdin JSON {"tool_name": "mcp__hb-orchestration__run_mode", "tool_input": {"mode", "reason", "ownReview", ...}}.
@@ -25,6 +28,8 @@ import sys
 PLAN_MODES = {'review_main', 'review_high'}
 # ownReview를 쓸 수 있는 검토형 서브에이전트 (계획서 2026-10-23_서브에이전트-종류-추가). 둘 이상이면 '+'로 잇고, 결과 원문도 이어 붙인다.
 REVIEWERS = {'self-reviewer', 'perf-reviewer', 'security-reviewer'}
+# 같은 자리의 API 리뷰 모드 (sub_direction은 ownReview에 쓰지 않는다)
+API_REVIEWERS = {'sub_self', 'sub_perf', 'sub_security'}
 # 접두어 · 이름 모두 대소문자를 무시한다 — [ownreview:…]로 쓰면 검사를 건너뛰던 빈틈 (/self-review fffbc4440a C5)
 OWN_REVIEW_TAG = re.compile(r'^\[ownReview:([^\]]*)\]', re.IGNORECASE)
 # '## 읽은 파일 (추가)' · 앞 공백 · '###' · 탭 같은 변형 제목도 읽은 파일 절이다 (/cross-review 8722c947f7 security C9,
@@ -82,19 +87,31 @@ def inside_subagent_in(item: str) -> bool:
     return bool(after)
 
 
+def inside_work_folder(item: str) -> bool:
+    """API 리뷰(sub_*)의 항목: 서버 작업 폴더 기준 상대 경로인지. 절대 경로 · 드라이브 · UNC · '~' · '..' 구성 요소는 거절."""
+    path = item.split(' (', 1)[0].strip().strip('`')
+    path = re.sub(r':\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*$', '', path)
+    if not path or path[0] in '/\\~' or re.match(r'^[A-Za-z]:', path):
+        return False
+    parts = [p for p in path.replace('\\', '/').split('/') if p not in ('', '.')]
+    return bool(parts) and '..' not in parts
+
+
 SEARCH_LINE = re.compile(r'^(grep|glob)\s*:', re.IGNORECASE)
 
 
-def read_item_ok(item: str) -> bool:
+def read_item_ok(item: str, api: bool = False) -> bool:
     """읽은 파일 항목 하나. 'Grep: …'·'Glob: …' 검색 기록 줄은 경로 모양 토큰(/·\\ 포함)이 있으면 모두 subagent_in/ 안이어야 하고,
-    없으면 통과 (검색 기록은 폴더 밖 접근의 증거가 아님 — 읽기 차단 훅이 Grep·Glob path도 막는다. 계획서 2026-10-19_H4-검색기록줄)."""
+    없으면 통과 (검색 기록은 폴더 밖 접근의 증거가 아님 — 읽기 차단 훅이 Grep·Glob path도 막는다. 계획서 2026-10-19_H4-검색기록줄).
+    api면 subagent_in/ 대신 작업 폴더 기준 상대 경로인지 본다."""
+    inside = inside_work_folder if api else inside_subagent_in
     if not SEARCH_LINE.match(item):
-        return inside_subagent_in(item)
+        return inside(item)
     paths = [t.strip('`\'",;()') for t in re.split(r'\s+', SEARCH_LINE.sub('', item)) if '/' in t or '\\' in t]
-    return all(inside_subagent_in(p) for p in paths)
+    return all(inside(p) for p in paths)
 
 
-def self_review_problem(own: str) -> str | None:
+def self_review_problem(own: str, api: bool = False) -> str | None:
     lines = own.replace('\r\n', '\n').split('\n')
     heads = [i for i, l in enumerate(lines) if l.startswith('## ')]
     if not any(lines[i].strip() == '## 지적' for i in heads):
@@ -113,13 +130,15 @@ def self_review_problem(own: str) -> str | None:
         items += [l[2:].strip() for l in body]
     if not items:
         return "'## 읽은 파일'에 항목이 없다"
-    outside = [p for p in items if not read_item_ok(p)]
+    outside = [p for p in items if not read_item_ok(p, api)]
+    if outside and api:
+        return f"읽은 파일에 작업 폴더 기준 상대 경로가 아닌 줄이 있다: {outside[0][:120]} (결과를 그대로 쓰지 말고 사용자에게 알린다)"
     if outside:
         return f"읽은 파일 중 subagent_in/ 밖이 있다: {outside[0][:120]} (서브에이전트 결과를 그대로 쓰지 말고 사용자에게 알린다)"
     return None
 
 
-def blocks_problem(own: str, agents: int) -> str | None:
+def blocks_problem(own: str, agents: int, api: bool = False) -> str | None:
     """이어 붙인 결과를 '## 지적' 절 제목(줄 맨 앞)마다 서브에이전트 블록으로 나눠, 블록마다 원문 형식을 검사한다
     (둘째 결과를 요약으로 바꿔도 통과하던 빈틈, /self-review fffbc4440a C1). 같은 원문을 두 번 붙인 것은 내용 비교 없이는 못 막는다."""
     lines = own.replace('\r\n', '\n').split('\n')
@@ -130,7 +149,7 @@ def blocks_problem(own: str, agents: int) -> str | None:
         return None
     for n, start in enumerate(starts):
         end = starts[n + 1] if n + 1 < len(starts) else len(lines)
-        if (problem := self_review_problem('\n'.join(lines[start:end]))) is not None:
+        if (problem := self_review_problem('\n'.join(lines[start:end]), api)) is not None:
             return f'{n + 1}번째 결과: {problem}'
     return None
 
@@ -147,14 +166,20 @@ def check(data: dict, today: datetime.date | None = None) -> None:
 
     if tag := OWN_REVIEW_TAG.match(reason):
         agents = [a.strip().lower() for a in tag.group(1).split('+')]
-        if unknown := [a for a in agents if a not in REVIEWERS]:
-            deny(f"reason 태그 '{tag.group(0)}'의 서브에이전트 '{unknown[0]}'를 모른다: {', '.join(sorted(REVIEWERS))} 중에서 '+'로 잇는다.")
+        if unknown := [a for a in agents if a not in REVIEWERS | API_REVIEWERS]:
+            deny(f"reason 태그 '{tag.group(0)}'의 서브에이전트 '{unknown[0]}'를 모른다: {', '.join(sorted(REVIEWERS))} "
+                 f"(API 리뷰면 {', '.join(sorted(API_REVIEWERS))}) 중에서 '+'로 잇는다.")
         if len(set(agents)) != len(agents):
             deny(f"reason 태그 '{tag.group(0)}'에 같은 서브에이전트가 두 번 있다: 서브에이전트마다 한 번씩만 쓴다.")
-        problem = self_review_problem(own) or blocks_problem(own, len(agents))
+        api = all(a in API_REVIEWERS for a in agents)
+        if not api and any(a in API_REVIEWERS for a in agents):
+            deny(f"reason 태그 '{tag.group(0)}'에 서브에이전트와 API 리뷰(sub_*)가 섞였다: 한쪽으로만 쓴다 "
+                 "(크레딧 소진으로 서브에이전트로 넘어갔으면 둘 다 서브에이전트로).")
+        problem = self_review_problem(own, api) or blocks_problem(own, len(agents), api)
         if problem is not None:
             keys = '' if own else f" (받은 입력 키: {', '.join(sorted(ti))})"
-            deny(f'ownReview가 {"+".join(agents)} 결과 원문이 아니다: {problem}{keys}. /cross-review 3단계 · /mode 3단계: ownReview에는 서브에이전트 결과 원문만 넣는다.')
+            deny(f'ownReview가 {"+".join(agents)} 결과 원문이 아니다: {problem}{keys}. /cross-review 3단계 · /mode 3단계: ownReview에는 서브에이전트 결과 원문만 넣는다'
+                 + (" (API 리뷰면 응답 본문 '## 지적'부터 끝까지, runId · '### 단계' 머리 줄과 '[경고]' 줄은 빼고)." if api else '.'))
     # 태그가 빠지면 검사를 건너뛰던 빈틈 (계획서 2026-10-23_H5-셸-문법-우회, security-reviewer 7282089076 C10).
     # review_*는 /cross-review로만 부르고 ownReview는 늘 서브에이전트 원문이다. perf_*는 설계안뿐이면 태그 없는 지휘자 의견 (mode.md 2단계).
     elif mode in PLAN_MODES and own.strip():

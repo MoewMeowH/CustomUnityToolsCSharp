@@ -58,6 +58,24 @@
     <span class="muted mono" style="margin-left:auto">@Model.Opt.ResolvedLogPath</span>
 </form>
 
+@if (Model.SubReviewMonthRuns > 0 || Model.SubReviewQuotaAt is not null)
+{
+    <p style="margin:-6px 0 12px">
+        <a class="badge" href="@Model.SubReviewLink" title="claude-cli 제공사(HB_REVIEWER_API_KEY) 검토 — sub_* 모드. 비용은 MCP 단가 기준">API 리뷰(sub_*) 이번 달 @(Model.SubReviewMonthRuns)회 · $@Model.SubReviewMonthCost.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)@(Model.SubReviewMonthUnpriced > 0 ? $" (단가 없음 {Model.SubReviewMonthUnpriced}건)" : "")</a>
+        @if (Model.SubReviewQuotaAt is { } quotaAt)
+        {
+            var holdHours = HB.Orchestration.Agents.ModeRunner.ClaudeCliQuotaHold.TotalHours;
+            if (Model.SubReviewQuotaHoldOver)
+            {
+                <span class="badge" title="마지막 판정 가능한 API 리뷰 기록이 Quota지만 @(holdHours)시간이 지났다. 다음 호출에서 다시 시도한다">크레딧 소진 기록 (@quotaAt.ToLocalTime().ToString("MM-dd HH:mm")) — 다음 호출에서 다시 시도</span>
+            }
+            else
+            {
+                <span class="badge warn" title="마지막 판정 가능한 API 리뷰 기록이 Quota. @(holdHours)시간 동안은 호출하지 않고 서브에이전트로 대체한다">크레딧 소진 (@quotaAt.ToLocalTime().ToString("MM-dd HH:mm")) — 서브에이전트로 대체 중</span>
+            }
+        }
+    </p>
+}
 @if (Model.UnrecordedSubagents > 0)
 {
     <p style="margin:-6px 0 12px"><a class="badge warn" href="/Subagents?Days=7&Unrecorded=true" title="selfReview · ownReview 어디에도 들어가지 않은 검토형 서브에이전트 결과">기록 없는 서브에이전트 결과 @(Model.UnrecordedSubagents)건 (최근 7일)</a></p>

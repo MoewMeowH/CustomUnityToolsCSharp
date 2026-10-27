@@ -1,28 +1,29 @@
 ---
-description: Claude 지휘자와 검토형 서브에이전트(기본 self-reviewer, perf · security · direction 선택)가 독립적으로 리뷰한 뒤 결과를 종합한다 (외부 에이전트 없음)
-argument-hint: [api] [perf|security|direction] [파일/커밋 범위 또는 계획서, 비우면 현재 미커밋 변경]
+description: Claude 지휘자와 검토형 리뷰어(기본 API 리뷰 sub_* — 코드 · perf · security · direction, 서브에이전트는 sub로 고르거나 크레딧 소진 때)가 독립적으로 리뷰한 뒤 결과를 종합한다 (다른 회사 외부 에이전트 없음)
+argument-hint: [sub] [perf|security|direction] [파일/커밋 범위 또는 계획서, 비우면 현재 미커밋 변경]
 ---
 
 인자: $ARGUMENTS
-- 첫 단어가 `api`면 아래 **"api일 때"** 절차 (코드 리뷰만, 시범 중 — 계획서 `Orchestration/HB_Orchestration/docs/plans/2026-10-27_검토형-서브에이전트-API-전환.md`). 시범이 끝나 기본이 바뀌기 전까지는 `api`를 줄 때만.
-- 첫 단어가 관점이면 그 서브에이전트, 아니면 **self-reviewer**(코드 리뷰). (계획서 `Orchestration/HB_Orchestration/docs/plans/2026-10-23_서브에이전트-종류-추가.md`)
-  - `perf` → **perf-reviewer** (실행 비용·할당·동기화·규모 증가만)
-  - `security` → **security-reviewer** (입력 검증·경로·비밀 값·외부 전송·검사 우회·fail-closed만)
-  - `direction` → **direction-reviewer** (요청 원문과 계획서의 방향만 — 대상은 계획서, 아래 "direction일 때")
+- 관점: 첫 단어(또는 `sub` 다음 단어)가 관점이면 그 리뷰어, 아니면 코드 리뷰. (계획서 `Orchestration/HB_Orchestration/docs/plans/2026-10-23_서브에이전트-종류-추가.md`)
+  - (없음) → 모드 `sub_self` / 서브에이전트 **self-reviewer** (코드 리뷰)
+  - `perf` → `sub_perf` / **perf-reviewer** (실행 비용·할당·동기화·규모 증가만)
+  - `security` → `sub_security` / **security-reviewer** (입력 검증·경로·비밀 값·외부 전송·검사 우회·fail-closed만)
+  - `direction` → `sub_direction` / **direction-reviewer** (요청 원문과 계획서의 방향만 — 대상은 계획서, 아래 "direction일 때")
+- **기본은 API 리뷰**(`sub_*` — claude --bare -p 읽기 전용 에이전트, HB_REVIEWER_API_KEY로 과금, 구독 사용량을 쓰지 않음): 아래 **"API 리뷰"** 절차. 첫 단어가 `sub`이면 서브에이전트(아래 1~5 본 절차). 계획서 `Orchestration/HB_Orchestration/docs/plans/2026-10-27_검토형-서브에이전트-API-전환.md`.
 - 나머지가 대상. 비어 있으면 `git diff HEAD`의 미커밋 변경.
-- 아래 "self-reviewer"는 고른 서브에이전트로 읽는다.
-- 외부 에이전트(`run_mode`)는 부르지 않는다. 외부 시선까지 필요하면 `/cross-review` (계획서 `Orchestration/HB_Orchestration/docs/plans/2026-10-20_리뷰조건-self-reviewer.md`). 예외: `api`일 때의 `sub_self`는 Claude(같은 회사)라 외부 시선이 아니다 — 서브에이전트 자리만 대신한다.
+- 아래 "self-reviewer"는 고른 리뷰어(API 리뷰면 `sub_*` 결과)로 읽는다.
+- 다른 회사 외부 에이전트는 부르지 않는다. 외부 시선까지 필요하면 `/cross-review` (계획서 `Orchestration/HB_Orchestration/docs/plans/2026-10-20_리뷰조건-self-reviewer.md`). `sub_*`는 Claude(같은 회사)라 외부 시선이 아니다 — 서브에이전트 자리만 대신한다.
 
-**api일 때** (`sub_self` — claude --bare -p 읽기 전용 에이전트, HB_REVIEWER_API_KEY로 과금, 구독 사용량을 쓰지 않음): 2-2 ~ 2-4만 바뀐다.
+**API 리뷰** (기본): 2-2 ~ 2-4와 4만 바뀐다.
 - 2-1은 같다 (지휘자 검토를 먼저 작업 로그에 저장).
-- 2-2 대신: `subagent_in/`에 복사하지 않는다. `run_mode("sub_self", input, context, reason)` — input = 위임 메시지의 대상 설명 · 변경 의도 · 제약(사용자 결정 원문). context = 대상 파일 + **판단에 필요한 파일**(변경 코드가 쓰는 타입 · 함수의 정의, 호출부, 설정, 관련 테스트)을 파일 단위로 넉넉히 (서버가 파일 전체를 작업 폴더에 복사하고 파일 목록을 프롬프트에 넣는다. 에이전트는 그 목록에서 Read로 연다 — 지금 판은 검색 도구가 없어 목록에 없는 파일은 못 찾는다. 범위 = 검토의 중심. 범위 밖 줄도 Anthropic으로 나가므로 비밀이 든 파일은 넣지 않는다). 너의 의견 · 의심 지점은 넣지 않는다. 지침 파일은 서버가 시스템 프롬프트에 붙인다.
-- 2-3: 서브에이전트를 부르지 않는다. `[실패]`면 한 줄로 알리고 서브에이전트(기본 절차)로 다시 할지 사용자에게 묻는다.
-- 2-4: 결과 형식 검사는 같다. `## 읽은 파일`은 작업 폴더 기준 상대 경로다 (폴더 밖 경로가 있으면 멈춤).
+- 2-2 대신: `subagent_in/`에 복사하지 않는다 (direction 제외 — 아래). `run_mode("sub_*", input, context, reason)` — input = 위임 메시지의 대상 설명 · 변경 의도 · 제약(사용자 결정 원문). context = 대상 파일 + **판단에 필요한 파일**(변경 코드가 쓰는 타입 · 함수의 정의, 호출부, 설정, 관련 테스트)을 파일 단위로 넉넉히 (서버가 파일 전체를 작업 폴더에 복사하고 파일 목록을 프롬프트에 넣는다. 에이전트는 그 목록에서 Read로 연다 — 지금 판은 검색 도구가 없어 목록에 없는 파일은 못 찾는다. 범위 = 검토의 중심. 범위 밖 줄도 Anthropic으로 나가므로 비밀이 든 파일은 넣지 않는다). 너의 의견 · 의심 지점은 넣지 않는다. 지침 파일은 서버가 시스템 프롬프트에 붙인다.
+- 2-3: 서브에이전트를 부르지 않는다. 결과가 **`[실패] Quota`**(크레딧 소진 — 서버가 최근 1시간 안에 Quota였으면 호출 없이 바로 돌려줌)면 **묻지 않고** 같은 대상 · 같은 위임 내용으로 서브에이전트 본 절차로 다시 한다: 2-1 지휘자 검토는 이미 저장했으니 고치지 않고, 2-2 입력 복사(`subagent_in/` · SHA-256 확인 · `_SUBAGENT_MISTAKES.md`)부터 2-4까지 한 뒤 4는 `selfReview`로 기록한다. 결과 보고 · 작업 로그에 "크레딧 소진으로 서브에이전트 사용"을 적는다. 그 밖의 `[실패]`는 한 줄로 알리고 서브에이전트로 다시 할지 사용자에게 묻는다.
+- 2-4: 결과 형식 검사는 같다. `## 읽은 파일`은 작업 폴더 기준 상대 경로다 (절대 경로 · `..`가 있으면 멈춤 — 작업 폴더는 실행 뒤 지워져 대조할 수 없다). `[경고] claude-cli 도구 사용 N건이 거절됨`이 붙으면 종합에서 알린다.
 - 4: `record_verdicts`에 `selfReview` 대신 run_mode 결과의 **runId** (지적은 `steps: [1]`). 나머지 규칙 같음.
-- 시범 기록: 작업 로그에 같은 대상을 서브에이전트로도 돌렸으면 둘의 지적 수 · 채택 · 오탐 · 비용(대시보드)을 나란히 적는다.
+- 대시보드 첫 화면에 API 리뷰 이번 달 횟수 · 비용과 크레딧 소진 상태가 보인다.
 
 **direction일 때**: 계획서를 쓴 뒤 사용자 승인 **전**에 지휘자가 제안하고, 사용자가 이 명령을 입력했을 때 돈다 (자동으로 부르지 않는다).
-- 2-2에서 `request.md`(이 작업에 대한 사용자 메시지 **원문 그대로**, 지휘자 요약 없이)와 계획서를 복사한다. 코드는 넣지 않는다 (필요하면 판단에 쓰인 자료만).
+- 2-2에서 `request.md`(이 작업에 대한 사용자 메시지 **원문 그대로**, 지휘자 요약 없이)와 계획서를 복사한다. 코드는 넣지 않는다 (필요하면 판단에 쓰인 자료만). API 리뷰(`sub_direction`)도 `request.md`는 `subagent_in/<날짜>_<주제>/`에 만든 뒤 그 파일과 계획서를 context(파일 전체 범위)로 넘긴다 — 요청 원문을 input에 다시 쓰지 않는다.
 - 2-1 지휘자 검토와 3 종합은 "요청 누락 · 범위 확장 · 더 단순한 길 · 되돌리기 어려운 결정 · 사용자에게 물을 것" 기준. 채택한 지적은 계획서 본문을 고치지 않고 사용자에게 보고해 `## 결정`으로 반영한다.
 
 1. diff가 있으면 대상 diff와 변경 의도를 파악한다. 의도가 불분명하면 커밋 메시지·주변 코드로 추론하고, 그래도 모르면 한 줄로 질문한다. / diff가 없으면(기존 코드 점검) 변경 의도 대신 "이 코드의 역할과 점검 목적"을 쓴다.
