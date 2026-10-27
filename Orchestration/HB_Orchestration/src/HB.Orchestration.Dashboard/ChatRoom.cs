@@ -107,34 +107,9 @@ public static class ChatRoomBuilder
             .ToHashSet(StringComparer.Ordinal);
 
         var runCalls = calls.Where(c => c.RunId is not null && runSet.Contains(c.RunId)).ToList();
+        // 실행 시작 줄 · 단계마다 마지막 시도 말풍선은 Shared RunBubbles가 만든다 (HB_Chat과 같이 씀, 2-2 e — 옮기기만).
         foreach (var run in runCalls.GroupBy(c => c.RunId!))
-        {
-            var ordered = run.OrderBy(c => c.Timestamp).ToList();
-            var first = ordered[0];
-            var mode = ModeNames.Normalize(first.Mode ?? first.Tool) ?? first.Tool;
-            if (first.Tool != VerdictRecorder.SelfReviewTool)
-            {
-                messages.Add(new RoomMessage
-                {
-                    Key = $"r{run.Key}",
-                    At = first.Timestamp,
-                    Role = RoomRole.System,
-                    Name = "실행",
-                    Detail = $"{mode} · {run.Key}",
-                    Markdown = string.IsNullOrWhiteSpace(first.Reason) ? $"`{mode}` 실행 시작" : $"`{mode}` 실행 시작 — {first.Reason}",
-                    RunId = run.Key,
-                    Link = $"/Call/{first.Id}",
-                    LinkLabel = "호출 상세",
-                });
-            }
-
-            // 단계마다 마지막 시도만 (재시도 · 실패 뒤 성공은 상세 화면에서 본다).
-            foreach (var call in ordered.GroupBy(c => c.Step ?? 1).Select(g => g.OrderBy(c => c.Attempt ?? 1).ThenBy(c => c.Timestamp).Last()))
-            {
-                if (call.Tool == VerdictRecorder.SelfReviewTool && selfReviewShown.Contains(run.Key)) continue;
-                messages.Add(FromCall(call, mode, auto));
-            }
-        }
+            messages.AddRange(RunBubbles.ForRun(run.Key, run, selfReviewShown.Contains(run.Key)).Select(b => FromBubble(b, auto)));
 
         foreach (var v in roomSubagents)
         {
@@ -179,56 +154,27 @@ public static class ChatRoomBuilder
         return new ChatRoom { Transcript = transcript, Title = title, Messages = sorted, RunIds = orderedRuns };
     }
 
-    private static RoomMessage FromCall(CallRecord c, string mode, Func<string, string?> auto)
+    /// <summary>Shared 실행 말풍선 → 채팅방 말풍선 (시작 줄은 안내, 스티커는 상황 → 태그, 링크는 호출 상세).</summary>
+    private static RoomMessage FromBubble(RunBubble b, Func<string, string?> auto) => new()
     {
-        var role = c.Tool == VerdictRecorder.SelfReviewTool ? RoomRole.Subagent
-            : string.Equals(c.Provider, "claude-cli", StringComparison.OrdinalIgnoreCase) || mode.StartsWith("sub_", StringComparison.Ordinal) ? RoomRole.ApiReview
-            : RoomRole.External;
-        var detail = string.Join(" · ", new[] { mode, c.Role, c.Step is { } s ? $"{s}단계" : null, c.Model }.Where(x => !string.IsNullOrWhiteSpace(x)));
-
-        string body;
-        string? situation;
-        if (!c.Success)
+        Key = b.Key,
+        At = b.At,
+        Role = b.Kind switch
         {
-            body = $"**실패** ({c.ErrorKind ?? "알 수 없음"}): {c.Error ?? "오류 문구 없음"}";
-            situation = c.ErrorKind switch
-            {
-                "Quota" => AutoSticker.CallQuota,
-                "RateLimit" => AutoSticker.CallRateLimit,
-                "Timeout" => AutoSticker.CallTimeout,
-                "Canceled" => null,
-                _ => AutoSticker.CallFailed,
-            };
-        }
-        else
-        {
-            body = c.Structured is { Parsed: true } st ? FindingRenderer.Render(st) : c.Response ?? "";
-            situation = c.Structured switch
-            {
-                { Parsed: true, Requests.Count: > 0 } => AutoSticker.CallRequests,
-                _ when c.Warnings.Count > 0 => AutoSticker.CallWarning,
-                { Parsed: true, Findings.Count: 0 } => AutoSticker.CallNoFindings,
-                { Parsed: true } => AutoSticker.CallFindings,
-                _ => null,
-            };
-        }
-        if (c.Warnings.Count > 0) body += "\n\n" + string.Join("\n", c.Warnings.Select(w => "> " + w));
-
-        return new RoomMessage
-        {
-            Key = $"c{c.Id}",
-            At = c.Timestamp.AddMilliseconds(Math.Max(0, c.ElapsedMs)),
-            Role = role,
-            Name = c.Agent ?? c.Model,
-            Detail = detail,
-            Markdown = body,
-            Sticker = situation is null ? null : auto(situation),
-            IsError = !c.Success,
-            RunId = c.RunId,
-            Link = $"/Call/{c.Id}",
-            LinkLabel = "호출 상세",
-        };
-    }
+            RunBubbleKind.Start => RoomRole.System,
+            RunBubbleKind.SelfReview => RoomRole.Subagent,
+            RunBubbleKind.ApiReview => RoomRole.ApiReview,
+            _ => RoomRole.External,
+        },
+        Name = b.Name,
+        Detail = b.Detail,
+        Markdown = b.Markdown,
+        Sticker = b.Situation is null ? null : auto(b.Situation),
+        IsError = b.IsError,
+        RunId = b.RunId,
+        Link = $"/Call/{b.CallId}",
+        LinkLabel = "호출 상세",
+    };
 
     private static RoomMessage FromVerdicts(string runId, List<VerdictRecord> batch, string? firstCallId, Func<string, string?> auto)
     {

@@ -40,7 +40,7 @@ public static class VerdictRecorder
     public const int MaxKeyChars = 80;
     public const int MaxSummaryChars = 300;
 
-    public const string SelfReviewTool = "self_review";
+    public const string SelfReviewTool = RunBubbles.SelfReviewTool;
     public const string SelfReviewRole = "SelfReviewer";
     public const string SelfReviewAgent = "self-reviewer";
 

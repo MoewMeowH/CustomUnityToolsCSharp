@@ -324,6 +324,39 @@ public static class CallLog
         return result;
     }
 
+    /// <summary>
+    /// offset 바이트부터 끝난 줄(\n까지)만 파일 순서대로 읽는다 — 덧붙은 기록만 따라 읽기 (HB_Chat 외부 에이전트 말풍선, 계획서 2-2 e).
+    /// End는 다음에 읽을 위치(쓰는 도중인 마지막 줄은 다음에). 깨진 줄은 건너뛴다. 파일이 offset보다 짧으면(압축 등으로 다시 쓰임) Reset이고 처음부터 읽은 결과다.
+    /// </summary>
+    public static (List<CallRecord> Records, long End, bool Reset) ReadFrom(string path, long offset)
+    {
+        var result = new List<CallRecord>();
+        if (!File.Exists(path)) return (result, 0, offset > 0);
+
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        var reset = offset > fs.Length || offset < 0;
+        if (reset) offset = 0;
+        fs.Seek(offset, SeekOrigin.Begin);
+        using var tail = new MemoryStream();
+        fs.CopyTo(tail);
+        var bytes = tail.GetBuffer().AsSpan(0, (int)tail.Length);
+        var complete = bytes.LastIndexOf((byte)'\n') + 1;
+        foreach (var range in bytes[..complete].Split((byte)'\n'))
+        {
+            var line = bytes[range];
+            if (line.Trim(" \r\t"u8).IsEmpty) continue;
+            try
+            {
+                if (JsonSerializer.Deserialize<CallRecord>(line, Json) is { } r) result.Add(ModeNames.Normalize(r));
+            }
+            catch (JsonException)
+            {
+                // 깨진 줄은 무시 (ReadAll과 같음)
+            }
+        }
+        return (result, offset + complete, reset);
+    }
+
     /// <summary>since 이후 기록만, 최신순. 파일 끝에서부터 읽다가 충분히 오래된 기록이 나오면 멈춘다 (오늘 사용량 같은 집계용).</summary>
     public static List<CallRecord> ReadSince(DateTimeOffset since, string? path = null)
     {

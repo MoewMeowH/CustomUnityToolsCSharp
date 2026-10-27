@@ -89,4 +89,27 @@ public sealed class CallLogTests : IDisposable
 
         Assert.Equal("ok", Assert.Single(CallLog.ReadAll(Log)).Id);
     }
+
+    [Fact]
+    public async Task ReadFrom_ReadsAppendedCompleteLines_ResetsWhenShorter()
+    {
+        await CallLog.AppendAsync(Record("a", DateTimeOffset.Now), Log);
+        var (first, end, reset) = CallLog.ReadFrom(Log, 0);
+        Assert.Equal(["a"], first.Select(r => r.Id));
+        Assert.False(reset);
+
+        // 쓰는 도중인 줄(줄바꿈 없음)은 다음에, 덧붙은 줄만 읽는다
+        await CallLog.AppendAsync(Record("b", DateTimeOffset.Now), Log);
+        File.AppendAllText(Log, """{"id":"half""");
+        var (second, end2, _) = CallLog.ReadFrom(Log, end);
+        Assert.Equal(["b"], second.Select(r => r.Id));
+        Assert.Equal(new FileInfo(Log).Length - """{"id":"half""".Length, end2);
+
+        // 다시 쓰여 짧아졌으면 처음부터
+        File.WriteAllText(Log, "");
+        await CallLog.AppendAsync(Record("c", DateTimeOffset.Now), Log);
+        var (third, _, reset3) = CallLog.ReadFrom(Log, end2);
+        Assert.True(reset3);
+        Assert.Equal(["c"], third.Select(r => r.Id));
+    }
 }

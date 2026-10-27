@@ -564,4 +564,20 @@ public sealed class ChatRoomTests : IDisposable
     }
 
     private static string RoleName(RoomRole role) => role.ToString().ToLowerInvariant();
+
+    [Fact]
+    public void RunBubbleSituations_MatchAutoStickerNames()
+    {
+        // 실행 말풍선 조립을 Shared로 옮기며(2-2 e) 상황 이름이 두 곳에 있다 — 값이 같아야 스티커 설정(Auto)이 그대로 듣는다
+        Assert.Equal(AutoSticker.CallNoFindings, RunBubbles.CallNoFindings);
+        Assert.Equal(AutoSticker.CallFindings, RunBubbles.CallFindings);
+        Assert.Equal(AutoSticker.CallWarning, RunBubbles.CallWarning);
+        Assert.Equal(AutoSticker.CallRequests, RunBubbles.CallRequests);
+        Assert.Equal(AutoSticker.CallQuota, RunBubbles.CallQuota);
+        Assert.Equal(AutoSticker.CallRateLimit, RunBubbles.CallRateLimit);
+        Assert.Equal(AutoSticker.CallTimeout, RunBubbles.CallTimeout);
+        Assert.Equal(AutoSticker.CallFailed, RunBubbles.CallFailed);
+        Assert.Equal(VerdictRecorder.SelfReviewTool, RunBubbles.SelfReviewTool);
+        Assert.Equal(FindingFormat.PerfFindings.Name, FindingRenderer.PerfFormatName);
+    }
 }

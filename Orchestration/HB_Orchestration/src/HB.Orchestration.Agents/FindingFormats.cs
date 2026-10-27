@@ -18,7 +18,7 @@ public sealed record FindingFormat(string Name, int Version, IReadOnlyList<strin
     public static readonly FindingFormat Findings = new("findings", 2, ["critical", "major", "minor", "nit"], Perf: false);
 
     /// <summary>PerfReviewer: 성능 검토 (빈도·증가·측정과 끝 절 3개).</summary>
-    public static readonly FindingFormat PerfFindings = new("perf_findings", 2, ["high", "medium", "low"], Perf: true);
+    public static readonly FindingFormat PerfFindings = new(Shared.FindingRenderer.PerfFormatName, 2, ["high", "medium", "low"], Perf: true);
 
     public static readonly IReadOnlyList<string> Confidences = ["high", "medium", "low"];
 
