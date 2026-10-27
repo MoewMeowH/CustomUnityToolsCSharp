@@ -231,7 +231,7 @@ public static partial class ReplayCaseBuilder
         var verdicts = VerdictLog.Latest(VerdictLog.ReadAll(verdictPath))
             .Where(v => v.RunId == c.RunId && !v.IsRequest).ToList();
         var findings = GoldenScorer.ReadSelfReview(c.Result.Message);
-        var (expected, traps) = Key(verdicts, findings, notes);
+        var (expected, traps) = Key(verdicts, findings, notes, c.Result.Message);
         if (expected.Count == 0) return (null, "채택된 지적 없음 (정답지가 빔)", notes);
 
         try
@@ -296,7 +296,7 @@ public static partial class ReplayCaseBuilder
     /// 판정 → 정답지. 리뷰어 지적(steps에 1): 채택 · 부분 = expected(origin self-review), 기각 = traps. 지휘자 추가(steps 없음) 채택 · 부분 = expected(origin conductor).
     /// 보류 · 중복은 넣지 않는다. 위치는 리뷰어 지적 줄(없으면 판정의 file), 필수 키워드는 지적 문장의 코드 이름.
     /// </summary>
-    internal static (List<GoldenItem> Expected, List<GoldenItem> Traps) Key(IReadOnlyList<VerdictRecord> verdicts, IReadOnlyList<GoldenFinding> findings, List<string> notes)
+    internal static (List<GoldenItem> Expected, List<GoldenItem> Traps) Key(IReadOnlyList<VerdictRecord> verdicts, IReadOnlyList<GoldenFinding> findings, List<string> notes, string review = "")
     {
         var expected = new List<GoldenItem>();
         var traps = new List<GoldenItem>();
@@ -309,10 +309,10 @@ public static partial class ReplayCaseBuilder
             switch (v.Verdict)
             {
                 case Verdicts.Adopted or Verdicts.Partial:
-                    if (Item(v, finding, reviewer ? "self-review" : "conductor", null, notes) is { } e) expected.Add(e);
+                    if (Item(v, finding, reviewer ? "self-review" : "conductor", null, notes, review) is { } e) expected.Add(e);
                     break;
                 case Verdicts.Rejected when reviewer:
-                    if (Item(v, finding, "self-review", v.Reason, notes) is { } t) traps.Add(t);
+                    if (Item(v, finding, "self-review", v.Reason, notes, review) is { } t) traps.Add(t);
                     break;
             }
         }
@@ -330,7 +330,38 @@ public static partial class ReplayCaseBuilder
     [GeneratedRegex(@"(?<file>[^\s,;():]+\.[A-Za-z0-9]+)(?::(?<line>\d+))?")]
     private static partial Regex FileLine();
 
-    private static GoldenItem? Item(VerdictRecord v, GoldenFinding? f, string origin, string? why, List<string> notes)
+    // 지적 머리 줄: "- C1 [major] 위치들 — 문제"
+    [GeneratedRegex(@"^\s*[-*]\s*(?<id>C\d+)\s*\[[A-Za-z]+\]\s*(?<loc>.*?)\s+[—–]\s+", RegexOptions.Multiline)]
+    private static partial Regex FindingHead();
+
+    [GeneratedRegex(@"\([^)]*\)")]
+    private static partial Regex Parenthesized();
+
+    [GeneratedRegex(@"^(?<file>[^\s:]+\.[A-Za-z0-9]+)(?::(?<from>\d+)(?:-(?<to>\d+))?)?$|^(?<from>\d+)(?:-(?<to>\d+))?$")]
+    private static partial Regex LocationToken();
+
+    /// <summary>
+    /// 지적 머리의 위치를 모두 읽는다: "a.cs:237, b.cs:82-87" · "a.cs:124-129, 188-202, 88"(앞 파일의 다른 범위) · 괄호 설명은 뺀다.
+    /// 원인 · 증상 지점이 다른 결함도 어느 한 곳만 짚으면 짝이 되게 (시범 replay-65843a0873: 다른 파일 줄로 짚어 놓침).
+    /// </summary>
+    internal static List<GoldenLocation> HeadLocations(string review, string id)
+    {
+        var head = FindingHead().Matches(review).FirstOrDefault(m => m.Groups["id"].Value.Equals(id, StringComparison.OrdinalIgnoreCase));
+        var result = new List<GoldenLocation>();
+        if (head is null) return result;
+        string? file = null;
+        foreach (var raw in Parenthesized().Replace(head.Groups["loc"].Value, " ").Split([',', '·', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (LocationToken().Match(raw) is not { Success: true } m) continue;
+            if (m.Groups["file"].Success) file = m.Groups["file"].Value;
+            if (file is null || !m.Groups["from"].Success || !int.TryParse(m.Groups["from"].Value, out var from) || from < 1) continue;
+            int? to = m.Groups["to"].Success && int.TryParse(m.Groups["to"].Value, out var t) && t >= from ? t : null;
+            result.Add(new GoldenLocation { File = file, From = from, To = to });
+        }
+        return result;
+    }
+
+    private static GoldenItem? Item(VerdictRecord v, GoldenFinding? f, string origin, string? why, List<string> notes, string review)
     {
         string? file = f?.File;
         int? line = f?.Line;
@@ -348,10 +379,12 @@ public static partial class ReplayCaseBuilder
         }
         if (required.Count == 0)
             notes.Add($"{v.FindingKey}: 필수 키워드 없음 — 줄만 맞으면 '확인 필요'로만 보인다 (손으로 required 보강)");
+        var locations = f is null ? [] : HeadLocations(review, f.Id);
         return new GoldenItem
         {
             Id = v.FindingKey, Summary = v.Summary, Severity = v.Severity ?? f?.Severity, Origin = origin, Why = why,
             Files = file is null ? [] : [file], Lines = file is not null && line is { } l ? [l] : [],
+            Locations = locations.Count > 1 ? locations : [],   // 하나뿐이면 Files · Lines와 같다
             Required = required, Keywords = keywords,
         };
     }

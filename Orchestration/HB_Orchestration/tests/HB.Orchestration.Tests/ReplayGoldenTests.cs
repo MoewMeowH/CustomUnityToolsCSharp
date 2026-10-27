@@ -259,6 +259,18 @@ public sealed class ReplayGoldenTests : IDisposable
     }
 
     [Fact]
+    public void Head_locations_read_every_file_and_range()   // 시범 replay-65843a0873: 다른 파일 줄로 짚어 놓침
+    {
+        const string review = "## 지적\n- C1 [major] HB_ScreenRecorder.cs:237, HB_ScreenRecorderWindow.cs:82-87 — 문제\n" +
+                              "- C3 [minor] hook_common.py:70-81 (scan) · 129-140 (tokenize) · share_guard.py:303 — 문제\n";
+        Assert.Equal(["HB_ScreenRecorder.cs:237-", "HB_ScreenRecorderWindow.cs:82-87"],
+            ReplayCaseBuilder.HeadLocations(review, "C1").Select(l => $"{l.File}:{l.From}-{l.To}"));
+        Assert.Equal(["hook_common.py:70-81", "hook_common.py:129-140", "share_guard.py:303-"],
+            ReplayCaseBuilder.HeadLocations(review, "C3").Select(l => $"{l.File}:{l.From}-{l.To}"));
+        Assert.Empty(ReplayCaseBuilder.HeadLocations(review, "C9"));
+    }
+
+    [Fact]
     public void Replay_input_hash_covers_restored_files()   // C4
     {
         var (candidate, verdictPath) = Setup(Transcript(ReadResult(Path.Combine(Cwd, "src", "a.cs"), "class A\n", 1, 1, 1)));
