@@ -52,6 +52,11 @@ public sealed class ChatOptions
     /// </summary>
     public int ApprovalTimeoutSeconds { get; set; } = 570;
 
+    /// <summary>run_mode 호출 기록 (외부 에이전트 말풍선, 계획서 2-2 e). 비우면 HB_ORCH_LOG_PATH 또는 %LOCALAPPDATA%/HB_Orchestration/calls.jsonl. 대시보드 Dashboard:LogPath를 바꿨으면 같은 값으로.</summary>
+    public string? CallLogPath { get; set; }
+
+    public string CallLogFile => string.IsNullOrWhiteSpace(CallLogPath) ? CallLog.DefaultPath : CallLogPath.Trim();
+
     /// <summary>지휘자 표정 → 스티커 태그 (상태 이름 Idle · Thinking · Writing · Tool · Approval · Done · Failed · Stopped · Sleep). 없는 상태는 기본값 (<see cref="FaceCatalog"/>).</summary>
     public Dictionary<string, string> Expressions { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 

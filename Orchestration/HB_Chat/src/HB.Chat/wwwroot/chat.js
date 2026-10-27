@@ -481,6 +481,8 @@
                 }
                 if (fresh.firstElementChild) {
                     chat.querySelector(".empty")?.remove();
+                    // 맨 뒤 실행 말풍선은 조각이 다시 보낸다 (다음 말이 생겼으면 그 앞으로) — 앞서 그린 것은 지운다 (/self-review a9e6066519 C1)
+                    chat.querySelectorAll(":scope > .run-trailing").forEach(n => n.remove());
                     decorate(fresh);
                     if (chat.dataset.firstLine === "-1") chat.dataset.firstLine = fresh.dataset.firstLine;
                     while (fresh.firstChild) chat.append(fresh.firstChild);

@@ -7,6 +7,52 @@
 *@
 @{
     var items = Model.Messages.Items;
+
+    // 외부 에이전트 · API 리뷰 말풍선 (계획서 2-2 e): 이 방에서 부른 run_mode 실행의 시작 줄과 단계 응답. 시각으로 끼운 자리에 (RoomRuns).
+    // 답장 · data-line은 달지 않는다 (지휘자 · 사용자 말이 아니고, 줄 번호는 다음 말 것이라 쪽 경계를 흐린다).
+    // trailing: 마지막 말 뒤 말풍선 — run-trailing 클래스를 달아 새 말 받기 조각이 바꿔 끼운다 (/self-review a9e6066519 C1).
+    void RunBubbleList(IReadOnlyList<RunBubble> bubbles, bool trailing = false)
+    {
+        foreach (var b in bubbles)
+        {
+            var link = Model.CallLink(b);
+            if (b.Kind == RunBubbleKind.Start)
+            {
+                <div class="system run-start@(trailing ? " run-trailing" : "")">
+                    <span class="body">@Model.RenderRun(b)</span>
+                    <span class="when">@b.At.ToLocalTime().ToString("HH:mm") · @b.Detail</span>
+                    @if (link is not null)
+                    {
+                        <a href="@link" target="_blank" rel="noopener">호출 상세</a>
+                    }
+                </div>
+                continue;
+            }
+            <div class="msg @RoomModel.RunClass(b)@(b.IsError ? " error" : "")@(trailing ? " run-trailing" : "")">
+                <div class="avatar" title="@b.Name">@(b.Name.Length > 0 ? char.ToUpperInvariant(b.Name[0]).ToString() : "?")</div>
+                <div class="bubble">
+                    <div class="who">
+                        <b>@b.Name</b>
+                        <span class="detail">@b.Detail</span>
+                        <span class="when">@b.At.ToLocalTime().ToString("MM-dd HH:mm:ss")</span>
+                        @if (link is not null)
+                        {
+                            <a href="@link" target="_blank" rel="noopener">호출 상세</a>
+                        }
+                    </div>
+                    @if (b.Markdown.Length > RoomModel.RunFoldChars)
+                    {
+                        <details class="long"><summary>응답 펼치기 (@b.Markdown.Length.ToString("N0")자)</summary><div class="body">@Model.RenderRun(b)</div></details>
+                    }
+                    else
+                    {
+                        <div class="body">@Model.RenderRun(b)</div>
+                    }
+                    @Model.RunSticker(b)
+                </div>
+            </div>
+        }
+    }
 }
 @* data-error: 세션 기록을 읽지 못한 채 그린 쪽 — 화면은 다음 새 말 받기 대신 쪽 전체를 다시 받는다 (/self-review 83b453653b C6) *@
 <div class="chat" id="chat" data-title="@Model.Title" data-last-line="@Model.LastLine"
@@ -39,6 +85,7 @@
                 }
             </div>
         }
+        RunBubbleList(Model.Runs.For(e));
         if (RoomModel.IsStoppedTurn(e))
         {
             <div class="system" data-line="@e.Line"><span class="body">중지된 턴</span> <span class="when">@e.Timestamp?.ToLocalTime().ToString("HH:mm")</span></div>
@@ -61,6 +108,12 @@
                 <div class="body">@Model.Render(e)</div>
             </div>
         </div>
+    }
+    @* 마지막 말보다 늦게 끝난 실행 (지휘자가 결과 뒤에 글을 쓰기 전) — 전체 쪽과 새 말 받기 조각에. 화면은 조각을 붙이기 전에 앞서 그린 것을 지운다
+       (다음 말이 생기면 그 말 앞으로 옮겨 간다). 위로 불러오기 조각에는 없다 *@
+    @if (!Model.Fragment || Model.AfterFragment)
+    {
+        RunBubbleList(Model.Runs.Trailing, trailing: true);
     }
     @if (!Model.Fragment && items.Count == 0 && Model.Transcript?.FormatError is null)
     {

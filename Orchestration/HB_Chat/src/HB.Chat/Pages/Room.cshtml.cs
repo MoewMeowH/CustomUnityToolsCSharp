@@ -13,7 +13,8 @@ namespace HB.Chat.Pages;
 /// ?handler=Pane: 방 전환 때 오른쪽 칸만 (2-2 a). Send · Stop · MarkRead는 POST (antiforgery + 같은 출처).
 /// </summary>
 public sealed class RoomModel(
-    RoomStore store, RoomHub hub, RoomList list, ChatTranscripts transcripts, StickerCatalog stickers, FaceCatalog faces, IOptions<ChatOptions> options)
+    RoomStore store, RoomHub hub, RoomList list, ChatTranscripts transcripts, StickerCatalog stickers, FaceCatalog faces, RoomRuns runs,
+    IOptions<ChatOptions> options)
     : PageModel
 {
     public Room Room { get; private set; } = null!;
@@ -25,6 +26,19 @@ public sealed class RoomModel(
 
     /// <summary>after로 새 말만 붙이는 응답이면 true — 빈 방 안내 · 읽기 실패 줄을 그리지 않는다.</summary>
     public bool Fragment { get; private set; }
+
+    /// <summary>
+    /// after(새 말 받기) 조각이면 true — 맨 뒤(Trailing) 실행 말풍선도 다시 보내고, 화면은 앞서 그린 Trailing을 이것으로 바꾼다
+    /// (다음 말이 생겨 그 앞으로 옮겨 간 말풍선이 두 번 보이지 않게 — /self-review a9e6066519 C1). 위로 불러오기 조각에는 없다.
+    /// </summary>
+    public bool AfterFragment { get; private set; }
+
+    /// <summary>이 방에서 부른 run_mode 실행 말풍선의 자리 (계획서 2-2 e). 그릴 때 처음 한 번 계산한다 (Fork 등은 안 읽음 — a9e6066519 C3).</summary>
+    public RunPlacement Runs => _runs ??= runs.For(Transcript);
+    private RunPlacement? _runs;
+
+    /// <summary>길면 접어 둔다 (외부 에이전트 응답은 수천 자가 흔하다).</summary>
+    public const int RunFoldChars = 1500;
 
     /// <summary>세션 기록의 마지막 말 줄 번호 (읽음 표시 · 새 말 받기의 기준).</summary>
     public int LastLine => RoomList.LastLine(Transcript);
@@ -43,6 +57,25 @@ public sealed class RoomModel(
     /// <summary>대시보드 채팅방 (세션 기록이 생긴 뒤부터 보인다 — 첫 말 전에는 대시보드가 404).</summary>
     public string? DashboardLink =>
         options.Value.DashboardUrl is { Length: > 0 } url ? $"{url.TrimEnd('/')}/Room/{Room.SessionId}" : null;
+
+    /// <summary>실행 말풍선 본문 (SafeMarkdown + 스티커 태그) — 외부 에이전트 응답은 지휘자 말과 같은 규칙으로 그린다.</summary>
+    public HtmlString RenderRun(RunBubble b) => new(StickerRenderer.Replace(SafeMarkdown.ToHtml(b.Markdown, SafeMarkdown.Default), stickers));
+
+    /// <summary>실행 말풍선의 자동 스티커 (상황 → 태그, 대시보드 설정 Auto 그대로). 없으면 null.</summary>
+    public HtmlString? RunSticker(RunBubble b) =>
+        b.Situation is { } s && stickers.ForSituation(s) is { } tag ? new HtmlString(StickerRenderer.Html(tag, stickers)) : null;
+
+    /// <summary>호출 상세 (대시보드). 대시보드 주소가 없으면 null.</summary>
+    public string? CallLink(RunBubble b) =>
+        options.Value.DashboardUrl is { Length: > 0 } url ? $"{url.TrimEnd('/')}/Call/{Uri.EscapeDataString(b.CallId)}" : null;
+
+    /// <summary>말풍선 색 (ChatUi _ChatStyles의 .external · .apireview · .subagent).</summary>
+    public static string RunClass(RunBubble b) => b.Kind switch
+    {
+        RunBubbleKind.ApiReview => "apireview",
+        RunBubbleKind.SelfReview => "subagent",
+        _ => "external",
+    };
 
     /// <summary>명령 방: 작업 폴더 · 사용자 설정이 이미 미리 허용한 명령 (카드 없이 실행됨).</summary>
     public IReadOnlyList<(string Source, string Rule)> InheritedRules =>
@@ -92,6 +125,7 @@ public sealed class RoomModel(
         if (Transcript?.FormatError is not null) return StatusCode(StatusCodes.Status503ServiceUnavailable);
         Messages = RoomList.Page(Transcript?.Entries ?? [], before, after);
         Fragment = (before is not null || after is not null) && !Messages.Reset;
+        AfterFragment = Fragment && after is not null;
         return Partial("_Messages", this);
     }
 
@@ -148,7 +182,7 @@ public sealed class RoomModel(
         if (!Load(id)) return NotFound();
         var now = DateTimeOffset.Now;
         Response.Headers.CacheControl = "no-store";
-        return File(System.Text.Encoding.UTF8.GetBytes(ChatExport.Markdown(Room, Transcript, now)), "text/markdown; charset=utf-8",
+        return File(System.Text.Encoding.UTF8.GetBytes(ChatExport.Markdown(Room, Transcript, now, Runs)), "text/markdown; charset=utf-8",
             ChatExport.FileName(Title, now));
     }
 
@@ -275,6 +309,7 @@ public sealed class RoomModel(
         Room = room;
         Transcript = transcripts.Read(room.SessionId);
         Messages = RoomList.Page(Transcript?.FormatError is null ? Transcript?.Entries ?? [] : [], null, null);
+        _runs = null;
         return true;
     }
 

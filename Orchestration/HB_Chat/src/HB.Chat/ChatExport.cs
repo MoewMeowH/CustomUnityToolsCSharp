@@ -5,13 +5,14 @@ using HB.Orchestration.Shared;
 namespace HB.Chat;
 
 /// <summary>
-/// 방 대화를 Markdown 파일로 (계획서 2-2 c). 화자 · 시각 · 본문(세션 기록 글 그대로, 스티커 태그도 글자 그대로) · 도구 이름.
-/// 외부 에이전트 말풍선은 e 단계에서 더한다.
+/// 방 대화를 Markdown 파일로 (계획서 2-2 c). 화자 · 시각 · 본문(세션 기록 글 그대로, 스티커 태그도 글자 그대로) · 도구 이름,
+/// 그리고 이 방에서 부른 run_mode 실행 말풍선 (2-2 e, 화면과 같은 자리).
 /// </summary>
 public static class ChatExport
 {
-    public static string Markdown(Room room, ChatTranscript? transcript, DateTimeOffset now)
+    public static string Markdown(Room room, ChatTranscript? transcript, DateTimeOffset now, RunPlacement? runs = null)
     {
+        runs ??= RunPlacement.Empty;
         var sb = new StringBuilder();
         sb.Append("# ").Append(RoomList.TitleOf(room, transcript)).Append("\n\n");
         sb.Append("- 내보낸 시각: ").Append(now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)).Append('\n');
@@ -27,6 +28,7 @@ public static class ChatExport
             if (e.Tools.Count > 0)
                 sb.Append("_도구: ").Append(string.Join(", ", RoomList.ToolChips(e.Tools).Select(c => c.Count > 1 ? $"{c.Name} ×{c.Count}" : c.Name)))
                   .Append("_\n\n");
+            AppendRuns(sb, runs.For(e));
             if (RoomList.IsStoppedTurn(e))
             {
                 sb.Append("> 중지된 턴 · ").Append(when).Append("\n\n");
@@ -40,7 +42,29 @@ public static class ChatExport
             sb.Append("### ").Append(e.Speaker == ChatSpeaker.User ? "나" : "지휘자").Append(" · ").Append(when).Append("\n\n");
             sb.Append(e.Text.TrimEnd()).Append("\n\n");
         }
+        AppendRuns(sb, runs.Trailing);
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// 실행 말풍선: 시작은 인용 한 줄, 단계 응답은 "### 에이전트 (모드 · 단계 · 모델) · 시각" + 인용으로 감싼 본문
+    /// (응답의 "## 지적" 같은 제목이 문서 목차와 섞이지 않게 — /self-review a9e6066519 C7).
+    /// </summary>
+    private static void AppendRuns(StringBuilder sb, IReadOnlyList<RunBubble> bubbles)
+    {
+        foreach (var b in bubbles)
+        {
+            var when = b.At.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+            if (b.Kind == RunBubbleKind.Start)
+            {
+                sb.Append("> ").Append(b.Markdown.Replace("\n", " ")).Append(" · ").Append(when).Append("\n\n");
+                continue;
+            }
+            sb.Append("### ").Append(b.Name).Append(" (").Append(b.Detail).Append(") · ").Append(when).Append("\n\n");
+            foreach (var line in b.Markdown.TrimEnd().ReplaceLineEndings("\n").Split('\n'))
+                sb.Append(line.Length == 0 ? ">" : "> " + line).Append('\n');
+            sb.Append('\n');
+        }
     }
 
     /// <summary>내려받을 파일 이름: 제목(파일 이름에 못 쓰는 글자는 _ , 60자) + 날짜.</summary>

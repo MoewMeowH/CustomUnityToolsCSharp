@@ -46,6 +46,7 @@ builder.Services.AddSingleton(sp =>
 });
 builder.Services.AddSingleton<RoomList>();
 builder.Services.AddSingleton<FaceCatalog>();
+builder.Services.AddSingleton<RoomRuns>();
 
 var app = builder.Build();
 

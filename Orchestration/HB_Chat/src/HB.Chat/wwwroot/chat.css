@@ -92,6 +92,11 @@ select, input[type=text], textarea { background: var(--panel); border: 1px solid
 .quote-x { padding: 0 8px; }
 #live .approval { max-width: 760px; margin-left: 44px; }
 
+/* 외부 에이전트 말풍선 (2-2 e): 색은 _ChatStyles(.external · .apireview · .subagent), 시작 줄은 안내 */
+.run-start a { margin-left: 6px; font-size: 12px; }
+.msg.external .bubble, .msg.apireview .bubble, .msg.subagent .bubble { max-width: min(820px, 92%); }
+details.long > .body { margin-top: 6px; }
+
 /* 보내기 제어 · 첨부 (2-2 d) */
 .queue, .attach-chips { max-width: 920px; margin: 0 auto 6px; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; font-size: 12px; }
 /* 칩 글은 span에서 줄임표, ×는 줄지 않게 — 긴 한글에서 ×가 잘렸다 (/self-review 5b26cff7df C1) */
