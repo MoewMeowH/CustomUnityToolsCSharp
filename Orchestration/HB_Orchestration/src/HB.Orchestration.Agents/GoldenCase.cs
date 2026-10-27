@@ -135,7 +135,8 @@ public static class GoldenCaseLoader
         IEnumerable<string> dirs = which == "all"
             ? Directory.GetDirectories(root)
                 .Where(d => !string.Equals(Path.GetFileName(d), ResultsFolder, StringComparison.OrdinalIgnoreCase))
-                .Where(d => !Path.GetFileName(d).StartsWith('_')) // _보관 같은 폴더는 사례가 아님
+                .Where(d => !Path.GetFileName(d).StartsWith('_')) // _보관 · _company(따로 돌리는 사례 묶음) 같은 폴더는 사례가 아님
+                .Where(d => !Path.GetFileName(d).StartsWith('.')) // .git 등 (골든 폴더를 별도 저장소로 둠 — 2026-10-27)
                 .Order(StringComparer.OrdinalIgnoreCase)
             : [Path.Combine(root, which)];
 

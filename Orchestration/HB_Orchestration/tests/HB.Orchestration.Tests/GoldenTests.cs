@@ -292,6 +292,8 @@ public sealed class GoldenTests
         d.Add("a", traps: """[ { "id": "T1", "summary": "링크", "keywords": ["junction"], "why": "설계" } ]""");
         Directory.CreateDirectory(Path.Combine(d.Root, "results"));
         Directory.CreateDirectory(Path.Combine(d.Root, "_보관"));
+        Directory.CreateDirectory(Path.Combine(d.Root, ".git"));       // 골든 폴더를 별도 저장소로 둠
+        Directory.CreateDirectory(Path.Combine(d.Root, "_company"));   // 따로 돌리는 사례 묶음
 
         var (cases, errors) = GoldenCaseLoader.LoadMany(d.Root, "all");
 
