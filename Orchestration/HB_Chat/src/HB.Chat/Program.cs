@@ -122,6 +122,13 @@ app.Lifetime.ApplicationStarted.Register(() =>
 
 // 방 실시간 알림 (SSE). 흘림 글 · 도구 상태 · 거절 · 끝. 끝나면 화면이 세션 기록으로 말풍선을 다시 받는다.
 var sseJson = new JsonSerializerOptions(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
+
+// 데스크톱 앱 (계획서 2-3): 방 상태 요약 — 서버 확인 · 알림 · 트레이 상태용. 읽기만.
+app.MapGet("/api/rooms", (RoomList list, HttpContext ctx) =>
+{
+    ctx.Response.Headers.CacheControl = "no-store";
+    return Results.Json(RoomApi.Rows(list.All()), RoomApi.Json);
+});
 app.MapGet("/events/{id}", async (string id, RoomStore store, RoomHub hub, HttpContext ctx) =>
 {
     if (!RoomStore.IsRoomId(id) || store.Get(id) is null)

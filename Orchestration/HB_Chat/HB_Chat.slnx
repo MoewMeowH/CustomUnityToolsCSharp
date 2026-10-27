@@ -1,9 +1,11 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/HB.Chat/HB.Chat.csproj" />
+    <Project Path="src/HB.Chat.Desktop/HB.Chat.Desktop.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/HB.Chat.Tests/HB.Chat.Tests.csproj" />
+    <Project Path="tests/HB.Chat.Desktop.Tests/HB.Chat.Desktop.Tests.csproj" />
   </Folder>
   <!-- HB_Orchestration에서 같이 쓰는 프로젝트 (세션 기록 읽기 · 말풍선 그리기) -->
   <Folder Name="/shared/">

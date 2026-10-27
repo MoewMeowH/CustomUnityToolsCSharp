@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- HB Chat 데스크톱 앱 (계획서 HB_Orchestration docs/plans/2026-10-28_HB_Chat-2차-승인창-WebView2 2-3):
+       채팅 서버(5290) · 대시보드 서버(5280)를 띄우거나 붙고, 두 화면을 WebView2 탭으로. 서버 코드는 참조하지 않는다 (HTTP로만). -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <AssemblyName>HB.Chat.Desktop</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="HB.Chat.Desktop.Tests" />
+  </ItemGroup>
+
+</Project>
