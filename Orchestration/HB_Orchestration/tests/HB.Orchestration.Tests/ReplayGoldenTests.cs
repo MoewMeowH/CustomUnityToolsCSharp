@@ -271,6 +271,14 @@ public sealed class ReplayGoldenTests : IDisposable
     }
 
     [Fact]
+    public void Result_lines_mask_the_user_name()   // GoldenSet 별도 저장소 push (H2 개인 값)
+    {
+        const string json = """{"path":"C:\\Users\\alice\\AppData\\x","other":"C:/Users/alice/y","keep":"C:\\Users\\alicex\\z","raw":"C:\Users\alice\.claude"}""";
+        Assert.Equal("""{"path":"C:\\Users\\<user>\\AppData\\x","other":"C:/Users/<user>/y","keep":"C:\\Users\\alicex\\z","raw":"C:\Users\<user>\.claude"}""",
+            GoldenCli.MaskUserName(json, "alice"));
+    }
+
+    [Fact]
     public void Replay_input_hash_covers_restored_files()   // C4
     {
         var (candidate, verdictPath) = Setup(Transcript(ReadResult(Path.Combine(Cwd, "src", "a.cs"), "class A\n", 1, 1, 1)));

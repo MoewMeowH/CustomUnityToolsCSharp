@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using HB.Orchestration.Shared;
 using PlanStep = (string Role, string Agent, string Model, HB.Orchestration.Shared.GuidelinesProvenance Guidelines, string? Effort, string? AppendSha256);
 
@@ -711,7 +712,7 @@ public static class GoldenCli
             var dir = Path.Combine(root, GoldenCaseLoader.ResultsFolder);
             Directory.CreateDirectory(dir);
             var path = Path.Combine(dir, $"{DateTime.Now:yyyy-MM-dd}_{label}.jsonl");
-            var text = string.Concat(lines.Select(l => JsonSerializer.Serialize(l, ResultJson) + "\n"));
+            var text = MaskUserName(string.Concat(lines.Select(l => JsonSerializer.Serialize(l, ResultJson) + "\n")));
             File.AppendAllText(path, text, new UTF8Encoding(false));
             return path;
         }
@@ -720,6 +721,18 @@ public static class GoldenCli
             error.WriteLine($"[경고] 결과 파일을 쓰지 못했습니다: {ex.Message} (점수는 위 출력과 호출 기록에 있음)");
             return null;
         }
+    }
+
+    /// <summary>
+    /// 결과 줄의 "Users\&lt;사용자 이름&gt;"(provenance의 지침 · modes · 기록 경로)을 "Users\&lt;user&gt;"로 가린다. 골든 폴더를 별도 저장소로 push할 때
+    /// 개인 값 검사(push 훅 H2)에 걸리지 않게 (2026-10-27, 사용자 결정 "가리고 앞으로도 가림"). 정답지 · 입력 해시와는 무관한 결과 파일만.
+    /// JSON의 "\\\\" 이스케이프도 같이 맞도록 구분자는 \ · / 여러 개를 받는다.
+    /// </summary>
+    internal static string MaskUserName(string text, string? userName = null)
+    {
+        userName ??= Path.GetFileName(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile).TrimEnd('\\', '/'));
+        if (string.IsNullOrEmpty(userName)) return text;
+        return Regex.Replace(text, @"(?<=[Uu]sers[\\/]+)" + Regex.Escape(userName) + @"(?![A-Za-z0-9_.-])", "<user>");
     }
 
     /// <param name="step">다단계(crash) 실행에서 그 단계의 기록. null이면 마지막 성공 기록.</param>
