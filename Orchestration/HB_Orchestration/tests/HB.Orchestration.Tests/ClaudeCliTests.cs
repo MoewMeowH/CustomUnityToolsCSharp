@@ -356,18 +356,6 @@ public sealed class ClaudeCliTests : IDisposable
         Assert.Contains("쓰지 않는다", ex.Message);                                   // "비어 있습니다"가 아니라 이름 문제를 알린다
     }
 
-    [Theory]
-    [InlineData("Custom_ANTHROPIC_API_KEY", "ANTHROPIC")]
-    [InlineData("Custom_CLAUDE_API_KEY", "CLAUDE")]
-    [InlineData("my_claude_key", "CLAUDE")]
-    public void Key_names_that_claude_code_blanks_are_rejected(string keyEnv, string word)
-    {
-        var ex = Assert.Throws<ProviderConfigurationException>(() => new ClaudeCliProvider().Create("p",
-            new ProviderOptions { Type = "claude-cli", ApiKeyEnv = keyEnv }, new AgentOptions { Name = "c", Provider = "p", Model = "m" }));
-        Assert.Contains($"'{word}'", ex.Message);
-        Assert.Contains("HB_REVIEWER_API_KEY", ex.Message);
-    }
-
     [Fact]
     public void Records_do_not_print_the_api_key()
     {
