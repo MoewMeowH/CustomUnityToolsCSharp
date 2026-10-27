@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <!--
+    채팅 말풍선 화면 공용 (대시보드 · 채팅 앱 HB_Chat, 계획서 2026-10-27_대화형-채팅-앱 2번).
+    SafeMarkdown · 스티커 · 실시간 표시(_LiveControl · _LiveScript) · 말풍선 CSS(_ChatStyles). 부분 뷰는 Pages/ 아래라 쓰는 쪽 Pages에서 이름으로 찾는다.
+  -->
+  <PropertyGroup>
+    <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Markdig" Version="1.4.0" />
+  </ItemGroup>
+
+</Project>

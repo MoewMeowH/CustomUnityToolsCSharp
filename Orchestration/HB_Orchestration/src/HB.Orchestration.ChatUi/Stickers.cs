@@ -1,9 +1,11 @@
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
-using Microsoft.Extensions.Options;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
 
-namespace HB.Orchestration.Dashboard;
+namespace HB.Orchestration.ChatUi;
 
 /// <summary>
 /// 채팅방 스티커 설정 (계획서 2026-10-27_에이전트-채팅방). appsettings.json의 Dashboard:Stickers에 기본값,
@@ -47,15 +49,18 @@ public static class AutoSticker
     public const string VerdictMixed = "VerdictMixed";
 }
 
-/// <summary>태그 → 그림 파일. 설정을 고치면 다음 요청부터 반영된다 (IOptionsMonitor).</summary>
-public sealed class StickerCatalog(IOptionsMonitor<DashboardOptions> options)
+/// <summary>
+/// 태그 → 그림 파일. options는 부를 때마다 현재 설정을 준다 (쓰는 쪽이 IOptionsMonitor의 CurrentValue를 넘긴다) —
+/// 설정을 고치면 다음 요청부터 반영된다.
+/// </summary>
+public sealed class StickerCatalog(Func<StickerOptions> options)
 {
     private static readonly Dictionary<string, string> ContentTypes = new(StringComparer.OrdinalIgnoreCase)
     {
         [".png"] = "image/png", [".gif"] = "image/gif", [".webp"] = "image/webp", [".jpg"] = "image/jpeg", [".jpeg"] = "image/jpeg",
     };
 
-    public StickerOptions Options => options.CurrentValue.Stickers;
+    public StickerOptions Options => options();
 
     /// <summary>의미 태그면 Files 태그로 바꾼다. 모르는 태그는 null.</summary>
     public string? Resolve(string tag)
@@ -135,4 +140,19 @@ public static partial class StickerRenderer
     /// <summary>태그 이름: 대괄호 · 꺾쇠 · 따옴표 · 공백 없이 40자까지.</summary>
     [GeneratedRegex(@"\[\[icon:([^\[\]<>""\s]{1,40})\]\]")]
     private static partial Regex TagRegex();
+}
+
+public static class StickerEndpoints
+{
+    /// <summary>
+    /// 채팅방 스티커 그림 /sticker/{tag}. 설정 목록(Files)에 있는 태그만, 스티커 폴더 안의 파일만 내보낸다.
+    /// 그림이 커서(2026-10-27 기본 팩: 1254px, 장당 약 1.4MB) 하루 동안 브라우저 캐시에 둔다.
+    /// </summary>
+    public static IEndpointConventionBuilder MapStickerImages(this IEndpointRouteBuilder app) =>
+        app.MapGet("/sticker/{tag}", (string tag, StickerCatalog catalog, HttpResponse response) =>
+        {
+            if (catalog.FileFor(tag) is not { } file) return Results.NotFound();
+            response.Headers.CacheControl = "private, max-age=86400";
+            return Results.File(file.Path, file.ContentType, lastModified: File.GetLastWriteTimeUtc(file.Path));
+        });
 }

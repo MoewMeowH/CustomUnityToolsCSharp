@@ -1,3 +1,4 @@
+using HB.Orchestration.ChatUi;
 using HB.Orchestration.Dashboard;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -21,20 +22,12 @@ builder.Services.AddSingleton<PricingService>();
 builder.Services.AddSingleton<ClaudeSessionsService>();
 builder.Services.AddSingleton<SubagentResultsService>();
 builder.Services.AddSingleton<BillingStore>();
-builder.Services.AddSingleton<StickerCatalog>();
+builder.Services.AddSingleton(sp => new StickerCatalog(() => sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<DashboardOptions>>().CurrentValue.Stickers));
 builder.Services.AddSingleton<ChatRoomService>();
 builder.Services.AddHttpClient<BillingApi>(c => c.Timeout = TimeSpan.FromSeconds(30))
     .AddTypedClient((http, sp) => new BillingApi(http, () => sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<DashboardOptions>>().Value.ReadAdminKey()));
 
 var app = builder.Build();
 app.MapRazorPages();
-
-// 채팅방 스티커 그림. 설정 목록(Files)에 있는 태그만, 스티커 폴더 안의 파일만 내보낸다.
-// 그림이 커서(2026-10-27 기본 팩: 1254px, 장당 약 1.4MB) 하루 동안 브라우저 캐시에 둔다.
-app.MapGet("/sticker/{tag}", (string tag, StickerCatalog catalog, HttpResponse response) =>
-{
-    if (catalog.FileFor(tag) is not { } file) return Results.NotFound();
-    response.Headers.CacheControl = "private, max-age=86400";
-    return Results.File(file.Path, file.ContentType, lastModified: File.GetLastWriteTimeUtc(file.Path));
-});
+app.MapStickerImages();
 app.Run();

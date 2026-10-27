@@ -1,12 +1,10 @@
 using Microsoft.AspNetCore.Html;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using HB.Orchestration.ChatUi;
 using Microsoft.Extensions.Options;
 
 namespace HB.Orchestration.Dashboard.Pages;
-
-/// <summary>실시간 갱신 설정 하나 (_LiveControl · _LiveScript). Stamp는 화면을 그리기 전에 잡은 값.</summary>
-public sealed record LiveView(string Stamp, string StampUrl, string ContentUrl, string TargetId, int Seconds, bool Follow);
 
 /// <summary>채팅방 하나 (세션 하나). ?handler=Stamp · Messages는 실시간 갱신용 (계획서 2026-10-27_채팅방-실시간-갱신).</summary>
 public sealed class RoomModel(ChatRoomService rooms, IOptions<DashboardOptions> options) : PageModel

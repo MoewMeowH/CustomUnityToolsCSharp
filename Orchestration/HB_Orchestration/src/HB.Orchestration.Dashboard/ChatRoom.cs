@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text;
 using HB.Orchestration.Agents;
+using HB.Orchestration.ChatUi;
 using HB.Orchestration.Shared;
 
 namespace HB.Orchestration.Dashboard;

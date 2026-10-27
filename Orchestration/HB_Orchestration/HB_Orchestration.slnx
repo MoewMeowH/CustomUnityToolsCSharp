@@ -3,6 +3,7 @@
     <Project Path="src/HB.Orchestration.Shared/HB.Orchestration.Shared.csproj" />
     <Project Path="src/HB.Orchestration.Agents/HB.Orchestration.Agents.csproj" />
     <Project Path="src/HB.Orchestration.Mcp/HB.Orchestration.Mcp.csproj" />
+    <Project Path="src/HB.Orchestration.ChatUi/HB.Orchestration.ChatUi.csproj" />
     <Project Path="src/HB.Orchestration.Dashboard/HB.Orchestration.Dashboard.csproj" />
   </Folder>
   <Folder Name="/tests/">

@@ -8,38 +8,8 @@
 <style>
     .room-head { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline; padding: 12px 16px; margin-bottom: 14px; }
     .room-head h2 { margin: 0; font-size: 17px; }
-    .chat { display: flex; flex-direction: column; gap: 10px; max-width: 920px; margin: 0 auto; }
-    .msg { display: flex; gap: 10px; align-items: flex-start; }
-    .msg.user { flex-direction: row-reverse; }
-    .avatar { flex: 0 0 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
-              font-weight: 650; font-size: 14px; color: #fff; background: var(--muted); }
-    .bubble { min-width: 0; max-width: min(760px, 86%); background: var(--panel); border: 1px solid var(--line);
-              border-radius: 14px; padding: 8px 12px; overflow-wrap: anywhere; }
-    .msg.user .bubble { background: color-mix(in srgb, var(--accent) 14%, var(--panel)); }
-    .msg.error .bubble { border-color: var(--err); }
-    .who { font-size: 12.5px; margin-bottom: 2px; }
-    .who b { font-weight: 650; }
-    .who .when, .who .detail { color: var(--muted); }
-    .who a { margin-left: 6px; font-size: 12px; }
-    .body > :first-child { margin-top: 0; } .body > :last-child { margin-bottom: 0; }
-    .body pre { margin: 6px 0; } .body table { width: auto; }
-    .body blockquote { margin: 6px 0; padding-left: 10px; border-left: 3px solid var(--line); color: var(--muted); }
-    .sticker { display: block; margin-top: 6px; object-fit: contain; }
-    .sticker-text { display: inline-block; margin-top: 6px; padding: 1px 8px; border-radius: 999px; font-size: 12px;
-                    border: 1px dashed var(--muted); color: var(--muted); }
-    .tools { font-size: 12px; color: var(--muted); text-align: center; }
-    .run-head { margin: 8px 0 0; font-size: 12.5px; color: var(--muted); border-top: 1px dashed var(--line); padding-top: 8px; }
-    .system { text-align: center; font-size: 12.5px; color: var(--muted); }
-    .system .body { display: inline; } .system .body p { display: inline; margin: 0; }
-    .user .avatar { background: var(--accent); }
-    .conductor .avatar { background: #c26b3a; }
-    .external .avatar { background: #2f8f6f; }
-    .apireview .avatar { background: #7a5bd1; }
-    .subagent .avatar { background: #b04a8a; }
-    .verdict .avatar { background: #8a6d1f; }
-    details.long > summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
-    .new-msgs { position: fixed; right: 16px; bottom: 16px; z-index: 5; }
 </style>
+<partial name="_ChatStyles" />
 
 <p><a href="/Rooms">← 채팅방</a></p>
 

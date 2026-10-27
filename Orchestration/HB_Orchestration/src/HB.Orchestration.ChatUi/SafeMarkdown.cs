@@ -3,7 +3,7 @@ using Markdig;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
 
-namespace HB.Orchestration.Dashboard;
+namespace HB.Orchestration.ChatUi;
 
 /// <summary>
 /// 화면에 그리는 Markdown (외부 에이전트 응답 · 세션 대화 · 서브에이전트 결과 — 믿을 수 없는 글).

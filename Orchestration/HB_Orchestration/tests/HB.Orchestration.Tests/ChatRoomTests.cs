@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using HB.Orchestration.Agents;
+using HB.Orchestration.ChatUi;
 using HB.Orchestration.Dashboard;
 using HB.Orchestration.Shared;
 using Microsoft.Extensions.Options;
@@ -146,29 +147,20 @@ public sealed class ChatRoomTests : IDisposable
 
     // ── 스티커 ──
 
-    private sealed class Monitor(DashboardOptions value) : IOptionsMonitor<DashboardOptions>
-    {
-        public DashboardOptions CurrentValue => value;
-        public DashboardOptions Get(string? name) => value;
-        public IDisposable? OnChange(Action<DashboardOptions, string?> listener) => null;
-    }
-
     private StickerCatalog Catalog(bool withDir = true)
     {
         var stickers = Path.Combine(_dir, "stickers");
         Directory.CreateDirectory(stickers);
         File.WriteAllBytes(Path.Combine(stickers, "06-done.png"), [0x89, 0x50]);
         File.WriteAllBytes(Path.Combine(_dir, "outside.png"), [0x89, 0x50]);
-        return new StickerCatalog(new Monitor(new DashboardOptions
+        var options = new StickerOptions
         {
-            Stickers = new StickerOptions
-            {
-                Dir = withDir ? stickers : null,
-                Files = new(StringComparer.Ordinal) { ["해냈다"] = "06-done.png", ["밖"] = "../outside.png", ["실행"] = "run.exe", ["없음"] = "99-none.png" },
-                Aliases = new(StringComparer.Ordinal) { ["완료"] = "해냈다" },
-                Auto = new(StringComparer.Ordinal) { [AutoSticker.CallNoFindings] = "완료", [AutoSticker.CallFailed] = "" },
-            },
-        }));
+            Dir = withDir ? stickers : null,
+            Files = new(StringComparer.Ordinal) { ["해냈다"] = "06-done.png", ["밖"] = "../outside.png", ["실행"] = "run.exe", ["없음"] = "99-none.png" },
+            Aliases = new(StringComparer.Ordinal) { ["완료"] = "해냈다" },
+            Auto = new(StringComparer.Ordinal) { [AutoSticker.CallNoFindings] = "완료", [AutoSticker.CallFailed] = "" },
+        };
+        return new StickerCatalog(() => options);
     }
 
     [Fact]
