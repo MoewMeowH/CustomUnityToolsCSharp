@@ -66,11 +66,12 @@
             {
                 <a class="mono" href="/ClaudeSession?id=@ses.SessionId">@ClaudeSessionsModel.Short(ses.SessionId)</a>
                 <span class="badge @(ses.Kind == HB.Orchestration.Shared.RunLinkKind.Estimated ? "warn" : null)">@(ses.Kind == HB.Orchestration.Shared.RunLinkKind.Confirmed ? "확정" : "추정")</span>
-                <a href="/Room/@ses.SessionId#run-@c.RunId">채팅방에서 보기</a>
+                @if (Model.Room is { } room) { <a href="/Room/@room.SessionId#run-@c.RunId">채팅방에서 보기</a> }
             }
-            else if (c.RunId is { } unlinkedRun)
+            else if (Model.Room is { } verdictRoom)
             {
-                <a class="muted" href="/Room/Run/@unlinkedRun" title="record_verdicts로 이어진 /self-review 실행도 찾습니다">채팅방 찾기</a>
+                <span class="muted">record_verdicts로 이어짐</span>
+                <a href="/Room/@verdictRoom.SessionId#run-@c.RunId">채팅방에서 보기</a>
             }
             else
             {

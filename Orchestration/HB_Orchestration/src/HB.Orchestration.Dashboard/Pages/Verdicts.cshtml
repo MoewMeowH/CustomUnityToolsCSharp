@@ -80,7 +80,7 @@ else
                     var r = v.Verdict;
                     <tr>
                         <td class="v-@r.Verdict" style="white-space:nowrap">@Verdicts.Label(r.Verdict)@(r.Severity is { } sev ? $" · {sev}" : "")</td>
-                        <td class="mono">@if (v.FirstCallId is { } id) { <a href="/Call/@id">@v.Mode</a> } else { @v.Mode } <a class="muted" href="/Room/Run/@r.RunId" title="이 실행이 이어진 채팅방">방</a></td>
+                        <td class="mono">@if (v.FirstCallId is { } id) { <a href="/Call/@id">@v.Mode</a> } else { @v.Mode }@if (Model.Rooms.GetValueOrDefault(r.RunId) is { } room) { <a class="muted" style="margin-left:6px" href="/Room/@room.SessionId#run-@r.RunId" title="@(room.IsEstimated ? "이 실행이 이어진 채팅방 (추정 연결)" : "이 실행이 이어진 채팅방")">방</a> }</td>
                         <td>@r.Summary@if (r.File is { } f) { <div class="muted mono">@f</div> }</td>
                         <td>@(r.IsClaudeOnly ? "Claude만" : string.Join(", ", v.Agents))@if (!r.IsClaudeOnly && r.ClaudeAlsoFound) { <span class="muted"> (+Claude)</span> }</td>
                         <td class="muted">@r.Reason</td>

@@ -34,9 +34,6 @@ public sealed record ChatTranscript
 
     public IReadOnlyList<ChatEntry> Entries { get; init; } = [];
 
-    /// <summary>record_verdicts로 이 세션에 이어진 실행 (입력 runId · /self-review가 만든 "기록 runId: …").</summary>
-    public IReadOnlyList<string> VerdictRunIds { get; init; } = [];
-
     public int UnknownLines { get; init; }
     public string? FormatError { get; init; }
 
@@ -48,9 +45,6 @@ public sealed record ChatTranscript
 /// </summary>
 public static partial class ClaudeChatReader
 {
-    /// <summary>record_verdicts 도구 이름 접미사 (서버 이름이 바뀌어도 잡히게).</summary>
-    public const string RecordVerdictsToolSuffix = "__record_verdicts";
-
     public static ChatTranscript Read(string path, CancellationToken ct = default)
     {
         var s = new State();
@@ -78,7 +72,6 @@ public static partial class ClaudeChatReader
             Cwd = s.Cwd,
             Title = s.CustomTitle ?? s.AiTitle,
             Entries = s.Entries,
-            VerdictRunIds = s.VerdictRuns.ToList(),
             UnknownLines = s.Unknown,
         };
     }
@@ -88,8 +81,6 @@ public static partial class ClaudeChatReader
         public string? SessionId, Cwd, CustomTitle, AiTitle;
         public int Unknown, PendingTools;
         public readonly List<ChatEntry> Entries = [];
-        public readonly HashSet<string> VerdictUses = new(StringComparer.Ordinal);
-        public readonly SortedSet<string> VerdictRuns = new(StringComparer.Ordinal);
 
         public void Add(int line, DateTimeOffset? ts, ChatSpeaker speaker, string text)
         {
@@ -161,13 +152,6 @@ public static partial class ClaudeChatReader
                     break;
                 case "tool_use":
                     s.PendingTools++;
-                    if (Str(block, "name") is { } name && name.EndsWith(RecordVerdictsToolSuffix, StringComparison.Ordinal) && Str(block, "id") is { } id)
-                    {
-                        s.VerdictUses.Add(id);
-                        if (block.TryGetProperty("input", out var input) && input.ValueKind == JsonValueKind.Object
-                            && Str(input, "runId") is { } runId && RunIdRegex().IsMatch(runId.Trim()))
-                            s.VerdictRuns.Add(runId.Trim());
-                    }
                     break;
             }
         }
@@ -195,11 +179,6 @@ public static partial class ClaudeChatReader
                     break;
                 case "image":
                     text.Append("[이미지]\n");
-                    break;
-                case "tool_result" when Str(block, "tool_use_id") is { } useId && s.VerdictUses.Contains(useId):
-                    // /self-review는 runId 없이 부르고 서버가 만든 runId를 결과 첫 줄에 알려 준다.
-                    foreach (Match m in CreatedRunRegex().Matches(ResultText(block)))
-                        s.VerdictRuns.Add(m.Groups[1].Value);
                     break;
             }
         }
@@ -262,17 +241,6 @@ public static partial class ClaudeChatReader
             ? m.Groups[1].Value.Trim()
             : null;
 
-    private static string ResultText(JsonElement block)
-    {
-        if (!block.TryGetProperty("content", out var c)) return "";
-        if (c.ValueKind == JsonValueKind.String) return c.GetString()!;
-        if (c.ValueKind != JsonValueKind.Array) return "";
-        var sb = new StringBuilder();
-        foreach (var part in c.EnumerateArray())
-            if (part.ValueKind == JsonValueKind.Object && Str(part, "text") is { } t) sb.Append(t);
-        return sb.ToString();
-    }
-
     private static IEnumerable<JsonElement> ContentBlocks(JsonElement root)
     {
         if (!root.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object) yield break;
@@ -286,13 +254,6 @@ public static partial class ClaudeChatReader
 
     private static bool Bool(JsonElement obj, string name) =>
         obj.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.True;
-
-    [GeneratedRegex(@"^[0-9a-f]{10}$")]
-    private static partial Regex RunIdRegex();
-
-    /// <summary>VerdictRecorder.Commit의 "… 기록 runId: xxxxxxxxxx" 줄.</summary>
-    [GeneratedRegex(@"기록 runId: ([0-9a-f]{10})")]
-    private static partial Regex CreatedRunRegex();
 
     [GeneratedRegex(@"<system-reminder>.*?</system-reminder>", RegexOptions.Singleline)]
     private static partial Regex SystemReminderRegex();

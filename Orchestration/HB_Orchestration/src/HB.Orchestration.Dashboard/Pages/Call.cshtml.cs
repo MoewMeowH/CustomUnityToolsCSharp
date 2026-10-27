@@ -46,6 +46,9 @@ public sealed class CallModel(IOptions<DashboardOptions> options, PricingService
     /// <summary>이 호출이 속한 Claude Code 세션 (세션 기록 화면의 연결 결과). 없으면 null.</summary>
     public (string SessionId, RunLinkKind Kind)? Session { get; private set; }
 
+    /// <summary>이 실행이 이어진 채팅방 (ChatRoomService.RunRooms — 판정 화면 · /Room/Run과 같은 규칙). 없으면 null.</summary>
+    public RunRoom? Room { get; private set; }
+
     public IActionResult OnGet(string id)
     {
         var all = log.All;
@@ -76,7 +79,7 @@ public sealed class CallModel(IOptions<DashboardOptions> options, PricingService
         {
             RunSteps = all.Where(c => c.RunId == runId).OrderBy(c => c.Step).ThenBy(c => c.Attempt ?? 1).ToList();
             StepAttempts = Math.Max(1, RunSteps.Count(c => c.Step == call.Step));
-            Session = FindSession(runId, all);
+            (Session, Room) = FindSessionAndRoom(runId, all);
             RunVerdicts = VerdictStats.ForRun(verdicts.Latest, RunSteps, runId);
         }
 
@@ -112,18 +115,27 @@ public sealed class CallModel(IOptions<DashboardOptions> options, PricingService
         return File(bytes, "text/plain; charset=utf-8");
     }
 
-    private (string, RunLinkKind)? FindSession(string runId, IReadOnlyList<CallRecord> all)
+    /// <summary>
+    /// run_mode 연결(세션 기록 화면과 같은 것)과 채팅방. 채팅방은 run_mode 연결이 없어도 record_verdicts runId로 이어질 수 있다 (/self-review 기록 등).
+    /// </summary>
+    private ((string, RunLinkKind)?, RunRoom?) FindSessionAndRoom(string runId, IReadOnlyList<CallRecord> all)
     {
         try
         {
-            foreach (var (summary, links) in sessions.Load(all).Links)
+            var snap = sessions.Load(all);
+            (string, RunLinkKind)? session = null;
+            foreach (var (summary, links) in snap.Links)
                 if (links.FirstOrDefault(l => l.RunId == runId && l.Kind is RunLinkKind.Confirmed or RunLinkKind.Estimated) is { } link)
-                    return (summary.FileSessionId, link.Kind);
+                {
+                    session = (summary.FileSessionId, link.Kind);
+                    break;
+                }
+            return (session, ChatRoomService.RunRooms(snap).GetValueOrDefault(runId));
         }
         catch (Exception)
         {
             // 세션 기록은 부가 정보다. 읽지 못해도 호출 상세는 보여 준다.
+            return (null, null);
         }
-        return null;
     }
 }

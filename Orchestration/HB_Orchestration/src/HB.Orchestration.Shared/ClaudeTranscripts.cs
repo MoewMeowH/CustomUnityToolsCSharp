@@ -32,6 +32,12 @@ public sealed record TranscriptSummary
     public IReadOnlyList<TranscriptInstructions> Instructions { get; init; } = [];
     public IReadOnlyList<TranscriptRunCall> RunCalls { get; init; } = [];
 
+    /// <summary>
+    /// record_verdicts로 이 세션에 이어진 실행 (입력 runId · /self-review가 만든 "기록 runId: …"), 정렬됨.
+    /// 채팅방이 실행 → 세션을 본문을 읽지 않고 찾는 데 쓴다 (계획서 2026-10-27_채팅방-실행연결-색인).
+    /// </summary>
+    public IReadOnlyList<string> VerdictRunIds { get; init; } = [];
+
     /// <summary>JSON이 아니거나, 아는 항목인데 필드 모양이 다른 줄 수. 건너뛰고 센다.</summary>
     public int UnknownLines { get; init; }
 
@@ -50,6 +56,12 @@ public static partial class ClaudeTranscriptReader
 {
     /// <summary>run_mode 도구 이름 접미사. 서버 이름("hb-orchestration")이 바뀌어도 잡히도록 접미사로 본다.</summary>
     public const string RunModeToolSuffix = "__run_mode";
+
+    /// <summary>record_verdicts 도구 이름 접미사 (서버 이름이 바뀌어도 잡히게).</summary>
+    public const string RecordVerdictsToolSuffix = "__record_verdicts";
+
+    /// <summary>record_verdicts 실패 결과의 머리. VerdictRecorder.Fail이 이 값을 쓴다.</summary>
+    public const string VerdictFailPrefix = "[판정 기록 불가]";
 
     /// <summary>
     /// 잘못된 바이트를 대체 문자로 바꾸지 않는다: 바뀐 내용으로 지침 크기·해시를 계산하면 대조가 조용히 틀린다.
@@ -108,6 +120,7 @@ public static partial class ClaudeTranscriptReader
             Cwd = state.Cwd,
             Instructions = state.Instructions,
             RunCalls = state.Calls.Select(c => c.ToRecord()).ToList(),
+            VerdictRunIds = state.VerdictRuns.ToList(),
             UnknownLines = state.Unknown,
         };
 
@@ -177,6 +190,9 @@ public static partial class ClaudeTranscriptReader
         public readonly List<PendingCall> Calls = [];
         public readonly Dictionary<string, PendingCall> ByToolUse = new(StringComparer.Ordinal);
         public readonly Dictionary<string, PendingCall> ByTask = new(StringComparer.Ordinal);
+        /// <summary>record_verdicts tool_use id → 입력 runId (없으면 null, /self-review). 결과가 성공일 때만 VerdictRuns로 옮긴다.</summary>
+        public readonly Dictionary<string, string?> VerdictUses = new(StringComparer.Ordinal);
+        public readonly SortedSet<string> VerdictRuns = new(StringComparer.Ordinal);
     }
 
     private static void ReadLine(string line, int lineNo, State s)
@@ -208,14 +224,23 @@ public static partial class ClaudeTranscriptReader
                     case "assistant":
                         if (!HasMessageContent(root)) { s.Unknown++; break; }
                         foreach (var block in ContentBlocks(root))
-                            if (Str(block, "type") == "tool_use" && Str(block, "name") is { } name && name.EndsWith(RunModeToolSuffix, StringComparison.Ordinal)
-                                && Str(block, "id") is { } id)
+                        {
+                            if (Str(block, "type") != "tool_use" || Str(block, "name") is not { } name || Str(block, "id") is not { } id) continue;
+                            var input = block.TryGetProperty("input", out var i) && i.ValueKind == JsonValueKind.Object ? i : (JsonElement?)null;
+                            if (name.EndsWith(RunModeToolSuffix, StringComparison.Ordinal))
                             {
-                                var mode = ModeNames.Normalize(block.TryGetProperty("input", out var input) && input.ValueKind == JsonValueKind.Object ? Str(input, "mode") : null);
+                                var mode = ModeNames.Normalize(input is { } runInput ? Str(runInput, "mode") : null);
                                 var call = new PendingCall(lineNo, ts, id, mode);
                                 s.Calls.Add(call);
                                 s.ByToolUse[id] = call;
                             }
+                            else if (name.EndsWith(RecordVerdictsToolSuffix, StringComparison.Ordinal))
+                            {
+                                s.VerdictUses[id] = input is { } verdictInput && Str(verdictInput, "runId") is { } runId && VerdictRunIdRegex().IsMatch(runId.Trim())
+                                    ? runId.Trim()
+                                    : null;
+                            }
+                        }
                         break;
                     case "user":
                         if (!HasMessageContent(root)) { s.Unknown++; break; }
@@ -281,6 +306,17 @@ public static partial class ClaudeTranscriptReader
         foreach (var block in ContentBlocks(root))
         {
             if (Str(block, "type") != "tool_result" || Str(block, "tool_use_id") is not { } useId) continue;
+            if (s.VerdictUses.TryGetValue(useId, out var inputRunId))
+            {
+                // 기록이 실패한 호출("[판정 기록 불가] …" · 도구 오류)은 잇지 않는다 — 잘못 넘긴 runId가 이 세션 방으로 끌려오지 않게 (/self-review 20b90a0a65 C2).
+                var verdictText = ResultText(block);
+                if (Bool(block, "is_error") || verdictText.TrimStart().StartsWith(VerdictFailPrefix, StringComparison.Ordinal)) continue;
+                if (inputRunId is not null) s.VerdictRuns.Add(inputRunId);
+                // /self-review는 runId 없이 부르고 서버가 만든 runId를 결과에 알려 준다 (VerdictRecorder.Commit). 그 도구의 결과에서만 본다.
+                foreach (Match created in CreatedRunRegex().Matches(verdictText))
+                    s.VerdictRuns.Add(created.Groups[1].Value);
+                continue;
+            }
             if (!s.ByToolUse.TryGetValue(useId, out var call)) continue;
 
             var text = ResultText(block);
@@ -386,6 +422,9 @@ public static partial class ClaudeTranscriptReader
     private static string? Str(JsonElement obj, string name) =>
         obj.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
 
+    private static bool Bool(JsonElement obj, string name) =>
+        obj.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.True;
+
     [GeneratedRegex(@"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.jsonl$")]
     private static partial Regex SessionFileRegex();
 
@@ -408,6 +447,14 @@ public static partial class ClaudeTranscriptReader
 
     [GeneratedRegex(@"<task-id>(\w+)</task-id>")]
     private static partial Regex TaskIdRegex();
+
+    /// <summary>record_verdicts 입력 runId 모양.</summary>
+    [GeneratedRegex(@"^[0-9a-f]{10}$")]
+    private static partial Regex VerdictRunIdRegex();
+
+    /// <summary>VerdictRecorder.Commit의 "… 기록 runId: xxxxxxxxxx" 줄.</summary>
+    [GeneratedRegex(@"기록 runId: ([0-9a-f]{10})")]
+    private static partial Regex CreatedRunRegex();
 }
 
 /// <summary>세션 기록의 지침 content와 지금 디스크 파일의 대조 결과.</summary>

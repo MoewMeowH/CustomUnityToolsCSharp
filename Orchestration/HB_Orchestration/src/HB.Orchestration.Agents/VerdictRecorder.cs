@@ -54,7 +54,8 @@ public static class VerdictRecorder
     /// <summary>같은 self-reviewer 원문을 중복으로 보는 기간 (일).</summary>
     public const int DuplicateWindowDays = 7;
 
-    private const string Fail = "[판정 기록 불가] ";
+    /// <summary>실패 결과의 머리. 세션 기록 요약이 이 머리로 실패한 호출을 거른다 (ClaudeTranscriptReader.VerdictFailPrefix).</summary>
+    private const string Fail = ClaudeTranscriptReader.VerdictFailPrefix + " ";
     private static readonly string[] Severities = ["high", "medium", "low"];
 
     /// <param name="maxReasonChars">Reason 글자 수 상한 (Records.MaxReasonChars, 0 = 무제한).</param>

@@ -258,18 +258,25 @@ public static class ChatRoomBuilder
     }
 }
 
+/// <summary>실행이 이어진 방: 세션 파일 ID와, 추정 연결로만 이어졌는지.</summary>
+public sealed record RunRoom(string SessionId, bool IsEstimated);
+
 /// <summary>
-/// 채팅방 목록 · 방 하나 · 실행 → 방 찾기. 세션 기록은 (경로 · 크기 · 수정 시각)이 같으면 다시 읽지 않는다.
+/// 채팅방 목록 · 방 하나 · 실행 → 방 찾기. 실행 → 방은 세션 요약(run_mode 연결 · record_verdicts runId)만 보고 본문은 읽지 않는다.
+/// 본문은 방을 그릴 때만 읽고, 최근 쓴 것부터 Dashboard:ClaudeSessionLimit + 20개만 들고 있는다 (계획서 2026-10-27_채팅방-실행연결-색인).
 /// </summary>
 public sealed class ChatRoomService(
     CallLogCache log,
     VerdictLogCache verdicts,
     ClaudeSessionsService sessions,
     SubagentResultsService subagents,
-    StickerCatalog stickers)
+    StickerCatalog stickers,
+    Microsoft.Extensions.Options.IOptions<DashboardOptions> options)
 {
-    private readonly ConcurrentDictionary<string, (long Length, DateTime WriteUtc, ChatTranscript Chat)> _cache =
-        new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>방 목록(최근 세션)을 매번 다 읽어도 캐시가 갈리지 않게 목록보다 이만큼 크게.</summary>
+    public const int CacheSpare = 20;
+
+    private readonly ChatTranscriptCache _cache = new(() => Math.Max(1, options.Value.ClaudeSessionLimit) + CacheSpare);
 
     public sealed record RoomSummary(TranscriptSummary Session, ChatTranscript Chat, int RunCount, string Title);
 
@@ -282,9 +289,8 @@ public sealed class ChatRoomService(
         var snap = sessions.Load(calls);
         return snap.Sessions.Select(s =>
         {
-            var chat = Chat(s);
-            var runs = RunIdsFor(s, chat, snap.Links);
-            return new RoomSummary(s, chat, runs.Count, TitleOf(chat));
+            var chat = _cache.Get(s);
+            return new RoomSummary(s, chat, RunIdsFor(s, snap.Links).Count, TitleOf(chat));
         }).ToList();
     }
 
@@ -296,34 +302,57 @@ public sealed class ChatRoomService(
         var session = snap.AllSessions.FirstOrDefault(s => string.Equals(s.FileSessionId, sessionId, StringComparison.OrdinalIgnoreCase));
         if (session is null) return null;
 
-        var chat = Chat(session);
-        var runIds = RunIdsFor(session, chat, snap.Links);
-        return ChatRoomBuilder.Build(chat, runIds, calls, subagents.Load(calls).Views, verdicts.Latest, stickers.ForSituation)
-            with { EstimatedRunIds = EstimatedRunIds(session, chat, snap.Links) };
+        var runIds = RunIdsFor(session, snap.Links);
+        return ChatRoomBuilder.Build(_cache.Get(session), runIds, calls, subagents.Load(calls).Views, verdicts.Latest, stickers.ForSituation)
+            with { EstimatedRunIds = EstimatedRunIds(session, snap.Links) };
     }
 
-    private static HashSet<string> EstimatedRunIds(TranscriptSummary session, ChatTranscript chat, IReadOnlyDictionary<TranscriptSummary, List<RunLink>> links)
+    /// <summary>실행이 이어진 세션 ID. 어느 세션에도 없으면 null.</summary>
+    public string? SessionOfRun(string runId) => RunRooms().GetValueOrDefault(runId)?.SessionId;
+
+    /// <summary>runId → 이어진 방 (판정 화면 · 호출 상세의 방 링크). 세션 요약만 읽는다.</summary>
+    public IReadOnlyDictionary<string, RunRoom> RunRooms() => RunRooms(sessions.Load(log.All));
+
+    public static IReadOnlyDictionary<string, RunRoom> RunRooms(ClaudeSessionsService.Snapshot snap) => RunRooms(snap.AllSessions, snap.Links);
+
+    /// <summary>
+    /// 순위: run_mode 확정 연결(실행한 세션) > record_verdicts runId(판정만 남긴 세션 — 소급 판정은 다른 세션일 수 있다) > run_mode 추정 연결.
+    /// 같은 순위가 여러 세션에 있으면(이어 연 세션은 앞 대화가 새 파일로 복사된다) 먼저 오는 세션 — 최근 수정된 것.
+    /// 호출 상세 · 판정 화면 · /Room/Run이 모두 이 규칙을 쓴다 (/self-review 20b90a0a65 C1).
+    /// </summary>
+    public static IReadOnlyDictionary<string, RunRoom> RunRooms(
+        IReadOnlyList<TranscriptSummary> sessions, IReadOnlyDictionary<TranscriptSummary, List<RunLink>> links)
+    {
+        const int Confirmed = 0, Verdict = 1, Estimated = 2;
+        var best = new Dictionary<string, (string Session, int Rank)>(StringComparer.Ordinal);
+        void Offer(string runId, string session, int rank)
+        {
+            if (!best.TryGetValue(runId, out var had) || rank < had.Rank) best[runId] = (session, rank);
+        }
+
+        foreach (var session in sessions)
+        {
+            var list = links.TryGetValue(session, out var l) ? l : [];
+            foreach (var link in list)
+                if (link.RunId is { } runId && link.Kind is RunLinkKind.Confirmed or RunLinkKind.Estimated)
+                    Offer(runId, session.FileSessionId, link.Kind == RunLinkKind.Confirmed ? Confirmed : Estimated);
+            foreach (var runId in session.VerdictRunIds)
+                Offer(runId, session.FileSessionId, Verdict);
+        }
+        return best.ToDictionary(kv => kv.Key, kv => new RunRoom(kv.Value.Session, kv.Value.Rank == Estimated), StringComparer.Ordinal);
+    }
+
+    private static HashSet<string> EstimatedRunIds(TranscriptSummary session, IReadOnlyDictionary<TranscriptSummary, List<RunLink>> links)
     {
         if (!links.TryGetValue(session, out var list)) return [];
         var confirmed = list.Where(l => l.Kind == RunLinkKind.Confirmed && l.RunId is not null).Select(l => l.RunId!).ToHashSet(StringComparer.Ordinal);
-        return list.Where(l => l.Kind == RunLinkKind.Estimated && l.RunId is { } id && !confirmed.Contains(id) && !chat.VerdictRunIds.Contains(id))
+        return list.Where(l => l.Kind == RunLinkKind.Estimated && l.RunId is { } id && !confirmed.Contains(id) && !session.VerdictRunIds.Contains(id))
             .Select(l => l.RunId!).ToHashSet(StringComparer.Ordinal);
     }
 
-    /// <summary>실행이 이어진 세션 ID (run_mode 확정 · 추정 연결, record_verdicts runId). 어느 세션에도 없으면 null.</summary>
-    public string? SessionOfRun(string runId)
+    private static List<string> RunIdsFor(TranscriptSummary session, IReadOnlyDictionary<TranscriptSummary, List<RunLink>> links)
     {
-        var calls = log.All;
-        var snap = sessions.Load(calls);
-        foreach (var (session, links) in snap.Links)
-            if (links.Any(l => l.RunId == runId && l.Kind is RunLinkKind.Confirmed or RunLinkKind.Estimated))
-                return session.FileSessionId;
-        return snap.AllSessions.FirstOrDefault(s => Chat(s).VerdictRunIds.Contains(runId))?.FileSessionId;
-    }
-
-    private static List<string> RunIdsFor(TranscriptSummary session, ChatTranscript chat, IReadOnlyDictionary<TranscriptSummary, List<RunLink>> links)
-    {
-        var ids = new HashSet<string>(chat.VerdictRunIds, StringComparer.Ordinal);
+        var ids = new HashSet<string>(session.VerdictRunIds, StringComparer.Ordinal);
         if (links.TryGetValue(session, out var list))
             foreach (var l in list)
                 if (l.RunId is { } id && l.Kind is RunLinkKind.Confirmed or RunLinkKind.Estimated)
@@ -333,13 +362,55 @@ public sealed class ChatRoomService(
 
     private static string TitleOf(ChatTranscript chat) =>
         chat.Title ?? chat.Entries.FirstOrDefault(e => e.Speaker == ChatSpeaker.User)?.Text.Split('\n')[0] ?? chat.FileSessionId;
+}
 
-    private ChatTranscript Chat(TranscriptSummary session)
+/// <summary>
+/// 세션 본문 캐시. (경로 · 크기 · 수정 시각)이 같으면 다시 읽지 않고, 상한을 넘으면 가장 오래 안 쓴 것부터 뺀다.
+/// 상한은 넣을 때마다 limit()으로 묻는다 (대시보드는 IOptions라 켤 때 값 그대로). 읽기에 실패한 본문(FormatError)은 넣지 않는다 —
+/// 잠금 같은 일시적 실패가 파일이 바뀔 때까지 빈 방으로 남지 않게 (/self-review 20b90a0a65 C4).
+/// </summary>
+public sealed class ChatTranscriptCache(Func<int> limit, Func<string, ChatTranscript>? read = null)
+{
+    private sealed class Entry(long length, DateTime writeUtc, ChatTranscript chat)
+    {
+        public readonly long Length = length;
+        public readonly DateTime WriteUtc = writeUtc;
+        public readonly ChatTranscript Chat = chat;
+        public long LastUsed;
+    }
+
+    private readonly ConcurrentDictionary<string, Entry> _entries = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Func<string, ChatTranscript> _read = read ?? (path => ClaudeChatReader.Read(path));
+    private long _clock;
+
+    public int Count => _entries.Count;
+
+    public bool Contains(string path) => _entries.ContainsKey(path);
+
+    public ChatTranscript Get(TranscriptSummary session)
     {
         var path = session.FilePath;
-        if (_cache.TryGetValue(path, out var hit) && hit.Length == session.FileBytes && hit.WriteUtc == session.LastWriteUtc) return hit.Chat;
-        var chat = ClaudeChatReader.Read(path);
-        _cache[path] = (session.FileBytes, session.LastWriteUtc, chat);
+        if (_entries.TryGetValue(path, out var hit) && hit.Length == session.FileBytes && hit.WriteUtc == session.LastWriteUtc)
+        {
+            hit.LastUsed = Interlocked.Increment(ref _clock);
+            return hit.Chat;
+        }
+        var chat = _read(path);
+        if (chat.FormatError is not null)
+        {
+            _entries.TryRemove(path, out _);
+            return chat;
+        }
+        _entries[path] = new Entry(session.FileBytes, session.LastWriteUtc, chat) { LastUsed = Interlocked.Increment(ref _clock) };
+        Trim();
         return chat;
+    }
+
+    private void Trim()
+    {
+        var over = _entries.Count - Math.Max(1, limit());
+        if (over <= 0) return;
+        foreach (var path in _entries.OrderBy(kv => kv.Value.LastUsed).Take(over).Select(kv => kv.Key).ToList())
+            _entries.TryRemove(path, out _);
     }
 }

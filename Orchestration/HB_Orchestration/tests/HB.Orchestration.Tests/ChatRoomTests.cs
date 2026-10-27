@@ -115,7 +115,7 @@ public sealed class ChatRoomTests : IDisposable
     }
 
     [Fact]
-    public void Reader_RecordVerdicts_LinksInputRunIdAndCreatedRunId()
+    public void Summary_RecordVerdicts_LinksInputRunIdAndCreatedRunId()
     {
         var path = Write(
             Assistant(1, Use("v1", "mcp__hb-orchestration__record_verdicts", new { runId = "aaaaaaaaaa", items = Array.Empty<object>() })),
@@ -124,9 +124,16 @@ public sealed class ChatRoomTests : IDisposable
             User(4, new object[] { Result("v2", "self-reviewer 기록 runId: bbbbbbbbbb\n판정 2건 기록") }),
             // 다른 도구 결과의 같은 문구는 연결하지 않는다.
             Assistant(5, Use("g1", "Grep", new { pattern = "runId" })),
-            User(6, new object[] { Result("g1", "기록 runId: cccccccccc") }));
+            User(6, new object[] { Result("g1", "기록 runId: cccccccccc") }),
+            // 기록이 실패한 호출 · 도구 오류 · 결과가 아직 없는 호출의 입력 runId는 잇지 않는다.
+            Assistant(7, Use("v3", "mcp__hb-orchestration__record_verdicts", new { runId = "dddddddddd" })),
+            User(8, new object[] { Result("v3", "[판정 기록 불가] runId 'dddddddddd'의 기록이 없습니다.") }),
+            Assistant(9, Use("v4", "mcp__hb-orchestration__record_verdicts", new { runId = "eeeeeeeeee" })),
+            User(10, new object[] { new { type = "tool_result", tool_use_id = "v4", is_error = true, content = "denied" } }),
+            Assistant(11, Use("v5", "mcp__hb-orchestration__record_verdicts", new { runId = "ffffffffff" })));
 
-        Assert.Equal(["aaaaaaaaaa", "bbbbbbbbbb"], ClaudeChatReader.Read(path).VerdictRunIds);
+        // 세션 요약이 가진다 (실행 → 방을 본문 없이 찾도록, 계획서 2026-10-27_채팅방-실행연결-색인).
+        Assert.Equal(["aaaaaaaaaa", "bbbbbbbbbb"], ClaudeTranscriptReader.Read(path).VerdictRunIds);
     }
 
     [Fact]
@@ -354,6 +361,84 @@ public sealed class ChatRoomTests : IDisposable
         var reply = Assert.Single(room.Messages, m => m.Role == RoomRole.ApiReview);
         Assert.Equal("/Call/a2", reply.Link);
         Assert.False(reply.IsError);
+    }
+
+    // ── 실행 → 방 · 본문 캐시 ──
+
+    private static TranscriptSummary Summary(string sessionId, params string[] verdictRuns) => new()
+    {
+        FilePath = Path.Combine("p", sessionId + ".jsonl"), FileBytes = 1, LastWriteUtc = new DateTime(2026, 10, 27), VerdictRunIds = verdictRuns,
+    };
+
+    [Fact]
+    public void RunRooms_RanksRunModeConfirmed_ThenVerdict_ThenEstimated()
+    {
+        // newer가 최근 수정된 세션 (AllSessions 순서).
+        var newer = Summary("new", "vv00000000", "retro00000");
+        var older = Summary("old", "estverdict");
+        var c1 = new TranscriptRunCall(1, At(1), "t1", "review_main", null, null);
+        var c2 = new TranscriptRunCall(2, At(2), "t2", "review_main", null, null);
+        var links = new Dictionary<TranscriptSummary, List<RunLink>>
+        {
+            [newer] = [new RunLink(c1, RunLinkKind.Estimated, "estverdict", 1), new RunLink(c2, RunLinkKind.Estimated, "r-est", 1),
+                       new RunLink(c1, RunLinkKind.Confirmed, "copied0000", 1)],
+            [older] = [new RunLink(c1, RunLinkKind.Confirmed, "retro00000", 1), new RunLink(c1, RunLinkKind.Confirmed, "copied0000", 1),
+                       new RunLink(c2, RunLinkKind.Ambiguous, null, 2)],
+        };
+
+        var rooms = ChatRoomService.RunRooms([newer, older], links);
+
+        Assert.Equal(new RunRoom("old", false), rooms["retro00000"]);  // 실행한 세션(확정)이 나중 세션의 소급 판정을 이긴다
+        Assert.Equal(new RunRoom("old", false), rooms["estverdict"]);  // 판정이 다른 세션의 추정을 이긴다
+        Assert.Equal(new RunRoom("new", false), rooms["vv00000000"]);  // 판정만
+        Assert.Equal(new RunRoom("new", true), rooms["r-est"]);        // 추정만
+        Assert.Equal(new RunRoom("new", false), rooms["copied0000"]);  // 같은 순위면 최근 세션 (이어 연 세션 복사본)
+        Assert.False(rooms.ContainsKey("golden0000"));
+        Assert.Equal(5, rooms.Count);
+    }
+
+    [Fact]
+    public void ChatCache_RereadsOnChange_AndDropsLeastRecentlyUsed()
+    {
+        var reads = new List<string>();
+        var cache = new ChatTranscriptCache(() => 2, path => { reads.Add(path); return new ChatTranscript { FilePath = path }; });
+        var a = Summary("a");
+        var b = Summary("b");
+        var c = Summary("c");
+
+        cache.Get(a);
+        cache.Get(b);
+        cache.Get(a); // a를 최근에 씀 → b가 가장 오래 안 씀
+        cache.Get(c);
+
+        Assert.Equal(2, cache.Count);
+        Assert.True(cache.Contains(a.FilePath));
+        Assert.False(cache.Contains(b.FilePath));
+        Assert.True(cache.Contains(c.FilePath));
+        Assert.Equal([a.FilePath, b.FilePath, c.FilePath], reads);
+
+        cache.Get(a with { FileBytes = 2 }); // 파일이 바뀌면 다시 읽는다
+        Assert.Equal(4, reads.Count);
+    }
+
+    [Fact]
+    public void ChatCache_DoesNotKeepFailedReads()
+    {
+        var fail = true;
+        var reads = 0;
+        var cache = new ChatTranscriptCache(() => 10, path =>
+        {
+            reads++;
+            return new ChatTranscript { FilePath = path, FormatError = fail ? "IOException: 잠김" : null };
+        });
+        var a = Summary("a");
+
+        Assert.NotNull(cache.Get(a).FormatError);
+        Assert.False(cache.Contains(a.FilePath));
+        fail = false;
+        Assert.Null(cache.Get(a).FormatError); // 파일이 그대로여도 다시 읽는다
+        Assert.True(cache.Contains(a.FilePath));
+        Assert.Equal(2, reads);
     }
 
     private static string RoleName(RoomRole role) => role.ToString().ToLowerInvariant();
