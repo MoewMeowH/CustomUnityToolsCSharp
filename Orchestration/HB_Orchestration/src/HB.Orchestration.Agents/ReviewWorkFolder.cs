@@ -58,7 +58,8 @@ public static class ReviewWorkFolder
     {
         Directory.CreateDirectory(folder);
         var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootDir));
-        var copied = new Dictionary<string, (string Inside, string Sha)>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        var copied = new Dictionary<string, (string Inside, string Sha, int? Lines)>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        var copyOrder = new List<string>();   // 지휘자가 넘긴 순서 (색인 예산을 이 순서로 쓴다)
         var focus = new List<string>();
         long total = 0;
 
@@ -105,13 +106,22 @@ public static class ReviewWorkFolder
                     using var target = new FileStream(dest, FileMode.CreateNew, FileAccess.Write);
                     using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
                     var buffer = new byte[81920];
-                    int read;
+                    int read, lines = 0;
+                    byte last = (byte)'\n';
+                    bool first = true, utf16 = false;
                     while ((read = source.Read(buffer, 0, buffer.Length)) > 0)
                     {
                         target.Write(buffer, 0, read);
                         sha.AppendData(buffer, 0, read);
+                        // UTF-16(BOM FF FE · FE FF)은 글자 안에 0x0A 바이트가 있어 바이트로 세면 부풀려진다 → 줄 수 모름 (sub_self 535ca00022 C7)
+                        if (first) utf16 = read >= 2 && ((buffer[0] == 0xFF && buffer[1] == 0xFE) || (buffer[0] == 0xFE && buffer[1] == 0xFF));
+                        first = false;
+                        lines += buffer.AsSpan(0, read).Count((byte)'\n');
+                        last = buffer[read - 1];
                     }
-                    copied[dest] = (inside, Convert.ToHexStringLower(sha.GetHashAndReset())[..12]);
+                    if (last != (byte)'\n') lines++;   // 마지막 줄에 줄바꿈이 없으면 그 줄도 센다 (빈 파일은 0)
+                    copied[dest] = (inside, Convert.ToHexStringLower(sha.GetHashAndReset())[..12], utf16 ? null : lines);
+                    copyOrder.Add(dest);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
@@ -125,9 +135,29 @@ public static class ReviewWorkFolder
         text.AppendLine().AppendLine("## 작업 폴더 (서버가 복사함)")
             .AppendLine("지금 작업 폴더에 지휘자가 고른 파일이 파일 전체로, 아래 경로 그대로 복사돼 있다. 폴더에 있는 파일은 아래 목록이 전부다.")
             .AppendLine("Read로 연다 (검색 도구가 없을 수 있다). 판단에 필요하면 목록의 다른 파일 · 다른 부분도 읽는다. 폴더 밖은 읽지 않는다.")
-            .AppendLine().AppendLine("### 파일 (경로 · SHA-256 앞 12자)");
-        foreach (var (inside, sha) in copied.Values.OrderBy(v => v.Inside, StringComparer.Ordinal))
-            text.AppendLine($"- {inside} · {sha}");
+            .AppendLine("'정의' 줄은 서버가 정규식으로 뽑은 대략의 위치(이름 줄번호)다. 큰 파일은 필요한 범위만 Read(offset · limit)로 열고, 판단 전에 그 줄을 직접 확인한다.")
+            .AppendLine().AppendLine("### 파일 (경로 · SHA-256 앞 12자 · 줄 수)");
+        // 정의 색인 (계획서 2026-10-27_작업폴더-정의-색인): 예산은 지휘자가 넘긴 순서(보통 중심 파일이 앞)로 쓰고,
+        // 상한에 걸린 파일은 건너뛰고 다음 파일을 본다. 목록은 경로 순 (sub_self 535ca00022 C3).
+        var indexes = new Dictionary<string, string>(copied.Comparer);
+        var overBudget = new List<string>();
+        var indexChars = 0;
+        foreach (var dest in copyOrder)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (DefinitionIndex.ReadText(dest) is not { } body) continue;
+            if (DefinitionIndex.Format(DefinitionIndex.Outline(copied[dest].Inside, body)) is not { } index) continue;
+            if (indexChars + index.Length > DefinitionIndex.MaxTotalChars) { overBudget.Add(copied[dest].Inside); continue; }
+            indexes[dest] = index;
+            indexChars += index.Length;
+        }
+        foreach (var (dest, (inside, sha, lines)) in copied.OrderBy(v => v.Value.Inside, StringComparer.Ordinal))
+        {
+            text.AppendLine($"- {inside} · {sha} · {(lines is { } n ? $"{n}줄" : "줄 수 모름(UTF-16)")}");
+            if (indexes.TryGetValue(dest, out var index)) text.AppendLine(index);
+        }
+        if (overBudget.Count > 0)
+            text.AppendLine($"(정의 색인 상한 {DefinitionIndex.MaxTotalChars:N0}자를 넘어 색인을 뺀 파일: {string.Join(", ", overBudget.Order(StringComparer.Ordinal))})");
         text.AppendLine().AppendLine("### 이번 검토의 중심 (경로:줄)");
         foreach (var line in focus) text.AppendLine(line);
         return (folder, text.ToString(), null);

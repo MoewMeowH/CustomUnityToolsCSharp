@@ -235,10 +235,71 @@ public sealed class ClaudeCliTests : IDisposable
         Assert.Contains("- src/A.cs:3-3", focus);
         Assert.Contains("- src/B.cs:1-1", focus);
         Assert.DoesNotContain("line2", focus);                                            // 본문은 프롬프트에 넣지 않는다
+        Assert.Matches(@"- src/A\.cs · [0-9a-f]{12} · 3줄", focus);
+        Assert.Matches(@"- src/B\.cs · [0-9a-f]{12} · 1줄", focus);
+        Assert.DoesNotContain("정의:", focus);                                           // 정의가 없는 파일은 색인 줄 없음
         Assert.Equal(2, Directory.EnumerateFiles(folder!, "*", SearchOption.AllDirectories).Count());
 
         ReviewWorkFolder.TryDelete(folder);
         Assert.False(Directory.Exists(folder));
+    }
+
+    [Fact]
+    public void Work_folder_list_has_definition_index_under_each_file()
+    {
+        Src("src/Runner.cs", "namespace X;\npublic sealed class Runner\n{\n    public void Run() { }\n}");
+        Src("docs/plan.md", "# 제목\n## 계획\n");
+        Src("notes.txt", "public class NotIndexed {}\n");
+
+        var (folder, focus, error) = ReviewWorkFolder.Create(Path.Combine(_dir, "review_in"),
+            [new ContextRange("src/Runner.cs", 1, 5), new ContextRange("docs/plan.md", 1, 2), new ContextRange("notes.txt", 1, 1)],
+            new ContextOptions(), Path.Combine(_dir, "repo"));
+
+        Assert.Null(error);
+        var lines = focus!.Split('\n').Select(l => l.TrimEnd('\r')).ToList();
+        var runner = lines.FindIndex(l => l.StartsWith("- src/Runner.cs · "));
+        Assert.EndsWith(" · 5줄", lines[runner]);                                             // 마지막 줄에 줄바꿈이 없어도 센다
+        Assert.Equal("  정의: class Runner 2 · Run() 4", lines[runner + 1]);
+        Assert.Equal("  정의: # 제목 1 · ## 계획 2", lines[lines.FindIndex(l => l.StartsWith("- docs/plan.md · ")) + 1]);
+        var notes = lines.FindIndex(l => l.StartsWith("- notes.txt · "));
+        Assert.False(lines[notes + 1].StartsWith("  정의:"));                                  // 모르는 확장자는 색인 없음
+        ReviewWorkFolder.TryDelete(folder);
+    }
+
+    [Fact]
+    public void Index_budget_follows_context_order_and_names_skipped_files()   // sub_self 535ca00022 C3 · C8
+    {
+        // 파일마다 정의 80개 × 약 70자 ≈ 5.6천 자 — 다섯 개면 전체 상한(2만 자)을 넘는다
+        string Methods(string prefix) => "public class C\n{\n" + string.Concat(Enumerable.Range(1, 79)
+            .Select(i => $"    public void {prefix}{new string('x', 55)}{i:D2}() {{ }}\n")) + "}\n";
+        foreach (var name in new[] { "a", "b", "c", "d", "e" }) Src($"src/{name}.cs", Methods(name));
+
+        var (folder, focus, error) = ReviewWorkFolder.Create(Path.Combine(_dir, "review_in"),
+            new[] { "e", "d", "c", "b", "a" }.Select(n => new ContextRange($"src/{n}.cs", 1, 1)).ToList(), new ContextOptions(), Path.Combine(_dir, "repo"));
+
+        Assert.Null(error);
+        var lines = focus!.Split('\n').Select(l => l.TrimEnd('\r')).ToList();
+        bool Indexed(string n) => lines[lines.FindIndex(l => l.StartsWith($"- src/{n}.cs · ")) + 1].StartsWith("  정의:");
+        Assert.True(Indexed("e") && Indexed("d") && Indexed("c"));                               // 앞에 넘긴 파일이 먼저
+        Assert.False(Indexed("a") || Indexed("b"));
+        Assert.Contains(lines, l => l.Contains("색인을 뺀 파일: src/a.cs, src/b.cs"));
+        Assert.True(lines.FindIndex(l => l.StartsWith("- src/a.cs")) < lines.FindIndex(l => l.StartsWith("- src/e.cs")));   // 목록은 경로 순
+        ReviewWorkFolder.TryDelete(folder);
+    }
+
+    [Fact]
+    public void Utf16_file_line_count_is_unknown()   // C7
+    {
+        var path = Path.Combine(_dir, "repo", "u16.ps1");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, "function A {}\n갊\n", System.Text.Encoding.Unicode);   // '갊' U+AC0A — 하위 바이트 0x0A
+
+        var (folder, focus, error) = ReviewWorkFolder.Create(Path.Combine(_dir, "review_in"), [new ContextRange("u16.ps1", 1, 1)], new ContextOptions(), Path.Combine(_dir, "repo"));
+
+        Assert.Null(error);
+        Assert.Matches(@"- u16\.ps1 · [0-9a-f]{12} · 줄 수 모름\(UTF-16\)", focus);
+        Assert.DoesNotContain("정의:", focus);                                                  // UTF-8이 아니면 색인 없음
+        ReviewWorkFolder.TryDelete(folder);
     }
 
     [Theory]

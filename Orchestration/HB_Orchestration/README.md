@@ -143,6 +143,7 @@ dotnet test tests/HB.Orchestration.Tests
 - 모드 `sub_self` · `sub_perf` · `sub_security` · `sub_direction` (역할 `SubSelf` · `SubPerf` · `SubSecurity` · `SubDirection` = 각 검토형 서브에이전트 정의 본문, 읽는 것만 작업 폴더 · Read 기준 / 에이전트 `claude_cli_opus` 공용 = claude-opus-5-5 · effort high · MaxTurns 40 · MaxBudgetUsd 2 · 재시도 없음, 제공사도 MaxAttempts 1). **검토형 리뷰의 기본**이다 — `/self-review` · `/cross-review` 2단계 · `perf_*` ownReview (서브에이전트는 `/self-review sub …` 또는 크레딧 소진 때).
 - **크레딧 소진 대체**: claude-cli 단계는 그 제공사의 최근 판정 가능한 기록(성공 또는 Quota)이 1시간 안의 Quota면 호출 없이 `[실패] Quota (최근) …`를 돌려준다 (지휘자는 서브에이전트로 대신한다). 1시간 뒤에는 한 번 시도한다 — 계속 막으면 성공 기록이 생기지 않아 크레딧을 채워도 풀리지 않는다 (크레딧이 없을 때 실패 호출은 비용 0, 충전 뒤 최대 1시간이면 풀린다). 대시보드 첫 화면에 `API 리뷰(sub_*) 이번 달 N회 · $X`(claude-cli 제공사 기준, 단가 없는 기록은 건수로)와, 마지막 판정 가능한 기록이 Quota면 `크레딧 소진 — 서브에이전트로 대체 중`(1시간이 지났으면 `다음 호출에서 다시 시도`). 시범 1호(2026-10-27, 이 기능 자체 리뷰): 17턴 · 274초 · $1.26, self-reviewer 서브에이전트와 지적 9건 겹침. 절차는 `/self-review` 명령 파일 "API 리뷰".
 - **ownReview로 쓸 때** (`/cross-review` 2단계 · `perf_*`): 응답 본문(`## 지적`부터)만 넣고 reason 태그는 `[ownReview:sub_self]` · `[ownReview:sub_perf]` · `[ownReview:sub_self+sub_security]`. H4 훅이 읽은 파일을 작업 폴더 기준 상대 경로로 검사한다.
+- **정의 색인** (계획서 `docs/plans/2026-10-27_작업폴더-정의-색인.md`): 이 PC의 claude -p는 Read만 주므로, 작업 폴더 절의 파일 목록에 줄 수와 `정의: class X 12 · Run() 40 · …`(C# · Python · Markdown · JSON 얕은 키 · PowerShell, 줄 단위 정규식 — 대략의 위치)를 붙인다. 파일당 80개 · 전체 2만 자 · 1MB 이하 UTF-8 파일만 (`DefinitionIndex`).
 
 ### 재시도
 
