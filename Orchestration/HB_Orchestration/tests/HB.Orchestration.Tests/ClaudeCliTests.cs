@@ -19,7 +19,7 @@ public sealed class ClaudeCliTests : IDisposable
         try { Directory.Delete(_dir, recursive: true); } catch (IOException) { }
     }
 
-    private static readonly ClaudeCliSettings Settings = new("claude", "sk-test", "Custom_CLAUDE_API_KEY", "claude-opus-5-5", 40, 2.5m, TimeSpan.FromMinutes(1));
+    private static readonly ClaudeCliSettings Settings = new("claude", "sk-test", "HB_REVIEWER_API_KEY", "claude-opus-5-5", 40, 2.5m, TimeSpan.FromMinutes(1));
 
     private static string ResultJson(string text = "## 지적\n- 문제 없음", string stopReason = "end_turn") => JsonSerializer.Serialize(new
     {
@@ -63,12 +63,12 @@ public sealed class ClaudeCliTests : IDisposable
     [Fact]
     public void Child_environment_sets_api_key_and_removes_other_auth()
     {
-        var env = ClaudeCliChatClient.ChildEnvironment("sk-test", "Custom_CLAUDE_API_KEY",
-            ["PATH", "OPENAI_API_KEY", "GEMINI_API_KEY", "OPENAI_ADMIN_KEY", "GITHUB_TOKEN", "Custom_CLAUDE_API_KEY", "ANTHROPIC_API_KEY"]);
+        var env = ClaudeCliChatClient.ChildEnvironment("sk-test", "HB_REVIEWER_API_KEY",
+            ["PATH", "OPENAI_API_KEY", "GEMINI_API_KEY", "OPENAI_ADMIN_KEY", "GITHUB_TOKEN", "HB_REVIEWER_API_KEY", "ANTHROPIC_API_KEY"]);
 
         Assert.Equal("sk-test", env["ANTHROPIC_API_KEY"]);
         foreach (var name in new[] { "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "ANTHROPIC_BASE_URL",
-                     "Custom_CLAUDE_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "OPENAI_ADMIN_KEY", "GITHUB_TOKEN" })
+                     "HB_REVIEWER_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "OPENAI_ADMIN_KEY", "GITHUB_TOKEN" })
             Assert.Null(env[name]);
         Assert.False(env.ContainsKey("PATH"));                                   // 나머지 환경은 그대로 물려받는다
     }
@@ -354,6 +354,18 @@ public sealed class ClaudeCliTests : IDisposable
         var ex = Assert.Throws<ProviderConfigurationException>(() => new ClaudeCliProvider().Create("p",
             new ProviderOptions { Type = "claude-cli", ApiKeyEnv = "ANTHROPIC_API_KEY" }, new AgentOptions { Name = "c", Provider = "p", Model = "m" }));
         Assert.Contains("쓰지 않는다", ex.Message);                                   // "비어 있습니다"가 아니라 이름 문제를 알린다
+    }
+
+    [Theory]
+    [InlineData("Custom_ANTHROPIC_API_KEY", "ANTHROPIC")]
+    [InlineData("Custom_CLAUDE_API_KEY", "CLAUDE")]
+    [InlineData("my_claude_key", "CLAUDE")]
+    public void Key_names_that_claude_code_blanks_are_rejected(string keyEnv, string word)
+    {
+        var ex = Assert.Throws<ProviderConfigurationException>(() => new ClaudeCliProvider().Create("p",
+            new ProviderOptions { Type = "claude-cli", ApiKeyEnv = keyEnv }, new AgentOptions { Name = "c", Provider = "p", Model = "m" }));
+        Assert.Contains($"'{word}'", ex.Message);
+        Assert.Contains("HB_REVIEWER_API_KEY", ex.Message);
     }
 
     [Fact]

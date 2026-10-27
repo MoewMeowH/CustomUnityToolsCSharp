@@ -22,6 +22,9 @@ public sealed class ClaudeCliProvider : IChatClientProvider
     /// <summary>Claude Code 자체가 쓰는 키 이름. 이 이름을 사용자 환경에 두면 대화형 Claude Code도 API 과금으로 바뀐다.</summary>
     public const string ClaudeCodeKeyName = "ANTHROPIC_API_KEY";
 
+    /// <summary>MCP 서버로 넘어가는 환경 변수에서 Claude Code가 값을 비우는 이름 낱말 (2026-10-27 사용자 확인: Custom_ANTHROPIC_API_KEY · Custom_CLAUDE_API_KEY 둘 다 비어서 들어옴).</summary>
+    public static readonly IReadOnlyList<string> BlankedNameWords = ["ANTHROPIC", "CLAUDE"];
+
     public string Type => TypeName;
 
     public IChatClient Create(string providerName, ProviderOptions options, AgentOptions agent)
@@ -31,7 +34,11 @@ public sealed class ClaudeCliProvider : IChatClientProvider
         // 이름 검사를 값 읽기보다 먼저: 비어 있다는 안내를 보고 그 변수를 채우면 막으려던 일이 생긴다.
         if (string.Equals(options.ApiKeyEnv, ClaudeCodeKeyName, StringComparison.OrdinalIgnoreCase))
             throw new ProviderConfigurationException(
-                $"제공사 '{providerName}': ApiKeyEnv에 {ClaudeCodeKeyName}를 쓰지 않는다 — 사용자 환경에 두면 Claude Code 자체가 API 과금으로 바뀐다. 다른 이름(예: Custom_CLAUDE_API_KEY)을 쓴다.");
+                $"제공사 '{providerName}': ApiKeyEnv에 {ClaudeCodeKeyName}를 쓰지 않는다 — 사용자 환경에 두면 Claude Code 자체가 API 과금으로 바뀐다. 다른 이름(예: HB_REVIEWER_API_KEY)을 쓴다.");
+        // Claude Code는 MCP 서버에 넘기는 환경 변수 중 이름에 이 낱말이 든 것의 값을 비운다 (2026-10-27 사용자 확인) — "비어 있습니다"로 헤매지 않게 먼저 알린다.
+        if (BlankedNameWords.FirstOrDefault(w => options.ApiKeyEnv!.Contains(w, StringComparison.OrdinalIgnoreCase)) is { } word)
+            throw new ProviderConfigurationException(
+                $"제공사 '{providerName}': ApiKeyEnv '{options.ApiKeyEnv}'에 '{word}'가 들어 있다 — Claude Code가 MCP 서버에 넘길 때 이런 이름의 값을 비운다. 다른 이름(예: HB_REVIEWER_API_KEY)을 쓴다.");
         var apiKey = Environment.GetEnvironmentVariable(options.ApiKeyEnv) is { Length: > 0 } k
             ? k
             : throw new ProviderConfigurationException($"제공사 '{providerName}': 환경 변수 {options.ApiKeyEnv} 이(가) 비어 있습니다.");

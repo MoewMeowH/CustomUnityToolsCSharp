@@ -13,7 +13,7 @@ argument-hint: [api] [perf|security|direction] [파일/커밋 범위 또는 계�
 - 아래 "self-reviewer"는 고른 서브에이전트로 읽는다.
 - 외부 에이전트(`run_mode`)는 부르지 않는다. 외부 시선까지 필요하면 `/cross-review` (계획서 `Orchestration/HB_Orchestration/docs/plans/2026-10-20_리뷰조건-self-reviewer.md`). 예외: `api`일 때의 `sub_self`는 Claude(같은 회사)라 외부 시선이 아니다 — 서브에이전트 자리만 대신한다.
 
-**api일 때** (`sub_self` — claude --bare -p 읽기 전용 에이전트, Custom_CLAUDE_API_KEY로 과금, 구독 사용량을 쓰지 않음): 2-2 ~ 2-4만 바뀐다.
+**api일 때** (`sub_self` — claude --bare -p 읽기 전용 에이전트, HB_REVIEWER_API_KEY로 과금, 구독 사용량을 쓰지 않음): 2-2 ~ 2-4만 바뀐다.
 - 2-1은 같다 (지휘자 검토를 먼저 작업 로그에 저장).
 - 2-2 대신: `subagent_in/`에 복사하지 않는다. `run_mode("sub_self", input, context, reason)` — input = 위임 메시지의 대상 설명 · 변경 의도 · 제약(사용자 결정 원문). context = 대상 파일 + **판단에 필요한 파일**(변경 코드가 쓰는 타입 · 함수의 정의, 호출부, 설정, 관련 테스트)을 파일 단위로 넉넉히 (서버가 파일 전체를 작업 폴더에 복사하고 파일 목록을 프롬프트에 넣는다. 에이전트는 그 목록에서 Read로 연다 — 지금 판은 검색 도구가 없어 목록에 없는 파일은 못 찾는다. 범위 = 검토의 중심. 범위 밖 줄도 Anthropic으로 나가므로 비밀이 든 파일은 넣지 않는다). 너의 의견 · 의심 지점은 넣지 않는다. 지침 파일은 서버가 시스템 프롬프트에 붙인다.
 - 2-3: 서브에이전트를 부르지 않는다. `[실패]`면 한 줄로 알리고 서브에이전트(기본 절차)로 다시 할지 사용자에게 묻는다.
