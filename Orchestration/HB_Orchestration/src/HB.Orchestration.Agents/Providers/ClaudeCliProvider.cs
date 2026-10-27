@@ -31,7 +31,7 @@ public sealed class ClaudeCliProvider : IChatClientProvider
         // 이름 검사를 값 읽기보다 먼저: 비어 있다는 안내를 보고 그 변수를 채우면 막으려던 일이 생긴다.
         if (string.Equals(options.ApiKeyEnv, ClaudeCodeKeyName, StringComparison.OrdinalIgnoreCase))
             throw new ProviderConfigurationException(
-                $"제공사 '{providerName}': ApiKeyEnv에 {ClaudeCodeKeyName}를 쓰지 않는다 — 사용자 환경에 두면 Claude Code 자체가 API 과금으로 바뀐다. 다른 이름(예: Custom_ANTHROPIC_API_KEY)을 쓴다.");
+                $"제공사 '{providerName}': ApiKeyEnv에 {ClaudeCodeKeyName}를 쓰지 않는다 — 사용자 환경에 두면 Claude Code 자체가 API 과금으로 바뀐다. 다른 이름(예: Custom_CLAUDE_API_KEY)을 쓴다.");
         var apiKey = Environment.GetEnvironmentVariable(options.ApiKeyEnv) is { Length: > 0 } k
             ? k
             : throw new ProviderConfigurationException($"제공사 '{providerName}': 환경 변수 {options.ApiKeyEnv} 이(가) 비어 있습니다.");
