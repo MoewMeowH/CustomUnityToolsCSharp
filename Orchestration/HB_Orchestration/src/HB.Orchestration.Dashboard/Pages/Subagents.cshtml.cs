@@ -27,7 +27,8 @@ public sealed class SubagentsModel(CallLogCache log, SubagentResultsService serv
         Days = Math.Clamp(Days, 0, 3650); // 아주 큰 값이면 AddDays가 범위를 넘는다 (/self-review C5)
         var since = DateTimeOffset.Now.AddDays(-Days);
         Views = Snapshot.Views
-            .Where(v => Days <= 0 || v.Result.ReturnedAt >= since)
+            // 넘긴 시각을 모르는 결과(기록 형식 변경)는 기간과 상관없이 보인다 — 조용히 빠지지 않게 (방식 비교 시험 (A) 지적).
+            .Where(v => Days <= 0 || v.Result.ReturnedAt is null || v.Result.ReturnedAt >= since)
             .Where(v => string.IsNullOrEmpty(Agent) || v.Result.AgentType == Agent)
             .Where(v => !Unrecorded || v.Link.Kind == SubagentLinkKind.None)
             .ToList();

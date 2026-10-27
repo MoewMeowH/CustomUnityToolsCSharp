@@ -46,28 +46,36 @@ public static partial class SubagentTranscriptReader
 
     public sealed record Meta(string? AgentType, string? Description, bool? Finished);
 
-    /// <summary>meta.json. 읽지 못하면 null.</summary>
+    /// <summary>
+    /// meta.json. 읽지 못하면 null. Claude Code가 쓰거나 지우는 중이어도 막지 않게 넓은 공유 모드로 연다
+    /// (세션 기록 읽기와 같다 — 깨지는 쪽이 사용자의 Claude Code가 되지 않게).
+    /// </summary>
     public static Meta? ReadMeta(string metaPath)
     {
         try
         {
-            using var doc = JsonDocument.Parse(File.ReadAllBytes(metaPath));
+            using var fs = new FileStream(metaPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var doc = JsonDocument.Parse(fs);
             var root = doc.RootElement;
             if (root.ValueKind != JsonValueKind.Object) return null;
             return new Meta(Str(root, "agentType"), Str(root, "description"),
                 root.TryGetProperty("finished", out var f) && f.ValueKind is JsonValueKind.True or JsonValueKind.False ? f.GetBoolean() : null);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException)
         {
             return null;
         }
     }
 
-    /// <summary>서브에이전트 기록 하나에서 넘긴 결과들. Error는 파일을 읽지 못했을 때만.</summary>
-    public static (List<SubagentResult> Results, string? Error) Read(string jsonlPath, Meta meta)
+    /// <summary>
+    /// 서브에이전트 기록 하나에서 넘긴 결과들. Error는 파일을 읽지 못했을 때만.
+    /// BadLines = 아는 모양인데 값을 꺼내지 못한 줄 (예: 짝 없는 서로게이트 문자열) — 그 줄만 건너뛰고 나머지는 읽는다.
+    /// </summary>
+    public static (List<SubagentResult> Results, string? Error, int BadLines) Read(string jsonlPath, Meta meta)
     {
         var results = new List<SubagentResult>();
         string? sessionId = null, cwd = null, agentId = null, version = null;
+        var bad = 0;
         try
         {
             using var fs = new FileStream(jsonlPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
@@ -78,6 +86,7 @@ public static partial class SubagentTranscriptReader
                 try { doc = JsonDocument.Parse(line); }
                 catch (JsonException) { continue; }
                 using (doc)
+                try
                 {
                     var root = doc.RootElement;
                     if (root.ValueKind != JsonValueKind.Object) continue;
@@ -111,13 +120,17 @@ public static partial class SubagentTranscriptReader
                         });
                     }
                 }
+                catch (InvalidOperationException)
+                {
+                    bad++; // 값 모양이 예상과 다르다 (ClaudeTranscriptReader.ReadLine과 같은 처리)
+                }
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return (results, $"{ex.GetType().Name}: {ex.Message}");
+            return (results, $"{ex.GetType().Name}: {ex.Message}", bad);
         }
-        return (results, null);
+        return (results, null, bad);
     }
 
     /// <summary>보관 파일 이름으로 쓸 수 있게 영숫자 · '_' · '-' 밖의 문자는 '-'로 바꾼다.</summary>
@@ -209,35 +222,45 @@ public static class SubagentArchive
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Error($"{jsonl}: {ex.Message}"); continue; }
             if (state.TryGetValue(jsonl, out var seen) && seen == stamp) { next[jsonl] = stamp; continue; }
 
-            var metaPath = jsonl[..^".jsonl".Length] + ".meta.json";
-            if (!File.Exists(metaPath)) { Error($"{jsonl}: meta.json이 없습니다 (형식이 바뀌었을 수 있음)"); continue; }
-            var meta = SubagentTranscriptReader.ReadMeta(metaPath);
-            if (meta is null) { Error($"{metaPath}: meta.json을 읽지 못했습니다"); continue; }
-            if (meta.AgentType is null) { Error($"{metaPath}: agentType이 없습니다 (형식이 바뀌었을 수 있음)"); continue; }
-            // 검토형이 아닌 기록은 도장을 남기지 않는다: 나중에 검토형 이름이 늘어도 다시 본다 (meta.json만 읽으므로 싸다).
-            if (!ReviewerTypes.Contains(meta.AgentType)) continue;
-
-            scanned++;
-            var (results, error) = SubagentTranscriptReader.Read(jsonl, meta);
-            if (error is not null) { Error($"{jsonl}: {error}"); continue; }
-            if (results.Count == 0)
+            // 파일 하나의 예상 밖 예외가 Sync 전체를 멈추고 앞 파일들의 도장까지 잃지 않게, 파일 단위로 잡는다 (방식 비교 시험 (B) 지적).
+            try
             {
-                if (meta.Finished == true) Error($"{jsonl}: 끝난 기록인데 넘긴 결과({SubagentTranscriptReader.HandbackToolName})가 없습니다 (형식이 바뀌었을 수 있음)");
-                else noResult++;
-                continue;
-            }
+                var metaPath = jsonl[..^".jsonl".Length] + ".meta.json";
+                if (!File.Exists(metaPath)) { Error($"{jsonl}: meta.json이 없습니다 (형식이 바뀌었을 수 있음)"); continue; }
+                var meta = SubagentTranscriptReader.ReadMeta(metaPath);
+                if (meta is null) { Error($"{metaPath}: meta.json을 읽지 못했습니다"); continue; }
+                if (meta.AgentType is null) { Error($"{metaPath}: agentType이 없습니다 (형식이 바뀌었을 수 있음)"); continue; }
+                // 검토형이 아닌 기록은 도장을 남기지 않는다: 나중에 검토형 이름이 늘어도 다시 본다 (meta.json만 읽으므로 싸다).
+                if (!ReviewerTypes.Contains(meta.AgentType)) continue;
 
-            var ok = true;
-            foreach (var r in results)
-            {
-                switch (TryStore(archiveFolder, r))
+                scanned++;
+                var (results, error, badLines) = SubagentTranscriptReader.Read(jsonl, meta);
+                if (error is not null) { Error($"{jsonl}: {error}"); continue; }
+                // 값을 꺼내지 못한 줄이 있으면 읽은 결과는 보관하되 도장은 남기지 않는다 (리더를 고치면 다시 읽힌다).
+                if (badLines > 0) Error($"{jsonl}: 값을 꺼내지 못한 줄 {badLines}개 (형식이 바뀌었을 수 있음)");
+                if (results.Count == 0)
                 {
-                    case null: break;
-                    case "": added++; break;
-                    case var e: Error($"{r.Key}: {e}"); ok = false; break;
+                    if (meta.Finished == true && badLines == 0) Error($"{jsonl}: 끝난 기록인데 넘긴 결과({SubagentTranscriptReader.HandbackToolName})가 없습니다 (형식이 바뀌었을 수 있음)");
+                    else if (badLines == 0) noResult++;
+                    continue;
                 }
+
+                var ok = badLines == 0;
+                foreach (var r in results)
+                {
+                    switch (TryStore(archiveFolder, r))
+                    {
+                        case null: break;
+                        case "": added++; break;
+                        case var e: Error($"{r.Key}: {e}"); ok = false; break;
+                    }
+                }
+                if (ok) next[jsonl] = stamp;
             }
-            if (ok) next[jsonl] = stamp;
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Error($"{jsonl}: {ex.GetType().Name}: {ex.Message}");
+            }
         }
 
         if (next.Count != state.Count || next.Any(kv => !state.TryGetValue(kv.Key, out var v) || v != kv.Value))

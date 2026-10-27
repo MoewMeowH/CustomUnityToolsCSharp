@@ -187,7 +187,8 @@ public sealed class SubagentResultsService(IOptions<DashboardOptions> options, C
         try
         {
             var since = DateTimeOffset.Now - RecentWindow;
-            return Load(calls).Views.Count(v => v.Link.Kind == SubagentLinkKind.None && v.Result.ReturnedAt >= since && !MaybePending(v));
+            // 넘긴 시각을 모르는 결과는 기간 안으로 센다 (화면과 같은 규칙).
+            return Load(calls).Views.Count(v => v.Link.Kind == SubagentLinkKind.None && (v.Result.ReturnedAt is null || v.Result.ReturnedAt >= since) && !MaybePending(v));
         }
         catch (Exception ex)
         {

@@ -196,6 +196,51 @@ public sealed class SubagentResultsTests : IDisposable
         Assert.Empty(report.Errors);
     }
 
+    // ── 방식 비교 시험(2026-10-27)의 새 지적 ──────────────────────────────
+
+    [Fact]
+    public void Unreadable_string_value_does_not_stop_sync()
+    {
+        // 짝 없는 서로게이트 이스케이프: Parse는 통과하고 값 꺼내기에서 실패할 수 있다. 어느 쪽이든 Sync가 멈추면 안 된다.
+        var broken = Handback("a1", "toolu_bad", "x").Replace("\"message\":\"x\"", "\"message\":\"\\ud800\"");
+        WriteAgent("a1", "self-reviewer", broken, Handback("a1", "toolu_ok", Review, second: 20));
+        WriteAgent("a2", "perf-reviewer", Handback("a2", "toolu_2", Review));
+
+        var report = SubagentArchive.Sync(Projects, Archive);
+
+        Assert.Contains(SubagentArchive.ReadAll(Archive).Results, r => r.Key == "a1_toolu_ok");
+        Assert.Contains(SubagentArchive.ReadAll(Archive).Results, r => r.Key == "a2_toolu_2");
+        Assert.True(report.Added >= 2);
+    }
+
+    [Fact]
+    public void Meta_open_for_writing_by_claude_code_is_still_read()
+    {
+        var jsonl = WriteAgent("a1", "self-reviewer", Handback("a1", "toolu_1", Review));
+        var meta = jsonl[..^".jsonl".Length] + ".meta.json";
+        using var writer = new FileStream(meta, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete);
+
+        var report = SubagentArchive.Sync(Projects, Archive);
+
+        Assert.Empty(report.Errors);
+        Assert.Equal(1, report.Added);
+    }
+
+    [Fact]
+    public void Result_without_return_time_is_counted_not_hidden()
+    {
+        var noTime = Handback("a1", "toolu_1", Review).Replace("\"timestamp\":\"2026-10-27T07:43:10.000Z\",", "");
+        WriteAgent("a1", "self-reviewer", noTime);
+        var log = Path.Combine(_dir, "calls.jsonl");
+        var options = Microsoft.Extensions.Options.Options.Create(new DashboardOptions { LogPath = log, ClaudeProjectsDir = Projects });
+        var service = new SubagentResultsService(options,
+            new ClaudeSessionsService(options, Microsoft.Extensions.Logging.Abstractions.NullLogger<ClaudeSessionsService>.Instance),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<SubagentResultsService>.Instance);
+
+        Assert.Equal(1, service.UnrecordedRecent([]));
+        Assert.Null(Assert.Single(service.Load([]).Views).Result.ReturnedAt);
+    }
+
     [Fact]
     public void Missing_root_is_empty_not_error()
     {
