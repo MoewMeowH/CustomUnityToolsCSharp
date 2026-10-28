@@ -35,6 +35,9 @@ public sealed class RoomNotes(Func<string> dataFolder)
     /// <summary>정리 표시를 쓸 때의 도구 이름 (승인 기록 tool 칸).</summary>
     public const string BackgroundTool = "백그라운드";
 
+    /// <summary>터미널 시작 · 끝 줄의 도구 이름 (계획서 2026-10-29_HB_Chat-터미널-곁칸). 시작 카드 결과는 "터미널"로 따로 남는다.</summary>
+    public const string TerminalTool = "터미널 상태";
+
     private readonly Lock _gate = new();
     private string? _path;
     private long _end;
@@ -118,11 +121,11 @@ public sealed class RoomNotes(Func<string> dataFolder)
             var summary = FirstLine(Str(e, "summary") ?? "", 120);
             var text = tool switch
             {
-                BackgroundTool => decision,
+                BackgroundTool or TerminalTool => decision,
                 ApprovalRequest.PlanTool => "계획 " + (decision == "허용" ? "승인" : decision),
                 _ => summary.Length > 0 ? $"승인 {decision} — {tool}: {summary}" : $"승인 {decision} — {tool}",
             };
-            var denied = tool != BackgroundTool && decision is not ("허용" or "항상 허용");
+            var denied = tool is not (BackgroundTool or TerminalTool) && decision is not ("허용" or "항상 허용");
             return (room, new RoomNote(at, text, denied));
         }
         catch (JsonException)

@@ -16,6 +16,7 @@ public sealed class ApprovalFlowTests : IDisposable
     private readonly ChatOptions _options;
     private readonly RoomStore _store;
     private readonly RoomHub _hub;
+    private readonly Terminals _terminals = new();
 
     public ApprovalFlowTests()
     {
@@ -33,6 +34,7 @@ public sealed class ApprovalFlowTests : IDisposable
         _hub = new RoomHub(_store, new ChatTranscripts(() => Path.Combine(_dir, "projects")), Options.Create(_options))
         {
             Log = new ApprovalLog(() => _options.DataFolder),
+            Terminals = _terminals,
             ProcessFactory = (room, spec, workspace) =>
             {
                 lock (_specs) _specs.Add(spec);
@@ -44,6 +46,7 @@ public sealed class ApprovalFlowTests : IDisposable
     public void Dispose()
     {
         _hub.Dispose();
+        _terminals.Dispose();
         try { Directory.Delete(_dir, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
 
@@ -342,6 +345,39 @@ public sealed class ApprovalFlowTests : IDisposable
         Assert.Contains(seen, e => e.Kind == "denied" && e.Text!.Contains("계획 모드로 시작한 실행이 아니라") && e.Logged == true);
         // 카드 없는 거절도 방 기록 줄로 남는다 (/self-review e464ec29ba C6)
         Assert.Contains("\"decision\":\"거절 (계획 모드로 시작한 실행이 아님)\"", Log());
+    }
+
+    [Fact]
+    public async Task TerminalStart_CardWithoutAlwaysAllow_LeavesOneTicket()
+    {
+        // 터미널 곁칸 (계획서 2026-10-29_HB_Chat-터미널-곁칸, 결정 "늘 카드"): terminal_start는 카드로 묻고 항상 허용은 받지 않는다.
+        // 허용하면 name · command만 돌려주고(가짜가 extra 키를 확인) 앱 MCP가 쓸 표를 하나 남긴다
+        var room = CommandRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "terminal please");
+        var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        Assert.Equal(RoomHub.TerminalTool, card.Tool);
+        Assert.Equal("python -m http.server 8000", card.Summary);
+        Assert.Null(card.Rule);
+        Assert.NotNull(_hub.Decide(room.Id, card.Id, ApprovalChoice.AlwaysAllow, null));
+        Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null));
+        var end = (await Until(ch, e => e.Kind == "idle")).Single(e => e.Kind == "end");
+        Assert.True(end.Ok, end.Text);
+        Assert.True(_terminals.TakeApproval(room.Id, "web", "python -m http.server 8000"));
+        Assert.False(_terminals.TakeApproval(room.Id, "web", "python -m http.server 8000")); // 한 번만
+        Assert.Contains("\"tool\":\"터미널\"", Log());
+    }
+
+    [Fact]
+    public async Task TerminalStart_Denied_LeavesNoTicket()
+    {
+        var room = CommandRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "terminal please");
+        var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Deny, null));
+        Assert.False((await Until(ch, e => e.Kind == "idle")).Single(e => e.Kind == "end").Ok);
+        Assert.False(_terminals.TakeApproval(room.Id, "web", "python -m http.server 8000"));
     }
 
     [Fact]

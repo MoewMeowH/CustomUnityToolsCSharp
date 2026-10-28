@@ -69,6 +69,14 @@ switch ($mode) {
         if ($d -and $d.behavior -eq 'allow' -and $d.updatedInput.command -ne 'git status') { $d = [pscustomobject]@{ behavior = 'deny'; message = 'updatedInput changed' } }
         Finish $d 'Bash' 'allowed'
     }
+    'terminal' {
+        # terminal side panel: app MCP terminal_start permission request (step-0 probe shape). Allow must carry only name + command back.
+        $d = Ask 'req_term' '{"subtype":"can_use_tool","tool_name":"mcp__hb-chat__terminal_start","display_name":"terminal_start","input":{"name":"web","command":"python -m http.server 8000","extra":"x"},"tool_use_id":"toolu_fake11"}'
+        if ($d -and $d.behavior -eq 'allow' -and ($d.updatedInput.name -ne 'web' -or $d.updatedInput.command -ne 'python -m http.server 8000' -or $null -ne $d.updatedInput.extra)) {
+            $d = [pscustomobject]@{ behavior = 'deny'; message = 'updatedInput changed' }
+        }
+        Finish $d 'mcp__hb-chat__terminal_start' 'allowed'
+    }
     'ask' {
         # 3차 0번 실측 A의 AskUserQuestion 모양 (질문 둘: 하나 고르기 · 여러 개)
         Emit '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","name":"AskUserQuestion","input":{}}}}'

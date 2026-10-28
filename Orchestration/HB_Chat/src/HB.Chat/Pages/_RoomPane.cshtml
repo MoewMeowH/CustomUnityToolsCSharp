@@ -167,12 +167,32 @@
                 <button type="button" role="tab" data-tab="info" id="side-tab-info" aria-controls="side-sec-info">방 정보</button>
                 <button type="button" role="tab" data-tab="runs" id="side-tab-runs" aria-controls="side-sec-runs">외부 실행</button>
                 <button type="button" role="tab" data-tab="files" id="side-tab-files" aria-controls="side-sec-files">첨부</button>
+                <button type="button" role="tab" data-tab="term" id="side-tab-term" aria-controls="side-sec-term">터미널</button>
             </div>
             <button type="button" class="side-x icon-btn" title="곁칸 닫기 (Esc)" aria-label="곁칸 닫기">@Icons.Svg("x")</button>
         </div>
         <section class="side-sec" data-tab="steps" id="side-sec-steps" role="tabpanel" aria-labelledby="side-tab-steps">
             <p class="muted" id="side-steps-empty">지휘자가 할 일 도구로 단계를 만들면 여기에 보입니다.</p>
             <ol class="side-steps" id="side-steps"></ol>
+        </section>
+        @* 터미널 (계획서 2026-10-29_HB_Chat-터미널-곁칸, 결정 3): 내 셸("+" PowerShell · ▾ 고르기, 입력 받음)과 지휘자 프로세스(명령 방, 읽기 전용).
+           화면이 terminals · term-out 알림으로 그리고, 탭을 열 때 xterm.js를 불러온다 *@
+        <section class="side-sec side-term" data-tab="term" id="side-sec-term" role="tabpanel" aria-labelledby="side-tab-term" hidden>
+            <div class="term-top">
+                <div class="term-tabs" id="term-tabs" role="tablist" aria-label="터미널"></div>
+                <div class="term-new">
+                    <button type="button" class="btn" id="term-new" title="새 PowerShell (작업 폴더에서)">+</button><button type="button" class="btn" id="term-new-menu" title="셸 고르기" aria-haspopup="menu" aria-expanded="false">▾</button>
+                    <div class="term-menu" id="term-menu" role="menu" hidden>
+                        @foreach (var (key, label) in Terminals.Shells)
+                        {
+                            <button type="button" role="menuitem" data-shell="@key">@label</button>
+                        }
+                    </div>
+                </div>
+            </div>
+            <p class="muted" id="term-empty">+ 로 작업 폴더에서 PowerShell을 엽니다 (▾로 명령 프롬프트).@(room.Level == PermissionLevel.Command ? " 지휘자가 서버를 띄우면 '지휘자' 탭으로 보입니다 (읽기 전용)." : "")</p>
+            <div class="term-bar" id="term-bar" hidden><span class="term-state" id="term-state"></span><button type="button" class="btn" id="term-stop">중지</button><button type="button" class="btn" id="term-close">닫기</button></div>
+            <div class="term-host" id="term-host"></div>
         </section>
         <div id="side-data"></div>
     </aside>

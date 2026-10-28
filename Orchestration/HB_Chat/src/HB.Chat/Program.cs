@@ -36,12 +36,18 @@ builder.Services.AddSingleton(sp => new StickerCatalog(() => sp.GetRequiredServi
 
 builder.Services.AddSingleton(sp => new RoomStore(Path.Combine(sp.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder, "rooms.json")));
 builder.Services.AddSingleton(sp => new ChatTranscripts(() => sp.GetRequiredService<IOptions<ChatOptions>>().Value.ProjectsRoot));
+// 터미널 곁칸 (계획서 2026-10-29_HB_Chat-터미널-곁칸): 지휘자가 띄운 서버를 앱이 ConPTY로 붙잡는다 + 앱 MCP(명령 방 실행만, 실행 토큰)
+builder.Services.AddSingleton<Terminals>();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddMcpServer().WithHttpTransport(o => o.Stateless = true).WithTools<TerminalTools>();
 builder.Services.AddSingleton(sp =>
 {
     var options = sp.GetRequiredService<IOptions<ChatOptions>>();
     return new RoomHub(sp.GetRequiredService<RoomStore>(), sp.GetRequiredService<ChatTranscripts>(), options)
     {
         Log = new ApprovalLog(() => options.Value.DataFolder),
+        Terminals = sp.GetRequiredService<Terminals>(),
+        SelfUrl = () => TerminalMcp.LoopbackUrl(sp.GetRequiredService<Microsoft.AspNetCore.Hosting.Server.IServer>()),
     };
 });
 builder.Services.AddSingleton<RoomList>();
@@ -109,6 +115,8 @@ void PurgeTrash()
     {
         var removed = Trash.Purge(app.Services.GetRequiredService<RoomStore>(),
             app.Services.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder, DateTimeOffset.Now);
+        // 지운 방의 터미널 목록(끝난 것의 버퍼 포함)도 버린다 (/self-review 57b59ef134 C12)
+        foreach (var id in removed) app.Services.GetRequiredService<Terminals>().Forget(id);
         if (removed.Count > 0)
             app.Logger.LogWarning("휴지통에서 30일 지난 방 {Count}개를 지웠습니다 (방 색인 · 첨부, 세션 기록은 남김): {Ids}", removed.Count, string.Join(", ", removed));
     }
@@ -121,6 +129,7 @@ PurgeTrash();
 using var purgeTimer = new Timer(_ => PurgeTrash(), null, TimeSpan.FromDays(1), TimeSpan.FromDays(1));
 
 app.UseSameOriginGuard();
+app.UseTerminalMcpToken(); // 앱 MCP는 그 방 실행 토큰이 맞을 때만
 // 위젯 (2-2 f): 말풍선 안 격리 iframe(srcdoc)이 스스로 다른 주소로 이동하지 못하게 (위젯 글을 밖으로 실어 나르는 길).
 // srcdoc은 가져오기가 아니라 막히지 않는다. 이 앱 화면에는 다른 iframe이 없다.
 app.UseWidgetCsp();
@@ -159,6 +168,7 @@ app.Use(async (ctx, next) =>
 app.UseStaticFiles();
 app.MapRazorPages();
 app.MapStickerImages();
+app.MapMcp(TerminalMcp.Path);
 // 화면 테마 (5차 a): 데스크톱 앱이 맨 위 줄 색 · WebView2 색 설정(대시보드 탭 포함)을 맞추려고 읽는다. 읽기만.
 // notifyBody: 데스크톱 알림에 답 앞부분을 보일지 (설정 화면 토글, 기본 끔)
 // conductorImage: 지휘자 프로필 그림 주소 (/profile-image/…, 없으면 null) — 데스크톱 토스트 왼쪽 그림 (결정 "지휘자 프로필 그림")
@@ -246,5 +256,9 @@ app.MapGet("/events", async (RoomHub hub, HttpContext ctx) =>
 });
 
 // 앱을 끌 때 돌던 claude 프로세스 트리를 끝낸다.
-app.Lifetime.ApplicationStopping.Register(() => app.Services.GetRequiredService<RoomHub>().Dispose());
+app.Lifetime.ApplicationStopping.Register(() =>
+{
+    app.Services.GetRequiredService<RoomHub>().Dispose();
+    app.Services.GetRequiredService<Terminals>().Dispose(); // 터미널도 (Job Object가 어차피 끝내지만 끝난 표시를 남긴다)
+});
 app.Run();

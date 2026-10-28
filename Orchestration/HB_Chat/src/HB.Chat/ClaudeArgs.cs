@@ -28,6 +28,9 @@ public sealed record RunSpec(
 
     /// <summary>계획 모드로 시작 (Claude 앱 기능 C — "계획 먼저"). 편집 · 명령 단계만 (<see cref="ClaudeArgs.PlanMode"/>).</summary>
     public bool Plan { get; init; }
+
+    /// <summary>앱 MCP(터미널 도구) 설정 파일 — 명령 단계에서만 쓴다 (<see cref="TerminalMcp"/>). null이면 터미널 도구 없이.</summary>
+    public string? TerminalMcpConfigPath { get; init; }
 }
 
 /// <summary>
@@ -201,7 +204,12 @@ public static partial class ClaudeArgs
     {
         if (string.IsNullOrWhiteSpace(spec.McpConfigPath))
             throw new ArgumentException($"{spec.Level} 단계에는 MCP 설정 파일이 필요하다");
-        args.AddRange(["--strict-mcp-config", "--mcp-config", spec.McpConfigPath, "--allowedTools", $"mcp__{spec.McpServer}"]);
+        // 명령 방은 앱 MCP(터미널)도 붙인다 — --mcp-config는 여러 파일을 받는다. 목록 · 읽기 · 중지는 묻지 않고, 시작은 승인 카드로 (계획서 2026-10-29_HB_Chat-터미널-곁칸)
+        var terminal = spec.Level == PermissionLevel.Command && !string.IsNullOrWhiteSpace(spec.TerminalMcpConfigPath);
+        args.AddRange(["--strict-mcp-config", "--mcp-config", spec.McpConfigPath]);
+        if (terminal) args.Add(spec.TerminalMcpConfigPath!);
+        args.AddRange(["--allowedTools", $"mcp__{spec.McpServer}"]);
+        if (terminal) args.AddRange(TerminalMcp.QuietTools);
     }
 
     /// <summary>모델 · 서버 이름: 영숫자로 시작, 영숫자 . _ : / - 만 64자까지.</summary>

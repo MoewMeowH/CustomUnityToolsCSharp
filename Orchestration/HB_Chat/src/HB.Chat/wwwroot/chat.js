@@ -190,6 +190,18 @@
     // 맨 위 이동 · 모달 · 내려받기도 없음. 문서 CSP는 네트워크를 다 막고 인라인 스크립트 · 스타일 · data: 그림만.
     // 위젯이 스스로 다른 주소로 이동하는 것은 페이지 CSP frame-src 'none'(Widgets.cs)이 막는다. 소스는 서버가 이스케이프한 글의 textContent.
     // 틀 위 표시 · 단추 · "코드 보기" 글은 CSS로 넣는다 — 인용 답장이 innerText로 본문을 읽을 때 섞이지 않게 (803e5f13eb C4).
+    // 터미널 곁칸 (계획서 2026-10-29_HB_Chat-터미널-곁칸): xterm.js 5.5.0 + addon-fit 0.10.0 (wwwroot/lib 고정 판)은 터미널 탭을 처음 열 때 한 번만 불러온다.
+    let xtermLoading = null;
+    function loadXterm() {
+        if (window.Terminal && window.FitAddon) return Promise.resolve();
+        return xtermLoading ??= new Promise((ok, fail) => {
+            const css = document.createElement("link");
+            css.rel = "stylesheet"; css.href = "/lib/xterm.css";
+            document.head.append(css);
+            const add = (src) => new Promise((res, rej) => { const s = document.createElement("script"); s.src = src; s.onload = res; s.onerror = rej; document.head.append(s); });
+            add("/lib/xterm.js").then(() => add("/lib/addon-fit.js")).then(ok, (e) => { xtermLoading = null; fail(e); });
+        });
+    }
     const WidgetMaxChars = 200000, WidgetMinHeight = 40, WidgetMaxHeight = 1200;
     const WidgetCsp = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; " +
         "font-src data:; media-src data: blob:; form-action 'none'; base-uri 'none'";
@@ -965,12 +977,166 @@
             document.title = "HB Chat · " + title;
         }
 
+        // ---- 터미널 곁칸 (계획서 2026-10-29_HB_Chat-터미널-곁칸, 결정 3): 내 셸("+" PowerShell · ▾ 고르기, 입력 받음)과 지휘자 프로세스(읽기 전용).
+        // 목록은 terminals 알림, 출력은 term-out 알림(base64 바이트). 탭을 처음 보일 때 xterm을 만들고 버퍼 전체를 받는다 — 그 끝 오프셋보다 앞선
+        // 실시간 조각은 버리고, 틈이 보이거나 다시 붙으면 버퍼를 다시 받는다 (/self-review 57b59ef134 C4). 키 입력은 차례대로 보낸다(내 셸만). ----
+        const termTabs = $("#term-tabs"), termHost = $("#term-host"), termBar = $("#term-bar");
+        let termList = [], termActive = null, termSend = Promise.resolve(), termResizeTimer = 0;
+        const termViews = new Map(); // id → { term, fit, box, end, pending, cols, rows }
+        const termObserver = termHost && window.ResizeObserver ? new ResizeObserver(() => { const v = termViews.get(termActive); if (v) fitTerm(v); }) : null;
+        if (termHost) termObserver?.observe(termHost);
+        const fromB64 = (s) => Uint8Array.from(atob(s || ""), c => c.charCodeAt(0));
+        function termLabel(t) { return t.running ? "실행 중" : t.stoppedBy ? "중지됨 (" + t.stoppedBy + ")" : "끝남 (코드 " + t.exitCode + ")"; }
+        function renderTerms(list) {
+            if (!termTabs) return;
+            termList = list || [];
+            $("#term-empty").hidden = termList.length > 0;
+            const running = termList.filter(t => t.running).length;
+            $("#side-tab-term").textContent = running ? "터미널 " + running : "터미널";
+            // 목록에서 빠진 것의 xterm은 버린다
+            for (const [id, v] of termViews) if (!termList.some(t => t.id === id)) { v.term.dispose(); v.box.remove(); termViews.delete(id); }
+            if (!termList.some(t => t.id === termActive)) termActive = termList.length ? termList[termList.length - 1].id : null;
+            termTabs.replaceChildren(...termList.map(t => {
+                const agent = t.kind === "Agent";
+                const b = el("button", "term-tab" + (t.running ? " running" : " ended") + (agent ? " agent" : ""), (agent ? "지휘자 · " : "") + t.name);
+                b.type = "button"; b.setAttribute("role", "tab"); b.dataset.term = t.id;
+                b.title = (agent ? t.command + " (읽기 전용)" : "내 셸") + " — " + termLabel(t);
+                b.setAttribute("aria-selected", String(t.id === termActive));
+                b.addEventListener("click", () => showTerm(t.id));
+                return b;
+            }));
+            updateTermBar();
+            if (sideTab === "term" && !side.hidden) showTerm(termActive);
+        }
+        function updateTermBar() {
+            const t = termList.find(x => x.id === termActive);
+            termBar.hidden = !t;
+            if (!t) return;
+            const agent = t.kind === "Agent";
+            $("#term-state").textContent = t.name + " · " + termLabel(t) + (agent ? " · 지휘자 · " + t.command : "");
+            $("#term-state").title = agent ? t.command + " (읽기 전용 — 지휘자가 띄움)" : "내 셸 (작업 폴더)";
+            $("#term-stop").hidden = !t.running;
+            $("#term-close").hidden = t.running;
+        }
+        function fitTerm(v) {
+            if (v.box.hidden || !v.box.offsetWidth) return; // 안 보이면 잴 수 없다
+            try { v.fit.fit(); } catch { return; }
+            if (v.term.cols === v.cols && v.term.rows === v.rows) return;
+            v.cols = v.term.cols; v.rows = v.term.rows;
+            const id = [...termViews].find(([, x]) => x === v)?.[0];
+            clearTimeout(termResizeTimer);
+            termResizeTimer = setTimeout(() => {
+                if (disposed || !id) return;
+                const data = new FormData(); data.append("term", id); data.append("cols", v.cols); data.append("rows", v.rows);
+                post("TerminalResize", data, true);
+            }, 150);
+        }
+        function termTheme() {
+            const cs = getComputedStyle(termHost);
+            return { background: cs.backgroundColor, foreground: cs.color, cursor: cs.color };
+        }
+        function writeTerm(v, offset, bytes) {
+            const end = offset + bytes.length;
+            if (end <= v.end) return; // 받은 버퍼에 이미 있다
+            if (offset > v.end) { loadBuffer(v); return; } // 조각이 빠졌다(끊겼다 다시 붙음) — 버퍼째 다시
+            v.term.write(offset >= v.end ? bytes : bytes.subarray(v.end - offset));
+            v.end = end;
+        }
+        // 버퍼 전체를 받아 다시 그린다 — 받는 동안 온 조각은 모았다가 끝 오프셋 뒤만 쓴다
+        async function loadBuffer(v) {
+            if (v.end < 0) return; // 이미 받는 중
+            v.end = -1; v.pending = [];
+            try {
+                const res = await fetch(self + "?handler=Terminal&term=" + encodeURIComponent(v.id), { cache: "no-store" });
+                if (res.ok && !disposed) { const j = await res.json(); v.term.reset(); v.term.write(fromB64(j.data)); v.end = j.end; }
+            } catch { }
+            if (v.end < 0) v.end = 0;
+            for (const p of v.pending) writeTerm(v, p.offset, p.bytes);
+            v.pending = [];
+        }
+        async function showTerm(id) {
+            if (!termHost) return;
+            termActive = id;
+            termTabs.querySelectorAll(".term-tab").forEach(b => b.setAttribute("aria-selected", String(b.dataset.term === id)));
+            updateTermBar();
+            for (const [tid, v] of termViews) v.box.hidden = tid !== id;
+            if (!id) return;
+            const have = termViews.get(id);
+            if (have) { fitTerm(have); return; }
+            try { await loadXterm(); } catch { $("#term-state").textContent = "터미널 화면(xterm.js)을 불러오지 못했습니다."; return; }
+            if (disposed || termViews.has(id) || !termList.some(t => t.id === id)) return;
+            const box = el("div", "term-view");
+            box.hidden = termActive !== id;
+            termHost.append(box);
+            const shell = termList.find(t => t.id === id)?.kind === "Shell";
+            // 지휘자 프로세스는 읽기 전용 (결정 3 — 지휘자에게도 사용자에게도 입력 길이 없다)
+            const term = new window.Terminal({ fontSize: 13, fontFamily: "Consolas, 'Cascadia Mono', monospace", scrollback: 5000, theme: termTheme(),
+                disableStdin: !shell, cursorBlink: shell });
+            const fit = new window.FitAddon.FitAddon();
+            term.loadAddon(fit);
+            term.open(box);
+            const v = { id, term, fit, box, end: 0, pending: [], cols: 0, rows: 0 };
+            termViews.set(id, v);
+            // 키 입력(내 셸만): 앞 요청이 끝난 뒤 보낸다 (순서가 바뀌면 명령이 섞인다). 붙여넣기는 한 번에 1,000자씩 — 서버 상한 4KB (/self-review 57b59ef134 C2)
+            if (shell) term.onData(d => {
+                for (let i = 0; i < d.length; i += 1000) {
+                    const part = d.slice(i, i + 1000);
+                    termSend = termSend.then(() => {
+                        if (disposed) return;
+                        // base64(UTF-8)로 — 폼 글로 보내면 서버 바인딩이 Enter · 스페이스 한 번(공백만)을 버린다
+                        const bytes = new TextEncoder().encode(part);
+                        let bin = ""; for (const b of bytes) bin += String.fromCharCode(b);
+                        const data = new FormData(); data.append("term", id); data.append("b64", btoa(bin));
+                        return post("TerminalInput", data, true);
+                    }).catch(() => { });
+                }
+            });
+            fitTerm(v);
+            await loadBuffer(v);
+            if (shell && termActive === id) term.focus();
+        }
+        // 새 내 셸: "+"는 PowerShell, ▾ 메뉴로 고르기 (결정 3 — Windows 11 터미널처럼)
+        async function openShell(kind) {
+            $("#term-menu").hidden = true;
+            $("#term-new-menu").setAttribute("aria-expanded", "false");
+            const data = new FormData(); data.append("shell", kind);
+            const r = await post("TerminalOpen", data, false, true);
+            // 목록은 terminals 알림이 가져온다 — 먼저 왔으면 바로 그 탭으로, 아니면 알림이 이 탭을 고른다
+            if (r?.id) { termActive = r.id; if (termList.some(t => t.id === r.id)) showTerm(r.id); }
+        }
+        $("#term-new")?.addEventListener("click", () => openShell("powershell"));
+        $("#term-new-menu")?.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const menu = $("#term-menu");
+            menu.hidden = !menu.hidden;
+            $("#term-new-menu").setAttribute("aria-expanded", String(!menu.hidden));
+        });
+        $("#term-menu")?.querySelectorAll("[data-shell]").forEach(b => b.addEventListener("click", () => openShell(b.dataset.shell)));
+        function closeTermMenu(e) { if (!e.target.closest?.(".term-new")) { const m = $("#term-menu"); if (m) m.hidden = true; } }
+        document.addEventListener("click", closeTermMenu);
+        $("#term-stop")?.addEventListener("click", async () => {
+            const data = new FormData(); data.append("term", termActive);
+            await post("TerminalStop", data);
+        });
+        $("#term-close")?.addEventListener("click", async () => {
+            const data = new FormData(); data.append("term", termActive);
+            await post("TerminalClose", data);
+        });
+        function termOutput(ev) {
+            const v = termViews.get(ev.termId);
+            if (!v) return; // 탭을 열 때 버퍼로 받는다
+            const bytes = fromB64(ev.data);
+            if (v.end < 0) v.pending.push({ offset: ev.offset, bytes });
+            else writeTerm(v, ev.offset, bytes);
+        }
+
         // ---- 오른쪽 곁칸 (3차 c): 단계 · 방 정보 · 외부 실행 · 첨부. 열림 · 탭은 브라우저 저장(편의만 — 못 읽으면 닫힌 채 · 단계 탭) ----
         const side = $("#side"), sideToggle = $("#side-toggle");
         const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch { } } };
-        const sideTabs = ["steps", "info", "runs", "files"];
+        const sideTabs = ["steps", "info", "runs", "files", "term"];
         // 저장값이 모르는 탭이면 단계 탭 — 모든 칸이 숨던 문제 (c216951e79 C7)
         let sideTab = sideTabs.includes(store.get("hbchat.sideTab")) ? store.get("hbchat.sideTab") : "steps";
+        if (sideTab === "term" && !$("#side-tab-term")) sideTab = "steps"; // 터미널 탭이 없는 칸(옛 화면)이면
         let sideLoading = false, sideAgain = false;
         // 넓은 폭(셋째 칸)인지 — 좁으면 곁칸이 방을 덮는다 (chat.css의 1199px 규칙과 같은 값)
         const wide = () => window.matchMedia("(min-width: 1200px)").matches;
@@ -979,11 +1145,12 @@
             store.set("hbchat.sideTab", tab);
             side.querySelectorAll(".side-tabs [data-tab]").forEach(b => b.setAttribute("aria-selected", String(b.dataset.tab === tab)));
             side.querySelectorAll(".side-sec").forEach(s => { s.hidden = s.dataset.tab !== tab; });
+            if (tab === "term" && !side.hidden) showTerm(termActive); // xterm은 탭이 보일 때 만든다 (안 보이면 크기를 못 잰다)
         }
         function sidePlaceholder(text) {
             // 받는 중 · 실패 글은 탭과 상관없이 보인다 (c216951e79 C6 · 지휘자 K3) — 단계 탭은 화면이 그리므로 그 탭에만 가린다
             const p = el("p", "muted side-sec side-wait", text);
-            p.hidden = sideTab === "steps";
+            p.hidden = sideTab === "steps" || sideTab === "term";
             $("#side-data").replaceChildren(p);
         }
         // 방 정보 · 외부 실행 · 첨부는 열 때 · 턴 끝 · 제목 · 규칙 · 첨부가 바뀔 때 서버에서 다시 받는다 (방 칸을 그릴 때는 계산하지 않음).
@@ -1044,7 +1211,8 @@
             side.querySelector(".side-x").addEventListener("click", () => setSide(false));
             side.querySelectorAll(".side-tabs [data-tab]").forEach(b => b.addEventListener("click", () => showTab(b.dataset.tab)));
             // Esc로 닫기 — 좁은 폭에서는 곁칸이 "정보" 단추를 덮는다 (지휘자 K2)
-            side.addEventListener("keydown", (e) => { if (e.key === "Escape") { setSide(false); sideToggle.focus(); } });
+            // 터미널 안의 Esc는 그 프로세스 입력이다 — 곁칸을 닫지 않는다
+            side.addEventListener("keydown", (e) => { if (e.key === "Escape" && !e.target.closest?.(".term-host")) { setSide(false); sideToggle.focus(); } });
             // 저장된 "열림"은 넓은 폭에서만 되살린다 — 좁으면 방을 열 때마다 대화를 덮었다 (c216951e79 C5). 미니 창은 숨김.
             if (store.get("hbchat.side") === "1" && wide() && !root.closest(".mini")) setSide(true);
         }
@@ -1061,7 +1229,8 @@
             head.append(el("span", null, "승인 요청 · " + a.tool + (a.fromAgent ? " · 서브에이전트" : "")), left); // 서브에이전트가 낸 요청 (D)
             // 명령 전문(스크롤 칸) — 사용자가 본 것이 허용되는 것과 같게 (/self-review 36e4e20e04 C3 · C5, ab79e61df5 C5).
             card.append(head, el("div", "cmd", a.summary));
-            if (a.description) card.append(el("div", "desc", "Claude 설명: " + a.description));
+            // 터미널 시작 카드의 설명은 앱이 쓴 안내다 (계획서 2026-10-29_HB_Chat-터미널-곁칸) — 지휘자 설명으로 보이지 않게
+            if (a.description) card.append(el("div", "desc", (a.tool === "터미널" ? "" : "Claude 설명: ") + a.description));
             // 명령 밖의 입력도 허용하면 같이 실행된다 — 본 것 = 허용되는 것 (/self-review 5e747ff851 C1)
             if (a.extra) card.append(el("div", "cmd", "추가 입력: " + a.extra));
             // 백그라운드 실행 명령 — 답이 끝난 뒤에도 돈다 (계획서 2026-10-29_HB_Chat-백그라운드-명령, 결정 "넣음")
@@ -1365,10 +1534,18 @@
                     renderSteps(ev.steps);
                     if (ev.status) showStatus(ev.status);
                     if (ev.busy && ev.backgroundUntil) showBackground(ev.backgroundCount || 0, ev.backgroundUntil); else clearBackground();
+                    renderTerms(ev.terminals);
+                    for (const v of termViews.values()) loadBuffer(v); // 끊긴 사이 출력은 알림으로 오지 않았다
                     loadSide(); // 끊긴 사이 끝난 턴은 end가 오지 않는다 — 비용 · 외부 실행을 새로 (C3)
                     break;
                 case "background":
                     showBackground(ev.backgroundCount, ev.backgroundUntil);
+                    break;
+                case "terminals":
+                    renderTerms(ev.terminals);
+                    break;
+                case "term-out":
+                    termOutput(ev);
                     break;
                 case "face":
                     setFace(ev.face, ev.face === "Tool" && ev.text ? shortTool(ev.text) : null);
@@ -1687,6 +1864,11 @@
                 disposed = true;
                 if (textBox.value || quote || attached.length) drafts.set(roomId, { text: textBox.value, quote, attached });
                 es.close();
+                termObserver?.disconnect();
+                document.removeEventListener("click", closeTermMenu);
+                clearTimeout(termResizeTimer);
+                for (const v of termViews.values()) v.term.dispose(); // 프로세스는 그대로 — 방을 다시 열면 버퍼로 다시 그린다
+                termViews.clear();
                 clearInterval(ticker);
                 clearTimeout(readTimer);
                 clearTimeout(faceTimer);
