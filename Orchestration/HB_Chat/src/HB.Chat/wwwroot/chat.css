@@ -306,6 +306,33 @@ input.rename { font-size: 15px; font-weight: 600; min-width: 200px; }
 .app.mini .scroll, .app.mini .room-head, .app.mini .composer { padding-left: 8px; padding-right: 8px; }
 .app.mini .room-head { padding-top: 4px; padding-bottom: 4px; }
 
+/* 디코 테마: 말풍선 대신 줄 (5차 c) — 모든 말을 왼쪽 정렬, 아바타 · 이름 · 시각 한 줄 아래 본문, 바탕 · 테두리 없음.
+   HB_Chat만 (공용 _ChatStyles는 대시보드 채팅방도 써서 그대로). 같은 사람의 이어진 말 묶기는 하지 않음 — 외부 실행은 이름이 달라도 같은 클래스라 CSS로 가를 수 없다 */
+[data-theme=discord] .chat, [data-theme=discord] #live { gap: 2px; }
+[data-theme=discord] .msg, [data-theme=discord] .msg.user { flex-direction: row; gap: 14px; padding: 6px 8px; margin: 0 -8px; border-radius: 4px; }
+[data-theme=discord] .msg:hover { background: rgb(0 0 0 / .08); }
+[data-theme=discord] .msg .avatar { flex-basis: 40px; height: 40px; margin-top: 2px; }
+[data-theme=discord] .bubble, [data-theme=discord] .msg.user .bubble,
+[data-theme=discord] .msg.external .bubble, [data-theme=discord] .msg.apireview .bubble, [data-theme=discord] .msg.subagent .bubble {
+    flex: 1; max-width: none; background: none; border: 0; border-radius: 0; padding: 0; }
+[data-theme=discord] .who { margin-bottom: 1px; }
+[data-theme=discord] .who b { font-size: 15px; font-weight: 600; color: var(--text); }
+[data-theme=discord] .who .when, [data-theme=discord] .who .detail { font-size: 11.5px; margin-left: 4px; }
+/* 오류 · 보내지 못함 · 찾은 말: 테두리 대신 왼쪽 띠 · 바탕 */
+[data-theme=discord] .msg.error, [data-theme=discord] #live .msg.failed { box-shadow: inset 2px 0 var(--err); background: color-mix(in srgb, var(--err) 6%, transparent); }
+[data-theme=discord] #live .msg.failed .bubble { border: 0; }
+[data-theme=discord] .msg.hit { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+[data-theme=discord] .msg.hit .bubble { outline: 0; }
+/* 질문 답(4차 D1): '나' 줄에 왼쪽 강조 띠 */
+[data-theme=discord] .msg.answer { box-shadow: inset 2px 0 var(--accent); }
+/* 칩 줄 · 승인 · 질문 카드는 본문 칸(아바타 40 + 사이 14)에 맞춘다 */
+[data-theme=discord] .tools { justify-content: flex-start; padding-left: 54px; }
+[data-theme=discord] #live .approval, [data-theme=discord] #live .question-card { margin-left: 54px; }
+[data-theme=discord] .app.mini .msg .avatar { flex-basis: 32px; height: 32px; }
+[data-theme=discord] .app.mini .msg { gap: 10px; }
+[data-theme=discord] .app.mini .tools { padding-left: 42px; }
+[data-theme=discord] .app.mini #live .approval, [data-theme=discord] .app.mini #live .question-card { margin-left: 0; }
+
 /* 좁은 폭: 목록 ↔ 방 두 화면 (in-room이면 방, 아니면 목록) */
 @media (max-width: 767px) {
     .app { grid-template-columns: minmax(0, 1fr); }
