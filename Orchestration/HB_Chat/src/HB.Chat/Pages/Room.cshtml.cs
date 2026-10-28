@@ -13,11 +13,17 @@ namespace HB.Chat.Pages;
 /// ?handler=Pane: 방 전환 때 오른쪽 칸만 (2-2 a). Send · Stop · MarkRead는 POST (antiforgery + 같은 출처).
 /// </summary>
 public sealed class RoomModel(
-    RoomStore store, RoomHub hub, RoomList list, ChatTranscripts transcripts, StickerCatalog stickers, FaceCatalog faces, RoomRuns runs,
+    RoomStore store, RoomHub hub, RoomList list, ChatTranscripts transcripts, StickerPacks packs, FaceCatalog faces, RoomRuns runs,
     IOptions<ChatOptions> options)
     : PageModel
 {
     public Room Room { get; private set; } = null!;
+
+    /// <summary>이 방 스티커 (4차 D2): 방에 고른 팩 → 전체 설정 → 기본. 말풍선 · 실행 스티커 · 표정 그림이 같이 쓴다.</summary>
+    public StickerCatalog Stickers => _stickers ??= packs.ForRoom(Room);
+    private StickerCatalog? _stickers;
+
+    public StickerPacks Packs => packs;
 
     /// <summary>데스크톱 미니 창 배치 (계획서 2-3 c, `?view=mini`). 서버 동작은 같고 CSS만 다르다.</summary>
     public bool Mini => string.Equals(Request.Query["view"], "mini", StringComparison.OrdinalIgnoreCase);
@@ -66,11 +72,11 @@ public sealed class RoomModel(
         options.Value.DashboardUrl is { Length: > 0 } url ? $"{url.TrimEnd('/')}/Room/{Room.SessionId}" : null;
 
     /// <summary>실행 말풍선 본문 (SafeMarkdown + 스티커 태그) — 외부 에이전트 응답은 지휘자 말과 같은 규칙으로 그린다.</summary>
-    public HtmlString RenderRun(RunBubble b) => new(StickerRenderer.Replace(SafeMarkdown.ToHtml(b.Markdown, SafeMarkdown.Default), stickers));
+    public HtmlString RenderRun(RunBubble b) => new(StickerRenderer.Replace(SafeMarkdown.ToHtml(b.Markdown, SafeMarkdown.Default), Stickers));
 
     /// <summary>실행 말풍선의 자동 스티커 (상황 → 태그, 대시보드 설정 Auto 그대로). 없으면 null.</summary>
     public HtmlString? RunSticker(RunBubble b) =>
-        b.Situation is { } s && stickers.ForSituation(s) is { } tag ? new HtmlString(StickerRenderer.Html(tag, stickers)) : null;
+        b.Situation is { } s && Stickers.ForSituation(s) is { } tag ? new HtmlString(StickerRenderer.Html(tag, Stickers)) : null;
 
     /// <summary>호출 상세 (대시보드). 대시보드 주소가 없으면 null.</summary>
     public string? CallLink(RunBubble b) =>
@@ -178,6 +184,21 @@ public sealed class RoomModel(
         return Change(id, r => r with { Title = clean }, "이름을 바꾸지 못했습니다");
     }
 
+    /// <summary>
+    /// 이 방 스티커 팩 (4차 D2, 곁칸 방 정보): 빈 값이면 전체 설정을 따른다. 있는 팩만. 바뀌면 열린 화면이 방을 다시 연다
+    /// (말풍선 스티커 · 표정 그림 주소가 팩마다 다르다).
+    /// </summary>
+    public IActionResult OnPostStickerPack(string id, string? pack)
+    {
+        if (!RoomStore.IsRoomId(id)) return NotFound();
+        var p = string.IsNullOrWhiteSpace(pack) ? null : pack.Trim();
+        // 폴더가 사라진 팩이라도 지금 고른 값 그대로는 받는다 (지휘자 검토 K3)
+        if (p is not null && !packs.Exists(p) && p != store.Get(id)?.StickerPack) return BadRequest("없는 스티커 팩입니다.");
+        var result = Change(id, r => r with { StickerPack = p }, "스티커 팩을 바꾸지 못했습니다");
+        if (result is JsonResult) hub.ProfilesChanged([id]);
+        return result;
+    }
+
     /// <summary>휴지통으로 (30일 뒤 완전히 지움). 실행 중인 방은 먼저 중지해야 한다 — 기다리는 승인 · 큐가 버려지지 않게.</summary>
     public IActionResult OnPostTrash(string id)
     {
@@ -207,6 +228,8 @@ public sealed class RoomModel(
         {
             var fork = store.Create(Room.Workspace, Room.Level, Room.Model, title, forkOf: Room.SessionId,
                 forkSourceSize: transcripts.Size(Room.SessionId));
+            // 이 방에 고른 스티커 팩도 따라간다 (4차 D2 — ef2c83416c C6). "항상 허용" 규칙은 그대로 옮기지 않는다
+            if (Room.StickerPack is { } pack) store.Update(fork.Id, r => r with { StickerPack = pack });
             hub.Touch(fork.Id);
             return new JsonResult(new { ok = true, id = fork.Id });
         }
@@ -379,6 +402,7 @@ public sealed class RoomModel(
         Messages = RoomList.Page(Transcript?.FormatError is null ? Transcript?.Entries ?? [] : [], null, null);
         _runs = null;
         _answers = null;
+        _stickers = null;
         return true;
     }
 
@@ -399,10 +423,10 @@ public sealed class RoomModel(
     public HtmlString Render(ChatEntry e)
     {
         if (e.Speaker != ChatSpeaker.User)
-            return new(StickerRenderer.Replace(SafeMarkdown.ToHtml(e.Text, SafeMarkdown.Default), stickers));
+            return new(StickerRenderer.Replace(SafeMarkdown.ToHtml(e.Text, SafeMarkdown.Default), Stickers));
         // 사용자 말의 [첨부] 줄은 칩으로 (2-2 d): 이 방 첨부 폴더의 파일만 링크 · 그림 미리보기, 그 밖의 경로는 글자 그대로
         var (body, paths) = Attachments.Split(e.Text);
-        var html = new System.Text.StringBuilder(StickerRenderer.Replace(SafeMarkdown.ToHtml(body, SafeMarkdown.KeepLineBreaks), stickers));
+        var html = new System.Text.StringBuilder(StickerRenderer.Replace(SafeMarkdown.ToHtml(body, SafeMarkdown.KeepLineBreaks), Stickers));
         if (paths.Count == 0) return new(html.ToString());
         var folder = Attachments.Folder(options.Value.DataFolder, Room.Id);
         var enc = System.Text.Encodings.Web.HtmlEncoder.Default;

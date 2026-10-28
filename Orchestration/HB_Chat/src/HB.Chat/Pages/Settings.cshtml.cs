@@ -10,10 +10,32 @@ namespace HB.Chat.Pages;
 /// </summary>
 public sealed class SettingsModel(
     RoomStore store, RoomHub hub, RoomList list, ChatTranscripts transcripts, IOptions<ChatOptions> options,
-    ProfileView profiles, FaceCatalog faces, RoomRuns runs) : PageModel
+    ProfileView profiles, FaceCatalog faces, RoomRuns runs, StickerPacks packs) : PageModel
 {
     public ProfileView Profiles => profiles;
     public FaceCatalog Faces => faces;
+    public StickerPacks Packs => packs;
+
+    /// <summary>전체 스티커 팩의 그림 찾기 (표정 미리보기 — 4차 D2).</summary>
+    public HB.Orchestration.ChatUi.StickerCatalog GlobalStickers => packs.For(packs.Effective((string?)null));
+
+    /// <summary>
+    /// 전체 스티커 팩 저장 (4차 D2): 빈 값이면 기본(스티커 폴더 바로 아래 파일). 있는 팩만. 방에 따로 고른 팩이 먼저다.
+    /// 저장하면 열린 화면이 방을 다시 연다.
+    /// </summary>
+    public IActionResult OnPostStickerPack(string? pack)
+    {
+        var p = string.IsNullOrWhiteSpace(pack) ? null : pack.Trim();
+        // 폴더가 사라진 팩이라도 지금 저장된 값 그대로는 받는다 — 화면이 그 값을 선택된 채 다시 보낸다 (지휘자 검토 K3)
+        Error = p is not null && !packs.Exists(p) && p != profiles.Store.StickerPack() ? "없는 스티커 팩입니다." : profiles.Store.SetStickerPack(p);
+        if (Error is null)
+        {
+            hub.ProfilesChanged(store.All().Select(r => r.Id));
+            return RedirectToPage(new { done = "pack" });
+        }
+        Fill();
+        return Page();
+    }
 
     /// <summary>프로필 줄 (3차 e): 나 · 지휘자 · 외부 에이전트(호출 기록에 나온 이름 + 프로필을 둔 이름).</summary>
     public IReadOnlyList<(string Key, string Label, string DefaultName)> ProfileRows { get; private set; } = [];
@@ -77,6 +99,7 @@ public sealed class SettingsModel(
         "renamed" => "방 이름을 바꿨습니다.",
         "profile" => "프로필을 저장했습니다.",
         "faces" => "지휘자 표정을 저장했습니다.",
+        "pack" => "스티커 팩을 바꿨습니다.",
         _ => null,
     };
 

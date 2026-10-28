@@ -22,6 +22,9 @@ public sealed record RoomSummary(
 
     /// <summary>작업 폴더 이름 (목록 폴더별 묶음, 3차 d).</summary>
     public string Workspace { get; init; } = "";
+
+    /// <summary>이 방에 고른 스티커 팩 (4차 D2, 없으면 전체 설정) — 목록 표정 그림.</summary>
+    public string? StickerPack { get; init; }
 }
 
 /// <summary>말풍선 한 쪽: 보일 말들과 그 앞에 더 있는지 (계획서 2-2 b, 50개씩 위로 불러오기).</summary>
@@ -61,6 +64,7 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
             Steps = hub.StepProgress(room.Id),
             Status = room.Status,
             Workspace = room.Workspace,
+            StickerPack = room.StickerPack,
         };
 
     /// <summary>

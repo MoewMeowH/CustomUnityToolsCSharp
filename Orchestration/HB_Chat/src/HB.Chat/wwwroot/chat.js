@@ -730,6 +730,17 @@
                     // 제목(비우면 첫 말)은 새 말 받기가 바꾼다 — 알림 줄에 세운다 (C2)
                     if (await post("Rename", data)) { chain = chain.then(() => disposed ? null : refreshMessages()).catch(() => { }); loadSide(); }
                 });
+                // 이 방 스티커 팩 (4차 D2): 바꾸면 서버가 profiles 알림을 보내 방을 다시 연다 (스티커 · 표정 주소가 바뀜)
+                // 실패하면 앞 값으로 되돌리고, 성공하면 알림을 기다리지 않고 직접 다시 연다 — 다시 붙는 중 알림을 놓쳐도 (ef2c83416c C5)
+                const packSel = $("#side-pack");
+                const packWas = packSel?.value;
+                packSel?.addEventListener("change", async () => {
+                    const data = new FormData(); data.append("pack", packSel.value);
+                    packSel.disabled = true;
+                    if (await post("StickerPack", data)) { reopenRoom(roomId); return; }
+                    packSel.value = packWas;
+                    packSel.disabled = false;
+                });
                 showTab(sideTab);
             } catch {
                 if (!disposed) sidePlaceholder("곁칸을 불러오지 못했습니다 — 닫았다 다시 열어 보세요.");

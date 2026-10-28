@@ -30,6 +30,14 @@ public sealed class StickerOptions
     /// 키는 <see cref="AutoSticker"/>의 상수.
     /// </summary>
     public Dictionary<string, string> Auto { get; set; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Dir에 그 파일이 없을 때 볼 폴더 (HB_Chat 4차 D2 스티커 팩 — 팩 폴더에 빠진 그림은 기본 폴더 것으로). 비우면 없음 — 대시보드는 쓰지 않는다.
+    /// </summary>
+    public string? FallbackDir { get; set; }
+
+    /// <summary>그림 주소 앞부분 (태그가 뒤에 붙음). 기본 /sticker/ — HB_Chat 팩은 /sticker-pack/{팩}/.</summary>
+    public string UrlBase { get; set; } = "/sticker/";
 }
 
 /// <summary>자동 스티커 상황 이름 (StickerOptions.Auto의 키).</summary>
@@ -76,18 +84,25 @@ public sealed class StickerCatalog(Func<StickerOptions> options)
 
     /// <summary>
     /// 태그의 그림 파일 (폴더 안의 실제 파일, 허용 확장자). 폴더가 없거나 파일 이름이 폴더 밖을 가리키면 null.
+    /// Dir에 없으면 FallbackDir에서 찾는다 (HB_Chat 4차 D2).
     /// </summary>
     public (string Path, string ContentType)? FileFor(string tag)
     {
         var o = Options;
-        if (Resolve(tag) is not { } resolved || string.IsNullOrWhiteSpace(o.Dir)) return null;
+        if (Resolve(tag) is not { } resolved) return null;
         var name = o.Files[resolved];
         if (string.IsNullOrWhiteSpace(name) || !ContentTypes.TryGetValue(Path.GetExtension(name), out var type)) return null;
+        return (Find(o.Dir, name) ?? Find(o.FallbackDir, name)) is { } path ? (path, type) : null;
+    }
 
+    /// <summary>폴더 안의 그 파일 (폴더 밖을 가리키거나 없으면 null).</summary>
+    private static string? Find(string? folder, string name)
+    {
+        if (string.IsNullOrWhiteSpace(folder)) return null;
         string dir, full;
         try
         {
-            dir = Path.GetFullPath(o.Dir.Trim());
+            dir = Path.GetFullPath(folder.Trim());
             full = Path.GetFullPath(Path.Combine(dir, name));
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
@@ -95,8 +110,7 @@ public sealed class StickerCatalog(Func<StickerOptions> options)
             return null;
         }
         var prefix = Path.EndsInDirectorySeparator(dir) ? dir : dir + Path.DirectorySeparatorChar;
-        if (!full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) || !File.Exists(full)) return null;
-        return (full, type);
+        return full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && File.Exists(full) ? full : null;
     }
 }
 
@@ -131,7 +145,7 @@ public static partial class StickerRenderer
         var enc = WebUtility.HtmlEncode(tag);
         if (catalog.FileFor(tag) is null) return $"<span class=\"sticker-text\">{enc}</span>";
         var size = Math.Clamp(catalog.Options.SizePx, 24, 512);
-        return $"<img class=\"sticker\" src=\"/sticker/{Uri.EscapeDataString(tag)}\" alt=\"{enc}\" title=\"{enc}\" width=\"{size}\" height=\"{size}\" loading=\"lazy\" />";
+        return $"<img class=\"sticker\" src=\"{WebUtility.HtmlEncode(catalog.Options.UrlBase)}{Uri.EscapeDataString(tag)}\" alt=\"{enc}\" title=\"{enc}\" width=\"{size}\" height=\"{size}\" loading=\"lazy\" />";
     }
 
     [GeneratedRegex(@"<pre[\s>].*?</pre>|<code[\s>].*?</code>", RegexOptions.Singleline | RegexOptions.IgnoreCase)]

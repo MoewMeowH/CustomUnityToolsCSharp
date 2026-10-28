@@ -49,6 +49,7 @@ builder.Services.AddSingleton<RoomList>();
 builder.Services.AddSingleton(sp => new ProfileStore(sp.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder));
 builder.Services.AddSingleton<ProfileView>();
 builder.Services.AddSingleton<FaceCatalog>();
+builder.Services.AddSingleton<StickerPacks>(); // 스티커 팩 (4차 D2)
 builder.Services.AddSingleton<RoomRuns>();
 
 var app = builder.Build();
@@ -157,6 +158,15 @@ app.Use(async (ctx, next) =>
 app.UseStaticFiles();
 app.MapRazorPages();
 app.MapStickerImages();
+// 스티커 팩 그림 (4차 D2): 있는 팩 · 목록에 있는 태그만, 팩 폴더 → 없으면 기본 폴더 (StickerCatalog.FileFor가 폴더 밖을 막는다)
+app.MapGet("/sticker-pack/{pack}/{tag}", IResult (string pack, string tag, StickerPacks packs, HttpResponse response) =>
+{
+    if (!packs.Exists(pack) || packs.For(pack).FileFor(tag) is not { } file) return Results.NotFound();
+    // 같은 주소가 기본 그림 → 팩에 채운 그림으로 바뀐다 — 매번 바뀌었는지 묻는다 (Last-Modified, 안 바뀌면 304 — ef2c83416c C4)
+    response.Headers.CacheControl = "private, no-cache";
+    response.Headers.XContentTypeOptions = "nosniff";
+    return TypedResults.PhysicalFile(file.Path, file.ContentType, lastModified: File.GetLastWriteTimeUtc(file.Path));
+});
 // 프로필 그림 (3차 e): 앱이 정한 이름 모양만 · 프로필 폴더 안만, nosniff · 같은 출처만 쓰게
 app.MapGet("/profile-image/{file}", IResult (string file, ProfileStore profiles, HttpResponse response) =>
 {

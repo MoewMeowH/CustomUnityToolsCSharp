@@ -1,5 +1,6 @@
 @model SidebarView
 @inject FaceCatalog Faces
+@inject StickerPacks Packs
 @inject ProfileView Profiles
 @*
     방 목록 줄: 아바타(상태 점) · 제목 · 시각 · 미리보기 · 안 읽은 수. 미리보기는 RoomList.Preview로 걷은 글자 그대로 (Razor 인코딩).
@@ -30,7 +31,7 @@
         <a class="room-item@(s.Id == Model.CurrentId ? " active" : "")" href="/Room/@s.Id" data-room="@s.Id">
             <div class="avatar conductor" title="@FaceCatalog.Label(s.Face)">
                 @* 글자는 늘 두고 그림이 있으면 CSS로 가린다 — 회사 모드는 그림을 숨기고 글자를 보인다 (2-2 c) *@
-                @if (Faces.Url(s.Face) is { } faceUrl)
+                @if (Faces.Url(s.Face, Packs.For(Packs.Effective(s.StickerPack))) is { } faceUrl)
                 {
                     <img class="face-img" src="@faceUrl" alt="" />
                 }

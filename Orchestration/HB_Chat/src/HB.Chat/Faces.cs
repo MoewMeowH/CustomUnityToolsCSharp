@@ -57,16 +57,22 @@ public sealed class FaceCatalog(StickerCatalog stickers, IOptions<ChatOptions> o
     /// <summary>기본 태그 (설정 화면이 "기본: …"으로 보인다).</summary>
     public static string DefaultTag(Face face) => DefaultTags[face];
 
-    /// <summary>그림 주소 (/sticker/{태그}). 스티커 그림이 없으면 지휘자 프로필 그림(3차 e), 그것도 없으면 null.</summary>
-    public string? Url(Face face) =>
-        stickers.FileFor(Tag(face)) is not null ? "/sticker/" + Uri.EscapeDataString(Tag(face))
-        : profiles?.Get(ProfileStore.Conductor).Image is { } image && profiles.ImagePath(image) is not null ? "/profile-image/" + image
-        : null;
+    /// <summary>
+    /// 그림 주소 (그 그림 찾기의 주소 앞부분 + 태그 — 기본 /sticker/, 팩이면 /sticker-pack/{팩}/, 4차 D2). 스티커 그림이 없으면 지휘자 프로필 그림(3차 e),
+    /// 그것도 없으면 null. pack을 주지 않으면 기본 스티커.
+    /// </summary>
+    public string? Url(Face face, StickerCatalog? pack = null)
+    {
+        var catalog = pack ?? stickers;
+        return catalog.FileFor(Tag(face)) is not null ? catalog.Options.UrlBase + Uri.EscapeDataString(Tag(face))
+            : profiles?.Get(ProfileStore.Conductor).Image is { } image && profiles.ImagePath(image) is not null ? "/profile-image/" + image
+            : null;
+    }
 
     /// <summary>고를 수 있는 스티커 태그 (설정 화면 · 저장 검사).</summary>
     public IReadOnlyList<string> KnownTags => [.. stickers.Options.Files.Keys.Concat(stickers.Options.Aliases.Keys).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
 
     /// <summary>화면 스크립트용: 상태 이름 → { url, label }.</summary>
-    public string Json() => JsonSerializer.Serialize(
-        Enum.GetValues<Face>().ToDictionary(f => f.ToString(), f => new { url = Url(f), label = Label(f) }));
+    public string Json(StickerCatalog? pack = null) => JsonSerializer.Serialize(
+        Enum.GetValues<Face>().ToDictionary(f => f.ToString(), f => new { url = Url(f, pack), label = Label(f) }));
 }

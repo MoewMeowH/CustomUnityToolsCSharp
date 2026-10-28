@@ -28,6 +28,28 @@
         <dt>비용</dt><dd title="claude가 알려 준 세션 누적 비용 (클라이언트 추정)">@(room.TotalCostUsd is { } cost ? "≈$" + cost.ToString("0.000") : "—")</dd>
         <dt>만든 때</dt><dd>@room.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</dd>
         <dt>마지막 실행</dt><dd>@(room.LastRunAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "—")</dd>
+        @* 이 방 스티커 팩 (4차 D2 — 결정 "전체 + 방별"): 비우면 전체 설정(설정 화면)을 따른다.
+           팩이 없으면 줄을 숨기되, 이 방에 고른 값이 남아 있으면 보인다 — 되돌릴 수 있게 (ef2c83416c C9) *@
+        @{ var packList = Model.Packs.List(); }
+        @if (packList.Count > 0 || room.StickerPack is not null)
+        {
+            var global = Model.Packs.Effective((string?)null);
+            var globalName = global is null ? "기본" : packList.FirstOrDefault(p => p.Id == global)?.Name ?? global;
+            <dt><label for="side-pack">스티커 팩</label></dt>
+            <dd>
+                <select id="side-pack">
+                    <option value="" selected="@(room.StickerPack is null)">전체 설정 따름 (@globalName)</option>
+                    @foreach (var p in packList)
+                    {
+                        <option value="@p.Id" selected="@(room.StickerPack == p.Id)">@p.Name</option>
+                    }
+                    @if (room.StickerPack is { } gone && packList.All(p => p.Id != gone))
+                    {
+                        <option value="@gone" selected>@gone (폴더 없음 — 전체 설정 '@(globalName)'(으)로 보임)</option>
+                    }
+                </select>
+            </dd>
+        }
         @if (room.Level == PermissionLevel.Command)
         {
             <dt>항상 허용</dt><dd>이 방 @(room.AllowRules.Count)개 <span class="muted">(목록은 대화 위 접힌 칸)</span></dd>

@@ -57,6 +57,9 @@ public sealed record Room
 
     /// <summary>마지막 턴의 지휘자 상태 한 줄 (CLI post_turn_summary, 3차 b). 방 머리 · 목록 · 미니 창에 보인다.</summary>
     public RoomStatus? Status { get; init; }
+
+    /// <summary>이 방만 쓸 스티커 팩 (4차 D2, 폴더 이름). null이면 전체 설정을 따른다 (StickerPacks.Effective).</summary>
+    public string? StickerPack { get; init; }
 }
 
 /// <summary>지휘자 상태 한 줄: 종류(blocked · completed · review_ready …) · 상태 글 · 사용자가 할 일.</summary>

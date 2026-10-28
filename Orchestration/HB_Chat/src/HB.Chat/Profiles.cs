@@ -28,6 +28,7 @@ public sealed partial class ProfileStore
     private readonly string _imageDir;
     private Dictionary<string, Profile> _profiles = new(StringComparer.Ordinal);
     private Dictionary<string, string> _faces = new(StringComparer.OrdinalIgnoreCase);
+    private string? _stickerPack;
 
     public string? LoadError { get; }
 
@@ -44,6 +45,7 @@ public sealed partial class ProfileStore
                 foreach (var (key, p) in saved.Profiles ?? [])
                     if (IsKey(key) && p is not null)
                         _profiles[key] = new Profile(CleanName(p.Name, key), IsColor(p.Color) ? p.Color : null, IsImageName(p.Image) ? p.Image : null);
+                _stickerPack = StickerPacks.IsPackName(saved.StickerPack) ? saved.StickerPack : null;
                 foreach (var (face, tag) in saved.Faces ?? [])
                     if (IsFaceName(face) && !string.IsNullOrWhiteSpace(tag) && tag.Length <= 40) _faces[face] = tag.Trim();
             }
@@ -69,6 +71,26 @@ public sealed partial class ProfileStore
     public string? FaceTag(Face face)
     {
         lock (_lock) return _faces.TryGetValue(face.ToString(), out var t) ? t : null;
+    }
+
+    /// <summary>전체 스티커 팩 (4차 D2 — 폴더 이름, null이면 기본). 방에 고른 팩이 먼저 (StickerPacks.Effective).</summary>
+    public string? StickerPack()
+    {
+        lock (_lock) return _stickerPack;
+    }
+
+    /// <summary>전체 스티커 팩 저장 (null · 빈 값이면 기본). 있는 팩인지는 부르는 쪽(StickerPacks.Exists)이 본다. 오류 문구(null이면 저장).</summary>
+    public string? SetStickerPack(string? pack)
+    {
+        var p = string.IsNullOrWhiteSpace(pack) ? null : pack.Trim();
+        if (p is not null && !HB.Chat.StickerPacks.IsPackName(p)) return "팩 이름 모양이 아닙니다.";
+        lock (_lock)
+        {
+            if (LoadError is not null) return $"profiles.json을 읽지 못해 쓰지 않습니다: {LoadError}";
+            var before = _stickerPack;
+            _stickerPack = p;
+            return TrySave(() => _stickerPack = before);
+        }
     }
 
     /// <summary>이름 · 색 저장 (빈 값이면 기본으로). 오류 문구(null이면 저장).</summary>
@@ -198,7 +220,7 @@ public sealed partial class ProfileStore
         {
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(_file))!);
             var tmp = _file + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(new ProfileFile { Profiles = new(_profiles), Faces = new(_faces) }, Json), new UTF8Encoding(false));
+            File.WriteAllText(tmp, JsonSerializer.Serialize(new ProfileFile { Profiles = new(_profiles), Faces = new(_faces), StickerPack = _stickerPack }, Json), new UTF8Encoding(false));
             File.Move(tmp, _file, overwrite: true);
             return null;
         }
@@ -242,6 +264,7 @@ public sealed partial class ProfileStore
     {
         public int Version { get; set; } = 1;
         public Dictionary<string, Profile>? Profiles { get; set; }
+        public string? StickerPack { get; set; }
         public Dictionary<string, string>? Faces { get; set; }
     }
 

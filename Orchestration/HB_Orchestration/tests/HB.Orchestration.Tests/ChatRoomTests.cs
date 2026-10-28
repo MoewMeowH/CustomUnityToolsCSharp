@@ -283,6 +283,32 @@ public sealed class ChatRoomTests : IDisposable
     }
 
     [Fact]
+    public void Catalog_FallbackDir_AndUrlBase()
+    {
+        // HB_Chat 4차 D2 스티커 팩: Dir에 없으면 FallbackDir, 주소 앞부분은 UrlBase (대시보드는 둘 다 비움 → 그대로)
+        var root = Path.Combine(_dir, "stickers");
+        var pack = Path.Combine(root, "cat");
+        Directory.CreateDirectory(pack);
+        File.WriteAllBytes(Path.Combine(root, "06-done.png"), [0x89, 0x50]);
+        File.WriteAllBytes(Path.Combine(root, "01-idle.png"), [0x89, 0x50]);
+        File.WriteAllBytes(Path.Combine(pack, "06-done.png"), [0x89, 0x51]);
+        var options = new StickerOptions
+        {
+            Dir = pack, FallbackDir = root, UrlBase = "/sticker-pack/cat/",
+            // "밖": 팩에서 풀면 root/outside.png(없음), 기본에서 풀면 _dir/outside.png(있지만 폴더 밖) — 기본 쪽 차단까지 거친다 (ef2c83416c C8)
+            Files = new(StringComparer.Ordinal) { ["해냈다"] = "06-done.png", ["대기"] = "01-idle.png", ["밖"] = "../outside.png" },
+        };
+        File.WriteAllBytes(Path.Combine(_dir, "outside.png"), [0x89, 0x50]);
+        var c = new StickerCatalog(() => options);
+
+        Assert.Equal(Path.Combine(pack, "06-done.png"), c.FileFor("해냈다")!.Value.Path); // 팩 것
+        Assert.Equal(Path.Combine(root, "01-idle.png"), c.FileFor("대기")!.Value.Path); // 팩에 없음 → 기본
+        Assert.Null(c.FileFor("밖")); // 두 폴더 모두 밖이면 없음
+        Assert.Contains("src=\"/sticker-pack/cat/%ED%95%B4%EB%83%88%EB%8B%A4\"", StickerRenderer.Html("해냈다", c));
+        Assert.Contains("src=\"/sticker/", StickerRenderer.Html("해냈다", Catalog())); // 기본 주소 그대로
+    }
+
+    [Fact]
     public void Catalog_WithoutFolder_RendersTextBadge()
     {
         var html = StickerRenderer.Html("해냈다", Catalog(withDir: false));

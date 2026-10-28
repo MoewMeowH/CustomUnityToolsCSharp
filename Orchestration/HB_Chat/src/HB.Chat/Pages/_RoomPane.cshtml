@@ -6,10 +6,10 @@
 @{
     var room = Model.Room;
     var face = Model.Face;
-    var faceUrl = Model.Faces.Url(face);
+    var faceUrl = Model.Faces.Url(face, Model.Stickers);
 }
 <div class="room" data-room="@room.Id" data-title="@Model.Title" data-read-up-to="@(room.ReadUpTo ?? -1)"
-     data-faces="@Model.Faces.Json()" data-profiles="@Profiles.Json()" data-face="@face" data-face-left="@Model.EndFaceLeftMs" data-end-face-ms="@RoomModel.EndFaceMs">
+     data-faces="@Model.Faces.Json(Model.Stickers)" data-profiles="@Profiles.Json()" data-face="@face" data-face-left="@Model.EndFaceLeftMs" data-end-face-ms="@RoomModel.EndFaceMs">
     @* 가운데(머리 · 말 · 입력칸) + 오른쪽 곁칸 (3차 c) *@
     <div class="room-main">
     <section class="room-head">
