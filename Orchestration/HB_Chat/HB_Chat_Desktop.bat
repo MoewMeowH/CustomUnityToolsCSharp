@@ -18,7 +18,7 @@ set "DASH_PORT=5280"
 set "CHAT_PROJ=%~dp0src\HB.Chat\HB.Chat.csproj"
 set "DASH_PROJ=%~dp0..\HB_Orchestration\src\HB.Orchestration.Dashboard\HB.Orchestration.Dashboard.csproj"
 set "DESK_PROJ=%~dp0src\HB.Chat.Desktop\HB.Chat.Desktop.csproj"
-set "DESK_EXE=%~dp0src\HB.Chat.Desktop\bin\%CONFIGURATION%\net10.0-windows\HB.Chat.Desktop.exe"
+set "DESK_EXE=%~dp0src\HB.Chat.Desktop\bin\%CONFIGURATION%\net10.0-windows10.0.17763.0\HB.Chat.Desktop.exe"
 
 where dotnet >nul 2>nul
 if errorlevel 1 (

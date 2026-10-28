@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
+using Microsoft.Toolkit.Uwp.Notifications;
 using Microsoft.Win32;
 
 namespace HB.Chat.Desktop;
@@ -55,7 +56,7 @@ public sealed class MainForm : Form
     private LocalServer? _chatServer, _dashServer;
     private AppTab _tab = AppTab.Chat;
     private string? _chatError = "서버 준비 중…", _dashError = "서버 준비 중…";
-    private string? _dashPending;
+    private string? _dashPending, _chatPending;
     private volatile bool _closing;
 
     // 트레이 · 알림 (2-3 b)
@@ -90,6 +91,7 @@ public sealed class MainForm : Form
         _theme = Appearance.LoadLast(_themePath) ?? Appearance.Default;
 
         Text = "HB Chat";
+        Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); // exe 아이콘(app.ico) — 작업 표시줄 · Alt+Tab
         MinimumSize = WindowPlacement.MinSize;
         Size = new Size(1280, 860);
         StartPosition = FormStartPosition.CenterScreen;
@@ -121,10 +123,13 @@ public sealed class MainForm : Form
         ApplyTheme(_theme);
         // 시스템 따름일 때 Windows 밝게 · 어둡게를 바꾸면 맨 위 줄도 따라간다 (웹 화면은 WebView2가 따라감)
         SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
+        // 토스트 누르기 — 될수록 일찍 구독한다 (앱이 꺼진 채 알림 센터에서 눌러 켜진 경우도 이 이벤트로 온다)
+        ToastNotificationManagerCompat.OnActivated += OnToastActivated;
 
         // 트레이 (2-3 b): 닫기(X)는 여기로 숨김, 메뉴 열기 · 끝내기, 두 번 누르면 열기, 풍선을 누르면 그 방
         _trayMenu.Items.Add("열기", null, (_, _) => BringUp());
         _trayMenu.Items.Add("미니 창", null, (_, _) => ToggleMini());
+        _trayMenu.Items.Add("알림 시험", null, (_, _) => TestToast());
         _trayMenu.Items.Add(new ToolStripSeparator());
         _trayMenu.Items.Add("끝내기", null, (_, _) => Exit());
         _tray = new NotifyIcon { Icon = _trayIcons[TrayLevel.Idle], Text = "HB Chat", ContextMenuStrip = _trayMenu, Visible = true };
@@ -139,6 +144,11 @@ public sealed class MainForm : Form
         base.OnLoad(e);
         _showWait = ThreadPool.RegisterWaitForSingleObject(_show, (_, _) => OnShowSignal(BringUp), null, -1, false);
         _exitWait = ThreadPool.RegisterWaitForSingleObject(_exitSignal, (_, _) => OnShowSignal(Exit), null, -1, false);
+        if (_pendingToastRoom is { } toastRoom) // 창이 생기기 전에 누른 토스트
+        {
+            _pendingToastRoom = null;
+            OpenRoom(toastRoom);
+        }
         if (_startWarning is not null)
         {
             _warnings.Add(_startWarning); // 서버 상태가 써져도 남게 (C6)
@@ -209,7 +219,8 @@ public sealed class MainForm : Form
             _chatError = error;
             if (error is null)
             {
-                _chatView.CoreWebView2.Navigate(_chatUrl.AbsoluteUri);
+                _chatView.CoreWebView2.Navigate(_chatPending ?? _chatUrl.AbsoluteUri);
+                _chatPending = null;
                 _watcher = new RoomWatcher(_chatUrl, OnRooms, OnConnection, SynchronizationContext.Current!);
                 _watcher.Start();
             }
@@ -319,6 +330,7 @@ public sealed class MainForm : Form
             var ready = (tab == AppTab.Chat ? _chatError : _dashError) is null && view.CoreWebView2 is not null;
             if (ready) view.CoreWebView2!.Navigate(url);
             else if (tab == AppTab.Dashboard) _dashPending = url; // 대시보드가 뜨면 그 주소로
+            else _chatPending = url; // 채팅 서버가 뜨면 그 방으로 (토스트를 눌러 앱이 켜진 경우)
         }
         UpdateTabs();
         UpdateTray(); // 채팅 탭으로 돌아오면 보고 있는 방의 안 본 실패를 지운다 (0f0b6007a4 C3)
@@ -385,11 +397,99 @@ public sealed class MainForm : Form
         UpdateTray();
         if (notices.Count == 0) return;
         Trace("알림 " + string.Join(", ", notices.Select(n => $"{n.Kind} {n.RoomId}"))); // 방 ID만 (제목은 남기지 않음)
+        if (ShowToasts(Toasts.For(notices, _notifyBody))) return;
+        // 토스트를 못 띄우면(지원 안 되는 Windows · 등록 실패) 트레이 풍선으로
         var (title, text) = Notices.Balloon(notices, _notifyBody);
         _balloonRoom = Notices.RoomToOpen(notices);
         var icon = notices.Any(n => n.Kind == NoticeKind.Approval) ? ToolTipIcon.Warning
             : notices.Any(n => n.Kind == NoticeKind.Failed) ? ToolTipIcon.Error : ToolTipIcon.Info;
         _tray.ShowBalloonTip(5000, title, text.Length > 0 ? text : "(제목 없음)", icon);
+    }
+
+    // ---- 토스트 알림 (계획서 2026-10-28 알림-토스트) ----
+
+    /// <summary>토스트를 띄운 방 — 그 방을 열면 알림 센터에서 지운다.</summary>
+    private readonly HashSet<string> _toastRooms = [];
+
+    /// <summary>토스트 왼쪽 그림 (지휘자 프로필 그림을 png로 내려 둔 파일). 없으면 앱 아이콘.</summary>
+    private string? _toastLogo, _logoUrl;
+
+    /// <summary>방 열기를 기다리는 토스트 누르기 (앱이 켜지는 중 · 채팅 화면 준비 전).</summary>
+    private string? _pendingToastRoom;
+
+    private bool ShowToasts(IReadOnlyList<ToastSpec> toasts)
+    {
+        try
+        {
+            foreach (var t in toasts)
+            {
+                Toasts.Show(t, _toastLogo);
+                if (t.RoomId is { } id) _toastRooms.Add(id);
+            }
+            return true;
+        }
+        catch (Exception ex) when (ex is COMException or InvalidOperationException or UnauthorizedAccessException or ArgumentException or Win32Exception)
+        {
+            Trace("토스트 실패 — 풍선으로: " + ex.GetType().Name + " " + ex.Message);
+            return false;
+        }
+    }
+
+    /// <summary>트레이 메뉴 "알림 시험": 지금 설정 · 그림으로 토스트 하나 (누르면 큰 창).</summary>
+    private void TestToast()
+    {
+        if (!ShowToasts([new ToastSpec(null, "알림 시험", "HB Chat 알림이 이렇게 보입니다")]))
+            _tray.ShowBalloonTip(4000, "알림 시험", "토스트를 띄우지 못해 풍선으로 보입니다 — logs/desktop.log", ToolTipIcon.Warning);
+    }
+
+    /// <summary>토스트를 누름 (백그라운드 스레드). 방 인자가 맞으면 그 방, 아니면 큰 창만. 창 준비 전이면 미뤄 둔다.</summary>
+    private void OnToastActivated(ToastNotificationActivatedEventArgsCompat e)
+    {
+        var room = Toasts.RoomFrom(e.Argument);
+        if (_closing) return;
+        if (!IsHandleCreated)
+        {
+            _pendingToastRoom = room;
+            return;
+        }
+        OnShowSignal(() => OpenRoom(room));
+    }
+
+    /// <summary>지휘자 프로필 그림을 토스트 로고로 내려 둔다 (주소가 바뀌었을 때만). 앱이 만든 이름 모양만, 실패하면 앱 아이콘.</summary>
+    private async void LoadToastLogo(string? url)
+    {
+        if (url == _logoUrl) return;
+        _logoUrl = url;
+        if (url is null || !Toasts.IsProfileImagePath(url))
+        {
+            _toastLogo = null;
+            return;
+        }
+        var dir = Path.Combine(_settings.DataFolder, "toast-images");
+        var path = Path.Combine(dir, Toasts.CacheName(url));
+        try
+        {
+            if (!File.Exists(path) && !await Toasts.SavePngAsync(await _http.GetByteArrayAsync(new Uri(_chatUrl, url), _cts.Token), path))
+            {
+                Trace("토스트 그림을 읽지 못함 — 앱 아이콘으로");
+                path = null;
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or ObjectDisposedException)
+        {
+            path = null;
+        }
+        if (_closing || url != _logoUrl) return; // 그 사이 또 바뀜
+        _toastLogo = path;
+        // 앞 그림 파일은 지운다 (그림을 바꿀 때마다 쌓이지 않게)
+        try
+        {
+            foreach (var old in Directory.Exists(dir) ? Directory.GetFiles(dir, "*.png") : [])
+                if (!string.Equals(old, path, StringComparison.OrdinalIgnoreCase)) File.Delete(old);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
     }
 
     /// <summary>
@@ -417,7 +517,20 @@ public sealed class MainForm : Form
     {
         if (_closing || _rooms is null) return;
         var rooms = _rooms.Values.ToList();
-        _unseenFailures.Update([], rooms, ViewingRoom());
+        var viewing = ViewingRoom();
+        _unseenFailures.Update([], rooms, viewing);
+        // 그 방을 보면 그 방 토스트를 알림 센터에서 지운다
+        if (viewing is not null && _toastRooms.Remove(viewing))
+        {
+            try
+            {
+                Toasts.Remove(viewing);
+            }
+            catch (Exception ex) when (ex is COMException or InvalidOperationException or UnauthorizedAccessException)
+            {
+                // 지우지 못해도 다음 알림이 Tag로 바꾼다
+            }
+        }
         var level = TrayStatus.Level(rooms, _unseenFailures.Ids);
         if (level != _trayLevel) Trace($"트레이 {_trayLevel} → {level}");
         _trayLevel = level;
@@ -604,6 +717,7 @@ public sealed class MainForm : Form
         }
         if (_closing || read != _appearanceRead) return;
         _notifyBody = Appearance.NotifyBody(json); // 알림에 답 앞부분 보이기 (설정 화면 토글, 기본 끔)
+        LoadToastLogo(Appearance.ConductorImage(json));
         if (Appearance.Parse(json) is not { } theme || theme == _theme) return;
         Trace($"테마 {_theme} → {theme}");
         ApplyTheme(theme);
@@ -756,6 +870,7 @@ public sealed class MainForm : Form
             _mini?.Dispose();
             _closing = true;
             SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged; // 정적 이벤트 — 안 빼면 창이 남는다
+            ToastNotificationManagerCompat.OnActivated -= OnToastActivated;
             _showWait?.Unregister(null);
             _exitWait?.Unregister(null);
             _cts.Cancel();

@@ -4,14 +4,20 @@
        채팅 서버(5290) · 대시보드 서버(5280)를 띄우거나 붙고, 두 화면을 WebView2 탭으로. 서버 코드는 참조하지 않는다 (HTTP로만). -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <!-- Windows 10 판 (알림 토스트 — Windows.UI.Notifications) -->
+    <TargetFramework>net10.0-windows10.0.17763.0</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <AssemblyName>HB.Chat.Desktop</AssemblyName>
+    <!-- 알림 센터 · 작업 표시줄에 보이는 앱 이름 · 아이콘 (패키지 없는 앱의 토스트는 exe에서 가져온다) -->
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <Product>HB Chat</Product>
+    <AssemblyTitle>HB Chat</AssemblyTitle>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
+    <PackageReference Include="Microsoft.Toolkit.Uwp.Notifications" Version="7.1.3" />
   </ItemGroup>
 
   <ItemGroup>

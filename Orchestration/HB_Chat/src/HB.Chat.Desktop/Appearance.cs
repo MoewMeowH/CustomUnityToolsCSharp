@@ -70,6 +70,22 @@ public static class Appearance
         }
     }
 
+    /// <summary>`/api/appearance`의 conductorImage (지휘자 프로필 그림 주소 — 토스트 왼쪽 그림). 없거나 글자가 아니면 null.</summary>
+    public static string? ConductorImage(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            return doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty("conductorImage", out var v)
+                && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>서버 · 저장 파일의 이름 (Parse의 반대).</summary>
     public static string Name(AppTheme theme) => theme switch
     {

@@ -88,7 +88,7 @@ public sealed class DesktopLogicTests : IDisposable
         var chatRoot = Path.Combine(_dir, "Orchestration", "HB_Chat");
         Directory.CreateDirectory(Path.Combine(chatRoot, "src", "HB.Chat"));
         File.WriteAllText(Path.Combine(chatRoot, "src", "HB.Chat", "HB.Chat.csproj"), "<Project />");
-        var exeDir = Path.Combine(chatRoot, "src", "HB.Chat.Desktop", "bin", "Release", "net10.0-windows");
+        var exeDir = Path.Combine(chatRoot, "src", "HB.Chat.Desktop", "bin", "Release", "net10.0-windows10.0.17763.0");
         Directory.CreateDirectory(exeDir);
         var orch = Path.Combine(_dir, "Orchestration", "HB_Orchestration");
         Directory.CreateDirectory(orch);
