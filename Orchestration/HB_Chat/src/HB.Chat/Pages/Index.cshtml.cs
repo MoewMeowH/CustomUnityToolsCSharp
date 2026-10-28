@@ -85,19 +85,20 @@ public sealed class IndexModel(RoomStore store, RoomHub hub, RoomList list, Chat
         return Redirect("/?trash=1");
     }
 
-    public IActionResult OnPostCreate(string workspace, PermissionLevel level, string model, string? title)
+    public IActionResult OnPostCreate(string workspace, PermissionLevel level, string model, string? title, string? effort = null)
     {
         var o = options.Value;
+        var (cleanEffort, effortError) = RoomEffort.Clean(effort);
         Error = o.WorkspacePath(workspace) is null ? "허용 목록에 없는 작업 폴더입니다."
             : !o.ModelList.Contains(model, StringComparer.Ordinal) ? "허용 목록에 없는 모델입니다."
             : !Enum.IsDefined(level) ? "알 수 없는 권한 단계입니다."
-            : title is { Length: > 200 } ? "제목이 너무 깁니다."
-            : null;
+            : effortError
+            ?? (title is { Length: > 200 } ? "제목이 너무 깁니다." : null);
         if (Error is null)
         {
             try
             {
-                var room = store.Create(workspace, level, model, title);
+                var room = store.Create(workspace, level, model, title, effort: cleanEffort);
                 hub.Touch(room.Id); // 다른 탭의 목록에도 보이게
                 return Redirect($"/Room/{room.Id}");
             }

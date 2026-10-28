@@ -25,6 +25,26 @@ public sealed class ClaudeArgsTests
     }
 
     [Fact]
+    public void Effort_AddedAfterModel_OnlyKnownLevels()
+    {
+        // Claude 앱 기능 B: 추론 강도 — 목록 값은 --effort, 없으면 넣지 않음, 모르는 값은 실행 전에 막음
+        var args = ClaudeArgs.Build(Spec(PermissionLevel.Read) with { Effort = "high" }, Models);
+        Assert.Contains("--model | opus | --effort | high | --session-id", Joined(args));
+        Assert.DoesNotContain("--effort", ClaudeArgs.Build(Spec(PermissionLevel.Read), Models));
+        Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Read) with { Effort = "ultra" }, Models));
+        Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Read) with { Effort = "high --dangerously" }, Models));
+    }
+
+    [Theory]
+    [InlineData(null, null, null)]
+    [InlineData("  ", null, null)]
+    [InlineData("max", "max", null)]
+    [InlineData(" low ", "low", null)]
+    [InlineData("HIGH", null, "알 수 없는 추론 강도입니다.")] // 대소문자도 CLI 값 그대로만
+    [InlineData("auto", null, "알 수 없는 추론 강도입니다.")]
+    public void RoomEffort_Clean(string? input, string? value, string? error) => Assert.Equal((value, error), RoomEffort.Clean(input));
+
+    [Fact]
     public void Fork_FirstRunResumesSourceIntoThisSession()
     {
         // 갈래 방 첫 실행 (2-2 c, 0번 실측: fork-session + session-id → 그 ID로 갈라짐)

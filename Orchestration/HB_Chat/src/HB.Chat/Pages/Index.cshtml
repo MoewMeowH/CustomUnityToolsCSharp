@@ -81,6 +81,16 @@
                             }
                         </select>
                     </label>
+                    @* 추론 강도 (Claude 앱 기능 B) — 곁칸 방 정보에서 나중에 바꿀 수 있다 *@
+                    <label>추론 강도
+                        <select name="effort">
+                            <option value="" selected>@RoomEffort.Name(null)</option>
+                            @foreach (var e in RoomEffort.Levels)
+                            {
+                                <option value="@e">@RoomEffort.Name(e)</option>
+                            }
+                        </select>
+                    </label>
                     <input type="text" name="title" placeholder="제목 (비우면 첫 말)" maxlength="200" style="flex:1;min-width:160px" />
                     <button class="btn primary" type="submit">@Icons.Svg("plus") 만들기</button>
                 </form>

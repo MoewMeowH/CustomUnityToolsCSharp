@@ -383,6 +383,16 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     {
         if (room.Level == PermissionLevel.Command && ClaudeArgs.CommandTools.Contains(ask.Tool))
         {
+            // 실행 중에 곁칸에서 단계를 내렸으면(명령 → 그 아래) 이 턴의 명령도 카드 없이 거절한다 — 내리기는 바로 막힌다
+            // (/self-review security 8ccecae84d C1). 올리기는 다음 실행부터.
+            if (store.Get(room.Id) is not { Level: PermissionLevel.Command })
+            {
+                lock (live.Gate)
+                {
+                    if (live.Generation == generation) Broadcast(live, new LiveEvent("denied") { Text = $"{ask.Tool}: 이 방 권한을 명령 아래로 내려 거절" });
+                }
+                return PermissionDecision.Deny("사용자가 이 방 권한을 명령 단계 아래로 내렸습니다 — 명령을 실행하지 않습니다.");
+            }
             if (ApprovalRequest.Parse(ask.RequestJson) is not { } request) return PermissionDecision.Deny("승인 요청 모양을 읽지 못해 거절했습니다.");
             var answer = await RequestApprovalAsync(room.Id, live, generation, request, aborted);
             return (answer ?? new ApprovalAnswer(false, "실행이 이미 끝나 거절했습니다.")).ToDecisionJson(ask.InputJson);
@@ -539,6 +549,9 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     public string? Decide(string roomId, string approvalId, ApprovalChoice choice, string? reason)
     {
         if (!_rooms.TryGetValue(roomId, out var live)) return "없는 방입니다.";
+        // 카드가 뜬 뒤 곁칸에서 권한을 명령 아래로 내렸으면 허용 · 항상 허용을 받지 않는다 (/self-review security 8ccecae84d C1)
+        if (choice != ApprovalChoice.Deny && store.Get(roomId) is not { Level: PermissionLevel.Command })
+            return "이 방 권한을 명령 단계 아래로 내려 허용할 수 없습니다 — 거절만 됩니다.";
         string? rule = null;
         lock (live.Gate)
         {
@@ -838,6 +851,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             ForkFrom = resume ? null : room.ForkOf, // 갈래 방의 첫 실행 (2-2 c)
             // 그 방 첨부 폴더가 있으면 Read로 열 수 있게 (2-2 d, 대화 단계는 ClaudeArgs가 뺀다)
             AttachDir = attachDir,
+            Effort = room.Effort, // 곁칸에서 바꾸면 다음 실행부터 (Claude 앱 기능 B)
         };
         ProcessSpec process;
         try

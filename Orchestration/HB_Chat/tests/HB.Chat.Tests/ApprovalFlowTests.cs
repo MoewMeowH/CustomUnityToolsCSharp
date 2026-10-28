@@ -123,6 +123,35 @@ public sealed class ApprovalFlowTests : IDisposable
     }
 
     [Fact]
+    public async Task LoweredLevel_PendingCardCanOnlyBeDenied()
+    {
+        // /self-review security 8ccecae84d C1: 카드가 뜬 뒤 곁칸에서 명령 아래로 내리면 허용 · 항상 허용을 받지 않는다
+        var room = CommandRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "approve please");
+        var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        _store.Update(room.Id, r => r with { Level = PermissionLevel.Read });
+        Assert.Contains("거절만", _hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null));
+        Assert.Contains("거절만", _hub.Decide(room.Id, card.Id, ApprovalChoice.AlwaysAllow, null));
+        Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Deny, null));
+        await Until(ch, e => e.Kind == "idle");
+        Assert.Empty(_store.Get(room.Id)!.AllowRules);
+    }
+
+    [Fact]
+    public async Task LoweredLevel_DeniesNewAskWithoutCard()
+    {
+        // 내리기는 실행 중인 턴에도 바로: 그 뒤 오는 명령 승인 요청은 카드 없이 거절 (시작 때 단계를 읽었든 아니든 같은 결과)
+        var room = CommandRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "approve please");
+        _store.Update(room.Id, r => r with { Level = PermissionLevel.Read });
+        var seen = await Until(ch, e => e.Kind == "idle");
+        Assert.DoesNotContain(seen, e => e.Kind == "approval");
+        Assert.Contains(seen, e => e.Kind == "denied");
+    }
+
+    [Fact]
     public async Task AbortedRequest_ClosesCardAsCut()
     {
         // 실행 쪽이 먼저 끊긴 경우 (요청 취소) — 카드는 "끊김"으로 닫히고 거절로 끝난다.

@@ -37,6 +37,20 @@ public sealed class StoreAndGuardTests : IDisposable
     }
 
     [Fact]
+    public void RoomStore_EffortAndLevelChange_SurviveReload()
+    {
+        // Claude 앱 기능 B: 만들 때 강도, 곁칸에서 모델 · 강도 · 단계 바꾸기 — 다시 읽어도 그대로, 옛 방(필드 없음)은 null
+        var path = Path.Combine(_dir, "rooms-effort.json");
+        var store = new RoomStore(path);
+        var room = store.Create("w", PermissionLevel.Read, "opus", null, effort: "high");
+        Assert.Equal("high", new RoomStore(path).Get(room.Id)!.Effort);
+        store.Update(room.Id, r => r with { Model = "haiku", Effort = null, Level = PermissionLevel.Command });
+        var again = new RoomStore(path).Get(room.Id)!;
+        Assert.Equal(("haiku", (string?)null, PermissionLevel.Command), (again.Model, again.Effort, again.Level));
+        Assert.Null(store.Create("w", PermissionLevel.Chat, "opus", null).Effort);
+    }
+
+    [Fact]
     public void RoomStore_BrokenFile_IsNotOverwritten()
     {
         var path = Path.Combine(_dir, "rooms.json");

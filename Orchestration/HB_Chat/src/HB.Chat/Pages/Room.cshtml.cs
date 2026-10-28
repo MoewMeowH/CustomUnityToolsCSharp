@@ -19,6 +19,9 @@ public sealed class RoomModel(
 {
     public Room Room { get; private set; } = null!;
 
+    /// <summary>고를 수 있는 모델 (설정 Chat:Models — 곁칸 방 설정 select).</summary>
+    public IReadOnlyList<string> Models => options.Value.ModelList;
+
     /// <summary>이 방 스티커 (4차 D2): 방에 고른 팩 → 전체 설정 → 기본. 말풍선 · 실행 스티커 · 표정 그림이 같이 쓴다.</summary>
     public StickerCatalog Stickers => _stickers ??= packs.ForRoom(Room);
     private StickerCatalog? _stickers;
@@ -199,6 +202,46 @@ public sealed class RoomModel(
         return result;
     }
 
+    /// <summary>
+    /// 방 설정 (Claude 앱 기능 B, 곁칸 방 정보): 모델(허용 목록) · 추론 강도(빈 값 = 기본) · 권한 단계(올리기 · 내리기 모두 — 결정).
+    /// 다음 실행부터 반영된다 — 실행 중인 턴은 그대로. 머리 배지 · 목록이 바뀌게 열린 화면이 방을 다시 연다.
+    /// </summary>
+    public IActionResult OnPostSettings(string id, string? model, string? effort, PermissionLevel? level, PermissionLevel? expectedLevel)
+    {
+        if (!RoomStore.IsRoomId(id)) return NotFound();
+        if (model is null || !options.Value.ModelList.Contains(model, StringComparer.Ordinal) || !ClaudeArgs.IsSafeName(model))
+            return BadRequest("허용 목록에 없는 모델입니다.");
+        var (cleanEffort, effortError) = RoomEffort.Clean(effort);
+        if (effortError is not null) return BadRequest(effortError);
+        if (level is not { } lv || !Enum.IsDefined(lv)) return BadRequest("알 수 없는 권한 단계입니다.");
+        // 폼을 그릴 때의 단계와 지금 단계가 다르면 거절 — 다른 탭 · 옛 곁칸이 방금 내린 단계를 다시 올리지 않게 (/self-review security 8ccecae84d C2).
+        // 비교는 잠금 안(Update)에서 한다
+        var stale = false;
+        IActionResult result;
+        try
+        {
+            var updated = store.Update(id, r =>
+            {
+                if (r.Level != expectedLevel)
+                {
+                    stale = true;
+                    return r;
+                }
+                return r with { Model = model, Effort = cleanEffort, Level = lv };
+            });
+            if (updated is null) return NotFound();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            return BadRequest($"방 설정을 바꾸지 못했습니다: {ex.Message}");
+        }
+        if (stale) return new ConflictObjectResult("다른 곳에서 이 방 권한이 바뀌었습니다 — 곁칸을 닫았다 다시 열어 지금 값을 본 뒤 바꾸세요.");
+        hub.Touch(id);
+        result = new JsonResult(new { ok = true });
+        if (result is JsonResult) hub.ProfilesChanged([id]);
+        return result;
+    }
+
     /// <summary>휴지통으로 (30일 뒤 완전히 지움). 실행 중인 방은 먼저 중지해야 한다 — 기다리는 승인 · 큐가 버려지지 않게.</summary>
     public IActionResult OnPostTrash(string id)
     {
@@ -228,8 +271,9 @@ public sealed class RoomModel(
         {
             var fork = store.Create(Room.Workspace, Room.Level, Room.Model, title, forkOf: Room.SessionId,
                 forkSourceSize: transcripts.Size(Room.SessionId));
-            // 이 방에 고른 스티커 팩도 따라간다 (4차 D2 — ef2c83416c C6). "항상 허용" 규칙은 그대로 옮기지 않는다
-            if (Room.StickerPack is { } pack) store.Update(fork.Id, r => r with { StickerPack = pack });
+            // 이 방에 고른 스티커 팩 · 추론 강도도 따라간다 (4차 D2 — ef2c83416c C6). "항상 허용" 규칙은 그대로 옮기지 않는다
+            if (Room.StickerPack is not null || Room.Effort is not null)
+                store.Update(fork.Id, r => r with { StickerPack = Room.StickerPack, Effort = Room.Effort });
             hub.Touch(fork.Id);
             return new JsonResult(new { ok = true, id = fork.Id });
         }

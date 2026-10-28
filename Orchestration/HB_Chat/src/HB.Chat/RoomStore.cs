@@ -60,6 +60,30 @@ public sealed record Room
 
     /// <summary>이 방만 쓸 스티커 팩 (4차 D2, 폴더 이름). null이면 전체 설정을 따른다 (StickerPacks.Effective).</summary>
     public string? StickerPack { get; init; }
+
+    /// <summary>추론 강도 (claude --effort, <see cref="RoomEffort.Levels"/> 중 하나). null이면 인자를 넣지 않는다 — CLI 기본.</summary>
+    public string? Effort { get; init; }
+}
+
+/// <summary>추론 강도 (Claude 앱 기능 B): claude 2.1.312 --effort가 받는 값. 화면 select · 저장 · 인자 검사가 같이 쓴다.</summary>
+public static class RoomEffort
+{
+    public static readonly IReadOnlyList<string> Levels = ["low", "medium", "high", "xhigh", "max"];
+
+    /// <summary>빈 값은 null(기본), 목록 값은 그대로, 그 밖은 오류.</summary>
+    public static (string? Value, string? Error) Clean(string? effort) =>
+        string.IsNullOrWhiteSpace(effort) ? (null, null)
+        : Levels.Contains(effort.Trim(), StringComparer.Ordinal) ? (effort.Trim(), null)
+        : (null, "알 수 없는 추론 강도입니다.");
+
+    /// <summary>화면 이름.</summary>
+    public static string Name(string? effort) => effort switch
+    {
+        null => "기본",
+        "low" => "low (빠름)",
+        "max" => "max (가장 깊게)",
+        _ => effort,
+    };
 }
 
 /// <summary>지휘자 상태 한 줄: 종류(blocked · completed · review_ready …) · 상태 글 · 사용자가 할 일.</summary>
@@ -110,7 +134,8 @@ public sealed class RoomStore
     /// <summary>
     /// 새 방. forkOf가 있으면 그 세션의 대화를 이어받는 갈래 방 — 읽음 위치는 null(이어받은 말은 읽은 것으로, 켤 때 마지막 줄로 옮겨짐).
     /// </summary>
-    public Room Create(string workspace, PermissionLevel level, string model, string? title, string? forkOf = null, long? forkSourceSize = null)
+    public Room Create(string workspace, PermissionLevel level, string model, string? title, string? forkOf = null, long? forkSourceSize = null,
+        string? effort = null)
     {
         var room = new Room
         {
@@ -119,6 +144,7 @@ public sealed class RoomStore
             Workspace = workspace,
             Level = level,
             Model = model,
+            Effort = effort,
             CreatedAt = DateTimeOffset.Now,
             Title = string.IsNullOrWhiteSpace(title) ? null : title.Trim(),
             ReadUpTo = forkOf is null ? 0 : null,

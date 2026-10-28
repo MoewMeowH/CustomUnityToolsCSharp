@@ -19,9 +19,56 @@
         <input type="text" id="side-title" maxlength="200" value="@(room.Title ?? "")" placeholder="비우면 첫 말 (@Model.Title)" />
         <button class="btn" type="submit">@Icons.Svg("check") 바꾸기</button>
     </form>
+    @* 모델 · 추론 강도 · 권한 단계 (Claude 앱 기능 B): 다음 말부터 반영. 단계는 올리기 · 내리기 모두 (결정) *@
+    <form class="side-settings" id="side-settings">
+        @* 그릴 때의 단계 — 서버가 지금 값과 다르면 거절한다 (옛 곁칸이 방금 내린 단계를 다시 올리지 않게, 8ccecae84d C2) *@
+        <input type="hidden" name="expectedLevel" value="@room.Level" />
+        <label><span class="muted">모델</span>
+            <select name="model">
+                @foreach (var m in Model.Models)
+                {
+                    <option value="@m" selected="@(m == room.Model)">@m</option>
+                }
+                @if (!Model.Models.Contains(room.Model))
+                {
+                    <option value="@room.Model" selected disabled>@room.Model (허용 목록에 없음)</option>
+                }
+            </select>
+        </label>
+        <label><span class="muted">추론 강도</span>
+            <select name="effort">
+                <option value="" selected="@(room.Effort is null)">@RoomEffort.Name(null)</option>
+                @foreach (var e in RoomEffort.Levels)
+                {
+                    <option value="@e" selected="@(e == room.Effort)">@RoomEffort.Name(e)</option>
+                }
+            </select>
+        </label>
+        <label><span class="muted">권한</span>
+            <select name="level">
+                @foreach (var lv in Enum.GetValues<PermissionLevel>())
+                {
+                    <option value="@lv" selected="@(lv == room.Level)" title="@RoomRules.Describe(lv)">@RoomRules.LevelName(lv)</option>
+                }
+            </select>
+        </label>
+        <button class="btn" type="submit">@Icons.Svg("check") 바꾸기</button>
+        <p class="muted side-settings-note">다음 말부터 적용됩니다 — 명령 아래로 내리면 실행 중인 턴의 명령도 바로 거절됩니다. @RoomRules.Describe(room.Level)</p>
+        @* 명령이 아닌 방에 남은 "항상 허용" 규칙: 다시 명령으로 올리면 묻지 않고 쓰인다 — 내용을 보인다 (8ccecae84d C3) *@
+        @if (room.Level != PermissionLevel.Command && room.AllowRules.Count > 0)
+        {
+            <div class="side-settings-note warn-rules">
+                <span>다시 명령으로 올리면 승인 없이 쓰일 '항상 허용' 규칙 @(room.AllowRules.Count)개:</span>
+                <ul>
+                    @foreach (var rule in room.AllowRules)
+                    {
+                        <li class="mono">@rule</li>
+                    }
+                </ul>
+            </div>
+        }
+    </form>
     <dl class="side-info">
-        <dt>권한</dt><dd><span class="badge">@RoomRules.LevelName(room.Level)</span> <span class="muted">@RoomRules.Describe(room.Level)</span></dd>
-        <dt>모델</dt><dd class="mono">@room.Model</dd>
         <dt>작업 폴더</dt><dd>@room.Workspace <span class="mono muted">@(Model.WorkspacePath ?? "(허용 목록에 없음)")</span></dd>
         <dt>세션</dt><dd class="mono" title="이 앱 전용 세션 — Claude 앱 · CLI에서 이어 쓰지 마세요">@room.SessionId</dd>
         <dt>컨텍스트</dt><dd>@(room.ContextTokens is { } t ? RoomModel.Tokens(t) + (room.ContextWindow is > 0 and var w ? " / " + RoomModel.Tokens(w) : "") : "—")</dd>

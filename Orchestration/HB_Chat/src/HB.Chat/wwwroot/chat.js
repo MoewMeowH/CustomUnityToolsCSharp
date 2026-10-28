@@ -741,6 +741,15 @@
                     packSel.value = packWas;
                     packSel.disabled = false;
                 });
+                // 모델 · 추론 강도 · 권한 (Claude 앱 기능 B): 다음 말부터. 성공하면 방을 다시 열어 머리 배지 · 입력칸 안내를 새 값으로
+                const settings = $("#side-settings");
+                settings?.addEventListener("submit", async (e) => {
+                    e.preventDefault();
+                    const button = settings.querySelector("button[type=submit]");
+                    button.disabled = true;
+                    if (await post("Settings", new FormData(settings))) { reopenRoom(roomId); return; }
+                    button.disabled = false;
+                });
                 showTab(sideTab);
             } catch {
                 if (!disposed) sidePlaceholder("곁칸을 불러오지 못했습니다 — 닫았다 다시 열어 보세요.");

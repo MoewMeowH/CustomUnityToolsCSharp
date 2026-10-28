@@ -22,6 +22,9 @@ public sealed record RunSpec(
 
     /// <summary>그 방 첨부 폴더 (절대 경로, 계획서 2-2 d). 대화 단계가 아니면 --add-dir로 더해 Read로 열 수 있게 한다.</summary>
     public string? AttachDir { get; init; }
+
+    /// <summary>추론 강도 (--effort, <see cref="RoomEffort.Levels"/>). null이면 넣지 않는다.</summary>
+    public string? Effort { get; init; }
 }
 
 /// <summary>
@@ -62,6 +65,12 @@ public static partial class ClaudeArgs
             "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--include-partial-messages", "--verbose",
             "--model", spec.Model,
         };
+        // 추론 강도 (Claude 앱 기능 B): 목록 값만 — 모델처럼 인자에 그대로 들어가므로 저장 때 검사했어도 다시 본다
+        if (spec.Effort is { } effort)
+        {
+            if (!RoomEffort.Levels.Contains(effort, StringComparer.Ordinal)) throw new ArgumentException($"알 수 없는 추론 강도: {effort}");
+            args.AddRange(["--effort", effort]);
+        }
         // 첨부 폴더: 작업 폴더 밖이라 없으면 Read가 거절된다 (2-2 0번 실측). 대화 단계는 도구가 없어 넣지 않는다 (사용자 결정 2).
         // --add-dir는 여러 값을 받으므로 바로 뒤에 다른 플래그가 온다.
         string? attachDeny = null;
