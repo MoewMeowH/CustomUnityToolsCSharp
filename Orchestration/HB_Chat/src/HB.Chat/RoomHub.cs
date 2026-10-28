@@ -1190,6 +1190,28 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         }
     }
 
+    /// <summary>
+    /// 실행 시작(init)의 MCP 서버 상태 · MCP 도구 이름을 방에 남기고 화면에 "mcp" 알림 — 연결 탭이 첫 턴 도중에도, 앱을 다시 켠 뒤에도 상태를 보인다
+    /// (사용자 확인 2026-10-29). 저장에 실패해도 실행은 그대로.
+    /// </summary>
+    private void KeepMcpStatus(string roomId, Live live, int generation, InitEvent init)
+    {
+        try
+        {
+            store.Update(roomId, r => r with
+            {
+                McpStatus = [.. init.McpServers.Select(s => new McpServerState(s.Name, s.Status))],
+                McpTools = [.. init.Tools.Where(t => t.StartsWith("mcp__", StringComparison.Ordinal))],
+                McpStatusAt = DateTimeOffset.Now,
+            });
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException) { }
+        lock (live.Gate)
+        {
+            if (live.Generation == generation) Broadcast(live, new LiveEvent("mcp"));
+        }
+    }
+
     /// <summary>Unity 캡처 도구 이름 앞부분 — capture_game_view · capture_scene_view · capture_editor_element · capture_runtime_element (0단계 명령 목록).</summary>
     public const string UnityCapturePrefix = "mcp__" + McpConfigFile.UnityServer + "__capture_";
 
@@ -1289,7 +1311,11 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 return;
             }
             // 입력칸 '/' 자동 완성 (Claude 앱 기능 A): 이 방 실행이 알려 준 명령 · 스킬 · 플러그인을 기억한다 (앱을 다시 켜면 첫 실행 전에는 없음)
-            if (ev is InitEvent commands) _commandSets[room.Id] = commands;
+            if (ev is InitEvent commands)
+            {
+                _commandSets[room.Id] = commands;
+                KeepMcpStatus(room.Id, live, generation, commands);
+            }
             if (unityName is not null) KeepUnityShots(room.Id, ev, captures);
             // 할 일 도구를 쓴 뒤의 출력이면 그 사이 도구가 돌아 파일이 바뀌었을 수 있다 — 잠금 밖에서 읽는다 (3차 b).
             // 잦은 stream_event(글 · 도구 입력 · 생각 조각)에서는 읽지 않고, 300ms 안에 다시 읽지 않는다 — 마지막 상태는 턴 끝 읽기가 맞춘다 (/self-review ea28ba9185 C1).

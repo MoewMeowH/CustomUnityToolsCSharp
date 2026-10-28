@@ -459,13 +459,14 @@ public sealed class RoomHubTests : IDisposable
 
         var seen = await Until(ch, e => e.Kind == "idle");
         var kinds = seen.Select(e => e.Kind).ToList();
-        Assert.Equal(["snapshot", "start", "tool", "denied", "delta", "delta", "status", "end", "idle"], kinds);
+        // mcp: 실행 시작(init)의 연결 상태를 저장했다는 알림 — 곁칸 연결 탭이 다시 받는다
+        Assert.Equal(["snapshot", "start", "mcp", "tool", "denied", "delta", "delta", "status", "end", "idle"], kinds);
         Assert.Equal("hello there", seen[1].Prompt);
-        Assert.Equal("Read", seen[2].Text);
-        Assert.Equal("notes.md", seen[2].Detail); // 칩 대상은 파일 이름만 (3차 b)
+        Assert.Equal("Read", seen[3].Text);
+        Assert.Equal("notes.md", seen[3].Detail); // 칩 대상은 파일 이름만 (3차 b)
         Assert.Equal("said hello", seen.Single(e => e.Kind == "status").Status!.Detail);
         Assert.Null(seen.Single(e => e.Kind == "status").Status!.NeedsAction); // 빈 글은 없음으로
-        Assert.StartsWith("Write:", seen[3].Text);
+        Assert.StartsWith("Write:", seen[4].Text);
         Assert.Equal("Hello", string.Concat(seen.Where(e => e.Kind == "delta").Select(e => e.Text)));
         var end = seen.Single(e => e.Kind == "end");
         Assert.True(end.Ok);
@@ -716,6 +717,21 @@ public sealed class RoomHubTests : IDisposable
         Assert.All(shots, shot => Assert.Contains("capture_game_view", shot.Text));
         Assert.All(shots, shot => Assert.NotNull(RoomShots.PathOf(Path.Combine(_dir, "data"), room.Id, shot.Image)));
         Assert.Contains(shots, shot => shot.Image!.EndsWith(".jpg", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Init_SavesMcpStatus_AndTellsScreen()
+    {
+        // 연결 탭: 실행 시작(init)의 상태를 방에 남기고 "mcp" 알림 — 첫 턴 도중 · 앱을 다시 켠 뒤에도 보이게 (사용자 확인 2026-10-29)
+        var room = NewRoom();
+        Assert.Null(room.McpStatusAt);
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "hello");
+        var seen = await Until(ch, e => e.Kind == "idle");
+        var mcp = seen.FindIndex(e => e.Kind == "mcp");
+        Assert.True(mcp >= 0);
+        Assert.True(mcp < seen.FindIndex(e => e.Kind == "end")); // 턴 끝 전에
+        Assert.NotNull(_store.Get(room.Id)!.McpStatusAt);
     }
 
     [Fact]

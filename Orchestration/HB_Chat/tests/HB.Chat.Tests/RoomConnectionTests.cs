@@ -262,6 +262,22 @@ public sealed class RoomConnectionTests : IDisposable
     }
 
     [Fact]
+    public void RoomStore_KeepsMcpStatus_AcrossReload()
+    {
+        var path = Path.Combine(Data, "rooms.json");
+        var store = new RoomStore(path);
+        var room = store.Create("ws", PermissionLevel.Read, "opus", null);
+        store.Update(room.Id, r => r with
+        {
+            McpStatus = [new McpServerState("notion", "connected")], McpTools = ["mcp__notion__search"], McpStatusAt = DateTimeOffset.Now,
+        });
+        var again = new RoomStore(path).Get(room.Id)!; // 앱을 다시 켬
+        Assert.Equal([new McpServerState("notion", "connected")], again.McpStatus);
+        Assert.Equal(["mcp__notion__search"], again.McpTools);
+        Assert.NotNull(again.McpStatusAt);
+    }
+
+    [Fact]
     public void Parser_InitKeepsToolNames()
     {
         var init = Assert.IsType<InitEvent>(StreamParser.Parse(

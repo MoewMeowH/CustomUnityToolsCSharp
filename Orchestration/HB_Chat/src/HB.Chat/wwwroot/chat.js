@@ -1687,6 +1687,9 @@
                 case "status":
                     showStatus(ev.status);
                     break;
+                case "mcp":
+                    loadSide(); // 실행 시작의 연결 상태 — 연결 탭이 턴 끝을 기다리지 않게 (곁칸이 닫혀 있으면 아무것도 안 함)
+                    break;
                 case "denied":
                 case "retry":
                     // 카드 없는 호스트 거절(logged)은 기록에도 남아 턴 끝에 제자리 방 기록 줄로 바뀐다 — 승인 결과 줄처럼 지운다 (/self-review e464ec29ba C6)

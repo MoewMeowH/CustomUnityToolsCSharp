@@ -46,12 +46,11 @@ public sealed class RoomModel(
             var o = options.Value;
             var room = Room;
             var ws = WorkspacePath;
-            var commands = hub.Commands(room.Id);
-            var init = commands?.McpServers ?? [];
-            string? Init(string name) => init.FirstOrDefault(s => s.Name == name) is { Name: not null } s ? s.Status : null;
+            // 마지막 실행 init의 상태 · 도구 이름 — 방에 저장돼 앱을 다시 켜도 남는다 (RoomHub.KeepMcpStatus)
+            string? Init(string name) => room.McpStatus.FirstOrDefault(s => s.Name == name)?.Status;
             IReadOnlyList<(string, string?)> InitTools(string name) =>
             [
-                .. (commands?.Tools ?? []).Where(t => t.StartsWith($"mcp__{name}__", StringComparison.Ordinal))
+                .. room.McpTools.Where(t => t.StartsWith($"mcp__{name}__", StringComparison.Ordinal))
                     .Select(t => (t[$"mcp__{name}__".Length..], (string?)null)).Order(),
             ];
             string Transport(string name) => ws is not null && McpConfigFile.Entry(ws, name)?["url"] is not null ? "http" : "stdio";

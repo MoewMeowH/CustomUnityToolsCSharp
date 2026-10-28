@@ -78,7 +78,18 @@ public sealed record Room
 
     /// <summary>연결한 Unity 프로젝트 이름 (설정에 등록한 것). 명령 방에서만 그 실행에 `unity mcp`가 붙는다 (결정 "명령 방만").</summary>
     public string? UnityProject { get; init; }
+
+    /// <summary>
+    /// 마지막 실행 init의 MCP 서버 상태 · MCP 도구 이름 · 그 시각 — 연결 탭이 앱을 다시 켠 뒤에도 보이게 (사용자 확인 2026-10-29 "첫 실행 때도 안 보임").
+    /// 실행 시작(init)마다 바꾼다.
+    /// </summary>
+    public IReadOnlyList<McpServerState> McpStatus { get; init; } = [];
+    public IReadOnlyList<string> McpTools { get; init; } = [];
+    public DateTimeOffset? McpStatusAt { get; init; }
 }
+
+/// <summary>MCP 서버 하나의 실행 상태 (init mcp_servers 한 항목: connected · failed · needs-auth …).</summary>
+public sealed record McpServerState(string Name, string Status);
 
 /// <summary>추론 강도 (Claude 앱 기능 B): claude 2.1.312 --effort가 받는 값. 화면 select · 저장 · 인자 검사가 같이 쓴다.</summary>
 public static class RoomEffort

@@ -185,8 +185,18 @@
                     else
                     {
                         <span class="mcp-dot @(c.Init switch { "connected" => "ok", null => "", _ => "bad" })"></span>
-                        @* 마지막 실행에 없던 연결(막 켬 · 앱을 다시 켬)은 다음 실행부터 붙는다 (지휘자 검토 K6) *@
-                        <span>@(c.Init switch { "connected" => "연결됨", null => "다음 실행부터 붙습니다 (상태는 그 뒤에)", var s => s })</span>
+                        @* 상태는 마지막 실행 init (방에 저장 — 앱을 다시 켜도 남음). 마지막 실행에 없던 연결(막 켬)은 다음 실행부터 붙는다 (지휘자 검토 K6) *@
+                        <span>@(c.Init switch
+                        {
+                            "connected" => "연결됨",
+                            null when room.McpStatusAt is null => "아직 상태 없음 — 이 방에서 말을 보내면 보입니다",
+                            null => "다음 실행부터 붙습니다",
+                            var s => s,
+                        })</span>
+                        @if (c.Init is not null && room.McpStatusAt is { } at)
+                        {
+                            <span class="muted" title="이 방 마지막 실행이 시작될 때 claude가 알려 준 상태">(마지막 실행 @at.ToLocalTime().ToString("MM-dd HH:mm"))</span>
+                        }
                     }
                     @if (probe is not null)
                     {
