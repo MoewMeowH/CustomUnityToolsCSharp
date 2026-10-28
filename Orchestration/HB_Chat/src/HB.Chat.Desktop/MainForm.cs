@@ -31,8 +31,8 @@ public sealed class MainForm : Form
 
     private readonly DesktopSettings _settings;
     private readonly string? _startWarning;
-    private readonly EventWaitHandle _show;
-    private RegisteredWaitHandle? _showWait;
+    private readonly EventWaitHandle _show, _exitSignal;
+    private RegisteredWaitHandle? _showWait, _exitWait;
     private readonly Uri _chatUrl, _dashboardUrl;
     private readonly NavigationPolicy _policy;
     private readonly ToolStripButton _chatTab = new("채팅"), _dashTab = new("대시보드");
@@ -51,11 +51,22 @@ public sealed class MainForm : Form
     private string? _dashPending;
     private volatile bool _closing;
 
-    public MainForm(DesktopSettings settings, string? startWarning, EventWaitHandle show)
+    // 트레이 · 알림 (2-3 b)
+    private readonly TrayIcons _trayIcons = new();
+    private readonly NotifyIcon _tray;
+    private readonly ContextMenuStrip _trayMenu = new();
+    private RoomWatcher? _watcher;
+    private Dictionary<string, RoomState>? _rooms;
+    private readonly FailureMarks _unseenFailures = new();
+    private string? _balloonRoom;
+    private bool _exiting, _hintShown, _confirming;
+
+    public MainForm(DesktopSettings settings, string? startWarning, EventWaitHandle show, EventWaitHandle exit)
     {
         _settings = settings;
         _startWarning = startWarning;
         _show = show;
+        _exitSignal = exit;
         _chatUrl = new Uri(settings.ChatUrl); // DesktopSettings.Load가 루프백 http만 남긴다
         _dashboardUrl = new Uri(settings.DashboardUrl);
         _policy = new NavigationPolicy(_chatUrl, _dashboardUrl);
@@ -81,12 +92,23 @@ public sealed class MainForm : Form
         Controls.Add(body);
         Controls.Add(bar);
         UpdateTabs();
+
+        // 트레이 (2-3 b): 닫기(X)는 여기로 숨김, 메뉴 열기 · 끝내기, 두 번 누르면 열기, 풍선을 누르면 그 방
+        _trayMenu.Items.Add("열기", null, (_, _) => BringUp());
+        _trayMenu.Items.Add(new ToolStripSeparator());
+        _trayMenu.Items.Add("끝내기", null, (_, _) => Exit());
+        _tray = new NotifyIcon { Icon = _trayIcons[TrayLevel.Idle], Text = "HB Chat", ContextMenuStrip = _trayMenu, Visible = true };
+        _tray.DoubleClick += (_, _) => BringUp();
+        _tray.BalloonTipClicked += (_, _) => OpenRoom(_balloonRoom);
+        // 작업 표시줄 · Alt-Tab으로 앞에 오면 보고 있는 방의 안 본 실패를 지운다 (0f0b6007a4 C3)
+        Activated += (_, _) => UpdateTray();
     }
 
     protected override async void OnLoad(EventArgs e)
     {
         base.OnLoad(e);
-        _showWait = ThreadPool.RegisterWaitForSingleObject(_show, (_, _) => OnShowSignal(), null, -1, false);
+        _showWait = ThreadPool.RegisterWaitForSingleObject(_show, (_, _) => OnShowSignal(BringUp), null, -1, false);
+        _exitWait = ThreadPool.RegisterWaitForSingleObject(_exitSignal, (_, _) => OnShowSignal(Exit), null, -1, false);
         if (_startWarning is not null) SetStatus(_startWarning);
         try
         {
@@ -149,7 +171,12 @@ public sealed class MainForm : Form
         if (server.Kind == ServerKind.Chat)
         {
             _chatError = error;
-            if (error is null) _chatView.CoreWebView2.Navigate(_chatUrl.AbsoluteUri);
+            if (error is null)
+            {
+                _chatView.CoreWebView2.Navigate(_chatUrl.AbsoluteUri);
+                _watcher = new RoomWatcher(_chatUrl, OnRooms, OnConnection, SynchronizationContext.Current!);
+                _watcher.Start();
+            }
         }
         else
         {
@@ -216,6 +243,8 @@ public sealed class MainForm : Form
             Trace($"{tab} 외부 프로토콜 실행 막음 {Short(e.Uri)}");
         };
         core.PermissionRequested += (_, e) => e.State = CoreWebView2PermissionState.Deny;
+        // 그 방을 열면(방 전환은 pushState라 SourceChanged로 온다) 안 본 실패 표시를 지운다
+        if (tab == AppTab.Chat) core.SourceChanged += (_, _) => UpdateTray();
         core.ProcessFailed += (_, e) => BeginInvoke(() => SetStatus(e.ProcessFailedKind == CoreWebView2ProcessFailedKind.BrowserProcessExited
             ? "화면 엔진이 끝났습니다 — 앱을 다시 켜세요" // 브라우저 프로세스는 새로 고침으로 돌아오지 않는다 (26d478170f C6)
             : $"화면 프로세스 오류({e.ProcessFailedKind}) — F5로 새로 고침"));
@@ -252,6 +281,7 @@ public sealed class MainForm : Form
             else if (tab == AppTab.Dashboard) _dashPending = url; // 대시보드가 뜨면 그 주소로
         }
         UpdateTabs();
+        UpdateTray(); // 채팅 탭으로 돌아오면 보고 있는 방의 안 본 실패를 지운다 (0f0b6007a4 C3)
     }
 
     private void UpdateTabs()
@@ -267,13 +297,13 @@ public sealed class MainForm : Form
 
     private void SetStatus(string text) => _status.Text = text;
 
-    /// <summary>두 번째 실행 신호 (스레드 풀). 창이 닫히는 중이거나 핸들이 없으면 버린다 (26d478170f C7).</summary>
-    private void OnShowSignal()
+    /// <summary>두 번째 실행 신호(앞으로 · --exit) (스레드 풀). 창이 닫히는 중이거나 핸들이 없으면 버린다 (26d478170f C7).</summary>
+    private void OnShowSignal(Action action)
     {
         if (_closing || !IsHandleCreated) return;
         try
         {
-            BeginInvoke(BringUp);
+            BeginInvoke(action);
         }
         catch (InvalidOperationException)
         {
@@ -283,9 +313,90 @@ public sealed class MainForm : Form
 
     private void BringUp()
     {
-        if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
         Show();
+        if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
         Activate();
+        UpdateTray();
+    }
+
+    // ---- 알림 · 트레이 (2-3 b) ----
+
+    /// <summary>`/events` 신호마다 받은 방 목록 (UI 스레드). 앞 목록과 비교해 알리고 트레이를 바꾼다.</summary>
+    private void OnRooms(IReadOnlyList<RoomState> rooms)
+    {
+        if (_closing) return;
+        var viewing = ViewingRoom();
+        var notices = Notices.Diff(_rooms, rooms, viewing);
+        _rooms = rooms.ToDictionary(r => r.Id);
+        _unseenFailures.Update(notices, rooms, viewing);
+        UpdateTray();
+        if (notices.Count == 0) return;
+        Trace("알림 " + string.Join(", ", notices.Select(n => $"{n.Kind} {n.RoomId}"))); // 방 ID만 (제목은 남기지 않음)
+        var (title, text) = Notices.Balloon(notices);
+        _balloonRoom = Notices.RoomToOpen(notices);
+        var icon = notices.Any(n => n.Kind == NoticeKind.Approval) ? ToolTipIcon.Warning
+            : notices.Any(n => n.Kind == NoticeKind.Failed) ? ToolTipIcon.Error : ToolTipIcon.Info;
+        _tray.ShowBalloonTip(5000, title, text.Length > 0 ? text : "(제목 없음)", icon);
+    }
+
+    /// <summary>
+    /// 연결이 끊기면(서버 종료 · 다시 켜는 중) 앞 목록을 버리고 트레이를 "연결 끊김"으로. 다시 붙은 뒤 첫 목록은 조용히 받는다 —
+    /// 서버를 다시 켜서 끊긴 턴을 "답 끝"으로 알리지 않게 (0f0b6007a4 C4).
+    /// </summary>
+    private void OnConnection(bool connected)
+    {
+        if (_closing || connected || _rooms is null) return;
+        _rooms = null;
+        _trayLevel = TrayLevel.Idle;
+        _tray.Icon = _trayIcons[TrayLevel.Idle];
+        _tray.Text = TrayStatus.Disconnected;
+        Trace("채팅 서버 연결 끊김");
+    }
+
+    /// <summary>트레이 아이콘 · 도움말. 지금 보고 있는 방의 실패는 본 것으로.</summary>
+    private void UpdateTray()
+    {
+        if (_closing || _rooms is null) return;
+        var rooms = _rooms.Values.ToList();
+        _unseenFailures.Update([], rooms, ViewingRoom());
+        var level = TrayStatus.Level(rooms, _unseenFailures.Ids);
+        if (level != _trayLevel) Trace($"트레이 {_trayLevel} → {level}");
+        _trayLevel = level;
+        _tray.Icon = _trayIcons[level];
+        _tray.Text = TrayStatus.Tooltip(rooms);
+    }
+
+    private TrayLevel _trayLevel = TrayLevel.Idle;
+
+    /// <summary>사용자가 지금 보고 있는 채팅 방 (창이 앞에 있고 채팅 탭이 그 방일 때만). 아니면 null — 그 방도 알린다.</summary>
+    private string? ViewingRoom() =>
+        Visible && WindowState != FormWindowState.Minimized && ActiveForm == this && _tab == AppTab.Chat && _chatView.CoreWebView2 is { } core
+            ? RoomIdOf(core.Source, _chatUrl)
+            : null;
+
+    /// <summary>채팅 주소의 `/Room/{12자리 16진}`이면 방 ID.</summary>
+    internal static string? RoomIdOf(string? url, Uri chatUrl)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var u) || !NavigationPolicy.SameOrigin(u, chatUrl)) return null;
+        var parts = u.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return parts is ["Room", var id] && IsRoomId(id) ? id : null;
+    }
+
+    internal static bool IsRoomId(string? id) => id is { Length: 12 } && id.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
+
+    /// <summary>풍선을 누르면 큰 창을 열고 그 방으로. 방 ID는 서버가 준 값이지만 모양을 한 번 더 본다.</summary>
+    private void OpenRoom(string? roomId)
+    {
+        BringUp();
+        if (IsRoomId(roomId)) ShowTab(AppTab.Chat, new Uri(_chatUrl, "/Room/" + roomId).AbsoluteUri);
+    }
+
+    /// <summary>트레이 메뉴 끝내기 — 진짜로 끈다 (도는 턴이 있으면 OnFormClosing이 묻는다).</summary>
+    private void Exit()
+    {
+        if (_confirming) return; // 이미 묻는 중 (0f0b6007a4 C2)
+        _exiting = true;
+        Close();
     }
 
     /// <summary>이동 결정 기록 (logs/desktop.log) — 막거나 옮긴 것만.</summary>
@@ -317,13 +428,46 @@ public sealed class MainForm : Form
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
-        // 이 앱이 띄운 채팅 서버에 도는 턴이 있으면 묻는다 — 끄면 서버와 claude가 같이 끝나 그 턴이 멈춘다.
-        if (_chatServer is { Owned: true } && AnyRunning()
-            && MessageBox.Show(this, "실행 중인 턴이 있습니다. 끄면 그 턴이 멈춥니다. 끌까요?", "HB Chat",
-                MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+        // 묻는 창이 떠 있는 동안 또 닫기가 오면(트레이 끝내기 · --exit · 닫기) 무시한다 — 확인 창이 겹치지 않게 (0f0b6007a4 C2)
+        if (_confirming && e.CloseReason != CloseReason.WindowsShutDown)
         {
             e.Cancel = true;
             return;
+        }
+        // 닫기(X)는 트레이로 숨긴다 (2-3 b). 끝내기는 트레이 메뉴 · Windows 종료.
+        if (!_exiting && e.CloseReason == CloseReason.UserClosing)
+        {
+            e.Cancel = true;
+            Hide();
+            if (!_hintShown)
+            {
+                _hintShown = true;
+                _balloonRoom = null;
+                _tray.ShowBalloonTip(4000, "HB Chat", "트레이에서 계속 돌아갑니다 — 끝내려면 트레이 메뉴의 끝내기", ToolTipIcon.None);
+            }
+            return;
+        }
+        // 이 앱이 띄운 채팅 서버에 도는 턴이 있으면 묻는다 — 끄면 서버와 claude가 같이 끝나 그 턴이 멈춘다. Windows 종료 때는 묻지 않는다.
+        if (e.CloseReason != CloseReason.WindowsShutDown && _chatServer is { Owned: true } && AnyRunning())
+        {
+            if (!Visible) BringUp();
+            _confirming = true;
+            DialogResult answer;
+            try
+            {
+                answer = MessageBox.Show(this, "실행 중인 턴이 있습니다. 끄면 그 턴이 멈춥니다. 끌까요?", "HB Chat",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+            }
+            finally
+            {
+                _confirming = false;
+            }
+            if (answer != DialogResult.Yes)
+            {
+                e.Cancel = true;
+                _exiting = false;
+                return;
+            }
         }
         _closing = true;
         var bounds = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
@@ -350,7 +494,13 @@ public sealed class MainForm : Form
         {
             _closing = true;
             _showWait?.Unregister(null);
+            _exitWait?.Unregister(null);
             _cts.Cancel();
+            _watcher?.Dispose();
+            _tray.Visible = false; // 안 지우면 트레이에 빈 아이콘이 남는다
+            _tray.Dispose();
+            _trayMenu.Dispose(); // NotifyIcon.Dispose가 메뉴는 해제하지 않는다 (0f0b6007a4 C10)
+            _trayIcons.Dispose();
             _chatView.Dispose();
             _dashView.Dispose();
             _http.Dispose();
