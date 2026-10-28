@@ -1,4 +1,5 @@
 @model RoomModel
+@inject ProfileView Profiles
 @*
     오른쪽 방 칸 (계획서 2-2 a). 첫 화면(Room.cshtml)과 방 전환(?handler=Pane)이 같이 쓴다. 동작은 wwwroot/chat.js의 mountRoom.
 *@
@@ -8,7 +9,7 @@
     var faceUrl = Model.Faces.Url(face);
 }
 <div class="room" data-room="@room.Id" data-title="@Model.Title" data-read-up-to="@(room.ReadUpTo ?? -1)"
-     data-faces="@Model.Faces.Json()" data-face="@face" data-face-left="@Model.EndFaceLeftMs" data-end-face-ms="@RoomModel.EndFaceMs">
+     data-faces="@Model.Faces.Json()" data-profiles="@Profiles.Json()" data-face="@face" data-face-left="@Model.EndFaceLeftMs" data-end-face-ms="@RoomModel.EndFaceMs">
     @* 가운데(머리 · 말 · 입력칸) + 오른쪽 곁칸 (3차 c) *@
     <div class="room-main">
     <section class="room-head">
@@ -16,7 +17,7 @@
         @* 지휘자 표정 (계획서 2-2 b): 상태마다 스티커 그림, 그림이 없으면 글자 아바타 *@
         <div class="avatar face" id="face">
             <img id="face-img" alt="" src="@faceUrl" @(faceUrl is null ? "hidden" : null) />
-            <span id="face-letter" @(faceUrl is null ? null : "hidden")>C</span>
+            <span id="face-letter" @(faceUrl is null ? null : "hidden")>@Profiles.Letter(ProfileStore.Conductor, Profiles.ConductorName)</span>
         </div>
         <div class="head-title">
             <h2 id="room-title" title="눌러서 이름 바꾸기">@Model.Title</h2>

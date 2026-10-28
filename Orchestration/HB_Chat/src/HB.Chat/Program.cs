@@ -45,6 +45,9 @@ builder.Services.AddSingleton(sp =>
     };
 });
 builder.Services.AddSingleton<RoomList>();
+// 주체별 프로필 (3차 e): 데이터 폴더 profiles.json + profiles/ 그림
+builder.Services.AddSingleton(sp => new ProfileStore(sp.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder));
+builder.Services.AddSingleton<ProfileView>();
 builder.Services.AddSingleton<FaceCatalog>();
 builder.Services.AddSingleton<RoomRuns>();
 
@@ -110,17 +113,21 @@ app.UseSameOriginGuard();
 // 위젯 (2-2 f): 말풍선 안 격리 iframe(srcdoc)이 스스로 다른 주소로 이동하지 못하게 (위젯 글을 밖으로 실어 나르는 길).
 // srcdoc은 가져오기가 아니라 막히지 않는다. 이 앱 화면에는 다른 iframe이 없다.
 app.UseWidgetCsp();
-// 첨부 올리기만 본문 상한을 첨부 상한 + 여유로 — 폼 바인딩이 본문을 먼저 다 읽으므로 핸들러 검사 전에 막는다 (지휘자 검토 R1).
-// 다른 요청은 Kestrel 기본(30MB) 그대로.
+// 첨부 · 프로필 그림 올리기만 본문 상한을 파일 상한 + 여유로 — 폼 바인딩이 본문을 먼저 다 읽으므로 핸들러 검사 전에 막는다
+// (지휘자 검토 R1, 프로필은 3차 e /self-review security). 다른 요청은 Kestrel 기본(30MB) 그대로.
 app.Use(async (ctx, next) =>
 {
-    if (HttpMethods.IsPost(ctx.Request.Method) && string.Equals(ctx.Request.Query["handler"], "Attach", StringComparison.OrdinalIgnoreCase))
+    var handler = HttpMethods.IsPost(ctx.Request.Method) ? ctx.Request.Query["handler"].ToString() : "";
+    (long Bytes, string Text)? upload =
+        string.Equals(handler, "Attach", StringComparison.OrdinalIgnoreCase) ? (Attachments.MaxBytes + 1024 * 1024, $"파일 하나는 {Attachments.MaxBytes / 1024 / 1024}MB까지입니다.")
+        : string.Equals(handler, "Profile", StringComparison.OrdinalIgnoreCase) ? (ProfileStore.MaxImageBytes + 64 * 1024, $"그림은 {ProfileStore.MaxImageBytes / 1024}KB까지입니다.")
+        : null;
+    if (upload is var (limit, text))
     {
-        const long limit = Attachments.MaxBytes + 1024 * 1024;
-        if (ctx.Request.ContentLength is > limit)
+        if (ctx.Request.ContentLength is { } length && length > limit)
         {
             ctx.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
-            await ctx.Response.WriteAsync($"파일 하나는 {Attachments.MaxBytes / 1024 / 1024}MB까지입니다.");
+            await ctx.Response.WriteAsync(text);
             return;
         }
         if (ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } body)
@@ -132,6 +139,15 @@ app.Use(async (ctx, next) =>
 app.UseStaticFiles();
 app.MapRazorPages();
 app.MapStickerImages();
+// 프로필 그림 (3차 e): 앱이 정한 이름 모양만 · 프로필 폴더 안만, nosniff · 같은 출처만 쓰게
+app.MapGet("/profile-image/{file}", IResult (string file, ProfileStore profiles, HttpResponse response) =>
+{
+    if (profiles.ImagePath(file) is not { } path) return Results.NotFound();
+    response.Headers.XContentTypeOptions = "nosniff";
+    response.Headers["Cross-Origin-Resource-Policy"] = "same-origin";
+    response.Headers.CacheControl = "private, max-age=86400"; // 바꾸면 파일 이름이 바뀐다
+    return TypedResults.PhysicalFile(path,ProfileStore.ContentType(path)); // 경로는 GetFullPath로 만든 절대 경로
+});
 // 승인 · 질문은 claude 프로세스의 stdin/stdout(stdio 호스트)으로 주고받는다 — 승인용 HTTP 경로는 없다 (3차 a, 그 전 2-1의 /approve).
 
 // 방 실시간 알림 (SSE). 흘림 글 · 도구 상태 · 거절 · 끝. 끝나면 화면이 세션 기록으로 말풍선을 다시 받는다.

@@ -82,6 +82,24 @@ public sealed class RoomRuns(IOptions<ChatOptions> options)
         return ids;
     }
 
+    /// <summary>
+    /// 호출 기록에 나온 외부 에이전트 이름들 (말풍선 이름과 같은 값 — Agent, 없으면 Model). 설정 화면 프로필 목록 (3차 e). 읽지 못하면 빈 목록.
+    /// </summary>
+    public IReadOnlyList<string> KnownAgents()
+    {
+        try
+        {
+            CallsFor([]); // 덧붙은 줄을 읽어 캐시를 채운다
+            lock (_gate)
+                return [.. _byRun.Values.SelectMany(l => l).Select(r => r.Agent ?? r.Model).Where(n => !string.IsNullOrWhiteSpace(n))
+                    .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return [];
+        }
+    }
+
     /// <summary>그 runId들의 호출 (기록에 있는 것만, 세션 차례). 덧붙은 줄을 먼저 읽고, 잠금 안에서 목록을 복사해 돌려준다.</summary>
     private List<KeyValuePair<string, List<CallRecord>>> CallsFor(IReadOnlyList<string> runIds)
     {

@@ -254,6 +254,17 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         }
     }
 
+    /// <summary>
+    /// 프로필 · 지휘자 표정이 바뀌었다고 알린다 (3차 e): 방 목록 줄마다 Touch에 더해, 열린 방 화면이 방을 다시 열어
+    /// 말풍선 · 진행 중 말풍선 · 표정을 새 이름 · 그림으로 그린다 (data-profiles · data-faces는 방을 열 때만 받으므로).
+    /// </summary>
+    public void ProfilesChanged(IEnumerable<string> roomIds)
+    {
+        foreach (var id in roomIds) Touch(id);
+        lock (_appGate)
+            foreach (var ch in _roomListeners) ch.Writer.TryWrite(new LiveEvent("profiles"));
+    }
+
     /// <summary>말 보내기. 실행 중이면 큐에 넣는다. 오류 문구(null이면 받음).</summary>
     public string? Send(string roomId, string text) => Enqueue(roomId, text, interrupt: false);
 

@@ -25,7 +25,7 @@ public enum Face
 /// (사용자 결정 2026-10-28 "추천대로": 쉼 대기 · 생각 중 생각 · 답 쓰는 중 설명 · 도구 검색 · 승인 요청 · 끝남 긍정 · 실패 당황 · 중지 미안 · 오래 쉼 잠).
 /// 그림이 없는 태그면 Url이 null — 화면은 글자 아바타 + 상태 글로 보인다.
 /// </summary>
-public sealed class FaceCatalog(StickerCatalog stickers, IOptions<ChatOptions> options)
+public sealed class FaceCatalog(StickerCatalog stickers, IOptions<ChatOptions> options, ProfileStore? profiles = null)
 {
     private static readonly Dictionary<Face, string> DefaultTags = new()
     {
@@ -48,12 +48,23 @@ public sealed class FaceCatalog(StickerCatalog stickers, IOptions<ChatOptions> o
         _ => face.ToString(),
     };
 
+    /// <summary>표정 → 태그: 설정 화면 프로필(3차 e) → 설정 파일 Chat:Expressions → 기본값.</summary>
     public string Tag(Face face) =>
-        options.Value.Expressions.TryGetValue(face.ToString(), out var tag) && !string.IsNullOrWhiteSpace(tag) ? tag.Trim() : DefaultTags[face];
+        profiles?.FaceTag(face) is { } chosen ? chosen
+        : options.Value.Expressions.TryGetValue(face.ToString(), out var tag) && !string.IsNullOrWhiteSpace(tag) ? tag.Trim()
+        : DefaultTags[face];
 
-    /// <summary>그림 주소 (/sticker/{태그}). 그림 파일이 없으면 null.</summary>
+    /// <summary>기본 태그 (설정 화면이 "기본: …"으로 보인다).</summary>
+    public static string DefaultTag(Face face) => DefaultTags[face];
+
+    /// <summary>그림 주소 (/sticker/{태그}). 스티커 그림이 없으면 지휘자 프로필 그림(3차 e), 그것도 없으면 null.</summary>
     public string? Url(Face face) =>
-        stickers.FileFor(Tag(face)) is null ? null : "/sticker/" + Uri.EscapeDataString(Tag(face));
+        stickers.FileFor(Tag(face)) is not null ? "/sticker/" + Uri.EscapeDataString(Tag(face))
+        : profiles?.Get(ProfileStore.Conductor).Image is { } image && profiles.ImagePath(image) is not null ? "/profile-image/" + image
+        : null;
+
+    /// <summary>고를 수 있는 스티커 태그 (설정 화면 · 저장 검사).</summary>
+    public IReadOnlyList<string> KnownTags => [.. stickers.Options.Files.Keys.Concat(stickers.Options.Aliases.Keys).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
 
     /// <summary>화면 스크립트용: 상태 이름 → { url, label }.</summary>
     public string Json() => JsonSerializer.Serialize(

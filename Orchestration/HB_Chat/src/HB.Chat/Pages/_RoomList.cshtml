@@ -1,5 +1,6 @@
 @model SidebarView
 @inject FaceCatalog Faces
+@inject ProfileView Profiles
 @*
     방 목록 줄: 아바타(상태 점) · 제목 · 시각 · 미리보기 · 안 읽은 수. 미리보기는 RoomList.Preview로 걷은 글자 그대로 (Razor 인코딩).
 *@
@@ -33,7 +34,7 @@
                 {
                     <img class="face-img" src="@faceUrl" alt="" />
                 }
-                <span class="face-letter">C</span>
+                <span class="face-letter">@Profiles.Letter(ProfileStore.Conductor, Profiles.ConductorName)</span>
                 @if (state.Length > 0)
                 {
                     <span class="dot @state"></span>

@@ -1,4 +1,5 @@
 @model RoomModel
+@inject ProfileView Profiles
 @*
     말풍선 한 쪽 (세션 기록의 사용자 · 지휘자 글, 계획서 2-2 b). 첫 화면 · 방 전환 · ?handler=Messages가 같이 쓴다.
     data-first-line: 이 쪽 첫 말의 줄 번호 (위로 불러오기의 before), data-has-more: 그 앞에 더 있는지,
@@ -29,10 +30,12 @@
                 continue;
             }
             <div class="msg @RoomModel.RunClass(b)@(b.IsError ? " error" : "")@(trailing ? " run-trailing" : "")">
-                <div class="avatar" title="@b.Name">@(b.Name.Length > 0 ? char.ToUpperInvariant(b.Name[0]).ToString() : "?")</div>
+                @* 외부 에이전트 프로필 (3차 e): 이름별 보이는 이름 · 그림 · 색. 원래 이름은 title로 *@
+                @{ var agentName = Profiles.AgentName(b.Name); }
+                @Profiles.Avatar(ProfileStore.AgentKey(b.Name), agentName, b.Name)
                 <div class="bubble">
                     <div class="who">
-                        <b>@b.Name</b>
+                        <b title="@b.Name">@agentName</b>
                         <span class="detail">@b.Detail</span>
                         <span class="when">@b.At.ToLocalTime().ToString("MM-dd HH:mm:ss")</span>
                         @if (link is not null)
@@ -96,9 +99,11 @@
             <div class="system" data-line="@e.Line"><span class="body">@Model.Render(e)</span> <span class="when">@e.Timestamp?.ToLocalTime().ToString("HH:mm")</span></div>
             continue;
         }
-        var who = e.Speaker == ChatSpeaker.User ? "나" : "지휘자";
-        <div class="msg @RoomModel.RoleClass(e.Speaker)" data-line="@e.Line">
-            <div class="avatar">@(e.Speaker == ChatSpeaker.User ? "나" : "C")</div>
+        // 나 · 지휘자 프로필 (3차 e)
+        var who = e.Speaker == ChatSpeaker.User ? Profiles.UserName : Profiles.ConductorName;
+        @* data-speaker: 답장 인용 머리는 보이는 이름 대신 고정 "나" · "지휘자" (프로필 이름이 지휘자에게 가는 글에 섞이지 않게) *@
+        <div class="msg @RoomModel.RoleClass(e.Speaker)" data-line="@e.Line" data-speaker="@(e.Speaker == ChatSpeaker.User ? "user" : "conductor")">
+            @Profiles.Avatar(e.Speaker == ChatSpeaker.User ? ProfileStore.User : ProfileStore.Conductor, who)
             <div class="bubble">
                 <div class="who">
                     <b>@who</b>

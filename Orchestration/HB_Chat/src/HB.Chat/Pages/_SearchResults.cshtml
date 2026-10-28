@@ -1,4 +1,5 @@
 @model IReadOnlyList<SearchHit>
+@inject ProfileView Profiles
 @*
     검색 결과 (계획서 2-2 c). 누르면 그 방을 열고(chat.js) 그 말이 보일 때까지 앞 쪽을 받아 강조한다. 글 조각은 Razor 인코딩.
 *@
@@ -17,7 +18,7 @@
                 }
                 else
                 {
-                    <b>@(h.Speaker == ChatSpeaker.User ? "나" : h.Speaker == ChatSpeaker.Conductor ? "지휘자" : "안내"):</b>
+                    <b>@(h.Speaker == ChatSpeaker.User ? Profiles.UserName : h.Speaker == ChatSpeaker.Conductor ? Profiles.ConductorName : "안내"):</b>
                 }
                 @h.Snippet
             </div>

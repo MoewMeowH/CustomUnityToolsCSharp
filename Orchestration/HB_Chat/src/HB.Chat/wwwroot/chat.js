@@ -370,7 +370,8 @@
                 if (!body) return;
                 const text = body.innerText.trim();
                 setQuote({
-                    who: msg.querySelector(".who b")?.textContent || "",
+                    // 보이는 이름(프로필)이 아니라 고정 이름 — 인용은 지휘자에게 가는 글이다 (3차 e /self-review security)
+                    who: msg.dataset.speaker === "user" ? "나" : "지휘자",
                     when: (msg.querySelector(".who .when")?.textContent || "").slice(0, 11), // MM-dd HH:mm
                     text: text.length > QuoteChars ? text.slice(0, QuoteChars) + "…" : text,
                 });
@@ -476,9 +477,20 @@
         // 진행 중 턴: 보낸 말(흐리게) + 지휘자 말풍선(입력 중 점 → 흘림 글, 위에 도구 칩) + 승인 카드 · 거절 줄.
         // 흘림 글은 글자 그대로이고, 끝나면 세션 기록의 말풍선으로 바뀐다. 기다리는 말은 입력칸 위 목록(#queue, 2-2 d).
         let stream = null, chips = null;
+        // 나 · 지휘자 프로필 (3차 e): 서버가 data-profiles로 준 이름 · 글자 · 색 · 그림 (없으면 기본)
+        const profiles = (() => { try { return JSON.parse(root.dataset.profiles || "{}"); } catch { return {}; } })();
+        function avatar(p, fallback) {
+            const a = el("div", "avatar");
+            if (p?.color && /^#[0-9a-fA-F]{6}$/.test(p.color)) a.style.background = p.color;
+            if (p?.image) { const img = el("img", "profile-img"); img.alt = ""; img.src = p.image; a.append(img); }
+            a.append(el("span", "avatar-letter", p?.letter || fallback));
+            return a;
+        }
         function bubble(cls, who, text) {
             const m = el("div", "msg " + cls), b = el("div", "bubble");
-            m.append(el("div", "avatar", cls.startsWith("user") ? "나" : "C"), b);
+            const user = cls.startsWith("user");
+            m.dataset.speaker = user ? "user" : "conductor";
+            m.append(avatar(user ? profiles.user : profiles.conductor, user ? "나" : "C"), b);
             const w = el("div", "who"); w.append(el("b", null, who)); b.append(w);
             if (cls === "conductor") { chips = el("div", "chips"); chips.hidden = true; b.append(chips); }
             const body = el("div", "body stream", text); b.append(body);
@@ -598,8 +610,8 @@
             live.replaceChildren();
             cards.clear(); // 카드도 live 안에 있었다
             chips = null;
-            if (prompt) bubble("user pending", "나", displayText(prompt));
-            stream = bubble("conductor", "지휘자", partial || null);
+            if (prompt) bubble("user pending", profiles.user?.name || "나", displayText(prompt));
+            stream = bubble("conductor", profiles.conductor?.name || "지휘자", partial || null);
             if (!partial) { stream.dataset.empty = "1"; stream.append(typing()); }
             setBusy(true);
             showQueue(pending);
@@ -910,6 +922,10 @@
             switch (ev.kind) {
                 case "rooms":
                     scheduleList(); // 방 목록 신호 (어느 방이든) — 탭당 SSE 하나라 방 SSE가 같이 싣는다
+                    break;
+                case "profiles":
+                    // 프로필 · 표정이 바뀜 (3차 e): 이름 · 그림 · 표정은 방을 열 때 받으므로 다시 연다 (쓰던 글은 dispose가 남긴다)
+                    reopenRoom(roomId);
                     break;
                 case "snapshot":
                     // 처음 붙거나 다시 붙을 때: 그사이 끝난 턴이 있을 수 있으니 새 말부터 받는다 (0a3b1d5155 C3).

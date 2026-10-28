@@ -100,6 +100,75 @@
                     <p class="muted" style="margin:6px 0 0">아직 방이 없습니다.</p>
                 }
             </section>
+
+            @* 프로필 (3차 e — 결정 4 "이름 · 그림 · 색 + 지휘자 표정"). 말투 · 프롬프트는 바꾸지 않는다 *@
+            <section class="panel" style="padding:12px 14px;margin-top:16px">
+                <h3 style="margin:0 0 6px;font-size:15px">프로필</h3>
+                <p class="muted" style="margin:0 0 8px;font-size:12.5px">
+                    말풍선 · 방 목록 · 미니 창에 보이는 이름 · 아바타. 그림은 png · jpg · webp, @(ProfileStore.MaxImageBytes / 1024)KB까지 (회사 모드에서는 숨김).
+                    외부 에이전트는 호출 기록에 나온 이름입니다. 비우면 기본값.
+                </p>
+                @if (Model.Profiles.Store.LoadError is { } pError)
+                {
+                    <p style="color:var(--warn);margin:0 0 8px">profiles.json을 읽지 못해 저장을 막았습니다 (덮어쓰지 않음): @pError</p>
+                }
+                @foreach (var (key, label, defaultName) in Model.ProfileRows)
+                {
+                    var p = Model.Profiles.Store.Get(key);
+                    <form method="post" asp-page-handler="Profile" enctype="multipart/form-data" class="settings-profile">
+                        <input type="hidden" name="key" value="@key" />
+                        @Model.Profiles.Avatar(key, p.Name ?? defaultName)
+                        <span class="who-key">@label</span>
+                        <input type="text" name="name" value="@(p.Name ?? "")" placeholder="@defaultName" maxlength="@ProfileStore.MaxNameChars" aria-label="@label 보이는 이름" />
+                        <input type="text" name="color" value="@(p.Color ?? "")" placeholder="#c26b3a" maxlength="7" class="mono" style="width:90px" aria-label="@label 색" />
+                        <input type="file" name="image" accept="image/png,image/jpeg,image/webp" aria-label="@label 그림" />
+                        @if (p.Image is not null)
+                        {
+                            <label class="muted"><input type="checkbox" name="clearImage" value="true" /> 그림 지우기</label>
+                        }
+                        <button class="btn" type="submit">저장</button>
+                    </form>
+                }
+            </section>
+
+            <section class="panel" style="padding:12px 14px;margin-top:16px">
+                <h3 style="margin:0 0 6px;font-size:15px">지휘자 표정</h3>
+                <p class="muted" style="margin:0 0 8px;font-size:12.5px">상태마다 보일 스티커 (설정 파일 Chat:Expressions보다 먼저). 비우면 기본.</p>
+                <form method="post" asp-page-handler="Faces">
+                    <table class="settings-table">
+                        <thead><tr><th>상태</th><th>스티커</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var face in Enum.GetValues<Face>())
+                            {
+                                var chosen = Model.Profiles.Store.FaceTag(face);
+                                var url = Model.Faces.Url(face);
+                                <tr>
+                                    <td>@FaceCatalog.Label(face)</td>
+                                    <td>
+                                        <select name="face[@face]">
+                                            <option value="">기본 (설정 파일 Chat:Expressions, 없으면 @FaceCatalog.DefaultTag(face))</option>
+                                            @* 저장한 태그가 지금 스티커 목록에 없으면(스티커 설정이 바뀜) 그대로 보이게 — 없으면 다음 저장이 조용히 기본으로 되돌린다 *@
+                                            @if (chosen is not null && !Model.Faces.KnownTags.Contains(chosen))
+                                            {
+                                                <option value="@chosen" selected>@chosen (지금 스티커 목록에 없음)</option>
+                                            }
+                                            @foreach (var tag in Model.Faces.KnownTags)
+                                            {
+                                                <option value="@tag" selected="@(tag == chosen)">@tag</option>
+                                            }
+                                        </select>
+                                    </td>
+                                    <td>@if (url is not null)
+                                        {
+                                            <img src="@url" alt="" class="settings-face" />
+                                        }</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                    <button class="btn primary" type="submit" style="margin-top:8px">표정 저장</button>
+                </form>
+            </section>
         </div>
     </section>
 </div>

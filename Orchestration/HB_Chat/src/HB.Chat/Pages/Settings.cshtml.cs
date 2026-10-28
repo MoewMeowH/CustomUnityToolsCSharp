@@ -8,8 +8,59 @@ namespace HB.Chat.Pages;
 /// 설정 화면 (3차 d — 노션 "앱 내 설정탭에 세션 이름 및 경로 추가기능"): 작업 폴더 더하기 · 지우기(앱에서 더한 것만)와 방 이름 바꾸기
 /// (결정 "방의 제목도 변경이 가능했음 좋긴행"). 양식 POST — antiforgery · 같은 출처 검사 아래. 성공하면 다시 이 화면으로(PRG).
 /// </summary>
-public sealed class SettingsModel(RoomStore store, RoomHub hub, RoomList list, ChatTranscripts transcripts, IOptions<ChatOptions> options) : PageModel
+public sealed class SettingsModel(
+    RoomStore store, RoomHub hub, RoomList list, ChatTranscripts transcripts, IOptions<ChatOptions> options,
+    ProfileView profiles, FaceCatalog faces, RoomRuns runs) : PageModel
 {
+    public ProfileView Profiles => profiles;
+    public FaceCatalog Faces => faces;
+
+    /// <summary>프로필 줄 (3차 e): 나 · 지휘자 · 외부 에이전트(호출 기록에 나온 이름 + 프로필을 둔 이름).</summary>
+    public IReadOnlyList<(string Key, string Label, string DefaultName)> ProfileRows { get; private set; } = [];
+
+    /// <summary>
+    /// 프로필 이름 · 색 · 그림 저장 (그림은 고르면 바꾸고, 지우기를 체크하면 글자 아바타로). 그림이 실패하면 이름 · 색도 저장하지 않게
+    /// 그림을 먼저 하고, 둘을 같이 고르면 거절한다 (3차 e /self-review security). 이름 · 색 검사는 그림보다 먼저 (저장 없이).
+    /// </summary>
+    public async Task<IActionResult> OnPostProfileAsync(string? key, string? name, string? color, IFormFile? image, bool clearImage)
+    {
+        var p = profiles.Store;
+        var hasImage = image is { Length: > 0 };
+        Error = clearImage && hasImage ? "그림을 고르면서 지우기를 같이 할 수 없습니다 — 하나만 고르세요."
+            : ProfileStore.Check(key, name, color);
+        if (Error is null && clearImage) Error = p.ClearImage(key);
+        else if (Error is null && hasImage)
+        {
+            if (image!.Length > ProfileStore.MaxImageBytes) Error = $"그림은 {ProfileStore.MaxImageBytes / 1024}KB까지입니다.";
+            else
+            {
+                await using var stream = image.OpenReadStream();
+                Error = await p.SetImageAsync(key, stream, HttpContext.RequestAborted);
+            }
+        }
+        Error ??= p.Save(key, name, color);
+        if (Error is null)
+        {
+            hub.ProfilesChanged(store.All().Select(r => r.Id)); // 목록 · 열린 화면이 새 이름 · 그림으로 다시 받게
+            return RedirectToPage(new { done = "profile" });
+        }
+        Fill();
+        return Page();
+    }
+
+    /// <summary>지휘자 표정 저장: 상태마다 스티커 태그 (빈 값이면 기본).</summary>
+    public IActionResult OnPostFaces([FromForm(Name = "face")] Dictionary<string, string?>? face)
+    {
+        Error = profiles.Store.SetFaces(face ?? [], faces.KnownTags);
+        if (Error is null)
+        {
+            hub.ProfilesChanged(store.All().Select(r => r.Id));
+            return RedirectToPage(new { done = "faces" });
+        }
+        Fill();
+        return Page();
+    }
+
     public SidebarView Sidebar { get; private set; } = new([], null);
     public string? Error { get; private set; }
 
@@ -24,6 +75,8 @@ public sealed class SettingsModel(RoomStore store, RoomHub hub, RoomList list, C
         "added" => "작업 폴더를 더했습니다.",
         "removed" => "작업 폴더를 목록에서 뺐습니다 (폴더 · 파일은 그대로).",
         "renamed" => "방 이름을 바꿨습니다.",
+        "profile" => "프로필을 저장했습니다.",
+        "faces" => "지휘자 표정을 저장했습니다.",
         _ => null,
     };
 
@@ -103,5 +156,16 @@ public sealed class SettingsModel(RoomStore store, RoomHub hub, RoomList list, C
         ];
         Rooms = [.. all.Where(r => r.DeletedAt is null).OrderByDescending(r => r.LastRunAt ?? r.CreatedAt)
             .Select(r => (r, RoomList.TitleOf(r, transcripts.Read(r.SessionId))))];
+        // 프로필을 둔 이름이 먼저 자리를 잡고(상한에 밀려 고칠 수 없게 되지 않게), 남은 자리를 호출 기록 이름으로 (3차 e /self-review security)
+        var saved = profiles.Store.Agents();
+        var seen = saved.Select(ProfileStore.AgentKey).OfType<string>().ToHashSet(StringComparer.Ordinal);
+        var known = runs.KnownAgents().Where(n => ProfileStore.AgentKey(n) is { } k && seen.Add(k))
+            .Order(StringComparer.Ordinal).Take(Math.Max(0, ProfileStore.MaxAgents - saved.Count));
+        ProfileRows =
+        [
+            (ProfileStore.User, "나", "나"),
+            (ProfileStore.Conductor, "지휘자", "지휘자"),
+            .. saved.Concat(known).Order(StringComparer.Ordinal).Select(n => (ProfileStore.AgentKey(n)!, "외부: " + n, n)),
+        ];
     }
 }
