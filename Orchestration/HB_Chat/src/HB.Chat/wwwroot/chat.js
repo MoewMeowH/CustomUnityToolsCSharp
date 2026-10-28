@@ -1189,10 +1189,11 @@
             if (a.plan) {
                 // 승인하면 서버가 "계획 먼저"를 껐다 — 토글도 맞춘다
                 if (label === "허용" && planToggle) planToggle.checked = false;
-                card.replaceWith(el("div", "live-line" + (label === "허용" ? "" : " denied"), "계획 " + (label === "허용" ? "승인 — 진행합니다" : (label || "끝남"))));
+                card.replaceWith(el("div", "live-line approval-line" + (label === "허용" ? "" : " denied"), "계획 " + (label === "허용" ? "승인 — 진행합니다" : (label || "끝남"))));
                 return;
             }
-            card.replaceWith(el("div", "live-line" + (label === "허용" || label === "항상 허용" ? "" : " denied"),
+            // approval-line: 턴이 끝나 기록을 다시 그리면 지운다 — 같은 줄이 기록 속 제자리(방 기록 줄)에 있다
+            card.replaceWith(el("div", "live-line approval-line" + (label === "허용" || label === "항상 허용" ? "" : " denied"),
                 "승인 " + (label || "끝남") + " — " + a.tool + ": " + a.summary.slice(0, 120)));
         }
         // 질문 카드 (3차 a): 지휘자의 AskUserQuestion. 질문마다 선택지(하나 · 여러 개) + "기타" 직접 쓰기. 남은 시간은 승인 카드와 같이 다시 쓴다.
@@ -1418,7 +1419,8 @@
                     break;
                 case "denied":
                 case "retry":
-                    live.append(el("div", "live-line " + ev.kind, (ev.kind === "denied" ? "거절됨 — " : "") + ev.text));
+                    // 카드 없는 호스트 거절(logged)은 기록에도 남아 턴 끝에 제자리 방 기록 줄로 바뀐다 — 승인 결과 줄처럼 지운다 (/self-review e464ec29ba C6)
+                    live.append(el("div", "live-line " + ev.kind + (ev.logged ? " approval-line" : ""), (ev.kind === "denied" ? "거절됨 — " : "") + ev.text));
                     break;
                 case "queued":
                     showQueue(ev.pendingItems);
@@ -1433,7 +1435,9 @@
                     const refreshed = await refreshMessages();
                     // 보내지 못한 말은 남김 (C2). 질문 답 말풍선은 세션 기록의 것으로 바뀌므로 지운다 (4차 D1).
                     // 답하지 않은 질문 줄(q-done)은 성공으로 끝난 턴에서만 — 중지 · 실패면 기록에 결과 줄이 없을 수 있어 남긴다 (e8091295fe C4)
-                    if (refreshed) live.querySelectorAll(":scope > .msg:not(.failed)" + (ev.ok ? ", :scope > .q-done" : "")).forEach(m => m.remove());
+                    // 승인 결과 줄 · 백그라운드 명령 진행 줄도 지운다 — 기록 속 제자리에 방 기록 줄 · 백그라운드 알림 줄로 다시 그려졌다 (계획서 2026-10-29_HB_Chat-진행줄-자리-정리표시).
+                    // 서브에이전트 진행 줄은 기록에 같은 줄이 없어 다음 턴까지 둔다 (/self-review e464ec29ba 자료 부족)
+                    if (refreshed) live.querySelectorAll(":scope > .msg:not(.failed), :scope > .approval-line, :scope > .agent-line[data-kind=\"local_bash\"]" + (ev.ok ? ", :scope > .q-done" : "")).forEach(m => m.remove());
                     else live.prepend(el("div", "live-line denied", "말풍선을 다시 받지 못했습니다 — 새로고침하면 보입니다."));
                     stream = null; chips = null;
                     clearBackground();

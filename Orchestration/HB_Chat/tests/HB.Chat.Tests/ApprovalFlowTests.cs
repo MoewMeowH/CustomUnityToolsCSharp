@@ -258,6 +258,8 @@ public sealed class ApprovalFlowTests : IDisposable
             _hub.WrapUp(room.Id);
             var seen = await Until(ch, e => e.Kind == "idle");
             Assert.True(seen.Single(e => e.Kind == "end").Ok);
+            // 정리 표시가 방 기록 줄로 남는다 (계획서 2026-10-29_HB_Chat-진행줄-자리-정리표시)
+            Assert.Contains("백그라운드 작업 1개를 '지금 끝내기'로 정리했습니다", Log());
         }
         finally { ClaudeRunner.CloseGrace = grace; }
     }
@@ -300,6 +302,7 @@ public sealed class ApprovalFlowTests : IDisposable
         _hub.Stop(room.Id);
         var end = (await Until(ch, e => e.Kind == "idle")).Single(e => e.Kind == "end");
         Assert.True(end.Ok, end.Text);
+        Assert.Contains("기다리는 중 멈춰 백그라운드 작업 1개를 정리했습니다", Log());
     }
 
     [Fact]
@@ -336,7 +339,28 @@ public sealed class ApprovalFlowTests : IDisposable
         _hub.Send(room.Id, "plan acceptEdits");
         var seen = await Until(ch, e => e.Kind == "idle");
         Assert.DoesNotContain(seen, e => e.Kind == "approval");
-        Assert.Contains(seen, e => e.Kind == "denied" && e.Text!.Contains("계획 모드로 시작한 실행이 아니라"));
+        Assert.Contains(seen, e => e.Kind == "denied" && e.Text!.Contains("계획 모드로 시작한 실행이 아니라") && e.Logged == true);
+        // 카드 없는 거절도 방 기록 줄로 남는다 (/self-review e464ec29ba C6)
+        Assert.Contains("\"decision\":\"거절 (계획 모드로 시작한 실행이 아님)\"", Log());
+    }
+
+    [Fact]
+    public async Task CardLeftAtRunEnd_LoggedAndDoneBeforeEnd()
+    {
+        // 실행이 끝날 때 남은 카드: 기록 · approval-done이 end보다 먼저 — 화면이 턴 끝에 기록을 다시 받을 때 그 줄이 있게 (/self-review e464ec29ba C3)
+        var room = CommandRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "approve please");
+        var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        var extra = _hub.RequestApprovalAsync(room.Id, ApprovalRequest.Parse("""{"tool_name":"Bash","input":{"command":"dir"}}""")!, CancellationToken.None);
+        var card2 = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null));
+        var seen = await Until(ch, e => e.Kind == "idle");
+        var done = seen.FindIndex(e => e.Kind == "approval-done" && e.Approval!.Id == card2.Id);
+        Assert.InRange(done, 0, seen.FindIndex(e => e.Kind == "end"));
+        Assert.Equal("실행 끝남", seen[done].Text);
+        Assert.False((await extra)!.Allow);
+        Assert.Contains("\"decision\":\"실행 끝남\"", Log());
     }
 
     [Fact]

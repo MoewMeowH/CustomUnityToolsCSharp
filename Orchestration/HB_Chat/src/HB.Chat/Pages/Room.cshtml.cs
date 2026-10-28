@@ -14,7 +14,7 @@ namespace HB.Chat.Pages;
 /// </summary>
 public sealed class RoomModel(
     RoomStore store, RoomHub hub, RoomList list, ChatTranscripts transcripts, StickerPacks packs, FaceCatalog faces, RoomRuns runs,
-    IOptions<ChatOptions> options)
+    RoomNotes notes, IOptions<ChatOptions> options)
     : PageModel
 {
     public Room Room { get; private set; } = null!;
@@ -55,6 +55,10 @@ public sealed class RoomModel(
     /// <summary>질문 카드 답 말풍선의 자리 (4차 D1, 세션 기록에서).</summary>
     public AnswerPlacement Answers => _answers ??= AnswerPlacement.Of(Transcript);
     private AnswerPlacement? _answers;
+
+    /// <summary>방 기록 줄(승인 결과 · 백그라운드 정리 표시)의 자리 (계획서 2026-10-29_HB_Chat-진행줄-자리-정리표시).</summary>
+    public NotePlacement Notes => _notes ??= notes.For(Room.Id, Transcript);
+    private NotePlacement? _notes;
 
     /// <summary>길면 접어 둔다 (외부 에이전트 응답은 수천 자가 흔하다).</summary>
     public const int RunFoldChars = 1500;
@@ -318,7 +322,7 @@ public sealed class RoomModel(
         if (!Load(id)) return NotFound();
         var now = DateTimeOffset.Now;
         Response.Headers.CacheControl = "no-store";
-        return File(System.Text.Encoding.UTF8.GetBytes(ChatExport.Markdown(Room, Transcript, now, Runs, Answers)), "text/markdown; charset=utf-8",
+        return File(System.Text.Encoding.UTF8.GetBytes(ChatExport.Markdown(Room, Transcript, now, Runs, Answers, Notes)), "text/markdown; charset=utf-8",
             ChatExport.FileName(Title, now));
     }
 

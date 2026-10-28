@@ -71,14 +71,24 @@
         }
     }
 
-    // 같은 말 앞(· 맨 뒤)의 외부 실행 말풍선과 질문 답을 시각 차례로 (e8091295fe C1)
-    void Placed(IReadOnlyList<RunBubble> runs, IReadOnlyList<ChatAnswer> answers, bool trailing = false)
+    // 같은 말 앞(· 맨 뒤)의 외부 실행 말풍선 · 질문 답 · 방 기록 줄(승인 결과 · 정리 표시)을 시각 차례로 (e8091295fe C1, 계획서 2026-10-29_HB_Chat-진행줄-자리-정리표시)
+    void Placed(IReadOnlyList<RunBubble> runs, IReadOnlyList<ChatAnswer> answers, IReadOnlyList<RoomNote> notes, bool trailing = false)
     {
+        var waiting = new Queue<RoomNote>(notes);
         foreach (var (run, answer) in AnswerPlacement.Merge(runs, answers))
         {
+            var at = run?.At ?? answer!.Timestamp;
+            while (waiting.Count > 0 && at is { } t && waiting.Peek().At <= t) NoteLine(waiting.Dequeue(), trailing);
             if (run is not null) RunBubbleList([run], trailing);
             else AnswerList([answer!], trailing);
         }
+        while (waiting.Count > 0) NoteLine(waiting.Dequeue(), trailing);
+    }
+
+    // 방 기록 줄: 가운데 작은 줄. trailing은 다른 맨 뒤 항목처럼 run-trailing — 새 말 받기 조각이 바꿔 끼운다
+    void NoteLine(RoomNote n, bool trailing)
+    {
+        <div class="system note@(n.Denied ? " denied" : "")@(trailing ? " run-trailing" : "")"><span class="body">@n.Text</span> <span class="when">@n.At.ToLocalTime().ToString("HH:mm")</span></div>
     }
 
     // 질문 카드 답 (4차 D1): '나' 말풍선 — 질문은 작게, 고른 답이 본문. 답하지 않았으면(거절 · 시간 초과) 회색 한 줄.
@@ -135,7 +145,7 @@
         {
             <div class="tools" data-line="@e.Line">@{ Chips(e); }</div>
         }
-        Placed(Model.Runs.For(e), Model.Answers.For(e));
+        Placed(Model.Runs.For(e), Model.Answers.For(e), Model.Notes.For(e));
         if (RoomModel.IsStoppedTurn(e))
         {
             <div class="system" data-line="@e.Line"><span class="body">중지된 턴</span> <span class="when">@e.Timestamp?.ToLocalTime().ToString("HH:mm")</span></div>
@@ -169,7 +179,7 @@
        (다음 말이 생기면 그 말 앞으로 옮겨 간다). 위로 불러오기 조각에는 없다 *@
     @if (!Model.Fragment || Model.AfterFragment)
     {
-        Placed(Model.Runs.Trailing, Model.Answers.Trailing, trailing: true);
+        Placed(Model.Runs.Trailing, Model.Answers.Trailing, Model.Notes.Trailing, trailing: true);
     }
     @if (!Model.Fragment && items.Count == 0 && Model.Transcript?.FormatError is null)
     {

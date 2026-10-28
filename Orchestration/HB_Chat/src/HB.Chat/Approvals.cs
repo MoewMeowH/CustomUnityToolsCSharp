@@ -269,5 +269,9 @@ public sealed class ApprovalLog(Func<string> dataFolder)
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { } // 기록 실패가 승인을 막지 않게
     }
 
+    /// <summary>방 기록 줄(정리 표시 등)을 같은 파일에 남긴다 — 기록 화면이 시각으로 제자리에 그린다 (RoomNotes).</summary>
+    public void Note(string roomId, string tool, string text) =>
+        Write(roomId, new ApprovalRequest(tool, "", null, null), text);
+
     private static string Cut(string s) => s.Length > 300 ? s[..300] + "…" : s;
 }

@@ -53,6 +53,9 @@ public sealed record LiveEvent(string Kind)
     /// <summary>background 알림 · snapshot: 메인 답 뒤 기다리는 백그라운드 작업 수와 정리 시각 (0이면 기다림 끝 — 화면 "지금 끝내기" 줄).</summary>
     public int? BackgroundCount { get; init; }
     public DateTimeOffset? BackgroundUntil { get; init; }
+
+    /// <summary>denied 알림: 승인 기록에도 남겨 기록 화면 제자리에 방 기록 줄로 보인다 — 화면이 턴 끝에 진행 칸의 줄을 지운다.</summary>
+    public bool? Logged { get; init; }
 }
 
 /// <summary>
@@ -137,6 +140,8 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         public readonly TaskCompletionSource<ApprovalAnswer> Answer = new(TaskCreationOptions.RunContinuationsAsynchronously);
         /// <summary>카드에 남길 결정 (허용 · 항상 허용 · 거절 …). 답을 정한 쪽이 적는다.</summary>
         public string? Label;
+        /// <summary>결정을 기록하고 approval-done을 알린 뒤 끝난다 — 실행 끝 알림(end)이 그 뒤에 나가게 기다린다 (/self-review e464ec29ba C3).</summary>
+        public readonly TaskCompletionSource Settled = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public ApprovalView View => new(Id, Request.Tool, Request.Summary, Request.Description, Request.Rule, ExpiresAt, Request.Truncated)
         {
@@ -166,6 +171,9 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
 
     /// <summary>승인 기록에 남길 계획 글 길이 (글자).</summary>
     public const int PlanLogChars = 2_000;
+
+    /// <summary>실행 끝에 남은 승인 카드의 기록 · approval-done을 기다리는 상한 — 넘으면 end를 그대로 보낸다.</summary>
+    private static readonly TimeSpan ApprovalSettleWait = TimeSpan.FromSeconds(2);
 
     /// <summary>방마다 마지막 실행의 init (명령 · 스킬 · 플러그인 목록 — Claude 앱 기능 A). 메모리만.</summary>
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, InitEvent> _commandSets = new();
@@ -463,10 +471,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         }
         if (ask.Tool == ApprovalRequest.PlanTool)
         {
-            lock (live.Gate)
-            {
-                if (live.Generation == generation) Broadcast(live, new LiveEvent("denied") { Text = "ExitPlanMode: 계획 모드로 시작한 실행이 아니라 거절" });
-            }
+            HostDenied(room, live, generation, ask.Tool, "", "계획 모드로 시작한 실행이 아님", "ExitPlanMode: 계획 모드로 시작한 실행이 아니라 거절");
             return PermissionDecision.Deny("이 실행은 계획 모드로 시작하지 않았습니다 — 계획 승인을 받을 수 없습니다.");
         }
         if (room.Level == PermissionLevel.Command && ClaudeArgs.CommandTools.Contains(ask.Tool))
@@ -475,10 +480,8 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             // (/self-review security 8ccecae84d C1). 올리기는 다음 실행부터.
             if (store.Get(room.Id) is not { Level: PermissionLevel.Command })
             {
-                lock (live.Gate)
-                {
-                    if (live.Generation == generation) Broadcast(live, new LiveEvent("denied") { Text = $"{ask.Tool}: 이 방 권한을 명령 아래로 내려 거절" });
-                }
+                HostDenied(room, live, generation, ask.Tool, ApprovalRequest.Parse(ask.RequestJson)?.Summary ?? "", "권한을 명령 아래로 내림",
+                    $"{ask.Tool}: 이 방 권한을 명령 아래로 내려 거절");
                 return PermissionDecision.Deny("사용자가 이 방 권한을 명령 단계 아래로 내렸습니다 — 명령을 실행하지 않습니다.");
             }
             if (ApprovalRequest.Parse(ask.RequestJson) is not { } request) return PermissionDecision.Deny("승인 요청 모양을 읽지 못해 거절했습니다.");
@@ -495,12 +498,23 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 : PermissionDecision.Deny($"사용자가 질문 카드에 답하지 않았습니다 ({answers.Label}). 필요하면 채팅 글로 다시 물어 주세요.");
         }
         // 호스트가 거절하면 CLI는 system/permission_denied를 내지 않는다 (3차 a 실제 확인) — 그 전처럼 "거절됨" 줄을 화면에 남긴다.
-        var target = ApprovalRequest.Parse(ask.RequestJson)?.Summary is { Length: > 0 } s ? $" {(s.Length > 120 ? s[..120] + "…" : s)}" : "";
+        var summary = ApprovalRequest.Parse(ask.RequestJson)?.Summary ?? "";
+        var target = summary is { Length: > 0 } s ? $" {(s.Length > 120 ? s[..120] + "…" : s)}" : "";
+        HostDenied(room, live, generation, ask.Tool, summary, "승인할 곳 없음", $"{ask.Tool}{target}: 승인할 곳이 없어 자동 거절");
+        return PermissionDecision.Deny(ClaudeRunner.NoApprover);
+    }
+
+    /// <summary>
+    /// 카드 없이 거절: 승인 기록에도 남기고(방 기록 줄 — 기록 화면 제자리 · 새로고침 뒤에도) 진행 칸에 "거절됨" 줄을 알린다.
+    /// Logged면 화면이 턴 끝에 그 줄을 지운다 (/self-review e464ec29ba C6). 기록이 먼저 — 턴 끝에 다시 받을 때 이미 있게.
+    /// </summary>
+    private void HostDenied(Room room, Live live, int generation, string tool, string summary, string why, string line)
+    {
+        Log?.Write(room.Id, new ApprovalRequest(tool, summary, null, null), $"거절 ({why})");
         lock (live.Gate)
         {
-            if (live.Generation == generation) Broadcast(live, new LiveEvent("denied") { Text = $"{ask.Tool}{target}: 승인할 곳이 없어 자동 거절" });
+            if (live.Generation == generation) Broadcast(live, new LiveEvent("denied") { Text = line, Logged = true });
         }
-        return PermissionDecision.Deny(ClaudeRunner.NoApprover);
     }
 
     /// <summary>테스트용: 그 방의 지금 실행에 승인 카드를 하나 더 띄운다 (실행 중이 아니면 null).</summary>
@@ -548,6 +562,13 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         }
 
         var answer = await pending.Answer.Task;
+        // 답을 정한 쪽(EndApprovals 등)은 TrySetResult 뒤 잠금 안에서 Label을 적는다 — 잠금으로 기다려 읽는다
+        string decision;
+        lock (live.Gate) decision = pending.Label ?? (answer.Allow ? "허용" : "거절");
+        // 기록을 approval-done보다 먼저 — 화면이 턴 끝에 기록을 다시 받을 때 방 기록 줄이 이미 있게 (/self-review e464ec29ba C3)
+        // 계획 글은 앞 2,000자만 기록한다 — 승인 기록이 계획 전문으로 커지지 않게 (지휘자 검토 S4)
+        var logged = request.IsPlan && request.Summary.Length > PlanLogChars ? request with { Summary = request.Summary[..PlanLogChars] + "…" } : request;
+        Log?.Write(roomId, logged, decision);
         lock (live.Gate)
         {
             live.Approvals.Remove(pending.Id);
@@ -556,9 +577,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             // Busy가 아니라 Cts로 본다: 실행이 끝나는 잠금에서 Cts를 먼저 비우므로 end 뒤에 face가 나가지 않는다 (/self-review 83b453653b C3).
             if (live.Cts is not null && live.Approvals.Count == 0) SetFace(live, live.Questions.Count > 0 ? Face.Question : Face.Tool);
         }
-        // 계획 글은 앞 2,000자만 기록한다 — 승인 기록이 계획 전문으로 커지지 않게 (지휘자 검토 S4)
-        var logged = request.IsPlan && request.Summary.Length > PlanLogChars ? request with { Summary = request.Summary[..PlanLogChars] + "…" } : request;
-        Log?.Write(roomId, logged, pending.Label ?? (answer.Allow ? "허용" : "거절"));
+        pending.Settled.TrySetResult();
         return answer;
     }
 
@@ -845,6 +864,17 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             // 창을 모르는 턴(중지 · result 없음)은 방 색인에 남은 창으로 — 화면 막대가 0%로 떨어지지 않게 (/self-review 83b453653b C5)
             var window = result.ContextWindow ?? store.Get(roomId)?.ContextWindow;
 
+            // 남은 승인 카드를 끝내고 그 기록 · approval-done이 끝나기를 잠깐 기다린다 — 답은 다른 스레드에서 이어지므로(RunContinuationsAsynchronously)
+            // 기다리지 않으면 end가 먼저 나가 화면이 그 줄 없는 기록을 받고, 결과 줄은 진행 칸에 다음 턴까지 남는다 (/self-review e464ec29ba C3)
+            Task[] settling;
+            lock (live.Gate)
+            {
+                EndApprovals(live, "실행 끝남");
+                settling = [.. live.Approvals.Values.Select(p => p.Settled.Task)];
+            }
+            if (settling.Length > 0)
+                try { await Task.WhenAll(settling).WaitAsync(ApprovalSettleWait); } catch (TimeoutException) { }
+
             // live.Cts를 잠금 안에서 먼저 비운 뒤 Dispose한다: Stop · Dispose가 해제된 CTS에 Cancel하지 않게 (0a3b1d5155 C4).
             lock (live.Gate)
             {
@@ -1020,8 +1050,25 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         lock (live.Gate) live.StepsWatch = false;
 
         if (mismatch is not null) result = result with { Ok = false, Cancelled = false, Error = mismatch };
+        // 답 뒤 백그라운드 기다림을 정리했으면 방 기록 줄로 남긴다 — 기록 화면이 그 자리에 그린다 ("끝남"이 몇 초뿐이던 것, 사용자 확인 2026-10-29)
+        if (BackgroundNote(result) is { } note) Log?.Note(room.Id, RoomNotes.BackgroundTool, note);
         return Record(room, result, forked: spec.ForkFrom is not null && result.Ok);
     }
+
+    /// <summary>
+    /// 정리 표시 글 (방 기록 줄). 정리하지 않았으면 null. 남은 작업이 0개면 작업이 다 끝나고 지휘자가 이어 답하던 중이다.
+    /// "stop"은 중지 · 끼어들기 둘 다라 "멈춰"로 (/self-review e464ec29ba C1).
+    /// </summary>
+    public static string? BackgroundNote(RunResult r) => (r.BackgroundClosedBy, r.BackgroundLeft > 0) switch
+    {
+        ("wrapup", true) => $"백그라운드 작업 {r.BackgroundLeft}개를 '지금 끝내기'로 정리했습니다",
+        ("wrapup", false) => "지휘자가 이어 답하던 중 '지금 끝내기'로 정리했습니다",
+        ("cap", true) => $"기다림 상한이 지나 백그라운드 작업 {r.BackgroundLeft}개를 정리했습니다",
+        ("cap", false) => "지휘자가 이어 답하던 중 기다림 상한이 지나 정리했습니다",
+        ("stop", true) => $"기다리는 중 멈춰 백그라운드 작업 {r.BackgroundLeft}개를 정리했습니다",
+        ("stop", false) => "지휘자가 이어 답하던 중 멈췄습니다",
+        _ => null,
+    };
 
     /// <summary>
     /// 기다림 상태를 기억하고(snapshot) 알림을 만든다. 정리 시각은 처음 알린 값을 실행 끝까지 지킨다 — 작업 수만 바뀐 알림은 Until이 없고,

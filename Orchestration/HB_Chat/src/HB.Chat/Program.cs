@@ -51,6 +51,7 @@ builder.Services.AddSingleton<ProfileView>();
 builder.Services.AddSingleton<FaceCatalog>();
 builder.Services.AddSingleton<StickerPacks>(); // 스티커 팩 (4차 D2)
 builder.Services.AddSingleton<RoomRuns>();
+builder.Services.AddSingleton(sp => new RoomNotes(sp.GetRequiredService<IOptions<ChatOptions>>())); // 방 기록 줄 (승인 결과 · 정리 표시)
 
 var app = builder.Build();
 

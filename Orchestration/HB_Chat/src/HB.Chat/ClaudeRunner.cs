@@ -20,6 +20,13 @@ public sealed record RunResult(
     /// <summary>마지막 assistant 요청의 컨텍스트 크기 (토큰). 중지돼도 그때까지 본 값.</summary>
     public long? ContextTokens { get; init; }
 
+    /// <summary>
+    /// 답 뒤 백그라운드 기다림을 무엇으로 정리했는지 — "wrapup"(지금 끝내기) · "cap"(기다림 상한) · "stop"(기다리는 중 중지 · 끼어들기). 기다림이 없었거나
+    /// 작업이 다 끝나 스스로 닫혔으면 null. BackgroundLeft는 그때 남았던 작업 수 (방 기록 줄 — 계획서 2026-10-29_HB_Chat-진행줄-자리-정리표시).
+    /// </summary>
+    public string? BackgroundClosedBy { get; init; }
+    public int BackgroundLeft { get; init; }
+
     /// <summary>모델의 컨텍스트 창 (result modelUsage). result가 없으면 null.</summary>
     public int? ContextWindow { get; init; }
 
@@ -139,8 +146,21 @@ public static class ClaudeRunner
                 if (killLater)
                     try { killAfterClose.CancelAfter(CloseGrace); } catch (ObjectDisposedException) { }
             }
-            using var closeOnCap = waitCap.Token.Register(() => _ = FinishAsync(killLater: true));
-            using var closeOnWrapUp = wrapUp.Register(() => { if (Volatile.Read(ref resultSeen)) _ = FinishAsync(killLater: true); });
+            // 무엇으로 정리했는지 (방 기록 줄). 처음 것만 남긴다 — 두 번째 답으로 끝났으면 Answered(줄 없음)
+            const string Answered = "answered";
+            string? closedBy = null;
+            var closedLeft = 0;
+            void Closed(string by)
+            {
+                if (Interlocked.CompareExchange(ref closedBy, by, null) is null) closedLeft = runningTasks.Count;
+            }
+            using var closeOnCap = waitCap.Token.Register(() => { Closed("cap"); _ = FinishAsync(killLater: true); });
+            using var closeOnWrapUp = wrapUp.Register(() =>
+            {
+                if (!Volatile.Read(ref resultSeen)) return;
+                Closed("wrapup");
+                _ = FinishAsync(killLater: true);
+            });
             void Waiting(TimeSpan? cap)
             {
                 try { onEvent(new BackgroundWaitEvent(runningTasks.Count, cap is { } c ? DateTimeOffset.Now + c : null)); } catch { /* 화면 쪽 실패 */ }
@@ -204,7 +224,12 @@ public static class ClaudeRunner
                         Volatile.Write(ref resultSeen, true);
                         // 턴 끝 — 다음 입력이 없으므로 CLI가 끝난다 (0번 실측). 백그라운드 작업이 아직 돌면 그 승인 요청 · 끝 알림을 받을 수 있게 열어 두되,
                         // 끝 알림이 끝내 오지 않아도 상한 뒤에는 닫는다 (승인 통로가 계속 열려 있지 않게). 서브에이전트가 남았으면 30분, 백그라운드 명령만이면 10분
-                        if (runningTasks.Count == 0) await FinishAsync(killLater: capArmed); // 기다림 끝의 두 번째 답 — 기다림 중 띄운 것이 남았을 수 있다
+                        if (runningTasks.Count == 0)
+                        {
+                            // 기다림 끝의 두 번째 답 — 정리할 것이 없다. CLI가 닫히는 동안 온 지금 끝내기 · 중지는 정리 줄을 남기지 않는다 (/self-review e464ec29ba C2)
+                            if (capArmed) Interlocked.CompareExchange(ref closedBy, Answered, null);
+                            await FinishAsync(killLater: capArmed); // 기다림 중 띄운 것이 남았을 수 있다
+                        }
                         else if (!capArmed)
                         {
                             capArmed = true;
@@ -229,12 +254,17 @@ public static class ClaudeRunner
             if (ct.IsCancellationRequested && !(result is { Ok: true } && capArmed))
                 return new RunResult(false, true, "중지됨", null, result?.CostUsd, sessionId, result?.Denials ?? 0, other, stderr)
                     { ContextTokens = context, ContextWindow = result?.WindowFor(contextModel), Status = status };
+            if (ct.IsCancellationRequested) Closed("stop");
             if (error is null && result is null)
                 error = $"결과 없이 끝났습니다 (종료 코드 {proc.ExitCode}).";
             if (error is null && !result!.Ok)
                 error = $"실행 오류 ({result.Subtype}): {result.Text}";
             return new RunResult(error is null, false, error, result?.Text, result?.CostUsd, sessionId, result?.Denials ?? 0, other,
-                string.IsNullOrWhiteSpace(stderr) ? null : stderr) { ContextTokens = context, ContextWindow = result?.WindowFor(contextModel), Status = status };
+                string.IsNullOrWhiteSpace(stderr) ? null : stderr)
+            {
+                ContextTokens = context, ContextWindow = result?.WindowFor(contextModel), Status = status,
+                BackgroundClosedBy = closedBy == Answered ? null : closedBy, BackgroundLeft = closedLeft,
+            };
         }
     }
 

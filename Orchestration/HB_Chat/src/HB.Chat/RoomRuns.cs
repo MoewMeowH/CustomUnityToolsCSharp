@@ -19,6 +19,31 @@ public sealed record RunPlacement(IReadOnlyDictionary<ChatEntry, IReadOnlyList<R
 }
 
 /// <summary>
+/// 시각으로 끼우기 — 실행 말풍선 · 방 기록 줄이 같은 규칙을 쓴다 (/self-review e464ec29ba C8):
+/// 항목 시각보다 늦은 첫 말 앞, 그런 말이 없으면 맨 뒤(Trailing). 말은 참조로 찾는다.
+/// </summary>
+public static class TimePlacement
+{
+    public static (IReadOnlyDictionary<ChatEntry, IReadOnlyList<T>> Before, IReadOnlyList<T> Trailing) Place<T>(
+        IReadOnlyList<ChatEntry> entries, IEnumerable<T> items, Func<T, DateTimeOffset> at)
+    {
+        var before = new Dictionary<ChatEntry, List<T>>(ReferenceEqualityComparer.Instance);
+        var trailing = new List<T>();
+        foreach (var item in items.OrderBy(at))
+        {
+            var t = at(item);
+            var next = entries.FirstOrDefault(e => e.Timestamp is { } ts && ts > t);
+            if (next is null) { trailing.Add(item); continue; }
+            if (!before.TryGetValue(next, out var list)) before[next] = list = [];
+            list.Add(item);
+        }
+        var placed = new Dictionary<ChatEntry, IReadOnlyList<T>>(ReferenceEqualityComparer.Instance);
+        foreach (var (entry, list) in before) placed[entry] = list;
+        return (placed, trailing);
+    }
+}
+
+/// <summary>
 /// 외부 에이전트 말풍선 (계획서 2-2 e): 지휘자가 이 방에서 부른 run_mode 실행의 응답을 그 방에 보인다.
 /// 이 방 세션 기록의 run_mode 결과 머리말에 있는 runId(확정 연결)만 쓴다 — 추정 연결은 쓰지 않는다
 /// (앱 세션은 결과 머리말이 늘 있어 확정으로 잡힘, 1차 확인 ebf595880b). 판정 · 서브에이전트 말풍선은 대시보드 몫.
@@ -56,18 +81,8 @@ public sealed class RoomRuns(IOptions<ChatOptions> options)
     /// </summary>
     public static RunPlacement Place(IReadOnlyList<ChatEntry> entries, IEnumerable<RunBubble> bubbles)
     {
-        var before = new Dictionary<ChatEntry, List<RunBubble>>(ReferenceEqualityComparer.Instance);
-        var trailing = new List<RunBubble>();
-        foreach (var b in bubbles.OrderBy(b => b.At))
-        {
-            var next = entries.FirstOrDefault(e => e.Timestamp is { } at && at > b.At);
-            if (next is null) { trailing.Add(b); continue; }
-            if (!before.TryGetValue(next, out var list)) before[next] = list = [];
-            list.Add(b);
-        }
-        var placed = new Dictionary<ChatEntry, IReadOnlyList<RunBubble>>(ReferenceEqualityComparer.Instance);
-        foreach (var (entry, list) in before) placed[entry] = list;
-        return new RunPlacement(placed, trailing);
+        var (before, trailing) = TimePlacement.Place(entries, bubbles, b => b.At);
+        return new RunPlacement(before, trailing);
     }
 
     /// <summary>세션 기록의 run_mode 호출 중 결과 머리말에 runId가 있는 것 (차례대로, 중복 없이). 읽기 실패는 기억하지 않는다.</summary>
