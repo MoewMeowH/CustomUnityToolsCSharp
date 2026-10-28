@@ -8,14 +8,11 @@ namespace HB.Chat;
 public static class SameOriginGuard
 {
     /// <summary>
-    /// 승인 훅(claude → 앱)은 브라우저가 아니라 Origin · Referer가 없다. 이 경로만 빼고, 실행마다 바뀌는 토큰으로 지킨다 (ApprovalEndpoint).
+    /// 빠지는 경로는 없다 — 2-1의 승인 훅 경로(/approve)는 3차 a에서 stdio 호스트로 바꾸며 없앴다.
     /// </summary>
-    public const string ApprovalPath = "/approve";
-
-    public static bool IsAllowed(string method, string? origin, string? referer, string scheme, string host, string? path = null)
+    public static bool IsAllowed(string method, string? origin, string? referer, string scheme, string host)
     {
         if (HttpMethods.IsGet(method) || HttpMethods.IsHead(method) || HttpMethods.IsOptions(method)) return true;
-        if (HttpMethods.IsPost(method) && string.Equals(path, ApprovalPath, StringComparison.OrdinalIgnoreCase)) return true;
         var self = $"{scheme}://{host}";
         if (!string.IsNullOrEmpty(origin)) return string.Equals(origin, self, StringComparison.OrdinalIgnoreCase);
         if (!string.IsNullOrEmpty(referer) && Uri.TryCreate(referer, UriKind.Absolute, out var r))
@@ -27,7 +24,7 @@ public static class SameOriginGuard
         app.Use(async (ctx, next) =>
         {
             var req = ctx.Request;
-            if (!IsAllowed(req.Method, req.Headers.Origin, req.Headers.Referer, req.Scheme, req.Host.Value ?? "", req.Path.Value))
+            if (!IsAllowed(req.Method, req.Headers.Origin, req.Headers.Referer, req.Scheme, req.Host.Value ?? ""))
             {
                 ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
                 await ctx.Response.WriteAsync("같은 출처의 요청만 받습니다.");

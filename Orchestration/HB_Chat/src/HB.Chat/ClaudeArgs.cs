@@ -5,7 +5,7 @@ namespace HB.Chat;
 /// <summary>
 /// 실행 하나의 입력. Resume이면 --resume, 아니면 --session-id로 새 세션을 앱이 정한 ID로 만든다.
 /// McpConfigPath는 읽기 · 편집 · 명령 단계에 필요하다 (hb-orchestration 항목만 담은 파일, <see cref="McpConfigFile"/>).
-/// ApprovalHookUrl · HookTimeoutSeconds · AllowRules는 명령 단계에만 쓴다: 승인 훅 주소(방 · 실행 토큰 포함)와 "이 방에서 항상 허용" 규칙.
+/// AllowRules는 명령 단계에만 쓴다: "이 방에서 항상 허용" 규칙.
 /// </summary>
 public sealed record RunSpec(
     PermissionLevel Level,
@@ -15,8 +15,6 @@ public sealed record RunSpec(
     string? McpConfigPath,
     string McpServer,
     string? AppendSystemPrompt,
-    string? ApprovalHookUrl = null,
-    int HookTimeoutSeconds = 600,
     IReadOnlyList<string>? AllowRules = null)
 {
     /// <summary>갈래 방의 첫 실행: 이어받을 원래 세션 ID (Resume이 아닐 때만 쓴다, 계획서 2-2 c).</summary>
@@ -60,7 +58,8 @@ public static partial class ClaudeArgs
 
         var args = new List<string>
         {
-            "-p", "--output-format", "stream-json", "--include-partial-messages", "--verbose",
+            // 입력도 stream-json (SDK식): 사용자 말 · 승인 답(control_response)을 stdin으로 보낸다 (3차 a, <see cref="ClaudeRunner"/>)
+            "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--include-partial-messages", "--verbose",
             "--model", spec.Model,
         };
         // 첨부 폴더: 작업 폴더 밖이라 없으면 Read가 거절된다 (2-2 0번 실측). 대화 단계는 도구가 없어 넣지 않는다 (사용자 결정 2).
@@ -95,24 +94,22 @@ public static partial class ClaudeArgs
                 args.AddRange(["--tools", "", "--strict-mcp-config"]);
                 break;
             case PermissionLevel.Read:
-                args.AddRange(["--tools", "Read,Grep,Glob"]);
+                args.AddRange(["--tools", "Read,Grep,Glob," + AskTool]);
                 AddMcp(args, spec);
                 break;
             case PermissionLevel.Edit:
-                args.AddRange(["--tools", "Read,Grep,Glob,Edit,Write", "--permission-mode", "acceptEdits"]);
+                args.AddRange(["--tools", "Read,Grep,Glob,Edit,Write," + AskTool, "--permission-mode", "acceptEdits"]);
                 args.Add("--disallowedTools");
                 args.AddRange(EditDenied.Select(p => $"Edit({p})"));
                 if (attachDeny is not null) args.Add(attachDeny);
                 AddMcp(args, spec);
                 break;
             case PermissionLevel.Command:
-                // 편집 단계 + 명령 도구. 명령은 PermissionRequest HTTP 훅으로 앱에 묻는다 (2차 0번 실측 A).
+                // 편집 단계 + 명령 도구. 명령은 stdio 호스트(앱)의 승인 카드로 묻는다 (3차 a — 그 전에는 PermissionRequest HTTP 훅).
                 // acceptEdits는 쓰지 않는다: 그 모드는 작업 폴더 안 cp · mv 같은 파일 명령을 묻지 않고 허용해, 편집 금지 규칙(Edit 도구에만 걸림)과
                 // 카드를 둘 다 지나치게 한다 (/self-review 36e4e20e04 C1). 대신 작업 폴더 안 편집만 `Edit(**)`로 미리 허용한다 —
-                // 실측(2026-10-28): 작업 폴더 안 Write는 묻지 않음, 밖 Write는 거절(훅 안 옴), Bash cp는 훅으로 옴.
-                if (string.IsNullOrWhiteSpace(spec.ApprovalHookUrl))
-                    throw new ArgumentException("명령 단계에는 승인 훅 주소가 필요하다");
-                args.AddRange(["--tools", "Read,Grep,Glob,Edit,Write,Bash,PowerShell"]);
+                // 실측(2026-10-28): 작업 폴더 안 Write는 묻지 않음, 밖 Write는 거절, Bash cp는 승인 요청으로 옴.
+                args.AddRange(["--tools", "Read,Grep,Glob,Edit,Write,Bash,PowerShell," + AskTool]);
                 args.Add("--disallowedTools");
                 args.AddRange(EditDenied.Select(p => $"Edit({p})"));
                 if (attachDeny is not null) args.Add(attachDeny);
@@ -120,14 +117,14 @@ public static partial class ClaudeArgs
                 // --allowedTools 가변 인자(AddMcp의 MCP 규칙 뒤)에 작업 폴더 안 편집과 "항상 허용" 규칙을 이어 붙인다. 규칙 모양은 저장할 때 검사했지만 다시 거른다.
                 args.Add(CommandEditAllow);
                 args.AddRange((spec.AllowRules ?? []).Where(ApprovalRules.IsAcceptable));
-                args.AddRange(["--settings", HookSettings(spec.ApprovalHookUrl, spec.HookTimeoutSeconds)]);
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(spec), spec.Level, "알 수 없는 권한 단계");
         }
-        // 대화 · 읽기 · 편집에는 승인자가 없다 — 승인이 필요한 호출은 묻지 않고 거절하고, Claude에게 다시 시도하지 말라고 알린다.
-        // 명령 단계에서도 그대로 둔다: PermissionRequest 훅은 이 설정보다 먼저 결정하고(문서), 훅이 답하지 못하면(시간 초과 · 오류) 거절로 끝난다 (0번 실측 A).
-        args.AddRange(["--permission-prompts", "none"]);
+        // 승인 요청은 모두 앱(stdio 호스트)이 답한다 (3차 a): 명령 방의 명령 도구는 승인 카드, AskUserQuestion은 질문 카드, 그 밖은 바로 거절
+        // (그 전의 --permission-prompts none과 같은 동작). PermissionRequest 훅은 붙이지 않는다 — 호스트가 있으면 훅의 거절을 호스트의 허용이 이긴다
+        // (3차 0번 실측). 프로젝트 PreToolUse 훅(H1 등)은 호스트에 묻기 전에 그대로 막는다 (같은 실측).
+        args.AddRange(["--permission-prompt-tool", "stdio"]);
 
         foreach (var a in args)
             if (DangerousArg().IsMatch(a)) throw new InvalidOperationException($"금지된 인자가 만들어졌다: {a}");
@@ -149,21 +146,11 @@ public static partial class ClaudeArgs
     /// <summary>명령 단계에서 작업 폴더 안 편집을 묻지 않게 하는 규칙 (Edit 규칙은 Write 도구에도 걸린다 — 2026-10-28 실측).</summary>
     public const string CommandEditAllow = "Edit(**)";
 
-    /// <summary>승인 카드로 받는 도구 (훅 matcher). 그 밖의 승인 요청(작업 폴더 밖 쓰기 등)은 카드 없이 거절된다.</summary>
-    public const string ApprovalMatcher = "Bash|PowerShell";
+    /// <summary>명령 방에서 승인 카드로 받는 도구. 그 밖의 승인 요청(작업 폴더 밖 쓰기 등)은 카드 없이 거절한다 (/self-review 36e4e20e04 C2 · ab79e61df5 C4).</summary>
+    public static readonly IReadOnlySet<string> CommandTools = new HashSet<string>(StringComparer.Ordinal) { "Bash", "PowerShell" };
 
-    /// <summary>
-    /// --settings로 넘길 훅 설정: 명령 도구의 PermissionRequest만 앱의 /approve로 (/self-review 36e4e20e04 C2 · ab79e61df5 C4).
-    /// 프로젝트 settings의 훅(H1 등)과 함께 돈다 — 이 실행에만 더해진다.
-    /// </summary>
-    public static string HookSettings(string url, int timeoutSeconds) =>
-        System.Text.Json.JsonSerializer.Serialize(new
-        {
-            hooks = new
-            {
-                PermissionRequest = new[] { new { matcher = ApprovalMatcher, hooks = new[] { new { type = "http", url, timeout = timeoutSeconds } } } },
-            },
-        });
+    /// <summary>지휘자의 객관식 질문 도구 (3차 a). SDK식 실행(stdio 호스트)에서만 도구 목록에 들어온다 (3차 0번 실측 A).</summary>
+    public const string AskTool = "AskUserQuestion";
 
     private static void AddMcp(List<string> args, RunSpec spec)
     {

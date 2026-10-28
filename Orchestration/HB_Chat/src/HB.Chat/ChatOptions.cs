@@ -47,8 +47,8 @@ public sealed class ChatOptions
     public string? StickerSettingsDir { get; set; }
 
     /// <summary>
-    /// 승인 카드가 답을 기다리는 시간(초). 넘으면 거절한다. claude 쪽 훅 제한 시간은 이보다 30초 길게 준다 —
-    /// 훅이 먼저 끊기면 claude는 그냥 거절하고 카드만 남는다 (0번 실측: 제한 시간을 넘긴 답은 연결이 끊겨 버려진다).
+    /// 승인 · 질문 카드가 답을 기다리는 시간(초). 넘으면 거절(질문은 답 없음)로 끝낸다. 3차 a부터 승인은 stdio 호스트라 claude 쪽 제한이 없다
+    /// (130초 늦은 답도 받음 — 3차 0번 실측) — 이 값만 대기를 정한다. 기본 570초는 2-1의 훅 제한(600초)에 맞췄던 값을 그대로 둔 것.
     /// </summary>
     public int ApprovalTimeoutSeconds { get; set; } = 570;
 
@@ -57,7 +57,7 @@ public sealed class ChatOptions
 
     public string CallLogFile => string.IsNullOrWhiteSpace(CallLogPath) ? CallLog.DefaultPath : CallLogPath.Trim();
 
-    /// <summary>지휘자 표정 → 스티커 태그 (상태 이름 Idle · Thinking · Writing · Tool · Approval · Done · Failed · Stopped · Sleep). 없는 상태는 기본값 (<see cref="FaceCatalog"/>).</summary>
+    /// <summary>지휘자 표정 → 스티커 태그 (상태 이름 Idle · Thinking · Writing · Tool · Approval · Question · Done · Failed · Stopped · Sleep). 없는 상태는 기본값 (<see cref="FaceCatalog"/>).</summary>
     public Dictionary<string, string> Expressions { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     public IReadOnlyList<string> ModelList => Models.Count > 0 ? Models : ["opus", "sonnet", "haiku"];

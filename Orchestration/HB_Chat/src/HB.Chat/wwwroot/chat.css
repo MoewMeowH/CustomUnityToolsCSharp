@@ -194,6 +194,16 @@ input.rename { font-size: 15px; font-weight: 600; min-width: 200px; }
 .approval .desc { font-size: 12.5px; color: var(--muted); }
 .approval .acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; align-items: center; }
 .approval .reason { flex: 1; min-width: 160px; font-size: 12.5px; }
+/* 질문 카드 (3차 a): 승인 카드 틀 + 질문마다 선택지 */
+#live .question-card { max-width: 760px; margin-left: 44px; }
+.question-card { border-color: var(--accent, var(--ok)); background: color-mix(in srgb, var(--accent, var(--ok)) 8%, var(--panel)); }
+.question-card .head { color: inherit; }
+.question-card fieldset { border: 0; margin: 6px 0 0; padding: 0; }
+.question-card legend { font-size: 13.5px; padding: 0; margin-bottom: 4px; }
+.question-card legend .tag { font-size: 11.5px; margin-right: 6px; padding: 0 6px; border-radius: 8px; border: 1px solid var(--line); color: var(--muted); }
+.question-card label.opt { display: flex; gap: 6px; align-items: baseline; font-size: 13px; padding: 2px 0; cursor: pointer; }
+.question-card label.opt .d { color: var(--muted); font-size: 12px; }
+.question-card .other { flex: 1; min-width: 160px; font-size: 12.5px; }
 .rules { max-width: 920px; margin: 0 auto 12px; font-size: 12.5px; }
 .rules li { display: flex; gap: 8px; align-items: center; }
 

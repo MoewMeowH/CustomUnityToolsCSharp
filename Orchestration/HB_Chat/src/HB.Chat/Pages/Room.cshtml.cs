@@ -233,6 +233,27 @@ public sealed class RoomModel(
         return hub.Decide(id, approval, parsed.Value, reason) is { } error ? BadRequest(error) : new JsonResult(new { ok = true });
     }
 
+    /// <summary>질문 카드의 답 (3차 a). answers는 JSON 객체(질문 글 → 답). skip이면 답하지 않기.</summary>
+    public IActionResult OnPostAnswer(string id, string? question, string? answers, bool skip)
+    {
+        if (!RoomStore.IsRoomId(id) || string.IsNullOrEmpty(question)) return NotFound();
+        Dictionary<string, string>? parsed = null;
+        if (!skip)
+        {
+            if (answers is null || answers.Length > 64 * 1024) return BadRequest("답을 읽지 못했습니다.");
+            try
+            {
+                parsed = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(answers);
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                return BadRequest("답을 읽지 못했습니다.");
+            }
+            if (parsed is null) return BadRequest("답을 읽지 못했습니다.");
+        }
+        return hub.Answer(id, question, parsed) is { } error ? BadRequest(error) : new JsonResult(new { ok = true });
+    }
+
     /// <summary>"이 방에서 항상 허용" 규칙 지우기.</summary>
     public IActionResult OnPostRemoveRule(string id, string? rule)
     {

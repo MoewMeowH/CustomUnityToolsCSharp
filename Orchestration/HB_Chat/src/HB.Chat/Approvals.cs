@@ -1,20 +1,37 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
 namespace HB.Chat;
 
 /// <summary>
-/// claude의 PermissionRequest HTTP 훅이 보낸 승인 요청 하나 (2차 계획서 2-1, 0번 실측 A로 받는 키를 확인).
+/// CLI가 stdio 호스트(앱)에 보낸 명령 승인 요청 하나 (control_request can_use_tool — 3차 0번 실측, 그 전 2-1은 PermissionRequest 훅 본문 · 같은 키).
 /// Summary는 카드에 보일 명령 전문(명령 · 파일 경로 · 그 밖은 입력 JSON). Rule은 CLI가 제안한 규칙 중 이 앱이 "항상 허용"으로 받는 것.
 /// Truncated면 전문이 너무 길어 잘린 것 — 사용자가 다 보지 못한 명령이라 거절만 받는다 (/self-review 36e4e20e04 C5 · ab79e61df5 C5).
+/// Extra는 명령 · 설명 밖의 입력(예 <c>run_in_background=true</c>) — 허용하면 입력 전체가 그대로 실행되므로 카드에 같이 보인다.
+/// Risky면 그 입력 이름에 dangerously · bypass가 있다 (예 <c>dangerouslyDisableSandbox</c>) — 거절만 받는다 (/self-review 5e747ff851 C1).
 /// </summary>
 public sealed record ApprovalRequest(string Tool, string Summary, string? Description, string? Rule, bool Truncated = false)
 {
     /// <summary>카드에 보일 명령 전문의 상한 (글자). 넘으면 잘라 보이고 허용을 막는다.</summary>
     public const int MaxSummaryChars = 20_000;
 
-    /// <summary>훅 본문(JSON)을 읽는다. 모양이 아니면 null.</summary>
+    /// <summary>추가 입력 값 하나를 보일 상한 (글자). 넘으면 잘리고 거절만 받는다 (다 보지 못한 입력).</summary>
+    public const int MaxExtraValueChars = 500;
+
+    public string? Extra { get; init; }
+    public bool Risky { get; init; }
+
+    /// <summary>카드에 보이는 것이 허용될 입력 전부가 아니어서 거절만 받는지.</summary>
+    public bool DenyOnly => Truncated || Risky;
+
+    /// <summary>요약으로 보이는 키 (명령이면 command · description, 파일이면 file_path · description).</summary>
+    private static readonly HashSet<string> ShownKeys = new(StringComparer.Ordinal) { "command", "description", "file_path" };
+
+    /// <summary>
+    /// 승인 요청 원문(control_request의 request 객체: tool_name · input · description · permission_suggestions)을 읽는다. 모양이 아니면 null.
+    /// </summary>
     public static ApprovalRequest? Parse(string body)
     {
         try
@@ -24,15 +41,30 @@ public sealed record ApprovalRequest(string Tool, string Summary, string? Descri
             if (e.ValueKind != JsonValueKind.Object || Str(e, "tool_name") is not { Length: > 0 } tool) return null;
             string summary;
             string? description = null;
-            if (e.TryGetProperty("tool_input", out var input) && input.ValueKind == JsonValueKind.Object)
+            var extras = new List<string>();
+            var risky = false;
+            var truncated = false;
+            if (e.TryGetProperty("input", out var input) && input.ValueKind == JsonValueKind.Object)
             {
-                summary = Str(input, "command") ?? Str(input, "file_path") ?? input.GetRawText();
-                description = Str(input, "description");
+                var shown = Str(input, "command") ?? Str(input, "file_path");
+                summary = shown ?? input.GetRawText();
+                description = Str(input, "description") ?? Str(e, "description");
+                if (shown is not null)
+                    foreach (var p in input.EnumerateObject().Where(p => !ShownKeys.Contains(p.Name)))
+                    {
+                        var value = p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString()! : p.Value.GetRawText();
+                        if (value.Length > MaxExtraValueChars) (value, truncated) = (value[..MaxExtraValueChars] + "…", true);
+                        extras.Add($"{p.Name}={value}");
+                        if (ApprovalRules.IsDangerousName(p.Name) && p.Value.ValueKind is not (JsonValueKind.False or JsonValueKind.Null)) risky = true;
+                    }
             }
             else summary = "";
-            var truncated = summary.Length > MaxSummaryChars;
-            if (truncated) summary = summary[..MaxSummaryChars] + "…";
-            return new ApprovalRequest(tool, summary, description, truncated ? null : SuggestedRule(e), truncated);
+            if (summary.Length > MaxSummaryChars) (summary, truncated) = (summary[..MaxSummaryChars] + "…", true);
+            return new ApprovalRequest(tool, summary, description, truncated || risky ? null : SuggestedRule(e), truncated)
+            {
+                Extra = extras.Count == 0 ? null : string.Join(", ", extras),
+                Risky = risky,
+            };
         }
         catch (JsonException)
         {
@@ -73,17 +105,25 @@ public enum ApprovalChoice
     Deny,
 }
 
-/// <summary>훅에 돌려줄 답. Message는 거절 때 Claude가 보는 문구.</summary>
+/// <summary>승인 카드의 답. Message는 거절 때 Claude가 보는 문구.</summary>
 public sealed record ApprovalAnswer(bool Allow, string? Message)
 {
-    /// <summary>PermissionRequest 훅 응답 JSON (hooks 문서 모양).</summary>
-    public string ToHookJson()
-    {
-        var decision = Allow
-            ? (object)new { behavior = "allow" }
-            : new { behavior = "deny", message = Message ?? "사용자가 거절했습니다." };
-        return JsonSerializer.Serialize(new { hookSpecificOutput = new { hookEventName = "PermissionRequest", decision } });
-    }
+    /// <summary>호스트 답 JSON (<see cref="PermissionDecision"/>). 허용이면 입력을 그대로 돌려준다.</summary>
+    public string ToDecisionJson(string inputJson) =>
+        Allow ? PermissionDecision.Allow(inputJson) : PermissionDecision.Deny(Message ?? "사용자가 거절했습니다.");
+}
+
+/// <summary>
+/// stdio 호스트의 승인 답 (control_response의 response — SDK canUseTool과 같은 모양, 3차 0번 실측):
+/// 허용 <c>{"behavior":"allow","updatedInput":{…}}</c>, 거절 <c>{"behavior":"deny","message":"…"}</c>.
+/// </summary>
+public static class PermissionDecision
+{
+    /// <summary>허용. updatedInput은 받은 입력 그대로 (질문 카드는 answers를 더한 입력 — <see cref="QuestionRequest.WithAnswers"/>).</summary>
+    public static string Allow(string updatedInputJson) =>
+        new JsonObject { ["behavior"] = "allow", ["updatedInput"] = JsonNode.Parse(updatedInputJson) }.ToJsonString();
+
+    public static string Deny(string message) => JsonSerializer.Serialize(new { behavior = "deny", message });
 }
 
 /// <summary>"이 방에서 항상 허용" 규칙 모양 검사.</summary>
@@ -105,6 +145,9 @@ public static partial class ApprovalRules
         var content = m.Groups[2].Value;
         return content.Trim().Length > 0 && !content.Contains('*') && Balanced(content) && !Dangerous().IsMatch(rule);
     }
+
+    /// <summary>입력 이름이 우회 · 위험 인자 모양인지 (예 dangerouslyDisableSandbox).</summary>
+    public static bool IsDangerousName(string name) => Dangerous().IsMatch(name);
 
     private static bool Balanced(string s)
     {
@@ -144,8 +187,9 @@ public sealed class ApprovalLog(Func<string> dataFolder)
             at = DateTimeOffset.Now,
             room = roomId,
             tool = request.Tool,
-            summary = request.Summary.Length > 300 ? request.Summary[..300] + "…" : request.Summary,
-            decision,
+            summary = Cut(request.Summary),
+            // 질문 카드의 답(기타 글 포함)도 300자까지만 — 세션 기록에 원문이 있다 (/self-review 5e747ff851 C2 · 지휘자 C4)
+            decision = Cut(decision),
         }, Json);
         try
         {
@@ -158,54 +202,6 @@ public sealed class ApprovalLog(Func<string> dataFolder)
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { } // 기록 실패가 승인을 막지 않게
     }
-}
 
-public static class ApprovalEndpoint
-{
-    /// <summary>훅 본문 상한 (바이트).</summary>
-    public const int MaxBodyBytes = 1024 * 1024;
-
-    /// <summary>
-    /// 훅이 부를 주소: 서버가 연 주소의 호스트를 127.0.0.1로 바꾼다 (localhost · 0.0.0.0 · + · * · [::]로 열어도 연결되는 루프백 주소로 —
-    /// /self-review 36e4e20e04 C10). 포트 · 경로는 그대로.
-    /// </summary>
-    public static string LoopbackUrl(string address)
-    {
-        var m = System.Text.RegularExpressions.Regex.Match(address, @"^(https?://)(\[[^\]]*\]|[^:/]+)(.*)$");
-        return m.Success ? m.Groups[1].Value + "127.0.0.1" + m.Groups[3].Value : address;
-    }
-
-    /// <summary>
-    /// POST /approve?room=&amp;token= — claude의 PermissionRequest HTTP 훅이 부른다. 같은 출처 검사에서 빠지는 대신 실행마다 바뀌는 토큰으로 지킨다.
-    /// 토큰이 그 방의 지금 실행과 맞지 않으면 본문을 읽기 전에 403 (훅 오류 → claude가 거절). 본문은 서버 단계에서 상한을 건다(chunked 포함).
-    /// 답할 때까지 요청을 붙잡고, 답을 훅 응답 JSON으로 돌려준다.
-    /// </summary>
-    public static IEndpointConventionBuilder MapApprovals(this IEndpointRouteBuilder app) =>
-        app.MapPost("/approve", async (HttpContext ctx, RoomHub hub) =>
-        {
-            var room = ctx.Request.Query["room"].ToString();
-            var token = ctx.Request.Query["token"].ToString();
-            // 토큰부터: 토큰 없는 요청이 큰 본문을 읽고 파싱하게 만들지 못하게 (/self-review 36e4e20e04 C7 · ab79e61df5 C6).
-            if (!RoomStore.IsRoomId(room) || !hub.IsCurrentToken(room, token)) return Results.StatusCode(StatusCodes.Status403Forbidden);
-            if (ctx.Request.ContentLength is > MaxBodyBytes) return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
-            if (ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } limit)
-                limit.MaxRequestBodySize = MaxBodyBytes;
-
-            string body;
-            try
-            {
-                using var reader = new StreamReader(ctx.Request.Body, Encoding.UTF8);
-                body = await reader.ReadToEndAsync(ctx.RequestAborted);
-            }
-            catch (BadHttpRequestException)
-            {
-                return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
-            }
-            if (ApprovalRequest.Parse(body) is not { } request) return Results.BadRequest();
-
-            var answer = await hub.RequestApprovalAsync(room, token, request, ctx.RequestAborted);
-            return answer is null
-                ? Results.StatusCode(StatusCodes.Status403Forbidden)
-                : Results.Content(answer.ToHookJson(), "application/json; charset=utf-8");
-        });
+    private static string Cut(string s) => s.Length > 300 ? s[..300] + "…" : s;
 }

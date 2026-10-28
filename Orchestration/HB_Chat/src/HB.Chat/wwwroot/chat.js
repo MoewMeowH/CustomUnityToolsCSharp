@@ -91,6 +91,13 @@
             try { localStorage.setItem("hbchat.company", company.checked ? "1" : "0"); } catch { /* 저장 못 해도 이번 화면에는 적용 */ }
         });
     }
+    // 다른 창(데스크톱 큰 창 ↔ 미니 창 · 다른 탭)에서 바꾸면 이미 열린 화면도 따라간다 — 처음 그릴 때만 읽어 미니 창이 옛 상태로 남았다 (사용자 제보 2026-10-28)
+    window.addEventListener("storage", (e) => {
+        if (e.key !== "hbchat.company") return;
+        const on = e.newValue === "1";
+        document.documentElement.classList.toggle("company", on);
+        if (company) company.checked = on;
+    });
     window.addEventListener("popstate", () => {
         const m = location.pathname.match(/^\/Room\/([0-9a-f]{12})$/);
         if (m) openRoom(m[1], false); else location.reload();
@@ -602,7 +609,11 @@
             // 명령 전문(스크롤 칸) — 사용자가 본 것이 허용되는 것과 같게 (/self-review 36e4e20e04 C3 · C5, ab79e61df5 C5).
             card.append(head, el("div", "cmd", a.summary));
             if (a.description) card.append(el("div", "desc", "Claude 설명: " + a.description));
-            if (a.truncated) card.append(el("div", "warn-line", "명령이 너무 길어 끝까지 보이지 않습니다 — 거절만 할 수 있습니다."));
+            // 명령 밖의 입력도 허용하면 같이 실행된다 — 본 것 = 허용되는 것 (/self-review 5e747ff851 C1)
+            if (a.extra) card.append(el("div", "cmd", "추가 입력: " + a.extra));
+            const denyOnly = a.truncated || a.risky;
+            if (a.risky) card.append(el("div", "warn-line", "위험한 입력(dangerously · bypass)이 있어 거절만 할 수 있습니다."));
+            else if (a.truncated) card.append(el("div", "warn-line", "명령이나 입력이 너무 길어 끝까지 보이지 않습니다 — 거절만 할 수 있습니다."));
             else if (a.rule) {
                 const r = el("div", "rule");
                 r.append(document.createTextNode("항상 허용하면 저장될 규칙: "), el("code", "mono", a.rule));
@@ -616,7 +627,7 @@
                 acts.append(b);
                 return b;
             };
-            if (!a.truncated) {
+            if (!denyOnly) {
                 button("허용", "allow", "primary");
                 if (a.rule) button("이 방에서 항상 허용", "always");
             }
@@ -639,6 +650,82 @@
             cards.delete(a.id);
             card.replaceWith(el("div", "live-line" + (label === "허용" || label === "항상 허용" ? "" : " denied"),
                 "승인 " + (label || "끝남") + " — " + a.tool + ": " + a.summary.slice(0, 120)));
+        }
+        // 질문 카드 (3차 a): 지휘자의 AskUserQuestion. 질문마다 선택지(하나 · 여러 개) + "기타" 직접 쓰기. 남은 시간은 승인 카드와 같이 다시 쓴다.
+        function showQuestion(q) {
+            if (cards.has(q.id)) return;
+            const follow = atBottom();
+            const card = el("div", "approval question-card");
+            const head = el("div", "head");
+            const left = el("span"); left.style.marginLeft = "auto";
+            head.append(el("span", null, "지휘자의 질문"), left);
+            card.append(head);
+            const reads = [];
+            q.questions.forEach((item, qi) => {
+                const set = el("fieldset");
+                const legend = el("legend");
+                if (item.header) legend.append(el("span", "tag", item.header));
+                legend.append(document.createTextNode(item.question));
+                set.append(legend);
+                const name = "q-" + q.id + "-" + qi;
+                const inputs = [];
+                for (const o of item.options) {
+                    const lab = el("label", "opt");
+                    const box = el("input");
+                    box.type = item.multiSelect ? "checkbox" : "radio"; box.name = name; box.value = o.label;
+                    lab.append(box, el("span", null, o.label));
+                    if (o.description) lab.append(el("span", "d", o.description));
+                    set.append(lab);
+                    inputs.push(box);
+                }
+                // 기타: 글을 쓰면 그 글이 답 (하나 고르기면 선택지 표시를 지운다)
+                const otherLab = el("label", "opt");
+                const other = el("input", "other");
+                other.type = "text"; other.maxLength = 1000; other.placeholder = item.options.length ? "기타 (직접 쓰기)" : "답 쓰기";
+                other.addEventListener("input", () => { if (!item.multiSelect && other.value.trim()) inputs.forEach(b => b.checked = false); });
+                // 반대로 하나 고르기에서 선택지를 고르면 기타 글을 비운다 — 안 그러면 보이는 선택과 다른 글이 답으로 갔다 (/self-review 7d839f4aa5 C3)
+                if (!item.multiSelect) inputs.forEach(b => b.addEventListener("change", () => { if (b.checked) other.value = ""; }));
+                otherLab.append(other);
+                set.append(otherLab);
+                card.append(set);
+                reads.push(() => {
+                    const picked = inputs.filter(b => b.checked).map(b => b.value);
+                    const typed = other.value.trim();
+                    if (typed) picked.push(typed);
+                    return [item.question, item.multiSelect ? picked.join(", ") : (typed || picked[0] || "")];
+                });
+            });
+            const acts = el("div", "acts");
+            const send = el("button", "btn primary", "답하기"); send.type = "button";
+            const skip = el("button", "btn", "답하지 않기"); skip.type = "button";
+            send.addEventListener("click", async () => {
+                const answers = Object.fromEntries(reads.map(r => r()));
+                if (Object.values(answers).some(a => !a)) { alert("모든 질문에 답을 고르거나 써 주세요."); return; }
+                await answer(q.id, card, answers);
+            });
+            skip.addEventListener("click", () => answer(q.id, card, null));
+            acts.append(send, skip);
+            card.append(acts);
+            card.dataset.expires = String(Date.parse(q.expiresAt));
+            card.left = left;
+            live.append(card);
+            cards.set(q.id, card);
+            tickApprovals();
+            if (follow) toBottom();
+        }
+        async function answer(id, card, answers) {
+            const controls = card.querySelectorAll("button, input");
+            controls.forEach(b => b.disabled = true);
+            const data = new FormData();
+            data.append("question", id);
+            if (answers) data.append("answers", JSON.stringify(answers)); else data.append("skip", "true");
+            if (!await post("Answer", data)) controls.forEach(b => b.disabled = false);
+        }
+        function doneQuestion(q, text, answered) {
+            const card = cards.get(q.id);
+            if (!card) return;
+            cards.delete(q.id);
+            card.replaceWith(el("div", "live-line" + (answered ? "" : " denied"), "질문 " + (answered ? "답함 — " + text : (text || "끝남"))));
         }
         async function decide(id, choice, card) {
             const reason = choice === "deny" ? card.querySelector("input.reason")?.value.trim() : null;
@@ -713,6 +800,12 @@
                     break;
                 case "approval-done":
                     doneApproval(ev.approval, ev.text);
+                    break;
+                case "question":
+                    showQuestion(ev.question);
+                    break;
+                case "question-done":
+                    doneQuestion(ev.question, ev.text, ev.ok === true);
                     break;
                 case "rules":
                     renderRules(ev.rules || []);

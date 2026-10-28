@@ -5,9 +5,10 @@ namespace HB.Chat;
 
 /// <summary>
 /// 방 화면에 보내는 실시간 알림 (SSE data 한 줄 = JSON 하나).
-/// kind: snapshot · start · delta · tool · denied · retry · end · queued · notice · idle · approval · approval-done · rules ·
+/// kind: snapshot · start · delta · tool · denied · retry · end · queued · notice · idle · approval · approval-done · question · question-done · rules ·
 /// rooms(방 목록 줄이 바뀌었을 수 있음, Text = 그 방 ID — 어느 방이든).
 /// Prompt는 지금 처리 중인 사용자 말, Pending은 큐에서 기다리는 말들. Approval은 승인 카드(approval) · 끝난 카드의 ID(approval-done, Text = 결정).
+/// Question은 질문 카드(question) · 끝난 카드(question-done, Text = 결정 한 줄 — 3차 a).
 /// </summary>
 public sealed record LiveEvent(string Kind)
 {
@@ -22,6 +23,7 @@ public sealed record LiveEvent(string Kind)
     /// <summary>기다리는 말 (ID 붙음 — 화면이 하나씩 취소, 계획서 2-2 d). Pending과 같은 차례.</summary>
     public IReadOnlyList<QueuedMessage>? PendingItems { get; init; }
     public ApprovalView? Approval { get; init; }
+    public QuestionView? Question { get; init; }
 
     /// <summary>rules 알림: 이 방의 "항상 허용" 규칙 전체 (바뀐 뒤 화면 목록을 다시 그린다).</summary>
     public IReadOnlyList<string>? Rules { get; init; }
@@ -37,8 +39,13 @@ public sealed record LiveEvent(string Kind)
 /// <summary>
 /// 화면의 승인 카드 하나. Rule이 있으면 "이 방에서 항상 허용" 단추와 저장될 규칙을 보인다.
 /// Truncated면 명령이 너무 길어 잘린 것 — 거절만 보인다 (서버도 허용을 받지 않는다).
+/// Extra는 명령 밖의 입력(허용하면 같이 실행됨), Risky면 위험한 이름의 입력이 있어 거절만 (/self-review 5e747ff851 C1).
 /// </summary>
-public sealed record ApprovalView(string Id, string Tool, string Summary, string? Description, string? Rule, DateTimeOffset ExpiresAt, bool Truncated);
+public sealed record ApprovalView(string Id, string Tool, string Summary, string? Description, string? Rule, DateTimeOffset ExpiresAt, bool Truncated)
+{
+    public string? Extra { get; init; }
+    public bool Risky { get; init; }
+}
 
 /// <summary>
 /// 방마다 한 번에 한 턴 (계획서 3번). 실행 중에 온 말은 큐에 넣고 끝나면 차례로 보낸다.
@@ -72,12 +79,13 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         public Face? LastEnd;
         public DateTimeOffset LastEndAt;
 
-        /// <summary>지금 명령 단계 실행의 승인 토큰 (실행마다 새로, 끝나거나 중지하면 비움). 이 값과 맞는 승인 요청만 받는다.</summary>
-        public string? RunToken;
-
         /// <summary>지금 실행을 끼어들기로 끝냈다 — end 알림 글을 "끼어들기로 멈춤"으로 (지휘자 검토 R5).</summary>
         public bool Interrupted;
         public readonly Dictionary<string, PendingApproval> Approvals = [];
+        public readonly Dictionary<string, PendingQuestion> Questions = [];
+
+        /// <summary>답을 기다리는 카드(승인 · 질문)가 있는지.</summary>
+        public bool Waiting => Approvals.Values.Any(p => !p.Answer.Task.IsCompleted) || Questions.Values.Any(q => !q.Answer.Task.IsCompleted);
     }
 
     private sealed class PendingApproval(ApprovalRequest request, DateTimeOffset expiresAt)
@@ -89,7 +97,23 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         /// <summary>카드에 남길 결정 (허용 · 항상 허용 · 거절 …). 답을 정한 쪽이 적는다.</summary>
         public string? Label;
 
-        public ApprovalView View => new(Id, Request.Tool, Request.Summary, Request.Description, Request.Rule, ExpiresAt, Request.Truncated);
+        public ApprovalView View => new(Id, Request.Tool, Request.Summary, Request.Description, Request.Rule, ExpiresAt, Request.Truncated)
+        {
+            Extra = Request.Extra,
+            Risky = Request.Risky,
+        };
+    }
+
+    /// <summary>질문 카드 하나 (3차 a). 답은 질문 글 → 답, null이면 답하지 않음(거절 — Label에 이유).</summary>
+    private sealed class PendingQuestion(QuestionRequest request, DateTimeOffset expiresAt)
+    {
+        public readonly string Id = Guid.NewGuid().ToString("N")[..10];
+        public readonly QuestionRequest Request = request;
+        public readonly DateTimeOffset ExpiresAt = expiresAt;
+        public readonly TaskCompletionSource<IReadOnlyDictionary<string, string>?> Answer = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public string? Label;
+
+        public QuestionView View => new(Id, Request.Items, ExpiresAt);
     }
 
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Live> _rooms = new();
@@ -106,7 +130,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     private readonly List<Channel<LiveEvent>> _roomListeners = [];
 
     /// <summary>방 목록 줄을 바꾸는 알림 (바쁨 · 승인 · 끝). 흘림 글(delta) 같은 잦은 알림은 넣지 않는다.</summary>
-    private static readonly HashSet<string> ListKinds = ["start", "end", "idle", "approval", "approval-done", "queued"];
+    private static readonly HashSet<string> ListKinds = ["start", "end", "idle", "approval", "approval-done", "question", "question-done", "queued"];
 
     /// <summary>
     /// 이 실행기를 바꿀 때 (테스트: 가짜 claude). 기본은 claude 실행 파일 + <see cref="ClaudeArgs"/> 인자.
@@ -116,20 +140,14 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     /// <summary>승인 기록 (없으면 남기지 않음).</summary>
     public ApprovalLog? Log { get; init; }
 
-    /// <summary>
-    /// 승인 훅이 부를 이 앱의 주소 (예: http://127.0.0.1:5290). 앱이 켜진 뒤 실제 주소로 채운다.
-    /// 비어 있으면 명령 단계 실행을 시작하지 않는다.
-    /// </summary>
-    public string? ApprovalBaseUrl { get; set; }
-
     public bool IsBusy(string roomId) => _rooms.TryGetValue(roomId, out var live) && live.Busy;
 
-    /// <summary>방 목록에 보일 실행 상태: 쉼 · 실행 중 · 승인 기다림 (실패는 방 색인의 LastError로 따로 본다).</summary>
+    /// <summary>방 목록에 보일 실행 상태: 쉼 · 실행 중 · 답 기다림(승인 · 질문 카드) (실패는 방 색인의 LastError로 따로 본다).</summary>
     public RoomActivity ActivityOf(string roomId)
     {
         if (!_rooms.TryGetValue(roomId, out var live)) return RoomActivity.Idle;
         lock (live.Gate)
-            return live.Approvals.Values.Any(p => !p.Answer.Task.IsCompleted) ? RoomActivity.Approval
+            return live.Waiting ? RoomActivity.Approval
                 : live.Busy ? RoomActivity.Busy
                 : RoomActivity.Idle;
     }
@@ -168,7 +186,10 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     /// <summary>실행 중 · 방금 끝난 턴의 표정 (방 잠금 안에서 부른다). 쉬는 방이면 null.</summary>
     private static Face? LiveFace(Live live, bool transient)
     {
-        if (live.Busy) return live.Approvals.Values.Any(p => !p.Answer.Task.IsCompleted) ? Face.Approval : live.Phase;
+        if (live.Busy)
+            return live.Approvals.Values.Any(p => !p.Answer.Task.IsCompleted) ? Face.Approval
+                : live.Questions.Values.Any(q => !q.Answer.Task.IsCompleted) ? Face.Question
+                : live.Phase;
         if (transient && live.LastEnd is { } end && DateTimeOffset.Now - live.LastEndAt < EndFaceFor) return end;
         return null;
     }
@@ -298,17 +319,56 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     }
 
     /// <summary>
-    /// 승인 요청 (PermissionRequest 훅 → /approve). 토큰이 그 방의 지금 실행과 맞지 않으면 null (엔드포인트가 403).
-    /// 카드를 띄우고 답 · 시간 초과 · 훅 쪽 끊김(aborted) · 중지 중 먼저 오는 것으로 끝낸다. 답은 기록에도 남긴다.
+    /// 실행 중인 claude가 묻는 승인 하나 (stdio 호스트 — <see cref="ClaudeRunner"/>의 onPermission, 3차 a). 답(<see cref="PermissionDecision"/> JSON)을 돌려준다.
+    /// 명령 방의 명령 도구 → 승인 카드, 대화 단계가 아닌 방의 AskUserQuestion → 질문 카드, 그 밖은 카드 없이 거절 (그 전 --permission-prompts none과 같은 동작).
+    /// 그 실행(세대)이 이미 끝났거나 중지됐으면 거절.
     /// </summary>
-    public async Task<ApprovalAnswer?> RequestApprovalAsync(string roomId, string token, ApprovalRequest request, CancellationToken aborted)
+    private async Task<string> DecideToolAsync(Room room, Live live, int generation, ToolPermission ask, CancellationToken aborted)
     {
-        if (!_rooms.TryGetValue(roomId, out var live)) return null;
+        if (room.Level == PermissionLevel.Command && ClaudeArgs.CommandTools.Contains(ask.Tool))
+        {
+            if (ApprovalRequest.Parse(ask.RequestJson) is not { } request) return PermissionDecision.Deny("승인 요청 모양을 읽지 못해 거절했습니다.");
+            var answer = await RequestApprovalAsync(room.Id, live, generation, request, aborted);
+            return (answer ?? new ApprovalAnswer(false, "실행이 이미 끝나 거절했습니다.")).ToDecisionJson(ask.InputJson);
+        }
+        if (room.Level != PermissionLevel.Chat && ask.Tool == ClaudeArgs.AskTool)
+        {
+            if (QuestionRequest.Parse(ask.InputJson) is not { } question)
+                return PermissionDecision.Deny("질문 카드로 보일 수 없는 모양이라 거절했습니다 — 같은 질문을 채팅 글로 물어 주세요.");
+            var answers = await RequestQuestionAsync(room.Id, live, generation, question, aborted);
+            return answers.Answers is { } given
+                ? PermissionDecision.Allow(question.WithAnswers(given))
+                : PermissionDecision.Deny($"사용자가 질문 카드에 답하지 않았습니다 ({answers.Label}). 필요하면 채팅 글로 다시 물어 주세요.");
+        }
+        // 호스트가 거절하면 CLI는 system/permission_denied를 내지 않는다 (3차 a 실제 확인) — 그 전처럼 "거절됨" 줄을 화면에 남긴다.
+        var target = ApprovalRequest.Parse(ask.RequestJson)?.Summary is { Length: > 0 } s ? $" {(s.Length > 120 ? s[..120] + "…" : s)}" : "";
+        lock (live.Gate)
+        {
+            if (live.Generation == generation) Broadcast(live, new LiveEvent("denied") { Text = $"{ask.Tool}{target}: 승인할 곳이 없어 자동 거절" });
+        }
+        return PermissionDecision.Deny(ClaudeRunner.NoApprover);
+    }
+
+    /// <summary>테스트용: 그 방의 지금 실행에 승인 카드를 하나 더 띄운다 (실행 중이 아니면 null).</summary>
+    internal Task<ApprovalAnswer?> RequestApprovalAsync(string roomId, ApprovalRequest request, CancellationToken aborted)
+    {
+        if (!_rooms.TryGetValue(roomId, out var live)) return Task.FromResult<ApprovalAnswer?>(null);
+        int generation;
+        lock (live.Gate) generation = live.Generation;
+        return RequestApprovalAsync(roomId, live, generation, request, aborted);
+    }
+
+    /// <summary>
+    /// 승인 카드를 띄우고 답 · 시간 초과 · 실행 쪽 끊김(aborted) · 중지 중 먼저 오는 것으로 끝낸다. 답은 기록에도 남긴다.
+    /// 그 세대의 실행이 아니면(이미 끝남 · 중지) null.
+    /// </summary>
+    private async Task<ApprovalAnswer?> RequestApprovalAsync(string roomId, Live live, int generation, ApprovalRequest request, CancellationToken aborted)
+    {
         var timeout = TimeSpan.FromSeconds(Math.Max(1, options.Value.ApprovalTimeoutSeconds));
         PendingApproval pending;
         lock (live.Gate)
         {
-            if (live.RunToken is not { } current || !TokenEquals(current, token)) return null;
+            if (live.Cts is null || live.Generation != generation) return null;
             pending = new PendingApproval(request, DateTimeOffset.Now + timeout);
             live.Approvals[pending.Id] = pending;
             Broadcast(live, new LiveEvent("approval") { Approval = pending.View });
@@ -323,7 +383,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         }
         catch (OperationCanceledException)
         {
-            // claude 쪽 훅이 먼저 끊겼으면 답을 돌려줘도 버려진다 (0번 실측). 아니면 시간 초과 — 둘 다 거절.
+            // 실행이 먼저 끝났으면(프로세스 종료 · 취소) 답을 돌려줘도 버려진다. 아니면 시간 초과 — 둘 다 거절.
             var (label, message) = aborted.IsCancellationRequested
                 ? ("끊김", "승인 요청이 claude 쪽에서 먼저 끊겼습니다.")
                 : ("시간 초과", "사용자가 시간 안에 답하지 않아 거절했습니다. 필요하면 다시 요청하세요.");
@@ -340,10 +400,78 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             Broadcast(live, new LiveEvent("approval-done") { Approval = pending.View, Text = pending.Label });
             // 다른 카드가 남았으면 그대로 승인 기다림, 아니면 도구 단계로 (허용이면 명령이 돈다, 거절이면 곧 다음 글).
             // Busy가 아니라 Cts로 본다: 실행이 끝나는 잠금에서 Cts를 먼저 비우므로 end 뒤에 face가 나가지 않는다 (/self-review 83b453653b C3).
-            if (live.Cts is not null && live.Approvals.Count == 0) SetFace(live, Face.Tool);
+            if (live.Cts is not null && live.Approvals.Count == 0) SetFace(live, live.Questions.Count > 0 ? Face.Question : Face.Tool);
         }
         Log?.Write(roomId, request, pending.Label ?? (answer.Allow ? "허용" : "거절"));
         return answer;
+    }
+
+    /// <summary>
+    /// 질문 카드를 띄우고 답 · 답하지 않기 · 시간 초과 · 실행 쪽 끊김 · 중지 중 먼저 오는 것으로 끝낸다 (3차 a). Answers가 null이면 답 없음(Label = 이유).
+    /// 기록(approvals.jsonl)에도 질문 → 답을 남긴다.
+    /// </summary>
+    private async Task<(IReadOnlyDictionary<string, string>? Answers, string Label)> RequestQuestionAsync(
+        string roomId, Live live, int generation, QuestionRequest request, CancellationToken aborted)
+    {
+        var timeout = TimeSpan.FromSeconds(Math.Max(1, options.Value.ApprovalTimeoutSeconds));
+        PendingQuestion pending;
+        lock (live.Gate)
+        {
+            if (live.Cts is null || live.Generation != generation) return (null, "실행 끝남");
+            pending = new PendingQuestion(request, DateTimeOffset.Now + timeout);
+            live.Questions[pending.Id] = pending;
+            Broadcast(live, new LiveEvent("question") { Question = pending.View });
+            if (live.Approvals.Count == 0) SetFace(live, Face.Question);
+        }
+
+        using var wait = CancellationTokenSource.CreateLinkedTokenSource(aborted);
+        wait.CancelAfter(timeout);
+        try
+        {
+            await pending.Answer.Task.WaitAsync(wait.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            lock (live.Gate)
+            {
+                if (pending.Answer.TrySetResult(null)) pending.Label = aborted.IsCancellationRequested ? "끊김" : "시간 초과";
+            }
+        }
+
+        var answers = await pending.Answer.Task;
+        string label;
+        lock (live.Gate)
+        {
+            label = answers is null ? pending.Label ?? "답 없음" : "답함";
+            live.Questions.Remove(pending.Id);
+            Broadcast(live, new LiveEvent("question-done")
+            {
+                Question = pending.View,
+                Text = answers is null ? label : QuestionRequest.Summary(request.Items, answers),
+                Ok = answers is not null, // 화면이 글 모양으로 가르지 않게 (지휘자 검토 C5)
+            });
+            if (live.Cts is not null && !live.Waiting) SetFace(live, Face.Thinking); // 답을 받으면 지휘자가 이어 생각한다
+        }
+        Log?.Write(roomId, new ApprovalRequest(ClaudeArgs.AskTool, QuestionRequest.Summary(request.Items, null), null, null),
+            answers is null ? label : "답: " + QuestionRequest.Summary(request.Items, answers));
+        return (answers, label);
+    }
+
+    /// <summary>
+    /// 질문 카드의 답 (화면). answers가 null이면 "답하지 않기". 오류 문구(null이면 받음).
+    /// </summary>
+    public string? Answer(string roomId, string questionId, IReadOnlyDictionary<string, string>? answers)
+    {
+        if (!_rooms.TryGetValue(roomId, out var live)) return "없는 방입니다.";
+        lock (live.Gate)
+        {
+            if (!live.Questions.TryGetValue(questionId, out var pending) || pending.Answer.Task.IsCompleted)
+                return "이미 끝난 질문입니다.";
+            if (answers is not null && pending.Request.Validate(answers) is { } error) return error;
+            if (!pending.Answer.TrySetResult(answers)) return "이미 끝난 질문입니다.";
+            if (answers is null) pending.Label = "답하지 않음";
+        }
+        return null;
     }
 
     /// <summary>
@@ -359,8 +487,10 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         {
             if (!live.Approvals.TryGetValue(approvalId, out var pending) || pending.Answer.Task.IsCompleted)
                 return "이미 끝난 승인 요청입니다.";
-            if (choice != ApprovalChoice.Deny && pending.Request.Truncated)
-                return "명령이 너무 길어 다 보이지 않습니다 — 거절만 할 수 있습니다.";
+            if (choice != ApprovalChoice.Deny && pending.Request.DenyOnly)
+                return pending.Request.Risky
+                    ? "위험한 입력(dangerously · bypass)이 있어 거절만 할 수 있습니다."
+                    : "명령이나 입력이 너무 길어 다 보이지 않습니다 — 거절만 할 수 있습니다.";
             if (choice == ApprovalChoice.AlwaysAllow && (rule = pending.Request.Rule) is null)
                 return "이 요청에는 항상 허용할 규칙이 없습니다.";
             var label = choice switch { ApprovalChoice.Allow => "허용", ApprovalChoice.AlwaysAllow => "항상 허용", _ => "거절" };
@@ -405,20 +535,6 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         lock (live.Gate) Broadcast(live, new LiveEvent("rules") { Rules = room.AllowRules });
     }
 
-    /// <summary>엔드포인트가 본문을 읽기 전에 보는 토큰 검사: 그 방의 지금 실행 토큰과 같은지.</summary>
-    public bool IsCurrentToken(string roomId, string token)
-    {
-        if (token.Length == 0 || !_rooms.TryGetValue(roomId, out var live)) return false;
-        lock (live.Gate) return live.RunToken is { } current && TokenEquals(current, token);
-    }
-
-    /// <summary>테스트용: 그 방의 지금 실행 토큰.</summary>
-    internal string? CurrentToken(string roomId)
-    {
-        if (!_rooms.TryGetValue(roomId, out var live)) return null;
-        lock (live.Gate) return live.RunToken;
-    }
-
     /// <summary>
     /// 작업 폴더 · 사용자 설정이 이미 미리 허용한 명령 규칙 (Bash · PowerShell). 명령 방에서는 이 규칙과 맞는 명령이 카드 없이 실행되므로
     /// 방 화면에 보인다 (/self-review ab79e61df5 C3 — 프로젝트 훅이 필요해 설정 출처를 줄이지는 않는다). 읽지 못한 파일은 건너뛴다.
@@ -452,16 +568,13 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         return rules;
     }
 
-    private static bool TokenEquals(string a, string b) =>
-        System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
-            System.Text.Encoding.UTF8.GetBytes(a), System.Text.Encoding.UTF8.GetBytes(b));
-
-    /// <summary>실행이 끝나거나 중지될 때: 토큰을 비우고 기다리던 승인을 모두 거절로 끝낸다 (잠금 안에서 부른다).</summary>
+    /// <summary>실행이 끝나거나 중지될 때: 기다리던 승인 · 질문을 모두 거절(답 없음)로 끝낸다 (잠금 안에서 부른다).</summary>
     private static void EndApprovals(Live live, string label)
     {
-        live.RunToken = null;
         foreach (var p in live.Approvals.Values)
             if (p.Answer.TrySetResult(new ApprovalAnswer(false, $"{label} — 승인 요청을 거절했습니다."))) p.Label = label;
+        foreach (var q in live.Questions.Values)
+            if (q.Answer.TrySetResult(null)) q.Label = label;
     }
 
     /// <summary>SSE 구독. 먼저 지금 상태(snapshot)를 넣어 준다. 끝나면 <see cref="Unsubscribe"/>.</summary>
@@ -485,6 +598,8 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             if (live.Notice is { } notice) ch.Writer.TryWrite(new LiveEvent("notice") { Text = notice });
             foreach (var p in live.Approvals.Values.Where(p => !p.Answer.Task.IsCompleted))
                 ch.Writer.TryWrite(new LiveEvent("approval") { Approval = p.View });
+            foreach (var q in live.Questions.Values.Where(q => !q.Answer.Task.IsCompleted))
+                ch.Writer.TryWrite(new LiveEvent("question") { Question = q.View });
             live.Subscribers.Add(ch);
         }
         lock (_appGate)
@@ -627,21 +742,6 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             }
         }
 
-        // 명령 단계: 이 실행에만 맞는 토큰을 만들어 승인 훅 주소에 넣는다. 끝나거나 중지하면 LoopAsync · Stop이 비운다.
-        string? hookUrl = null;
-        if (room.Level == PermissionLevel.Command)
-        {
-            if (ApprovalBaseUrl is not { Length: > 0 } baseUrl)
-                return Record(room, new RunResult(false, false, "승인 주소를 아직 모릅니다 — 앱이 다 켜진 뒤 다시 보내세요.", null, null, null, 0, 0, null));
-            var token = Convert.ToHexStringLower(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16));
-            lock (live.Gate)
-            {
-                if (live.Generation != generation) return new RunResult(false, true, "중지됨", null, null, null, 0, 0, null);
-                live.RunToken = token;
-            }
-            hookUrl = $"{baseUrl.TrimEnd('/')}/approve?room={room.Id}&token={token}";
-        }
-
         // 그 방 첨부 폴더: 열어도 되는 폴더일 때만 (링크 · .claude가 있으면 열지 않고 알림 — /self-review 0c3b7e3514 C2 · C3)
         string? attachDir = null;
         if (room.Level != PermissionLevel.Chat)
@@ -656,8 +756,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 }
         }
 
-        var spec = new RunSpec(room.Level, room.Model, room.SessionId, resume, mcpConfig, o.McpServer, RoomRules.For(room.Level),
-            hookUrl, Math.Max(1, o.ApprovalTimeoutSeconds) + 30, room.AllowRules)
+        var spec = new RunSpec(room.Level, room.Model, room.SessionId, resume, mcpConfig, o.McpServer, RoomRules.For(room.Level), room.AllowRules)
         {
             ForkFrom = resume ? null : room.ForkOf, // 갈래 방의 첫 실행 (2-2 c)
             // 그 방 첨부 폴더가 있으면 Read로 열 수 있게 (2-2 d, 대화 단계는 ClaudeArgs가 뺀다)
@@ -701,7 +800,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 };
                 if (shown is not null) Broadcast(live, shown);
             }
-        }, stopOnMismatch.Token);
+        }, (ask, aborted) => DecideToolAsync(room, live, generation, ask, aborted), stopOnMismatch.Token);
 
         if (mismatch is not null) result = result with { Ok = false, Cancelled = false, Error = mismatch };
         return Record(room, result, forked: spec.ForkFrom is not null && result.Ok);
@@ -793,7 +892,7 @@ public enum RoomActivity
 {
     Idle,
     Busy,
-    /// <summary>실행 중이고 승인 카드가 답을 기다린다.</summary>
+    /// <summary>실행 중이고 승인 · 질문 카드가 답을 기다린다 (데스크톱 앱이 이 이름을 읽는다 — 질문도 같은 값).</summary>
     Approval,
 }
 
@@ -806,6 +905,9 @@ public static class RoomRules
         (level == PermissionLevel.Command
             ? "명령을 실행하면 사용자가 그 자리에서 카드로 허용 · 거절한다. 거절되면 같은 명령을 다시 시도하지 말고, 거절 이유를 보고 다른 방법을 묻는다."
             : "승인을 물을 곳이 없어서 허용되지 않은 도구 호출은 자동으로 거절된다 — 거절되면 다시 시도하지 말고, 무엇이 필요한지 사용자에게 말한다.") +
+        // 질문 카드 (3차 a): 대화 단계는 도구가 없다
+        (level == PermissionLevel.Chat ? "" :
+            $" 사용자에게 선택지 중 하나를 고르게 할 때는 {ClaudeArgs.AskTool} 도구를 쓴다 — 화면에 질문 카드로 보인다. 답이 없다고 돌아오면 채팅 글로 다시 묻는다.") +
         Widgets.Rule + // 위젯 형식 (2-2 f)
         // 첨부 (2-2 d): 말 끝의 [첨부] 줄 — 대화 단계는 도구가 없어 받지 않는다
         (level == PermissionLevel.Chat ? "" :

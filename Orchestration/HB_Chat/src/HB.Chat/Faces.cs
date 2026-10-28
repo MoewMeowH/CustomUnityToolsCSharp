@@ -12,6 +12,8 @@ public enum Face
     Writing,
     Tool,
     Approval,
+    /// <summary>질문 카드가 답을 기다림 (3차 a).</summary>
+    Question,
     Done,
     Failed,
     Stopped,
@@ -27,7 +29,7 @@ public sealed class FaceCatalog(StickerCatalog stickers, IOptions<ChatOptions> o
 {
     private static readonly Dictionary<Face, string> DefaultTags = new()
     {
-        [Face.Idle] = "대기", [Face.Thinking] = "생각", [Face.Writing] = "설명", [Face.Tool] = "검색", [Face.Approval] = "요청",
+        [Face.Idle] = "대기", [Face.Thinking] = "생각", [Face.Writing] = "설명", [Face.Tool] = "검색", [Face.Approval] = "요청", [Face.Question] = "질문",
         [Face.Done] = "긍정", [Face.Failed] = "당황", [Face.Stopped] = "미안", [Face.Sleep] = "잠",
     };
 
@@ -38,6 +40,7 @@ public sealed class FaceCatalog(StickerCatalog stickers, IOptions<ChatOptions> o
         Face.Writing => "답 쓰는 중…",
         Face.Tool => "도구 실행 중",
         Face.Approval => "승인 기다림",
+        Face.Question => "답 기다림",
         Face.Done => "끝남",
         Face.Failed => "실패",
         Face.Stopped => "중지됨",

@@ -16,6 +16,54 @@ public sealed class StreamParserTests
     }
 
     [Fact]
+    public void ControlRequest_KeepsIdSubtypeAndRawRequest()
+    {
+        // 3차 0번 실측 모양 (2.1.312, stdio 호스트)
+        var ev = Assert.IsType<ControlRequestEvent>(StreamParser.Parse(
+            """{"type":"control_request","request_id":"9f1","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{"questions":[]},"requires_user_interaction":true}}"""));
+        Assert.Equal("9f1", ev.RequestId);
+        Assert.Equal("can_use_tool", ev.Subtype);
+        Assert.Contains("\"tool_name\":\"AskUserQuestion\"", ev.RequestJson);
+        // request_id나 request가 없으면 다른 줄로 (답할 곳을 모름)
+        Assert.IsType<OtherEvent>(StreamParser.Parse("""{"type":"control_request","request":{"subtype":"can_use_tool"}}"""));
+        Assert.IsType<OtherEvent>(StreamParser.Parse("""{"type":"control_request","request_id":"x"}"""));
+        Assert.IsType<OtherEvent>(StreamParser.Parse("""{"type":"control_response","response":{"subtype":"success","request_id":"hbchat_init"}}"""));
+        // 요청 거두기 (SDK 규약 모양 — 추정, 7d839f4aa5 C1)
+        Assert.Equal("9f1", Assert.IsType<ControlCancelEvent>(StreamParser.Parse("""{"type":"control_cancel_request","request_id":"9f1"}""")).RequestId);
+        Assert.IsType<OtherEvent>(StreamParser.Parse("""{"type":"control_cancel_request"}"""));
+    }
+
+    [Fact]
+    public void Question_ParsesValidatesAndAddsAnswers()
+    {
+        // 3차 0번 실측 A의 AskUserQuestion 입력
+        const string input = """{"questions":[{"question":"Which color do you prefer?","header":"Color","options":[{"label":"Red","description":"Choose Red"},{"label":"Blue","description":"Choose Blue"}],"multiSelect":false}]}""";
+        var q = QuestionRequest.Parse(input)!;
+        var item = Assert.Single(q.Items);
+        Assert.Equal("Color", item.Header);
+        Assert.Equal(["Red", "Blue"], item.Options.Select(o => o.Label));
+
+        Assert.NotNull(q.Validate(new Dictionary<string, string>()));
+        Assert.NotNull(q.Validate(new Dictionary<string, string> { ["Which color do you prefer?"] = "  " }));
+        Assert.NotNull(q.Validate(new Dictionary<string, string> { ["Which color do you prefer?"] = new string('a', QuestionRequest.MaxAnswerChars + 1) }));
+        var answers = new Dictionary<string, string> { ["Which color do you prefer?"] = "Red " };
+        Assert.Null(q.Validate(answers));
+
+        // 허용 답의 updatedInput = 원래 입력 + answers (0번 실측 A에서 지휘자가 "You answered Red."로 받음)
+        using var doc = System.Text.Json.JsonDocument.Parse(q.WithAnswers(answers));
+        Assert.Equal("Red", doc.RootElement.GetProperty("answers").GetProperty("Which color do you prefer?").GetString());
+        Assert.Equal(1, doc.RootElement.GetProperty("questions").GetArrayLength());
+    }
+
+    [Theory]
+    [InlineData("not json")]
+    [InlineData("""{"questions":[]}""")]
+    [InlineData("""{"questions":[{"question":"","options":[]}]}""")]
+    [InlineData("""{"questions":[{"question":"q","options":[{"description":"no label"}]}]}""")]
+    [InlineData("""{"questions":[{"question":"q","options":[]},{"question":"q","options":[]}]}""")] // 같은 질문 글 둘 — 답의 키가 겹친다
+    public void Question_RejectsWrongShape(string input) => Assert.Null(QuestionRequest.Parse(input));
+
+    [Fact]
     public void AssistantUsage_IsContextSize_AndResultHasWindow()
     {
         // 2-2 0번 실측 모양 (haiku 5.5): 마지막 assistant usage = 그 요청의 컨텍스트, result modelUsage.contextWindow

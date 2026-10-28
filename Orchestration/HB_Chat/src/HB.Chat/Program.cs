@@ -109,16 +109,7 @@ app.Use(async (ctx, next) =>
 app.UseStaticFiles();
 app.MapRazorPages();
 app.MapStickerImages();
-app.MapApprovals();
-
-// 승인 훅이 부를 주소: 실제로 연 주소에서 고른다 (localhost는 127.0.0.1로 — AllowedHosts에 있고 IPv6 해석을 피한다).
-app.Lifetime.ApplicationStarted.Register(() =>
-{
-    var addresses = app.Services.GetRequiredService<Microsoft.AspNetCore.Hosting.Server.IServer>()
-        .Features.Get<Microsoft.AspNetCore.Hosting.Server.Features.IServerAddressesFeature>()?.Addresses;
-    if (addresses?.FirstOrDefault(a => a.StartsWith("http://", StringComparison.OrdinalIgnoreCase)) is { } address)
-        app.Services.GetRequiredService<RoomHub>().ApprovalBaseUrl = ApprovalEndpoint.LoopbackUrl(address);
-});
+// 승인 · 질문은 claude 프로세스의 stdin/stdout(stdio 호스트)으로 주고받는다 — 승인용 HTTP 경로는 없다 (3차 a, 그 전 2-1의 /approve).
 
 // 방 실시간 알림 (SSE). 흘림 글 · 도구 상태 · 거절 · 끝. 끝나면 화면이 세션 기록으로 말풍선을 다시 받는다.
 var sseJson = new JsonSerializerOptions(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };

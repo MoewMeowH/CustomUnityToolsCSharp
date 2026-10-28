@@ -18,8 +18,8 @@ public sealed class ClaudeArgsTests
     {
         var args = ClaudeArgs.Build(Spec(PermissionLevel.Chat, mcp: null), Models);
         Assert.Equal(
-            "-p | --output-format | stream-json | --include-partial-messages | --verbose | --model | opus | --session-id | " + Sid +
-            " | --append-system-prompt | 규칙 | --tools |  | --strict-mcp-config | --permission-prompts | none",
+            "-p | --input-format | stream-json | --output-format | stream-json | --include-partial-messages | --verbose | --model | opus | --session-id | " + Sid +
+            " | --append-system-prompt | 규칙 | --tools |  | --strict-mcp-config | --permission-prompt-tool | stdio",
             Joined(args));
         Assert.DoesNotContain("--mcp-config", args);
     }
@@ -46,16 +46,17 @@ public sealed class ClaudeArgsTests
     public void Read_HasReadToolsAndOnlyTheOneMcpServer()
     {
         var args = ClaudeArgs.Build(Spec(PermissionLevel.Read), Models);
-        Assert.Contains("--tools | Read,Grep,Glob | --strict-mcp-config | --mcp-config | C:/data/mcp.json | --allowedTools | mcp__hb-orchestration", Joined(args));
+        // AskUserQuestion: 질문 카드 (3차 a — stdio 호스트에서만 도구 목록에 들어온다)
+        Assert.Contains("--tools | Read,Grep,Glob,AskUserQuestion | --strict-mcp-config | --mcp-config | C:/data/mcp.json | --allowedTools | mcp__hb-orchestration", Joined(args));
         Assert.DoesNotContain("--permission-mode", args);
-        Assert.Equal("none", args[args.ToList().IndexOf("--permission-prompts") + 1]);
+        Assert.Equal("stdio", args[args.ToList().IndexOf("--permission-prompt-tool") + 1]);
     }
 
     [Fact]
     public void Edit_AddsEditToolsAndAcceptEdits_ButNoBash()
     {
         var args = ClaudeArgs.Build(Spec(PermissionLevel.Edit), Models);
-        Assert.Contains("--tools | Read,Grep,Glob,Edit,Write | --permission-mode | acceptEdits", Joined(args));
+        Assert.Contains("--tools | Read,Grep,Glob,Edit,Write,AskUserQuestion | --permission-mode | acceptEdits", Joined(args));
         Assert.DoesNotContain(args, a => a.Contains("Bash", StringComparison.OrdinalIgnoreCase));
         Assert.Contains("--strict-mcp-config", args);
     }

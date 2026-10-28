@@ -32,7 +32,7 @@ public sealed class RoomHubTests : IDisposable
             ProcessFactory = (room, spec, workspace) =>
             {
                 lock (_specs) _specs.Add(spec);
-                return new ProcessSpec("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, spec.SessionId, spec.ApprovalHookUrl ?? ""], workspace);
+                return new ProcessSpec("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, spec.SessionId], workspace);
             },
         };
     }

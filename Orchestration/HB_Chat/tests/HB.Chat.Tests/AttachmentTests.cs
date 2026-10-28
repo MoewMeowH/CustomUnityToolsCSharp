@@ -125,8 +125,7 @@ public sealed class AttachmentTests : IDisposable
         var dir = Path.Combine(_dir, "attachments", "0123456789ab");
         var rule = $"Edit({ClaudeArgs.AbsoluteRulePath(dir)}/**)";
         RunSpec Spec(PermissionLevel level) =>
-            new(level, "opus", "15eb061e-7153-4c14-83ba-083385ed6945", false, "C:/data/mcp.json", "hb-orchestration", "규칙",
-                ApprovalHookUrl: "http://127.0.0.1:5290/approve?room=x&token=y") { AttachDir = dir };
+            new(level, "opus", "15eb061e-7153-4c14-83ba-083385ed6945", false, "C:/data/mcp.json", "hb-orchestration", "규칙") { AttachDir = dir };
         Assert.Contains(rule, ClaudeArgs.Build(Spec(PermissionLevel.Edit), ["opus"]));
         Assert.Contains(rule, ClaudeArgs.Build(Spec(PermissionLevel.Command), ["opus"]));
         Assert.DoesNotContain(rule, ClaudeArgs.Build(Spec(PermissionLevel.Read), ["opus"])); // 읽기는 쓸 도구가 없다

@@ -51,7 +51,19 @@ public sealed record ResultEvent(bool Ok, string? Text, string? Subtype, double?
         ?? Models.OrderByDescending(m => m.Input).FirstOrDefault()?.Window;
 }
 
-/// <summary>화면에 쓰지 않는 줄 (status · message_start · rate_limit_event · 모르는 종류 · 깨진 JSON).</summary>
+/// <summary>
+/// control_request: CLI가 호스트(앱)에 묻는 요청 (3차 0번 실측 — <c>{"type":"control_request","request_id":…,"request":{"subtype":"can_use_tool",…}}</c>).
+/// RequestJson은 request 객체 원문. 답은 <see cref="ClaudeRunner"/>가 같은 request_id의 control_response로 stdin에 쓴다.
+/// </summary>
+public sealed record ControlRequestEvent(string RequestId, string Subtype, string RequestJson) : StreamEvent;
+
+/// <summary>
+/// control_cancel_request: CLI가 앞서 낸 제어 요청을 거둔다 (<c>{"type":"control_cancel_request","request_id":…}</c> — SDK 규약의 모양, 3차 0번 실측에서는 못 봄 · 추정).
+/// 그 요청의 카드를 "끊김"으로 닫는다 (/self-review 7d839f4aa5 C1).
+/// </summary>
+public sealed record ControlCancelEvent(string RequestId) : StreamEvent;
+
+/// <summary>화면에 쓰지 않는 줄 (status · message_start · rate_limit_event · control_response · 모르는 종류 · 깨진 JSON).</summary>
 public sealed record OtherEvent(string Type) : StreamEvent;
 
 public static class StreamParser
@@ -70,6 +82,9 @@ public static class StreamParser
             return type switch
             {
                 "stream_event" => ParseStream(e),
+                "control_request" when Str(e, "request_id") is { Length: > 0 } id && e.TryGetProperty("request", out var req) && req.ValueKind == JsonValueKind.Object
+                    => new ControlRequestEvent(id, Str(req, "subtype") ?? "", req.GetRawText()),
+                "control_cancel_request" when Str(e, "request_id") is { Length: > 0 } cancelId => new ControlCancelEvent(cancelId),
                 "system" when subtype == "init" => new InitEvent(Str(e, "session_id"), Str(e, "claude_code_version"), McpServers(e)),
                 "system" when subtype == "permission_denied" => new DeniedEvent(Str(e, "tool_name"), Str(e, "decision_reason")),
                 "system" when subtype == "api_retry" => new RetryEvent(Int(e, "attempt") ?? 0, Str(e, "error")),
