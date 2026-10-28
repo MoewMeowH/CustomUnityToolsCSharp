@@ -11,10 +11,12 @@
             --accent: #3b6ef5; --ok: #1f9d55; --err: #d64545; --warn: #b7791f; --code: #f1f3f6;
             --mono: ui-monospace, "JetBrains Mono", Consolas, monospace;
         }
+        @* 어두운 색은 디코 색 (HB_Chat 5차 a — HB_Chat _Layout과 같은 값). HB_Chat 데스크톱 앱이 테마에 맞춰 WebView2 색 설정을 바꾸면 이 색이 된다 *@
         @@media (prefers-color-scheme: dark) {
             :root {
-                --bg: #16181d; --panel: #1e2128; --text: #e4e7ee; --muted: #8b93a5; --line: #2d313b;
-                --accent: #6b93ff; --ok: #4ccb84; --err: #ff6b6b; --warn: #e3b341; --code: #262a33;
+                --bg: #313338; --panel: #2b2d31; --text: #dbdee1; --muted: #949ba4; --line: #3f4147;
+                --accent: #5865f2; --ok: #23a55a; --err: #f23f43; --warn: #f0b232; --code: #1e1f22;
+                color-scheme: dark;
             }
         }
         * { box-sizing: border-box; }

@@ -1,20 +1,31 @@
 <!doctype html>
-<html lang="ko">
+@inject ProfileStore Profiles
+@* data-theme: 화면 테마 (5차 a — 설정 화면, 기본 디코 다크). system은 Windows 밝게 · 어둡게를 따른다 *@
+<html lang="ko" data-theme="@Profiles.Theme()">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>@(ViewData["Title"] ?? "HB Chat")</title>
     @* 색 변수는 대시보드 _Layout과 같은 값 (말풍선 CSS _ChatStyles가 이 변수를 쓴다). 화면 틀 · 방 CSS는 wwwroot/chat.css (계획서 2-2 a). *@
+    @* 어두운 색은 디코 색 (5차 a): 배경 #313338 · 곁 #2b2d31 · 가장 진한 칸 #1e1f22 · 강조 #5865f2 — 대시보드 _Layout의 어두운 색과 같은 값.
+       밝게(light)는 늘 밝은 색, 디코(discord)는 늘 어두운 색, 시스템(system)은 Windows 설정을 따른다. *@
     <style>
         :root {
             --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #6b7385; --line: #e3e6ec;
             --accent: #3b6ef5; --ok: #1f9d55; --err: #d64545; --warn: #b7791f; --code: #f1f3f6;
             --mono: ui-monospace, "JetBrains Mono", Consolas, monospace;
+            color-scheme: light;
+        }
+        :root[data-theme=discord] {
+            --bg: #313338; --panel: #2b2d31; --text: #dbdee1; --muted: #949ba4; --line: #3f4147;
+            --accent: #5865f2; --ok: #23a55a; --err: #f23f43; --warn: #f0b232; --code: #1e1f22;
+            color-scheme: dark;
         }
         @@media (prefers-color-scheme: dark) {
-            :root {
-                --bg: #16181d; --panel: #1e2128; --text: #e4e7ee; --muted: #8b93a5; --line: #2d313b;
-                --accent: #6b93ff; --ok: #4ccb84; --err: #ff6b6b; --warn: #e3b341; --code: #262a33;
+            :root[data-theme=system] {
+                --bg: #313338; --panel: #2b2d31; --text: #dbdee1; --muted: #949ba4; --line: #3f4147;
+                --accent: #5865f2; --ok: #23a55a; --err: #f23f43; --warn: #f0b232; --code: #1e1f22;
+                color-scheme: dark;
             }
         }
     </style>

@@ -158,6 +158,12 @@ app.Use(async (ctx, next) =>
 app.UseStaticFiles();
 app.MapRazorPages();
 app.MapStickerImages();
+// 화면 테마 (5차 a): 데스크톱 앱이 맨 위 줄 색 · WebView2 색 설정(대시보드 탭 포함)을 맞추려고 읽는다. 읽기만.
+app.MapGet("/api/appearance", (ProfileStore profiles, HttpContext ctx) =>
+{
+    ctx.Response.Headers.CacheControl = "no-store";
+    return Results.Json(new { theme = profiles.Theme() });
+});
 // 스티커 팩 그림 (4차 D2): 있는 팩 · 목록에 있는 태그만, 팩 폴더 → 없으면 기본 폴더 (StickerCatalog.FileFor가 폴더 밖을 막는다)
 app.MapGet("/sticker-pack/{pack}/{tag}", IResult (string pack, string tag, StickerPacks packs, HttpResponse response) =>
 {

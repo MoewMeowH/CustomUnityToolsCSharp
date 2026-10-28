@@ -134,6 +134,20 @@ public sealed class ProfileStoreTests : IDisposable
     }
 
     [Fact]
+    public void Theme_DefaultDiscord_ValidatesAndReloads()
+    {
+        // 5차 a: 기본 디코 다크, 셋 중 하나만, 다시 읽기 · 파일의 이상한 값은 기본으로
+        var store = New();
+        Assert.Equal(ProfileStore.ThemeDiscord, store.Theme());
+        Assert.NotNull(store.SetTheme("dark"));
+        Assert.NotNull(store.SetTheme(null));
+        Assert.Null(store.SetTheme(ProfileStore.ThemeLight));
+        Assert.Equal(ProfileStore.ThemeLight, New().Theme());
+        File.WriteAllText(Path.Combine(_dir, "profiles.json"), """{"theme":"<b>"}""");
+        Assert.Equal(ProfileStore.ThemeDiscord, New().Theme());
+    }
+
+    [Fact]
     public void BrokenFile_IsNotOverwritten()
     {
         File.WriteAllText(Path.Combine(_dir, "profiles.json"), "{ broken");

@@ -19,6 +19,27 @@ public sealed class SettingsModel(
     /// <summary>전체 스티커 팩의 그림 찾기 (표정 미리보기 — 4차 D2).</summary>
     public HB.Orchestration.ChatUi.StickerCatalog GlobalStickers => packs.For(packs.Effective((string?)null));
 
+    /// <summary>화면 테마 저장 (5차 a). 저장하면 열린 화면이 방을 다시 연다 — 데스크톱 앱은 같은 신호로 /api/appearance를 다시 읽는다.</summary>
+    public IActionResult OnPostTheme(string? theme)
+    {
+        Error = profiles.Store.SetTheme(theme);
+        if (Error is null)
+        {
+            hub.ProfilesChanged(store.All().Select(r => r.Id));
+            return RedirectToPage(new { done = "theme" });
+        }
+        Fill();
+        return Page();
+    }
+
+    /// <summary>테마 이름 (설정 화면).</summary>
+    public static string ThemeName(string theme) => theme switch
+    {
+        ProfileStore.ThemeSystem => "시스템 따름 (Windows 밝게 · 어둡게 설정대로)",
+        ProfileStore.ThemeLight => "밝게",
+        _ => "디코 다크",
+    };
+
     /// <summary>
     /// 전체 스티커 팩 저장 (4차 D2): 빈 값이면 기본(스티커 폴더 바로 아래 파일). 있는 팩만. 방에 따로 고른 팩이 먼저다.
     /// 저장하면 열린 화면이 방을 다시 연다.
@@ -100,6 +121,7 @@ public sealed class SettingsModel(
         "profile" => "프로필을 저장했습니다.",
         "faces" => "지휘자 표정을 저장했습니다.",
         "pack" => "스티커 팩을 바꿨습니다.",
+        "theme" => "화면 테마를 바꿨습니다.",
         _ => null,
     };
 

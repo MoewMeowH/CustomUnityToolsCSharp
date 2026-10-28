@@ -136,6 +136,22 @@
                 }
             </section>
 
+            @* 화면 테마 (5차 a — 노션 "UI/UX 변경 희망": 디코 같은 어두운 테마, 결정 "설정으로") *@
+            <section class="panel" style="padding:12px 14px;margin-top:16px">
+                <h3 style="margin:0 0 6px;font-size:15px">화면 테마</h3>
+                <p class="muted" style="margin:0 0 8px;font-size:12.5px">데스크톱 앱에서는 대시보드 탭과 맨 위 줄도 같은 테마로 보입니다.</p>
+                <form method="post" asp-page-handler="Theme" class="settings-add">
+                    @{ var theme = Model.Profiles.Store.Theme(); }
+                    <select name="theme" aria-label="화면 테마">
+                        @foreach (var t in ProfileStore.Themes)
+                        {
+                            <option value="@t" selected="@(t == theme)">@SettingsModel.ThemeName(t)</option>
+                        }
+                    </select>
+                    <button class="btn primary" type="submit">@Icons.Svg("check") 테마 저장</button>
+                </form>
+            </section>
+
             @* 스티커 팩 (4차 D2 — 노션 "이모티콘 사용 종류 변경"): 스티커 폴더 아래 폴더 하나가 팩 하나, 파일 이름은 기본과 같다. 방마다는 곁칸 방 정보에서 *@
             <section class="panel" style="padding:12px 14px;margin-top:16px">
                 <h3 style="margin:0 0 6px;font-size:15px">스티커 팩</h3>

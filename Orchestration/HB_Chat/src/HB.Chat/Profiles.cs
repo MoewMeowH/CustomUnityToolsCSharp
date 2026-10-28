@@ -29,6 +29,11 @@ public sealed partial class ProfileStore
     private Dictionary<string, Profile> _profiles = new(StringComparer.Ordinal);
     private Dictionary<string, string> _faces = new(StringComparer.OrdinalIgnoreCase);
     private string? _stickerPack;
+    private string _theme = DefaultTheme;
+
+    /// <summary>화면 테마 (5차 a): 시스템 따름 · 밝게 · 디코 다크. 기본은 디코 다크 (결정 "모두 추천대로").</summary>
+    public const string ThemeSystem = "system", ThemeLight = "light", ThemeDiscord = "discord", DefaultTheme = ThemeDiscord;
+    public static readonly IReadOnlyList<string> Themes = [ThemeSystem, ThemeLight, ThemeDiscord];
 
     public string? LoadError { get; }
 
@@ -46,6 +51,7 @@ public sealed partial class ProfileStore
                     if (IsKey(key) && p is not null)
                         _profiles[key] = new Profile(CleanName(p.Name, key), IsColor(p.Color) ? p.Color : null, IsImageName(p.Image) ? p.Image : null);
                 _stickerPack = StickerPacks.IsPackName(saved.StickerPack) ? saved.StickerPack : null;
+                _theme = saved.Theme is { } t && Themes.Contains(t) ? t : DefaultTheme;
                 foreach (var (face, tag) in saved.Faces ?? [])
                     if (IsFaceName(face) && !string.IsNullOrWhiteSpace(tag) && tag.Length <= 40) _faces[face] = tag.Trim();
             }
@@ -71,6 +77,25 @@ public sealed partial class ProfileStore
     public string? FaceTag(Face face)
     {
         lock (_lock) return _faces.TryGetValue(face.ToString(), out var t) ? t : null;
+    }
+
+    /// <summary>화면 테마 (5차 a — <see cref="Themes"/> 중 하나).</summary>
+    public string Theme()
+    {
+        lock (_lock) return _theme;
+    }
+
+    /// <summary>화면 테마 저장. 오류 문구(null이면 저장).</summary>
+    public string? SetTheme(string? theme)
+    {
+        if (theme is null || !Themes.Contains(theme)) return "알 수 없는 테마입니다.";
+        lock (_lock)
+        {
+            if (LoadError is not null) return $"profiles.json을 읽지 못해 쓰지 않습니다: {LoadError}";
+            var before = _theme;
+            _theme = theme;
+            return TrySave(() => _theme = before);
+        }
     }
 
     /// <summary>전체 스티커 팩 (4차 D2 — 폴더 이름, null이면 기본). 방에 고른 팩이 먼저 (StickerPacks.Effective).</summary>
@@ -220,7 +245,7 @@ public sealed partial class ProfileStore
         {
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(_file))!);
             var tmp = _file + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(new ProfileFile { Profiles = new(_profiles), Faces = new(_faces), StickerPack = _stickerPack }, Json), new UTF8Encoding(false));
+            File.WriteAllText(tmp, JsonSerializer.Serialize(new ProfileFile { Profiles = new(_profiles), Faces = new(_faces), StickerPack = _stickerPack, Theme = _theme }, Json), new UTF8Encoding(false));
             File.Move(tmp, _file, overwrite: true);
             return null;
         }
@@ -265,6 +290,7 @@ public sealed partial class ProfileStore
         public int Version { get; set; } = 1;
         public Dictionary<string, Profile>? Profiles { get; set; }
         public string? StickerPack { get; set; }
+        public string? Theme { get; set; }
         public Dictionary<string, string>? Faces { get; set; }
     }
 
