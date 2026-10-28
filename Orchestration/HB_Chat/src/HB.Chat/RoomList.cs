@@ -296,7 +296,7 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
     {
         var s = StickerTag().Replace(text, " ");
         // 위젯 HTML · 차트 JSON은 한 줄로 읽을 글이 아니다 (2-2 f 실제 확인: 목록에 <!DOCTYPE html>이 보였음)
-        s = WidgetBlock().Replace(s, m => m.Groups["lang"].Value == "chart" ? " [차트] " : " [위젯] ");
+        s = WidgetBlock().Replace(s, m => m.Groups["lang"].Value switch { "chart" => " [차트] ", "slides" => " [슬라이드] ", _ => " [위젯] " });
         s = Fence().Replace(s, " ");
         s = Link().Replace(s, "$1");
         s = LineMark().Replace(s, "");
@@ -312,9 +312,9 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
     [GeneratedRegex(@"^\s*(```|~~~)[^\n]*$", RegexOptions.Multiline)]
     private static partial Regex Fence();
 
-    // 화면(Markdig)이 위젯 · 차트로 그리는 모양과 맞춘다: ``` · ~~~ 세 개 이상, 언어 이름이 정확히 widget 또는 chart, 닫는 울타리는 같은 글자로 그 길이 이상,
+    // 화면(Markdig)이 위젯 · 차트 · 슬라이드로 그리는 모양과 맞춘다: ``` · ~~~ 세 개 이상, 언어 이름이 정확히 widget · chart · slides, 닫는 울타리는 같은 글자로 그 길이 이상,
     // 닫히지 않았으면 글 끝까지(중지된 턴), CRLF (803e5f13eb C6)
-    [GeneratedRegex(@"^[ \t]*(?<f>(?<c>[`~])\k<c>{2,})[ \t]*(?<lang>widget|chart)(?:[ \t][^\n]*)?\r?$.*?(?:^[ \t]*\k<f>\k<c>*[ \t]*\r?$|\z)",
+    [GeneratedRegex(@"^[ \t]*(?<f>(?<c>[`~])\k<c>{2,})[ \t]*(?<lang>widget|chart|slides)(?:[ \t][^\n]*)?\r?$.*?(?:^[ \t]*\k<f>\k<c>*[ \t]*\r?$|\z)",
         RegexOptions.Multiline | RegexOptions.Singleline)]
     private static partial Regex WidgetBlock();
 

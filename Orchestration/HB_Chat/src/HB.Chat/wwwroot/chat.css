@@ -199,7 +199,13 @@ select, input[type=text], textarea { background: var(--panel); border: 1px solid
 .widget.chart .widget-code > summary::after { content: "데이터 보기"; }
 .widget-run.chart-draw::after { content: "▶ 그리기"; }
 .widget-run.chart-print::after { content: "인쇄 · PDF"; }
-.widget-frame[hidden] { display: none; } /* .widget-frame의 display:block이 hidden 기본 숨김을 이긴다 */
+.widget-frame[hidden] { display: none; }
+/* 슬라이드 시안 (2026-10-29): 16:9 틀(높이 알림 없음), 인쇄용 틀은 960×540으로 그려 스스로 인쇄한다.
+   인쇄용 틀은 화면 안에 투명하게 둔다 — 화면 밖의 다른 출처 틀은 Chromium이 그리기를 멈춰 reveal 준비가 끝나지 않았다 (실제 확인, 추정 원인) */
+.widget.slides .widget-bar::before { content: "지휘자가 준 글로 앱이 그린 슬라이드 · 틀을 누르고 ← → 로 넘김"; }
+.widget.slides .widget-code > summary::after { content: "데이터 보기"; }
+.widget-frame.slides-frame { height: 315px; resize: none; }
+.widget-frame.slides-print-frame { position: fixed; left: 0; top: 0; width: 960px; height: 540px; opacity: 0; pointer-events: none; z-index: -1; } /* .widget-frame의 display:block이 hidden 기본 숨김을 이긴다 */
 /* 차트 하나만 인쇄 (2026-10-29): print-one이면 그 상자의 밝은 인쇄용 틀만 보인다. 틀 폭은 화면 그대로 (폭이 바뀌면 틀 안 다시 그리기가 인쇄보다 늦을 수 있어서) */
 @media print {
     html.print-one, html.print-one body { background: #fff !important; }

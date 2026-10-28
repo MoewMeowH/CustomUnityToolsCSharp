@@ -52,6 +52,8 @@ public sealed class WidgetTests
     [InlineData("앞\n~~~chart\n{\"type\":\"pie\"}\n~~~\n뒤", "앞 [차트] 뒤")]
     [InlineData("앞\n```chart\n{\"type\":\"bar\" 끝나지 않음", "앞 [차트]")]
     [InlineData("앞\n```charts\n{}\n```", "앞 {}")]                                 // 다른 언어 이름은 접지 않음
+    [InlineData("앞\n```slides\n{\"slides\":[]}\n```\n뒤", "앞 [슬라이드] 뒤")]    // 슬라이드 시안 (2026-10-29)
+    [InlineData("앞\n~~~slides\n{}\n~~~\n뒤", "앞 [슬라이드] 뒤")]
     public void Preview_WidgetBlockShapesMatchRenderer(string text, string preview) =>
         Assert.Equal(preview, RoomList.Preview(text)); // (803e5f13eb C6)
 
@@ -71,17 +73,31 @@ public sealed class WidgetTests
         var rules = RoomRules.For(PermissionLevel.Chat);
         Assert.Contains("```chart", rules);
         Assert.Contains("Chart.js 설정 JSON", rules);
+        Assert.Contains("```slides", rules); // 슬라이드 시안
+        Assert.Contains("\"slides\"", rules);
     }
 
     [Fact]
-    public void ChartLibrary_IsBundledWithLicense()
+    public void SlidesFence_RendersAsEscapedCodeWithLanguageClass()
     {
-        // 앱이 내주는 Chart.js 4.6.1 (npm 배포 파일 그대로, 계획서 2026-10-29_HB_Chat-차트-시안) — 바뀌면 SHA를 계획서 · 작업 로그와 같이 갱신
+        var html = SafeMarkdown.ToHtml("```slides\n{\"slides\":[{\"body\":\"</script><img src=x>\"}]}\n```\n", SafeMarkdown.Default);
+        Assert.Contains("<code class=\"language-slides\">", html);
+        Assert.Contains("&lt;/script&gt;&lt;img src=x&gt;", html);
+        Assert.DoesNotContain("<img", html);
+    }
+
+    // 앱이 내주는 라이브러리 (npm 배포 파일 그대로, 계획서 2026-10-29_HB_Chat-차트-시안 · 슬라이드-시안) — 바뀌면 SHA를 계획서 · 작업 로그와 같이 갱신
+    [Theory]
+    [InlineData("chart.umd.min.js", "87364cc2b2a76a6684929e7d6b80b18a897794db38400caff1fcf1791c6925d2", "chart.js.LICENSE.md", "MIT License")]
+    [InlineData("reveal.js", "aa1bbbf2617b23a623b23612cb3c5bdb63de512e652bf20fcfa832b045d37844", "reveal.js.LICENSE", "Permission is hereby granted")]
+    [InlineData("reveal.css", "615ee850cbbb98a0f688b60ed37b21819a3f54c9f3e6f20e33e63693ab74a0c0", "reveal.js.LICENSE", "Permission is hereby granted")]
+    [InlineData("marked.umd.js", "9eb730d2362ae1a8c6201698f17009e16671be6946d3d06503ddc0575283db7c", "marked.LICENSE", "Permission is hereby granted")]
+    [InlineData("purify.min.js", "cd37898f9782adf54820c413191b5691803f0f137c799d6edcfd38523b4c2c31", "dompurify.LICENSE", "Apache License")]
+    public void Library_IsBundledWithLicense(string file, string sha256, string license, string licenseText)
+    {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "HB.Chat", "wwwroot", "lib"));
-        var lib = File.ReadAllBytes(Path.Combine(root, "chart.umd.min.js"));
-        Assert.Equal("87364cc2b2a76a6684929e7d6b80b18a897794db38400caff1fcf1791c6925d2",
-            Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(lib)));
-        Assert.Contains("MIT License", File.ReadAllText(Path.Combine(root, "chart.js.LICENSE.md")));
+        Assert.Equal(sha256, Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(Path.Combine(root, file)))));
+        Assert.Contains(licenseText, File.ReadAllText(Path.Combine(root, license)));
     }
 
     [Fact]

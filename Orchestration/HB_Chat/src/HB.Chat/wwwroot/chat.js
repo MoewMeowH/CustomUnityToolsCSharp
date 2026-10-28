@@ -208,6 +208,11 @@
             "</head><body>" + source + "</body></html>";
     }
     window.addEventListener("message", (e) => {
+        // 슬라이드 인쇄용 틀이 인쇄를 마쳤다 — 보낸 창이 그 틀일 때만 지운다
+        if (e.data !== null && typeof e.data === "object" && e.data.hbPrintDone === true) {
+            for (const f of document.querySelectorAll("iframe.slides-print-frame")) if (f.contentWindow === e.source) f.remove();
+            return;
+        }
         const h = e.data !== null && typeof e.data === "object" ? e.data.hbWidgetHeight : undefined;
         if (typeof h !== "number" || !Number.isFinite(h)) return;
         for (const frame of document.querySelectorAll("iframe.widget-frame")) {
@@ -267,20 +272,37 @@
     // 설정 JSON에서 버릴 키: 틀 스크립트의 Object.assign이 __proto__를 setter로 타지 않게 (Chart.js 4.6.1 병합은 이미 거름, f8602c9ccd C2)
     const ChartDropKeys = new Set(["__proto__", "constructor", "prototype"]);
     const ChartTypes = new Set(["bar", "line", "pie", "doughnut", "radar", "polarArea", "scatter", "bubble"]);
-    let chartLib = null; // Promise<string> — 처음 쓸 때 한 번 받는다, 실패하면 다음에 다시
-    function loadChartLib() {
-        chartLib ??= fetch("/lib/chart.umd.min.js", { credentials: "omit" })
-            .then(r => { if (!r.ok) throw new Error(String(r.status)); return r.text(); })
-            .catch(e => { chartLib = null; throw e; });
-        return chartLib;
+    // 앱이 내주는 라이브러리 글 (wwwroot/lib) — 처음 쓸 때 한 번 받는다, 실패하면 다음에 다시
+    const libCache = new Map();
+    function loadLib(name) {
+        if (!libCache.has(name))
+            libCache.set(name, fetch("/lib/" + name, { credentials: "omit" })
+                .then(r => { if (!r.ok) throw new Error(String(r.status)); return r.text(); })
+                .catch(e => { libCache.delete(name); throw e; }));
+        return libCache.get(name);
     }
+    const loadChartLib = () => loadLib("chart.umd.min.js");
+    // 틀 안에 인라인으로 붙이는 라이브러리 글: 닫는 태그가 틀을 일찍 닫지 못하게
+    const inlineScript = code => "<script>" + code.replace(/<\/script/gi, "<\\/script") + "<\/script>";
+    const inlineStyle = css => "<style>" + css.replace(/<\/style/gi, "<\\/style") + "</style>";
+    // 겹친 방어: 틀 스크립트가 그리기 전에 WebRTC 생성자를 지운다 — CSP · sandbox로 못 막는 전송 길 (완전하지 않음, f8602c9ccd C2)
+    const NoWebRtc = "for(const k of[\"RTCPeerConnection\",\"webkitRTCPeerConnection\",\"RTCDataChannel\"]){try{delete window[k];}catch(e){}try{window[k]=undefined;}catch(e){}}";
+    const isPlainObject = v => v !== null && typeof v === "object" && !Array.isArray(v);
+    const isChart = v => isPlainObject(v) && ChartTypes.has(v.type);
+    const parseData = source => JSON.parse(source, (k, v) => ChartDropKeys.has(k) ? undefined : v);
     function chartConfig(source) {
         if (source.length > ChartMaxChars) return { error: `차트 데이터가 너무 커서(${source.length.toLocaleString()}자) 코드로만 보입니다.` };
         let config;
-        try { config = JSON.parse(source, (k, v) => ChartDropKeys.has(k) ? undefined : v); } catch { return { error: "차트 JSON을 읽지 못해 코드로만 보입니다." }; }
-        if (config === null || typeof config !== "object" || Array.isArray(config) || !ChartTypes.has(config.type))
-            return { error: "차트 종류(type)가 없거나 지원하지 않는 종류라 코드로만 보입니다." };
+        try { config = parseData(source); } catch { return { error: "차트 JSON을 읽지 못해 코드로만 보입니다." }; }
+        if (!isChart(config)) return { error: "차트 종류(type)가 없거나 지원하지 않는 종류라 코드로만 보입니다." };
         return { config };
+    }
+    // 이 말풍선에서 바로 그릴 차례인지 (차트 · 슬라이드를 같이 센다, 그릴 수 있는 것만) — 넘으면 "그리기" 단추
+    function autoDrawSlot(box) {
+        const msg = box.closest(".msg");
+        const nth = Number(msg.dataset.sheets || 0) + 1;
+        msg.dataset.sheets = String(nth);
+        return nth <= ChartAutoMax;
     }
     // <script> 안에 넣을 JSON: 글이 </script>나 <!--로 틀을 깨지 못하게 < > & 와 줄 구분 문자를 \u 이스케이프 (JSON.parse로는 같은 값)
     function scriptJson(value) {
@@ -296,15 +318,14 @@
             "<meta http-equiv=\"Content-Security-Policy\" content=\"" + WidgetCsp + "\">" +
             "<style>html,body{margin:0}body{padding:8px;font:13px system-ui,\"Malgun Gothic\",sans-serif}" +
             ".box{position:relative;height:" + ChartHeight + "px}.err{white-space:pre-wrap}</style>" +
-            "<script>" + lib.replace(/<\/script/gi, "<\\/script") + "<\/script>" +
+            inlineScript(lib) +
             "<script type=\"application/json\" id=\"hb-chart\">" + scriptJson({ config, theme }) + "<\/script>" +
             "</head><body><div class=\"box\"><canvas></canvas></div>" +
             // 그리기 실패(설정 오류)는 틀 안에 글로만. 높이 알림은 위젯과 같은 메시지 — 부모가 보낸 창 · 상한을 확인한다
             "<script>(()=>{const d=JSON.parse(document.getElementById(\"hb-chart\").textContent),c=d.config,t=d.theme;" +
             // 틀 문서는 color-scheme이 부모(다크)와 달라 흰 바탕을 칠한다 — 앱 패널 색으로 (실제 확인: 흰 바탕에 밝은 글자)
             "document.documentElement.style.background=t.panel;document.body.style.color=t.text;" +
-            // 겹친 방어: 그리기 전에 WebRTC 생성자를 지운다 — CSP · sandbox로 못 막는 전송 길 (완전하지 않음, f8602c9ccd C2)
-            "for(const k of[\"RTCPeerConnection\",\"webkitRTCPeerConnection\",\"RTCDataChannel\"]){try{delete window[k];}catch(e){}try{window[k]=undefined;}catch(e){}}" +
+            NoWebRtc +
             "try{Chart.defaults.color=t.text;Chart.defaults.borderColor=t.line;Chart.defaults.animation=false;" +
             // devicePixelRatio는 앱이 정한다 — 큰 값으로 캔버스 메모리를 키우지 못하게 (f8602c9ccd C1)
             "c.options=Object.assign({},c.options,{responsive:true,maintainAspectRatio:false,devicePixelRatio:Math.min(window.devicePixelRatio||1,2)});" +
@@ -370,14 +391,131 @@
                 print.addEventListener("click", () => printChart(box, lib, parsed.config));
                 bar.append(print);
             }, () => details.before(note("차트 라이브러리를 불러오지 못해 데이터로만 보입니다.")));
-            // 이 말풍선에서 몇 번째 차트인지 (그릴 수 있는 것만 센다)
-            const msg = box.closest(".msg");
-            const nth = Number(msg.dataset.charts || 0) + 1;
-            msg.dataset.charts = String(nth);
-            if (nth <= ChartAutoMax) { draw(); return; }
+            if (autoDrawSlot(box)) { draw(); return; }
             const go = el("button", "widget-run chart-draw");
             go.type = "button";
             go.setAttribute("aria-label", "차트 그리기");
+            go.addEventListener("click", () => { go.remove(); draw(); });
+            bar.append(go);
+        });
+    }
+    // ---- 슬라이드 시안 (계획서 Orchestration/HB_Chat/docs/plans/2026-10-29_HB_Chat-슬라이드-시안.md) ----
+    // ```slides = {"title"?, "slides": [{"title"?, "body"?: Markdown, "chart"?: Chart.js 설정, "notes"?}]}.
+    // 앱이 넣어 둔 reveal.js 6.0.2로 차트와 같은 격리 틀에 그린다. 제목 · 메모는 textContent, 본문 Markdown은 marked → DOMPurify(허용 태그만, 속성 없음)를
+    // 틀 안에서 한다 — 정화가 뚫려도 격리된 틀 안 (결정 "Markdown 서식"). 슬라이드 차트는 ```chart와 같은 검사 · 같은 덮어쓰기.
+    // 차트 장은 덱당 SlidesMaxCharts장까지 — 장마다 캔버스(960×330, devicePixelRatio 2면 약 5MB)라 60장이면 수백 MB (607bd5ec77 지휘자 추가)
+    const SlidesMaxChars = 50000, SlidesMaxCount = 60, SlidesMaxCharts = 10, SlidesPrintTimeoutMs = 60000;
+    const SlidesLibs = ["reveal.js", "reveal.css", "marked.umd.js", "purify.min.js"];
+    const SlidesTags = ["p", "br", "hr", "strong", "b", "em", "i", "del", "s", "code", "pre", "blockquote", "ul", "ol", "li",
+        "table", "thead", "tbody", "tr", "th", "td", "h3", "h4"];
+    // reveal 기본 테마 대신 앱 테마 (기본 테마는 글꼴을 품어 575KB이거나 외부 글꼴을 불러 CSP에 막힌다)
+    // reveal.css의 .reveal-viewport가 흰 바탕 · 검은 글자를 칠한다 — 앱 색으로 덮는다 (실제 확인: 흰 바탕에 밝은 글자)
+    const SlidesCss = "html,body,.reveal-viewport{margin:0;height:100%;background:var(--hb-bg);color:var(--hb-fg)}" +
+        ".reveal{font:30px/1.45 system-ui,\"Malgun Gothic\",sans-serif;color:var(--hb-fg);--r-link-color:var(--hb-fg)}" +
+        ".reveal .slides section{text-align:left}.reveal .slides section.hb-cover{text-align:center}" +
+        ".reveal h1,.reveal h2,.reveal h3,.reveal h4{margin:0 0 .45em;line-height:1.2;font-weight:700}" +
+        ".reveal h1{font-size:1.9em;margin-top:2.6em}.reveal h2{font-size:1.35em}.reveal h3{font-size:1.1em}.reveal h4{font-size:1em}" +
+        ".reveal p{margin:.35em 0}.reveal ul,.reveal ol{margin:.25em 0 .25em 1.2em;padding:0}.reveal li{margin:.12em 0}" +
+        ".reveal code{font-family:Consolas,monospace;font-size:.85em;background:rgba(127,127,127,.18);padding:0 .2em;border-radius:4px}" +
+        ".reveal pre{font-size:.62em;background:rgba(127,127,127,.15);padding:.5em .7em;border-radius:6px;overflow:hidden;white-space:pre-wrap}" +
+        ".reveal pre code{background:none;padding:0}.reveal blockquote{margin:.4em 0;padding-left:.6em;border-left:5px solid var(--hb-line);opacity:.85}" +
+        ".reveal table{border-collapse:collapse;font-size:.75em}.reveal th,.reveal td{border:1px solid var(--hb-line);padding:.15em .5em}" +
+        ".reveal .controls,.reveal .progress{color:var(--hb-fg)}.reveal .slide-number{background:none;color:var(--hb-fg);opacity:.6}" +
+        ".hb-chart{position:relative;height:330px;margin-top:.3em}.err{white-space:pre-wrap;padding:8px;font:13px system-ui,sans-serif}";
+    function slidesConfig(source) {
+        if (source.length > SlidesMaxChars) return { error: `슬라이드 데이터가 너무 커서(${source.length.toLocaleString()}자) 코드로만 보입니다.` };
+        let deck;
+        try { deck = parseData(source); } catch { return { error: "슬라이드 JSON을 읽지 못해 코드로만 보입니다." }; }
+        const text = v => v === undefined || typeof v === "string";
+        const ok = isPlainObject(deck) && text(deck.title) && Array.isArray(deck.slides) &&
+            deck.slides.length > 0 && deck.slides.length <= SlidesMaxCount &&
+            deck.slides.every(s => isPlainObject(s) && text(s.title) && text(s.body) && text(s.notes) && (s.chart === undefined || isChart(s.chart))) &&
+            deck.slides.filter(s => s.chart).length <= SlidesMaxCharts;
+        if (!ok) return { error: `슬라이드 형식(title · slides 1~${SlidesMaxCount}장 · 차트는 ${SlidesMaxCharts}장까지, 장마다 title · body · chart · notes)이 맞지 않아 코드로만 보입니다.` };
+        return { deck };
+    }
+    // print면 view:"print"로 모든 장을 쪽마다 펼치고 틀이 스스로 인쇄한다 (부모에서 iframe을 인쇄하면 쪽이 나뉘지 않음 — 결정 절)
+    function slidesDoc(libs, chartLib, deck, theme, print) {
+        const [reveal, revealCss, marked, purify] = libs;
+        return "<!doctype html><html><head><meta charset=\"utf-8\">" +
+            "<meta http-equiv=\"Content-Security-Policy\" content=\"" + WidgetCsp + "\">" +
+            inlineStyle(revealCss) + inlineStyle(SlidesCss) +
+            inlineScript(reveal) + inlineScript(marked) + inlineScript(purify) + (chartLib ? inlineScript(chartLib) : "") +
+            "<script type=\"application/json\" id=\"hb-deck\">" + scriptJson({ deck, theme, print, tags: SlidesTags }) + "<\/script>" +
+            "</head><body><div class=\"reveal\"><div class=\"slides\"></div></div>" +
+            "<script>(()=>{const d=JSON.parse(document.getElementById(\"hb-deck\").textContent),k=d.deck,t=d.theme,r=document.documentElement;" +
+            NoWebRtc +
+            "r.style.setProperty(\"--hb-bg\",t.panel);r.style.setProperty(\"--hb-fg\",t.text);r.style.setProperty(\"--hb-line\",t.line);" +
+            // 그리기 실패: 인쇄용 틀이면 끝났다고 알려 부모가 지우게 한다 — 보이지 않는 틀이 allow-modals를 가진 채 남지 않게 (607bd5ec77 C3)
+            "const fail=e=>{const p=document.createElement(\"div\");p.className=\"err\";p.style.color=t.text;p.textContent=\"슬라이드를 그리지 못했습니다: \"+e.message;document.body.replaceChildren(p);" +
+            "if(d.print)parent.postMessage({hbPrintDone:true},\"*\");};" +
+            // data-* · aria-*도 버린다 — DOMPurify 기본은 남기고, reveal은 data-preview-link가 붙은 요소를 누르면 그 주소를 틀 안에 연다 (607bd5ec77 C1)
+            "try{const md=s=>DOMPurify.sanitize(marked.parse(s,{async:false,gfm:true,breaks:true}),{ALLOWED_TAGS:d.tags,ALLOWED_ATTR:[],ALLOW_DATA_ATTR:false,ALLOW_ARIA_ATTR:false});" +
+            "const box=document.querySelector(\".slides\"),charts=[];" +
+            "const add=(s,cover)=>{const sec=document.createElement(\"section\");if(cover)sec.className=\"hb-cover\";" +
+            "if(s.title){const h=document.createElement(cover?\"h1\":\"h2\");h.textContent=s.title;sec.append(h);}" +
+            "if(s.body){const b=document.createElement(\"div\");b.innerHTML=md(s.body);sec.append(b);}" +
+            "if(s.chart){const w=document.createElement(\"div\");w.className=\"hb-chart\";const c=document.createElement(\"canvas\");w.append(c);sec.append(w);charts.push([c,s.chart]);}" +
+            "if(s.notes){const a=document.createElement(\"aside\");a.className=\"notes\";a.textContent=s.notes;sec.append(a);}" +
+            "box.append(sec);};" +
+            "if(k.title)add({title:k.title},true);k.slides.forEach(s=>add(s,false));" +
+            "const o={embedded:true,width:960,height:540,margin:.06,controls:true,progress:true,slideNumber:\"c/t\",hash:false,history:false," +
+            // postMessage API를 끈다 — 기본은 켜져 있고 보낸 창을 확인하지 않아, 실행 중인 위젯이 옆 슬라이드의 Reveal을 부를 수 있다 (607bd5ec77 C2)
+            "respondToHashChanges:false,keyboard:true,transition:\"none\",backgroundTransition:\"none\",center:false,help:false,postMessage:false,postMessageEvents:false,previewLinks:false};" +
+            "if(d.print)o.view=\"print\";" +
+            "Reveal.initialize(o).then(()=>{try{" +
+            // 슬라이드는 960×540을 줄여 보이므로 차트 글자를 키운다 (실제 확인: 기본 12px은 읽기 어려움)
+            "if(charts.length){Chart.defaults.color=t.text;Chart.defaults.borderColor=t.line;Chart.defaults.animation=false;Chart.defaults.font.size=20;" +
+            "for(const[c,cfg]of charts){cfg.options=Object.assign({},cfg.options,{responsive:true,maintainAspectRatio:false,devicePixelRatio:Math.min(window.devicePixelRatio||1,2)});new Chart(c,cfg);}}" +
+            // 인쇄용 틀: 다 그린 뒤 스스로 인쇄하고 끝났다고 부모에 알린다 (부모가 틀을 지움)
+            "if(d.print){let sent=false;const done=()=>{if(!sent){sent=true;parent.postMessage({hbPrintDone:true},\"*\");}};" +
+            "addEventListener(\"afterprint\",done);setTimeout(()=>{window.print();done();},150);}" +
+            "}catch(e){fail(e);}},fail);}catch(e){fail(e);}})()<\/script></body></html>";
+    }
+    const SlidesPrintTheme = ChartPrintTheme;
+    function slidesFrame(html, cls, sandbox) {
+        const frame = el("iframe", "widget-frame running " + cls);
+        frame.setAttribute("sandbox", sandbox);
+        frame.setAttribute("referrerpolicy", "no-referrer");
+        frame.title = "슬라이드";
+        frame.srcdoc = html;
+        return frame;
+    }
+    function slides(container) {
+        container.querySelectorAll(".msg.conductor .body pre > code.language-slides").forEach(code => {
+            const pre = code.parentElement;
+            if (pre.closest(".widget")) return;
+            const box = el("div", "widget slides");
+            pre.replaceWith(box);
+            const note = text => { const n = el("div", "muted widget-note"); n.dataset.note = text; return n; };
+            const parsed = slidesConfig(code.textContent);
+            if (parsed.error) { box.append(note(parsed.error), pre); return; }
+            const details = el("details", "widget-code");
+            details.append(el("summary"), pre);
+            const bar = el("div", "widget-bar");
+            box.append(bar, details);
+            const needChart = parsed.deck.slides.some(s => s.chart);
+            const libs = () => Promise.all([Promise.all(SlidesLibs.map(loadLib)), needChart ? loadChartLib() : Promise.resolve(null)]);
+            const draw = () => libs().then(([l, c]) => {
+                const frame = slidesFrame(slidesDoc(l, c, parsed.deck, chartTheme(), false), "slides-frame", "allow-scripts");
+                frame.setAttribute("loading", "lazy");
+                details.before(frame);
+                const print = el("button", "widget-run chart-print");
+                print.type = "button";
+                print.setAttribute("aria-label", "슬라이드 인쇄 · PDF로 저장");
+                // 인쇄용 틀은 화면 밖에서 그려 스스로 인쇄한다 — 틀 안 print()에 allow-modals가 필요 (이 틀만)
+                print.addEventListener("click", () => {
+                    document.querySelectorAll("iframe.slides-print-frame").forEach(f => f.remove());
+                    const frame = slidesFrame(slidesDoc(l, c, parsed.deck, SlidesPrintTheme, true), "slides-print-frame", "allow-scripts allow-modals");
+                    document.body.append(frame);
+                    setTimeout(() => frame.remove(), SlidesPrintTimeoutMs); // 끝 알림이 끝내 안 와도 지운다 (607bd5ec77 C3)
+                });
+                bar.append(print);
+            }, () => details.before(note("슬라이드 라이브러리를 불러오지 못해 데이터로만 보입니다.")));
+            if (autoDrawSlot(box)) { draw(); return; }
+            const go = el("button", "widget-run chart-draw");
+            go.type = "button";
+            go.setAttribute("aria-label", "슬라이드 그리기");
             go.addEventListener("click", () => { go.remove(); draw(); });
             bar.append(go);
         });
@@ -386,6 +524,7 @@
     function decorate(container) {
         widgets(container);
         charts(container);
+        slides(container);
         container.querySelectorAll(".body pre").forEach(pre => {
             if (pre.querySelector(":scope > .copy")) return;
             const b = el("button", "copy");
