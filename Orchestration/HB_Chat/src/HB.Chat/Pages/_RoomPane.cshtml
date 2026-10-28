@@ -168,6 +168,10 @@
                 <button type="button" role="tab" data-tab="runs" id="side-tab-runs" aria-controls="side-sec-runs">외부 실행</button>
                 <button type="button" role="tab" data-tab="files" id="side-tab-files" aria-controls="side-sec-files">첨부</button>
                 <button type="button" role="tab" data-tab="term" id="side-tab-term" aria-controls="side-sec-term">터미널</button>
+                @if (room.Level == PermissionLevel.Command)
+                {
+                    <button type="button" role="tab" data-tab="browser" id="side-tab-browser" aria-controls="side-sec-browser">브라우저</button>
+                }
             </div>
             <button type="button" class="side-x icon-btn" title="곁칸 닫기 (Esc)" aria-label="곁칸 닫기">@Icons.Svg("x")</button>
         </div>
@@ -194,6 +198,15 @@
             <div class="term-bar" id="term-bar" hidden><span class="term-state" id="term-state"></span><button type="button" class="btn" id="term-stop">중지</button><button type="button" class="btn" id="term-close">닫기</button></div>
             <div class="term-host" id="term-host"></div>
         </section>
+        @* 지휘자 브라우저 (계획서 2026-10-29_HB_Chat-지휘자-브라우저, 결정 "보기만"): 명령 방만. browser · browser-frame 알림으로 그린다 *@
+        @if (room.Level == PermissionLevel.Command)
+        {
+            <section class="side-sec side-browser" data-tab="browser" id="side-sec-browser" role="tabpanel" aria-labelledby="side-tab-browser" hidden>
+                <p class="browser-state" id="browser-state">지휘자 브라우저가 닫혀 있습니다 — 지휘자가 웹 페이지를 열면 여기에 실시간으로 보입니다 (보기만).</p>
+                <p class="browser-blocked" id="browser-blocked" hidden></p>
+                <div class="browser-view"><img id="browser-frame" alt="지휘자 브라우저 화면" hidden /></div>
+            </section>
+        }
         <div id="side-data"></div>
     </aside>
 </div>

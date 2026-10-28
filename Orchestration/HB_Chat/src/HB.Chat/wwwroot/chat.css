@@ -129,6 +129,25 @@ select, input[type=text], textarea { background: var(--panel); border: 1px solid
 .term-menu button { border: 0; background: none; text-align: left; padding: 7px 10px; cursor: pointer; color: var(--text); font-size: 13px; }
 .term-menu button:hover { background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
 .term-tab.agent { font-style: italic; }
+/* 지휘자 브라우저 곁칸 (계획서 2026-10-29_HB_Chat-지휘자-브라우저): 보기만, 1280×800 화면을 칸 너비에 맞춰 */
+.side-sec.side-browser { display: flex; flex-direction: column; gap: 6px; }
+.side-sec.side-browser[hidden], .browser-blocked[hidden], #browser-frame[hidden] { display: none; }
+.browser-state { margin: 0; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browser-blocked { margin: 0; font-size: 12px; color: var(--warn); overflow-wrap: anywhere; }
+.browser-view { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #fff; }
+#browser-frame { display: block; width: 100%; height: auto; user-select: none; pointer-events: none; }
+/* 방 기록의 스크린샷 줄 (결정 "기록에 그림으로 남김") */
+.system.note .note-shot { display: block; margin: 6px auto 0; width: min(420px, 90%); }
+.system.note .note-shot img { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; cursor: zoom-in; }
+/* 스크린샷 크게 보기 (사용자 요청 — 닫기 단추) */
+.shot-view { position: fixed; inset: 0; z-index: 50; background: rgb(0 0 0 / .7); display: flex; align-items: center; justify-content: center; padding: 32px; cursor: zoom-out; }
+.shot-view .shot-frame { position: relative; max-width: 100%; max-height: 100%; display: flex; }
+.shot-view img { max-width: 100%; max-height: calc(100vh - 64px); border-radius: 6px; box-shadow: 0 8px 32px rgb(0 0 0 / .5); cursor: default; }
+/* ✕는 그림 오른쪽 위 모서리에 반쯤 걸치게 */
+.shot-view .shot-x { position: absolute; top: -14px; right: -14px; width: 32px; height: 32px; border-radius: 50%; font-size: 16px; line-height: 1;
+                     display: flex; align-items: center; justify-content: center; padding: 0;
+                     color: #fff; background: #333; border: 2px solid #fff; box-shadow: 0 2px 8px rgb(0 0 0 / .5); cursor: pointer; }
+.shot-view .shot-x:hover { background: var(--accent); }
 .term-tab { border: 1px solid var(--line); background: none; border-radius: 6px; padding: 3px 8px; font-size: 12px; cursor: pointer; color: var(--muted); }
 .term-tab[aria-selected=true] { color: var(--text); border-color: var(--accent); }
 .term-tab::before { content: "○"; margin-right: 4px; font-size: 9px; vertical-align: 1px; }

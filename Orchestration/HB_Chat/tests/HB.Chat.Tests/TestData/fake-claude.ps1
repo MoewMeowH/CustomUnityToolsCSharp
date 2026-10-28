@@ -77,6 +77,15 @@ switch ($mode) {
         }
         Finish $d 'mcp__hb-chat__terminal_start' 'allowed'
     }
+    'browse' {
+        # agent browser: browser_open for an outside site (card), localhost (no card), then another page on the approved site (no card).
+        # Each allow must carry only the url back.
+        $d1 = Ask 'req_b1' '{"subtype":"can_use_tool","tool_name":"mcp__hb-chat__browser_open","input":{"url":"https://example.com/a","extra":1},"tool_use_id":"toolu_b1"}'
+        if (-not $d1 -or $d1.behavior -ne 'allow' -or $d1.updatedInput.url -ne 'https://example.com/a' -or $null -ne $d1.updatedInput.extra) { Finish $d1 'browser_open' 'x'; break }
+        $d2 = Ask 'req_b2' '{"subtype":"can_use_tool","tool_name":"mcp__hb-chat__browser_open","input":{"url":"http://localhost:3000/"},"tool_use_id":"toolu_b2"}'
+        $d3 = Ask 'req_b3' '{"subtype":"can_use_tool","tool_name":"mcp__hb-chat__browser_open","input":{"url":"https://example.com/b"},"tool_use_id":"toolu_b3"}'
+        if ($d2.behavior -eq 'allow' -and $d3.behavior -eq 'allow') { Finish $d3 'browser_open' 'browsed' } else { Finish ([pscustomobject]@{ behavior = 'deny'; message = 'later open denied' }) 'browser_open' 'x' }
+    }
     'ask' {
         # 3차 0번 실측 A의 AskUserQuestion 모양 (질문 둘: 하나 고르기 · 여러 개)
         Emit '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","name":"AskUserQuestion","input":{}}}}'

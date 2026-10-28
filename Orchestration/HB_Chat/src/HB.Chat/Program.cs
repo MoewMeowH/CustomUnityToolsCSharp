@@ -39,7 +39,10 @@ builder.Services.AddSingleton(sp => new ChatTranscripts(() => sp.GetRequiredServ
 // 터미널 곁칸 (계획서 2026-10-29_HB_Chat-터미널-곁칸): 지휘자가 띄운 서버를 앱이 ConPTY로 붙잡는다 + 앱 MCP(명령 방 실행만, 실행 토큰)
 builder.Services.AddSingleton<Terminals>();
 builder.Services.AddHttpContextAccessor();
-builder.Services.AddMcpServer().WithHttpTransport(o => o.Stateless = true).WithTools<TerminalTools>();
+// 지휘자 브라우저 (계획서 2026-10-29_HB_Chat-지휘자-브라우저): 방마다 화면 없는 Chrome(없으면 Edge) · 별도 프로필 — 같은 앱 MCP
+builder.Services.AddSingleton(sp => new AgentBrowser(() => sp.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder,
+    blockedPorts: () => TerminalMcp.BlockedPorts(sp.GetRequiredService<Microsoft.AspNetCore.Hosting.Server.IServer>(), sp.GetRequiredService<IOptions<ChatOptions>>().Value)));
+builder.Services.AddMcpServer().WithHttpTransport(o => o.Stateless = true).WithTools<TerminalTools>().WithTools<BrowserTools>();
 builder.Services.AddSingleton(sp =>
 {
     var options = sp.GetRequiredService<IOptions<ChatOptions>>();
@@ -47,6 +50,7 @@ builder.Services.AddSingleton(sp =>
     {
         Log = new ApprovalLog(() => options.Value.DataFolder),
         Terminals = sp.GetRequiredService<Terminals>(),
+        Browser = sp.GetRequiredService<AgentBrowser>(),
         SelfUrl = () => TerminalMcp.LoopbackUrl(sp.GetRequiredService<Microsoft.AspNetCore.Hosting.Server.IServer>()),
     };
 });
@@ -116,7 +120,11 @@ void PurgeTrash()
         var removed = Trash.Purge(app.Services.GetRequiredService<RoomStore>(),
             app.Services.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder, DateTimeOffset.Now);
         // 지운 방의 터미널 목록(끝난 것의 버퍼 포함)도 버린다 (/self-review 57b59ef134 C12)
-        foreach (var id in removed) app.Services.GetRequiredService<Terminals>().Forget(id);
+        foreach (var id in removed)
+        {
+            app.Services.GetRequiredService<Terminals>().Forget(id);
+            app.Services.GetRequiredService<AgentBrowser>().Close(id, "방 삭제");
+        }
         if (removed.Count > 0)
             app.Logger.LogWarning("휴지통에서 30일 지난 방 {Count}개를 지웠습니다 (방 색인 · 첨부, 세션 기록은 남김): {Ids}", removed.Count, string.Join(", ", removed));
     }
@@ -260,5 +268,6 @@ app.Lifetime.ApplicationStopping.Register(() =>
 {
     app.Services.GetRequiredService<RoomHub>().Dispose();
     app.Services.GetRequiredService<Terminals>().Dispose(); // 터미널도 (Job Object가 어차피 끝내지만 끝난 표시를 남긴다)
+    app.Services.GetRequiredService<AgentBrowser>().Dispose();
 });
 app.Run();

@@ -88,7 +88,14 @@
     // 방 기록 줄: 가운데 작은 줄. trailing은 다른 맨 뒤 항목처럼 run-trailing — 새 말 받기 조각이 바꿔 끼운다
     void NoteLine(RoomNote n, bool trailing)
     {
-        <div class="system note@(n.Denied ? " denied" : "")@(trailing ? " run-trailing" : "")"><span class="body">@n.Text</span> <span class="when">@n.At.ToLocalTime().ToString("HH:mm")</span></div>
+        <div class="system note@(n.Denied ? " denied" : "")@(trailing ? " run-trailing" : "")"><span class="body">@n.Text</span> <span class="when">@n.At.ToLocalTime().ToString("HH:mm")</span>
+            @* 지휘자 브라우저 스크린샷 (결정 "기록에 그림으로 남김"): 같은 출처 · 방 · 이름 모양을 서버가 확인한 뒤 내준다. 누르면 새 탭에 원본 *@
+            @if (n.Image is { Length: > 0 } image)
+            {
+                var src = $"/Room/{Model.Room.Id}?handler=Shot&name={Uri.EscapeDataString(image)}";
+                <a class="note-shot" href="@src" target="_blank" rel="noopener"><img src="@src" alt="지휘자 브라우저 스크린샷" loading="lazy" /></a>
+            }
+        </div>
     }
 
     // 질문 카드 답 (4차 D1): '나' 말풍선 — 질문은 작게, 고른 답이 본문. 답하지 않았으면(거절 · 시간 초과) 회색 한 줄.

@@ -14,7 +14,7 @@ namespace HB.Chat.Pages;
 /// </summary>
 public sealed class RoomModel(
     RoomStore store, RoomHub hub, RoomList list, ChatTranscripts transcripts, StickerPacks packs, FaceCatalog faces, RoomRuns runs,
-    RoomNotes notes, Terminals terminals, IOptions<ChatOptions> options)
+    RoomNotes notes, Terminals terminals, AgentBrowser browser, IOptions<ChatOptions> options)
     : PageModel
 {
     public Room Room { get; private set; } = null!;
@@ -260,7 +260,11 @@ public sealed class RoomModel(
         hub.Touch(id);
         hub.ForgetCommands(id); // 단계 · 모델이 바뀌면 다음 실행의 init이 새 목록 (db1b130ff2 C7)
         // 명령 아래로 내리면 지휘자가 띄운 프로세스도 끝낸다 — "명령 실행 없음" 단계에서 돌던 서버가 남지 않게 (/self-review 57b59ef134 C1 · a3a9dd85c1 C1). 내 셸은 그대로
-        if (lv != PermissionLevel.Command && expectedLevel == PermissionLevel.Command) terminals.StopRoom(id, "권한 낮춤", TerminalKind.Agent);
+        if (lv != PermissionLevel.Command && expectedLevel == PermissionLevel.Command)
+        {
+            terminals.StopRoom(id, "권한 낮춤", TerminalKind.Agent);
+            browser.Close(id, "권한 낮춤"); // 지휘자 브라우저도 명령 방만 (계획서 2026-10-29_HB_Chat-지휘자-브라우저)
+        }
         result = new JsonResult(new { ok = true });
         if (result is JsonResult) hub.ProfilesChanged([id]);
         return result;
@@ -283,6 +287,7 @@ public sealed class RoomModel(
         if (hub.IsBusy(id)) return BadRequest("실행 중인 방입니다 — 중지한 뒤 휴지통에 넣으세요.");
         hub.ForgetCommands(id);
         terminals.StopRoom(id, "방 삭제"); // 그 방 터미널도 끝낸다 (계획서 2026-10-29_HB_Chat-터미널-곁칸)
+        browser.Close(id, "방 삭제");
         return Change(id, r => r with { DeletedAt = DateTimeOffset.Now }, "휴지통에 넣지 못했습니다");
     }
 
@@ -366,6 +371,28 @@ public sealed class RoomModel(
     }
 
     // ---- 터미널 곁칸 (계획서 2026-10-29_HB_Chat-터미널-곁칸) ----
+
+    // ---- 지휘자 브라우저 (계획서 2026-10-29_HB_Chat-지휘자-브라우저) ----
+
+    /// <summary>방 기록의 스크린샷 그림: 그 방 폴더 · 이름 모양이 맞을 때만, nosniff · 같은 출처.</summary>
+    public IActionResult OnGetShot(string id, string? name)
+    {
+        if (browser.ShotPath(id, name) is not { } path) return NotFound();
+        Response.Headers.XContentTypeOptions = "nosniff";
+        Response.Headers["Cross-Origin-Resource-Policy"] = "same-origin";
+        Response.Headers.CacheControl = "private, max-age=86400"; // 이름이 시각이라 바뀌지 않는다
+        return PhysicalFile(path, "image/png");
+    }
+
+    /// <summary>곁칸 브라우저 탭을 열 때: 마지막 실시간 화면(jpeg). 없으면 204.</summary>
+    public IActionResult OnGetBrowserFrame(string id)
+    {
+        if (!RoomStore.IsRoomId(id)) return NotFound();
+        Response.Headers.CacheControl = "no-store";
+        Response.Headers.XContentTypeOptions = "nosniff"; // 스크린샷 그림과 같게 (/self-review security 8b11177bd5 C7)
+        Response.Headers["Cross-Origin-Resource-Policy"] = "same-origin";
+        return browser.LastFrame(id) is { } jpeg ? File(jpeg, "image/jpeg") : new NoContentResult();
+    }
 
     /// <summary>터미널 탭을 열 때: 출력 버퍼 전체(base64)와 끝 오프셋 — 화면은 그보다 앞선 실시간 조각을 버린다.</summary>
     public IActionResult OnGetTerminal(string id, string? term)

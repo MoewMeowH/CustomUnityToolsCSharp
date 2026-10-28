@@ -226,8 +226,10 @@ public sealed class TerminalsTests : IDisposable
             { TerminalMcpConfigPath = "C:/data/mcp-terminal-r.json" };
         var args = string.Join(" | ", ClaudeArgs.Build(spec, ["opus"]));
         Assert.Contains("--mcp-config | C:/data/mcp.json | C:/data/mcp-terminal-r.json | --allowedTools | mcp__hb-orchestration | " +
-            "mcp__hb-chat__terminal_list | mcp__hb-chat__terminal_read | mcp__hb-chat__terminal_stop | Edit(**)", args);
+            "mcp__hb-chat__terminal_list | mcp__hb-chat__terminal_read | mcp__hb-chat__terminal_stop | mcp__hb-chat__browser_click", args);
+        Assert.Contains("mcp__hb-chat__browser_read | Edit(**)", args);
         Assert.DoesNotContain("terminal_start", args);
+        Assert.DoesNotContain("browser_open", args); // 열기는 호스트가 사이트를 본다
         Assert.DoesNotContain("mcp-terminal", string.Join(" | ", ClaudeArgs.Build(spec with { Level = PermissionLevel.Edit }, ["opus"])));
 
         // 방 규칙의 터미널 안내는 앱 MCP를 붙인 실행에만 (지휘자 검토 K3)

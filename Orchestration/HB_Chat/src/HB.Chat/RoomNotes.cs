@@ -6,7 +6,11 @@ using Microsoft.Extensions.Options;
 namespace HB.Chat;
 
 /// <summary>방 기록 줄 하나 — 승인 결과 · 백그라운드 정리 표시 (계획서 2026-10-29_HB_Chat-진행줄-자리-정리표시). Denied면 거절 · 시간 초과처럼 흐린 색.</summary>
-public sealed record RoomNote(DateTimeOffset At, string Text, bool Denied);
+public sealed record RoomNote(DateTimeOffset At, string Text, bool Denied)
+{
+    /// <summary>지휘자 브라우저 스크린샷 파일 이름 (그 방 browser-shots 폴더) — 기록 화면이 작은 그림으로 그린다.</summary>
+    public string? Image { get; init; }
+}
 
 /// <summary>방 기록 줄의 자리: 말 → 그 말 앞에 보일 줄들, 마지막 말 뒤의 줄(Trailing). 외부 실행 말풍선(RunPlacement)과 같은 규칙.</summary>
 public sealed record NotePlacement(IReadOnlyDictionary<ChatEntry, IReadOnlyList<RoomNote>> Before, IReadOnlyList<RoomNote> Trailing)
@@ -37,6 +41,9 @@ public sealed class RoomNotes(Func<string> dataFolder)
 
     /// <summary>터미널 시작 · 끝 줄의 도구 이름 (계획서 2026-10-29_HB_Chat-터미널-곁칸). 시작 카드 결과는 "터미널"로 따로 남는다.</summary>
     public const string TerminalTool = "터미널 상태";
+
+    /// <summary>지휘자 브라우저 스크린샷 줄 (계획서 2026-10-29_HB_Chat-지휘자-브라우저, 결정 "기록에 그림으로 남김") — 요약 칸 = 그림 파일 이름.</summary>
+    public const string BrowserShotTool = "브라우저 스크린샷";
 
     private readonly Lock _gate = new();
     private string? _path;
@@ -119,6 +126,7 @@ public sealed class RoomNotes(Func<string> dataFolder)
             if (tool == ClaudeArgs.AskTool) return null; // 질문 카드 답은 '나' 말풍선으로 이미 있다
             var decision = Str(e, "decision") ?? "";
             var summary = FirstLine(Str(e, "summary") ?? "", 120);
+            if (tool == BrowserShotTool) return (room, new RoomNote(at, decision, false) { Image = Str(e, "summary") });
             var text = tool switch
             {
                 BackgroundTool or TerminalTool => decision,

@@ -1130,13 +1130,73 @@
             else writeTerm(v, ev.offset, bytes);
         }
 
+        // ---- 지휘자 브라우저 곁칸 (계획서 2026-10-29_HB_Chat-지휘자-브라우저, 결정 "보기만"): 상태는 browser 알림, 화면은 browser-frame 알림(jpeg base64,
+        // 바뀔 때만 옴). 탭을 열 때 마지막 화면을 받는다. 클릭 · 입력은 받지 않는다 — 지휘자 작업과 섞이지 않게. ----
+        const browserFrame = $("#browser-frame");
+        let browserOpen = false, browserFrameUrl = null;
+        function showBrowserImage(src) {
+            if (!browserFrame) return;
+            if (browserFrameUrl) URL.revokeObjectURL(browserFrameUrl);
+            browserFrameUrl = src.startsWith("blob:") ? src : null;
+            browserFrame.src = src;
+            browserFrame.hidden = false;
+        }
+        function renderBrowser(view) {
+            if (!browserFrame) return;
+            browserOpen = !!view?.open;
+            $("#browser-state").textContent = browserOpen
+                ? (view.url || "빈 화면") + (view.title ? " — " + view.title : "")
+                : "지휘자 브라우저가 닫혀 있습니다 — 지휘자가 웹 페이지를 열면 여기에 실시간으로 보입니다 (보기만).";
+            $("#browser-state").title = view?.url || "";
+            const blocked = $("#browser-blocked");
+            blocked.hidden = !(browserOpen && view.blocked);
+            blocked.textContent = browserOpen && view.blocked ? "막은 이동: " + view.blocked + " (허용되지 않은 사이트)" : "";
+            if (!browserOpen) { browserFrame.hidden = true; browserFrame.removeAttribute("src"); }
+            $("#side-tab-browser").textContent = browserOpen ? "브라우저 ●" : "브라우저";
+        }
+        // 기록 줄의 스크린샷을 누르면 새 창 대신 화면 위에 크게 — 닫기 단추 · Esc · 바깥 누르기로 닫는다 (사용자 요청: 데스크톱에서 새 창은 닫을 길이 없었다)
+        function openShot(src) {
+            closeShot();
+            const box = el("div", "shot-view");
+            box.setAttribute("role", "dialog");
+            box.setAttribute("aria-label", "스크린샷");
+            const x = el("button", "shot-x icon-btn", "✕");
+            x.type = "button"; x.title = "닫기 (Esc)"; x.setAttribute("aria-label", "닫기");
+            const img = el("img");
+            img.src = src; img.alt = "지휘자 브라우저 스크린샷";
+            // ✕는 화면 모서리가 아니라 그림 모서리에 — 화면 모서리면 방 머리 단추(대시보드 · 정보) 위에 겹쳐 보였다 (사용자 데스크톱 확인)
+            const frame = el("div", "shot-frame");
+            frame.append(img, x);
+            box.append(frame);
+            box.addEventListener("click", (e) => { if (e.target !== img) closeShot(); });
+            document.body.append(box);
+            x.focus();
+        }
+        function closeShot() { document.querySelector(".shot-view")?.remove(); }
+        function shotKeys(e) { if (e.key === "Escape" && document.querySelector(".shot-view")) { e.stopPropagation(); closeShot(); } }
+        document.addEventListener("keydown", shotKeys, true);
+        root.addEventListener("click", (e) => {
+            const a = e.target.closest?.(".note-shot");
+            if (!a) return;
+            e.preventDefault();
+            openShot(a.getAttribute("href"));
+        });
+        async function loadBrowserFrame() {
+            if (!browserFrame || !browserOpen) return;
+            try {
+                const res = await fetch(self + "?handler=BrowserFrame", { cache: "no-store" });
+                if (res.status === 200 && !disposed) showBrowserImage(URL.createObjectURL(await res.blob()));
+            } catch { }
+        }
+
         // ---- 오른쪽 곁칸 (3차 c): 단계 · 방 정보 · 외부 실행 · 첨부. 열림 · 탭은 브라우저 저장(편의만 — 못 읽으면 닫힌 채 · 단계 탭) ----
         const side = $("#side"), sideToggle = $("#side-toggle");
         const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch { } } };
-        const sideTabs = ["steps", "info", "runs", "files", "term"];
+        const sideTabs = ["steps", "info", "runs", "files", "term", "browser"];
         // 저장값이 모르는 탭이면 단계 탭 — 모든 칸이 숨던 문제 (c216951e79 C7)
         let sideTab = sideTabs.includes(store.get("hbchat.sideTab")) ? store.get("hbchat.sideTab") : "steps";
         if (sideTab === "term" && !$("#side-tab-term")) sideTab = "steps"; // 터미널 탭이 없는 칸(옛 화면)이면
+        if (sideTab === "browser" && !$("#side-tab-browser")) sideTab = "steps"; // 브라우저 탭은 명령 방만
         let sideLoading = false, sideAgain = false;
         // 넓은 폭(셋째 칸)인지 — 좁으면 곁칸이 방을 덮는다 (chat.css의 1199px 규칙과 같은 값)
         const wide = () => window.matchMedia("(min-width: 1200px)").matches;
@@ -1146,11 +1206,12 @@
             side.querySelectorAll(".side-tabs [data-tab]").forEach(b => b.setAttribute("aria-selected", String(b.dataset.tab === tab)));
             side.querySelectorAll(".side-sec").forEach(s => { s.hidden = s.dataset.tab !== tab; });
             if (tab === "term" && !side.hidden) showTerm(termActive); // xterm은 탭이 보일 때 만든다 (안 보이면 크기를 못 잰다)
+            if (tab === "browser" && !side.hidden) loadBrowserFrame(); // 마지막 화면 (실시간 프레임은 바뀔 때만 온다)
         }
         function sidePlaceholder(text) {
             // 받는 중 · 실패 글은 탭과 상관없이 보인다 (c216951e79 C6 · 지휘자 K3) — 단계 탭은 화면이 그리므로 그 탭에만 가린다
             const p = el("p", "muted side-sec side-wait", text);
-            p.hidden = sideTab === "steps" || sideTab === "term";
+            p.hidden = sideTab === "steps" || sideTab === "term" || sideTab === "browser";
             $("#side-data").replaceChildren(p);
         }
         // 방 정보 · 외부 실행 · 첨부는 열 때 · 턴 끝 · 제목 · 규칙 · 첨부가 바뀔 때 서버에서 다시 받는다 (방 칸을 그릴 때는 계산하지 않음).
@@ -1229,8 +1290,8 @@
             head.append(el("span", null, "승인 요청 · " + a.tool + (a.fromAgent ? " · 서브에이전트" : "")), left); // 서브에이전트가 낸 요청 (D)
             // 명령 전문(스크롤 칸) — 사용자가 본 것이 허용되는 것과 같게 (/self-review 36e4e20e04 C3 · C5, ab79e61df5 C5).
             card.append(head, el("div", "cmd", a.summary));
-            // 터미널 시작 카드의 설명은 앱이 쓴 안내다 (계획서 2026-10-29_HB_Chat-터미널-곁칸) — 지휘자 설명으로 보이지 않게
-            if (a.description) card.append(el("div", "desc", (a.tool === "터미널" ? "" : "Claude 설명: ") + a.description));
+            // 터미널 시작 · 브라우저 사이트 카드의 설명은 앱이 쓴 안내다 — 지휘자 설명으로 보이지 않게
+            if (a.description) card.append(el("div", "desc", (a.tool === "터미널" || a.tool === "브라우저" ? "" : "Claude 설명: ") + a.description));
             // 명령 밖의 입력도 허용하면 같이 실행된다 — 본 것 = 허용되는 것 (/self-review 5e747ff851 C1)
             if (a.extra) card.append(el("div", "cmd", "추가 입력: " + a.extra));
             // 백그라운드 실행 명령 — 답이 끝난 뒤에도 돈다 (계획서 2026-10-29_HB_Chat-백그라운드-명령, 결정 "넣음")
@@ -1536,6 +1597,8 @@
                     if (ev.busy && ev.backgroundUntil) showBackground(ev.backgroundCount || 0, ev.backgroundUntil); else clearBackground();
                     renderTerms(ev.terminals);
                     for (const v of termViews.values()) loadBuffer(v); // 끊긴 사이 출력은 알림으로 오지 않았다
+                    renderBrowser(ev.browser);
+                    if (sideTab === "browser" && !side.hidden) loadBrowserFrame();
                     loadSide(); // 끊긴 사이 끝난 턴은 end가 오지 않는다 — 비용 · 외부 실행을 새로 (C3)
                     break;
                 case "background":
@@ -1546,6 +1609,12 @@
                     break;
                 case "term-out":
                     termOutput(ev);
+                    break;
+                case "browser":
+                    renderBrowser(ev.browser);
+                    break;
+                case "browser-frame":
+                    if (browserOpen && ev.data) showBrowserImage("data:image/jpeg;base64," + ev.data);
                     break;
                 case "face":
                     setFace(ev.face, ev.face === "Tool" && ev.text ? shortTool(ev.text) : null);
@@ -1865,6 +1934,9 @@
                 if (textBox.value || quote || attached.length) drafts.set(roomId, { text: textBox.value, quote, attached });
                 es.close();
                 termObserver?.disconnect();
+                if (browserFrameUrl) URL.revokeObjectURL(browserFrameUrl);
+                closeShot();
+                document.removeEventListener("keydown", shotKeys, true);
                 document.removeEventListener("click", closeTermMenu);
                 clearTimeout(termResizeTimer);
                 for (const v of termViews.values()) v.term.dispose(); // 프로세스는 그대로 — 방을 다시 열면 버퍼로 다시 그린다

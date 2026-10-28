@@ -43,6 +43,12 @@ public sealed class ChatOptions
     /// <summary>대시보드 주소 (방 화면의 "대시보드에서 보기" 링크). 비우면 링크 없음.</summary>
     public string? DashboardUrl { get; set; }
 
+    /// <summary>
+    /// 지휘자 브라우저가 로컬이어도 열지 못하는 포트 — 이 앱 · 대시보드 화면을 열면 같은 출처라 자기 승인 카드를 누를 수 있다
+    /// (/self-review security 8b11177bd5 C1). 이 앱이 듣는 포트 · DashboardUrl 포트는 따로 더한다. 기본은 사용자 앱 5290(시험 서버에서도 막히게).
+    /// </summary>
+    public int[] BrowserBlockedPorts { get; set; } = [5290];
+
     /// <summary>스티커 설정을 읽을 대시보드 폴더 (appsettings.json · appsettings.local.json의 Dashboard:Stickers). 비우면 글자 배지.</summary>
     public string? StickerSettingsDir { get; set; }
 

@@ -51,7 +51,7 @@ public static class ChatExport
 
     /// <summary>방 기록 줄 (승인 결과 · 정리 표시).</summary>
     private static void AppendNote(StringBuilder sb, RoomNote n) =>
-        sb.Append("> ").Append(n.Text.Replace("\n", " ")).Append(" · ")
+        sb.Append("> ").Append(n.Text.Replace("\n", " ")).Append(n.Image is { } image ? $" (그림 {image})" : "").Append(" · ")
           .Append(n.At.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)).Append("\n\n");
 
     /// <summary>

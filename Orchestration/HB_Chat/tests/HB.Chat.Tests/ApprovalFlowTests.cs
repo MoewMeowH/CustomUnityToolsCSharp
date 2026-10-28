@@ -17,6 +17,7 @@ public sealed class ApprovalFlowTests : IDisposable
     private readonly RoomStore _store;
     private readonly RoomHub _hub;
     private readonly Terminals _terminals = new();
+    private AgentBrowser? _browser;
 
     public ApprovalFlowTests()
     {
@@ -35,6 +36,8 @@ public sealed class ApprovalFlowTests : IDisposable
         {
             Log = new ApprovalLog(() => _options.DataFolder),
             Terminals = _terminals,
+            // 사이트 카드만 본다 — 브라우저는 띄우지 않는다
+            Browser = _browser = new AgentBrowser(() => _options.DataFolder, () => null),
             ProcessFactory = (room, spec, workspace) =>
             {
                 lock (_specs) _specs.Add(spec);
@@ -47,6 +50,7 @@ public sealed class ApprovalFlowTests : IDisposable
     {
         _hub.Dispose();
         _terminals.Dispose();
+        _browser?.Dispose();
         try { Directory.Delete(_dir, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
 
@@ -366,6 +370,26 @@ public sealed class ApprovalFlowTests : IDisposable
         Assert.True(_terminals.TakeApproval(room.Id, "web", "python -m http.server 8000"));
         Assert.False(_terminals.TakeApproval(room.Id, "web", "python -m http.server 8000")); // 한 번만
         Assert.Contains("\"tool\":\"터미널\"", Log());
+    }
+
+    [Fact]
+    public async Task BrowserOpen_OutsideSiteCardOnce_LocalNoCard()
+    {
+        // 지휘자 브라우저 (계획서 2026-10-29_HB_Chat-지휘자-브라우저, 결정 "localhost만 묻지 않음"): 밖 사이트는 사이트마다 한 번 카드,
+        // localhost · 허용한 사이트의 다른 쪽은 카드 없이. 허용 답은 url만 (가짜가 extra 키를 확인)
+        var room = CommandRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "browse please");
+        var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        Assert.Equal(RoomHub.BrowserTool, card.Tool);
+        Assert.Equal("https://example.com/a", card.Summary);
+        Assert.Null(card.Rule);
+        Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null));
+        var seen = await Until(ch, e => e.Kind == "idle");
+        Assert.True(seen.Single(e => e.Kind == "end").Ok);
+        Assert.DoesNotContain(seen, e => e.Kind == "approval"); // localhost · 같은 사이트는 다시 묻지 않음
+        Assert.True(_browser!.IsAllowed(room.Id, new Uri("https://example.com/zzz")));
+        Assert.False(_browser.IsAllowed(room.Id, new Uri("https://other.example/")));
     }
 
     [Fact]

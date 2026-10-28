@@ -20,9 +20,15 @@ public static class TerminalMcp
     /// <summary>mcp-config의 서버 이름 — 도구 이름이 mcp__hb-chat__terminal_* 가 된다.</summary>
     public const string Server = "hb-chat";
     public const string StartTool = "mcp__" + Server + "__terminal_start";
-    /// <summary>묻지 않는 도구 (--allowedTools). 시작만 카드.</summary>
+    /// <summary>지휘자 브라우저 열기 — 호스트가 사이트를 보고 정한다(로컬 · 허용한 사이트는 바로, 그 밖은 카드, 계획서 2026-10-29_HB_Chat-지휘자-브라우저).</summary>
+    public const string BrowserOpenTool = "mcp__" + Server + "__browser_open";
+    /// <summary>묻지 않는 도구 (--allowedTools). 터미널 시작 · 브라우저 열기만 호스트가 본다.</summary>
     public static readonly IReadOnlyList<string> QuietTools =
-        ["mcp__" + Server + "__terminal_list", "mcp__" + Server + "__terminal_read", "mcp__" + Server + "__terminal_stop"];
+    [
+        "mcp__" + Server + "__terminal_list", "mcp__" + Server + "__terminal_read", "mcp__" + Server + "__terminal_stop",
+        "mcp__" + Server + "__browser_click", "mcp__" + Server + "__browser_type", "mcp__" + Server + "__browser_key",
+        "mcp__" + Server + "__browser_scroll", "mcp__" + Server + "__browser_screenshot", "mcp__" + Server + "__browser_read",
+    ];
 
     /// <summary>terminal_start 입력 (name · command 문자열). 모양이 아니면 null.</summary>
     public static (string Name, string Command)? ParseStart(string inputJson)
@@ -40,6 +46,22 @@ public static class TerminalMcp
             return null;
         }
     }
+
+    /// <summary>도구 입력의 글 키 하나. 없거나 글이 아니면 null.</summary>
+    public static string? ParseString(string inputJson, string key)
+    {
+        try
+        {
+            return JsonNode.Parse(inputJson)?[key] is { } v && v.GetValueKind() == System.Text.Json.JsonValueKind.String ? v.GetValue<string>() : null;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>browser_open 허용 답의 입력 — url만 (정규화한 주소).</summary>
+    public static string UrlInput(string url) => new JsonObject { ["url"] = url }.ToJsonString();
 
     /// <summary>허용 답의 입력 — 카드에 보인 두 키만 다시 담는다 (보이지 않는 키는 승인하지 않는다, 계획 카드와 같은 원칙).</summary>
     public static string StartInput(string name, string command) =>
@@ -84,6 +106,18 @@ public static class TerminalMcp
             if (uri.IsLoopback) return $"http://{uri.Authority}"; // 127.0.0.1 · [::1] 그대로 (/self-review 57b59ef134 C11)
         }
         return null;
+    }
+
+    /// <summary>
+    /// 지휘자 브라우저가 로컬이어도 열지 못하는 포트: 이 앱이 듣는 포트 전부 + DashboardUrl 포트 + 설정 목록 (/self-review security 8b11177bd5 C1).
+    /// </summary>
+    public static IReadOnlyCollection<int> BlockedPorts(IServer server, ChatOptions options)
+    {
+        var ports = new HashSet<int>(options.BrowserBlockedPorts);
+        foreach (var address in server.Features.Get<IServerAddressesFeature>()?.Addresses ?? [])
+            if (Uri.TryCreate(address.Replace("://+", "://localhost").Replace("://*", "://localhost"), UriKind.Absolute, out var uri)) ports.Add(uri.Port);
+        if (Uri.TryCreate(options.DashboardUrl, UriKind.Absolute, out var dashboard)) ports.Add(dashboard.Port);
+        return ports;
     }
 
     /// <summary>MCP 요청의 토큰이 지금 실행 중인 방 토큰인지.</summary>
