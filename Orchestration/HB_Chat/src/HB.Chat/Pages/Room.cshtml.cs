@@ -19,6 +19,9 @@ public sealed class RoomModel(
 {
     public Room Room { get; private set; } = null!;
 
+    /// <summary>이 방 마지막 실행이 알려 준 서브에이전트 이름 (Claude 앱 기능 D — 곁칸 목록). 이 앱을 켠 뒤 아직 돌지 않았으면 null.</summary>
+    public IReadOnlyList<string>? Agents => hub.Commands(Room.Id)?.Agents;
+
     /// <summary>고를 수 있는 모델 (설정 Chat:Models — 곁칸 방 설정 select).</summary>
     public IReadOnlyList<string> Models => options.Value.ModelList;
 

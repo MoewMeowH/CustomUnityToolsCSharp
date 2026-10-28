@@ -30,6 +30,31 @@ public sealed class CommandCatalogTests : IDisposable
         Assert.Equal(["color"], ev.TerminalCommands);
         Assert.Equal([("unity", @"C:\p\unity")], ev.Plugins); // 경로 없는 줄은 뺀다
         Assert.Empty(Assert.IsType<InitEvent>(StreamParser.Parse("""{"type":"system","subtype":"init"}""")).SlashCommands);
+        Assert.Equal(["Explore", "general-purpose"], Assert.IsType<InitEvent>(StreamParser.Parse("""{"type":"system","subtype":"init","agents":["Explore","general-purpose"]}""")).Agents);
+    }
+
+    [Fact]
+    public void TaskEvents_ParseStartProgressDone()
+    {
+        // Claude 앱 기능 D (2.1.312 실측 모양)
+        Assert.Equal(new TaskEvent("started", "t1", "writer", "Write out.txt", null, null),
+            StreamParser.Parse("""{"type":"system","subtype":"task_started","task_id":"t1","description":"Write out.txt","subagent_type":"writer","is_backgrounded":true}"""));
+        Assert.Equal(new TaskEvent("progress", "t1", "general-purpose", "Reading gp.txt", null, 3),
+            StreamParser.Parse("""{"type":"system","subtype":"task_progress","task_id":"t1","description":"Reading gp.txt","subagent_type":"general-purpose","usage":{"tool_uses":3}}"""));
+        Assert.Equal(new TaskEvent("done", "t1", null, null, "failed", null),
+            StreamParser.Parse("""{"type":"system","subtype":"task_notification","task_id":"t1","status":"failed"}"""));
+        Assert.IsType<OtherEvent>(StreamParser.Parse("""{"type":"system","subtype":"task_started"}""")); // task_id 없음
+    }
+
+    [Fact]
+    public void TaskEvents_LongTextCapped()
+    {
+        // /self-review security 42f9d47dc4 C3: 에이전트 정의 · 지휘자가 정하는 글은 상한까지만 화면 · 기록으로 간다
+        var line = $$"""{"type":"system","subtype":"task_started","task_id":"t1","description":"{{new string('d', 5000)}}","subagent_type":"{{new string('a', 500)}}","status":"{{new string('s', 500)}}"}""";
+        var t = Assert.IsType<TaskEvent>(StreamParser.Parse(line));
+        Assert.Equal(StreamParser.StatusChars + 1, t.Description!.Length);
+        Assert.Equal(81, t.Agent!.Length);
+        Assert.Equal(41, t.Status!.Length);
     }
 
     [Fact]

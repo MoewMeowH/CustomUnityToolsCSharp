@@ -148,6 +148,73 @@ public sealed class ApprovalFlowTests : IDisposable
     }
 
     [Fact]
+    public async Task Subagent_ProgressLines_AndCardMarkedFromAgent()
+    {
+        // Claude 앱 기능 D: 서브에이전트 진행(task_*) → agent 알림, 서브에이전트의 명령 승인(agent_id) → 카드에 서브에이전트 표시, 같은 허용 길
+        var room = CommandRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "agent please");
+        var before = await Until(ch, e => e.Kind == "approval");
+        var tasks = before.Where(e => e.Kind == "agent").Select(e => e.Task!).ToList();
+        Assert.Equal(["started", "progress"], tasks.Select(t => t.Phase));
+        Assert.All(tasks, t => Assert.Equal(("t_sub1", "general-purpose"), (t.TaskId, t.Agent)));
+        Assert.Equal(1, tasks[1].ToolUses);
+        var card = before.Last().Approval!;
+        Assert.True(card.FromAgent);
+        Assert.Equal("mkdir subdir", card.Summary);
+
+        Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null));
+        var after = await Until(ch, e => e.Kind == "idle");
+        var done = after.Single(e => e.Kind == "agent").Task!;
+        Assert.Equal(("done", "completed"), (done.Phase, done.Status));
+        Assert.True(after.Single(e => e.Kind == "end").Ok);
+    }
+
+    [Fact]
+    public async Task BackgroundSubagent_ApprovalAfterMainResult_StillAnswered()
+    {
+        // 실제 확인(2026-10-28): 백그라운드 서브에이전트는 메인 result 뒤에 승인을 묻는다 — stdin을 닫지 않아야 카드 답이 간다
+        var room = CommandRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "bgagent please");
+        var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        Assert.True(card.FromAgent);
+        Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null));
+        var after = await Until(ch, e => e.Kind == "idle");
+        Assert.Equal("completed", after.Single(e => e.Kind == "agent").Task!.Status);
+        Assert.True(after.Single(e => e.Kind == "end").Ok);
+    }
+
+    [Fact]
+    public async Task BackgroundSubagent_NeverDone_StdinClosedAfterCap()
+    {
+        // /self-review security 42f9d47dc4 C2: 끝 알림이 오지 않아도 상한 뒤에는 stdin을 닫아 실행이 끝난다.
+        // 상한은 전역이라 같은 클래스(차례로 도는) 안에서만 줄였다가 되돌린다
+        var before = ClaudeRunner.BackgroundAgentWait;
+        ClaudeRunner.BackgroundAgentWait = TimeSpan.FromSeconds(1);
+        try
+        {
+            var room = CommandRoom();
+            var ch = _hub.Subscribe(room.Id);
+            _hub.Send(room.Id, "bghang please");
+            var seen = await Until(ch, e => e.Kind == "idle");
+            Assert.True(seen.Single(e => e.Kind == "end").Ok);
+        }
+        finally { ClaudeRunner.BackgroundAgentWait = before; }
+    }
+
+    [Fact]
+    public async Task Tasks_PlainOrLateProgress_DoNotHoldStdin()
+    {
+        // C2: subagent_type 없는 task는 기다리지 않고, 끝난 뒤 늦게 온 진행 줄은 다시 열지 않는다 (상한 30분 — 기다리면 시험 시간 초과)
+        var room = CommandRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "bgmisc please");
+        var seen = await Until(ch, e => e.Kind == "idle");
+        Assert.True(seen.Single(e => e.Kind == "end").Ok);
+    }
+
+    [Fact]
     public async Task PlanRequest_WithoutPlanFirst_DeniedWithoutCard()
     {
         // 지휘자 검토 S1: 계획 모드로 시작하지 않은 실행의 ExitPlanMode는 카드 없이 거절

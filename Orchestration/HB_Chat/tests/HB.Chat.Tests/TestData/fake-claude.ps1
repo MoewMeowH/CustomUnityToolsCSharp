@@ -120,6 +120,38 @@ switch ($mode) {
         }
         Finish $d 'ExitPlanMode' 'planned'
     }
+    'agent' {
+        # subagent (feature D, 2.1.312 shape): task_started -> task_progress -> subagent Bash approval with agent_id -> task_notification
+        Emit '{"type":"system","subtype":"task_started","task_id":"t_sub1","tool_use_id":"toolu_a","description":"Make dir","subagent_type":"general-purpose","is_backgrounded":false}'
+        Emit '{"type":"system","subtype":"task_progress","task_id":"t_sub1","tool_use_id":"toolu_a","description":"Running mkdir","subagent_type":"general-purpose","usage":{"total_tokens":10,"tool_uses":1,"duration_ms":5}}'
+        $d = Ask 'req_sub' '{"subtype":"can_use_tool","tool_name":"Bash","display_name":"Bash","input":{"command":"mkdir subdir","description":"Create subdir"},"agent_id":"a1b2c3","tool_use_id":"toolu_fake6"}'
+        $status = if ($d -and $d.behavior -eq 'allow') { 'completed' } else { 'failed' }
+        Emit ('{"type":"system","subtype":"task_notification","task_id":"t_sub1","tool_use_id":"toolu_a","status":"' + $status + '","subagent_type":"general-purpose"}')
+        Finish $d 'Bash' 'sub done'
+    }
+    'bgagent' {
+        # background subagent (feature D, real check 2026-10-28): the CLI emits the main result first, then the subagent asks for approval,
+        # then task_notification and a second result. The app must keep stdin open until the subagent is done.
+        Emit '{"type":"system","subtype":"task_started","task_id":"t_bg1","tool_use_id":"toolu_b","description":"Make dir","subagent_type":"general-purpose","is_backgrounded":true}'
+        Emit '{"type":"result","subtype":"success","is_error":false,"result":"launched","total_cost_usd":0.001,"permission_denials":[]}'
+        $d = Ask 'req_bg' '{"subtype":"can_use_tool","tool_name":"Bash","display_name":"Bash","input":{"command":"mkdir bgdir","description":"Create bgdir"},"agent_id":"bg1","tool_use_id":"toolu_fake7"}'
+        $status = if ($d -and $d.behavior -eq 'allow') { 'completed' } else { 'failed' }
+        Emit ('{"type":"system","subtype":"task_notification","task_id":"t_bg1","tool_use_id":"toolu_b","status":"' + $status + '","subagent_type":"general-purpose"}')
+        Finish $d 'Bash' 'bg done'
+    }
+    'bghang' {
+        # background subagent that never reports done (security review 42f9d47dc4 C2): the app must still close stdin after its wait cap
+        Emit '{"type":"system","subtype":"task_started","task_id":"t_hang","tool_use_id":"toolu_c","description":"Never ends","subagent_type":"general-purpose","is_backgrounded":true}'
+        Emit '{"type":"result","subtype":"success","is_error":false,"result":"launched","total_cost_usd":0.001,"permission_denials":[]}'
+    }
+    'bgmisc' {
+        # C2: a task without subagent_type is not waited for, and a late progress line after done does not re-open the task
+        Emit '{"type":"system","subtype":"task_started","task_id":"t_plain","description":"plain task"}'
+        Emit '{"type":"system","subtype":"task_started","task_id":"t_late","description":"Quick","subagent_type":"general-purpose","is_backgrounded":true}'
+        Emit '{"type":"system","subtype":"task_notification","task_id":"t_late","status":"completed"}'
+        Emit '{"type":"system","subtype":"task_progress","task_id":"t_late","description":"late line","subagent_type":"general-purpose"}'
+        Emit '{"type":"result","subtype":"success","is_error":false,"result":"misc","total_cost_usd":0.001,"permission_denials":[]}'
+    }
     'write' {
         # 앱이 카드로 받지 않는 승인 요청 (작업 폴더 밖 쓰기) — 카드 없이 거절돼야 한다
         $d = Ask 'req_write' '{"subtype":"can_use_tool","tool_name":"Write","display_name":"Write","input":{"file_path":"C:\\outside\\x.txt","content":"x"},"tool_use_id":"toolu_fake3"}'

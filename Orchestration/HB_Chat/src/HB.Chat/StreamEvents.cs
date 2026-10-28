@@ -15,8 +15,17 @@ public sealed record InitEvent(string? SessionId, string? Version, IReadOnlyList
     public IReadOnlyList<string> SlashCommands { get; init; } = [];
     public IReadOnlyList<string> Skills { get; init; } = [];
     public IReadOnlyList<string> TerminalCommands { get; init; } = [];
+
+    /// <summary>쓸 수 있는 서브에이전트 이름 (Claude 앱 기능 D — 곁칸 목록).</summary>
+    public IReadOnlyList<string> Agents { get; init; } = [];
     public IReadOnlyList<(string Name, string Path)> Plugins { get; init; } = [];
 }
+
+/// <summary>
+/// 서브에이전트 진행 (Claude 앱 기능 D — 2.1.312 실측 system task_started · task_progress · task_notification).
+/// Phase: started · progress · done. Agent는 subagent_type, Description은 지휘자가 준 설명 · 진행 글, Status는 끝 상태(completed · failed …).
+/// </summary>
+public sealed record TaskEvent(string Phase, string TaskId, string? Agent, string? Description, string? Status, int? ToolUses) : StreamEvent;
 
 /// <summary>흘림 글 조각 (stream_event content_block_delta / text_delta).</summary>
 public sealed record DeltaEvent(string Text) : StreamEvent;
@@ -114,8 +123,13 @@ public static class StreamParser
                     SlashCommands = Strs(e, "slash_commands"),
                     Skills = Strs(e, "skills"),
                     TerminalCommands = Strs(e, "terminal_slash_commands"),
+                    Agents = Strs(e, "agents"),
                     Plugins = Plugins(e),
                 },
+                "system" when subtype is "task_started" or "task_progress" or "task_notification" && Str(e, "task_id") is { Length: > 0 } taskId =>
+                    new TaskEvent(subtype switch { "task_started" => "started", "task_progress" => "progress", _ => "done" }, taskId,
+                        Cap(Str(e, "subagent_type"), 80), Cap(Str(e, "description"), StatusChars), Cap(Str(e, "status"), 40),
+                        e.TryGetProperty("usage", out var u) && u.ValueKind == JsonValueKind.Object ? Int(u, "tool_uses") : null),
                 "system" when subtype == "permission_denied" => new DeniedEvent(Str(e, "tool_name"), Str(e, "decision_reason")),
                 "system" when subtype == "api_retry" => new RetryEvent(Int(e, "attempt") ?? 0, Str(e, "error")),
                 "system" when subtype == "post_turn_summary" =>

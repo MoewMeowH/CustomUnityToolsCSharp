@@ -32,6 +32,9 @@ public sealed record ApprovalRequest(string Tool, string Summary, string? Descri
     /// <summary>카드에 보이는 것이 허용될 입력 전부가 아니어서 거절만 받는지.</summary>
     public bool DenyOnly => !IsPlan && (Truncated || Risky);
 
+    /// <summary>서브에이전트가 낸 요청 (request의 agent_id — Claude 앱 기능 D). 카드에 "서브에이전트"로 보인다. 허용 · 규칙은 같다.</summary>
+    public bool FromAgent { get; init; }
+
     /// <summary>계획 모드에서 지휘자가 계획 승인을 묻는 도구.</summary>
     public const string PlanTool = "ExitPlanMode";
 
@@ -110,6 +113,7 @@ public sealed record ApprovalRequest(string Tool, string Summary, string? Descri
             {
                 Extra = extras.Count == 0 ? null : string.Join(", ", extras),
                 Risky = risky,
+                FromAgent = Str(e, "agent_id") is { Length: > 0 },
             };
         }
         catch (JsonException)

@@ -97,6 +97,18 @@
                 </select>
             </dd>
         }
+        @* 서브에이전트 (Claude 앱 기능 D, 결정 "보인다"): 마지막 실행의 init 목록. 방 단계의 도구 · 규칙 · 승인을 그대로 따른다 *@
+        @if (ClaudeArgs.AllowsAgents(room.Level))
+        {
+            <dt>서브에이전트</dt>
+            <dd>@(Model.Agents is { Count: > 0 } agents ? string.Join(" · ", agents) : "이 방이 한 번 돈 뒤에 보입니다") <span class="muted">(이 방 권한 안에서만)</span></dd>
+        }
+        else if (room.Level == PermissionLevel.Command)
+        {
+            @* 명령 방은 서브에이전트를 쓰지 않는다 (/self-review security 42f9d47dc4 C1) *@
+            <dt>서브에이전트</dt>
+            <dd class="muted">명령 방에서는 쓰지 않습니다 — 에이전트 정의가 명령 승인을 건너뛸 수 있어서 (읽기 · 편집 방에서 쓰세요)</dd>
+        }
         @if (room.Level == PermissionLevel.Command)
         {
             <dt>항상 허용</dt><dd>이 방 @(room.AllowRules.Count)개 <span class="muted">(목록은 대화 위 접힌 칸)</span></dd>

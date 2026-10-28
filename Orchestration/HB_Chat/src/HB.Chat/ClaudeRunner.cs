@@ -110,6 +110,13 @@ public static class ClaudeRunner
             string? contextModel = null;
             StatusEvent? status = null;
             var other = 0;
+            // 도는 서브에이전트 (Claude 앱 기능 D): 백그라운드 서브에이전트가 있으면 CLI는 메인 턴의 result를 먼저 내고 서브에이전트가 끝난 뒤 다시 result를 낸다
+            // (2.1.312 실제 확인). 그 사이 stdin을 닫으면 서브에이전트의 승인 요청이 "Stream closed"로 실패했다 — 모두 끝난 뒤의 result에서 닫는다.
+            // 서브에이전트(subagent_type 있는) task만 센다 · 끝난 ID는 다시 넣지 않는다 · 메인 result 뒤 기다림은 상한까지 (/self-review security 42f9d47dc4 C2)
+            var runningTasks = new HashSet<string>(StringComparer.Ordinal);
+            var finishedTasks = new HashSet<string>(StringComparer.Ordinal);
+            using var waitCap = new CancellationTokenSource();
+            using var closeOnCap = waitCap.Token.Register(() => _ = input.CloseAsync());
             while (await proc.StandardOutput.ReadLineAsync() is { } line)
             {
                 if (line.Length > MaxLineChars)
@@ -140,9 +147,21 @@ public static class ClaudeRunner
                         continue;
                     case OtherEvent: other++; break;
                     case InitEvent init: sessionId = init.SessionId; break;
+                    case TaskEvent task:
+                        // 끝 알림에는 subagent_type이 없을 수 있다 — 지우기는 늘, 넣기는 서브에이전트만
+                        if (task.Phase == "done")
+                        {
+                            runningTasks.Remove(task.TaskId);
+                            finishedTasks.Add(task.TaskId);
+                        }
+                        else if (task.Agent is not null && !finishedTasks.Contains(task.TaskId)) runningTasks.Add(task.TaskId);
+                        break;
                     case ResultEvent r:
                         result = r;
-                        await input.CloseAsync(); // 턴 끝 — 다음 입력이 없으므로 CLI가 끝난다 (0번 실측)
+                        // 턴 끝 — 다음 입력이 없으므로 CLI가 끝난다 (0번 실측). 서브에이전트가 아직 돌면 그 승인 요청을 받을 수 있게 열어 두되,
+                        // 끝 알림이 끝내 오지 않아도 상한 뒤에는 닫는다 (승인 통로가 계속 열려 있지 않게)
+                        if (runningTasks.Count == 0) await input.CloseAsync();
+                        else waitCap.CancelAfter(BackgroundAgentWait);
                         break;
                     case UsageEvent { ContextTokens: > 0 } u: (context, contextModel) = (u.ContextTokens, u.Model ?? contextModel); break;
                     case StatusEvent s: status = s; break;
@@ -167,6 +186,9 @@ public static class ClaudeRunner
     }
 
     private static RunResult Fail(string error) => new(false, false, error, null, null, null, 0, 0, null);
+
+    /// <summary>메인 result 뒤 백그라운드 서브에이전트를 기다리는 상한 — 넘으면 stdin을 닫는다(그 뒤 서브에이전트 승인 요청은 실패). 시험이 줄인다.</summary>
+    internal static TimeSpan BackgroundAgentWait { get; set; } = TimeSpan.FromMinutes(30);
 
     /// <summary>SDK가 처음 보내는 제어 요청 (0번 실측에서 쓴 모양 그대로 — 훅은 넘기지 않는다).</summary>
     internal const string InitializeLine = """{"type":"control_request","request_id":"hbchat_init","request":{"subtype":"initialize","hooks":null}}""";

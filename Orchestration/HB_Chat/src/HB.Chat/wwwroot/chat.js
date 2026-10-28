@@ -791,7 +791,7 @@
             const card = el("div", "approval");
             const head = el("div", "head");
             const left = el("span"); left.style.marginLeft = "auto";
-            head.append(el("span", null, "승인 요청 · " + a.tool), left);
+            head.append(el("span", null, "승인 요청 · " + a.tool + (a.fromAgent ? " · 서브에이전트" : "")), left); // 서브에이전트가 낸 요청 (D)
             // 명령 전문(스크롤 칸) — 사용자가 본 것이 허용되는 것과 같게 (/self-review 36e4e20e04 C3 · C5, ab79e61df5 C5).
             card.append(head, el("div", "cmd", a.summary));
             if (a.description) card.append(el("div", "desc", "Claude 설명: " + a.description));
@@ -830,6 +830,27 @@
             tickApprovals();
             if (follow) toBottom();
         }
+        // 서브에이전트 진행 줄 (Claude 앱 기능 D): task_id마다 한 줄 — 시작 · 진행(설명 · 도구 수) · 끝. 턴이 끝나면 다른 진행 줄처럼 지워진다.
+        const agentLines = new Map();
+        function showAgent(t) {
+            if (!t || !t.taskId) return;
+            let line = agentLines.get(t.taskId);
+            if (!line || !line.isConnected) {
+                line = el("div", "live-line agent-line");
+                line.dataset.agent = t.agent || "";
+                agentLines.set(t.taskId, line);
+                live.append(line);
+            }
+            const name = line.dataset.agent || t.agent || "서브에이전트";
+            if (t.agent) line.dataset.agent = t.agent;
+            if (t.description) line.dataset.desc = t.description;
+            const state = t.phase === "done" ? (t.status === "completed" ? "끝" : "끝남(" + (t.status || "?") + ")")
+                : "진행 중" + (t.toolUses ? " · 도구 " + t.toolUses : "");
+            line.textContent = "서브에이전트 " + name + (line.dataset.desc ? ": " + line.dataset.desc : "") + " — " + state;
+            line.classList.toggle("denied", t.phase === "done" && t.status !== "completed");
+            if (atBottom()) toBottom();
+        }
+
         // 계획 카드 (Claude 앱 기능 C): 지휘자의 계획(ExitPlanMode)을 글로 보이고 "승인하고 진행" · 이유 적어 거절(다시 계획). 항상 허용은 없다.
         function showPlan(a) {
             const follow = atBottom();
@@ -1049,6 +1070,9 @@
                     break;
                 case "approval":
                     showApproval(ev.approval);
+                    break;
+                case "agent":
+                    showAgent(ev.task);
                     break;
                 case "approval-done":
                     doneApproval(ev.approval, ev.text);

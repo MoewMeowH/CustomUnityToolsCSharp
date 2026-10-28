@@ -110,11 +110,11 @@ public static partial class ClaudeArgs
                 args.AddRange(["--tools", "", "--strict-mcp-config"]);
                 break;
             case PermissionLevel.Read:
-                args.AddRange(["--tools", "Read,Grep,Glob," + HostTools]);
+                args.AddRange(["--tools", "Read,Grep,Glob," + HostTools + "," + AgentTool]);
                 AddMcp(args, spec);
                 break;
             case PermissionLevel.Edit:
-                args.AddRange(["--tools", "Read,Grep,Glob,Edit,Write," + HostTools + planTool, "--permission-mode", spec.Plan ? "plan" : "acceptEdits"]);
+                args.AddRange(["--tools", "Read,Grep,Glob,Edit,Write," + HostTools + "," + AgentTool + planTool, "--permission-mode", spec.Plan ? "plan" : "acceptEdits"]);
                 args.Add("--disallowedTools");
                 args.AddRange(EditDenied.Select(p => $"Edit({p})"));
                 if (attachDeny is not null) args.Add(attachDeny);
@@ -164,6 +164,9 @@ public static partial class ClaudeArgs
     /// 계획 모드를 쓸 수 있는 단계와, 계획 승인 뒤 돌아갈 권한 모드: 편집 acceptEdits(평소 인자와 같음) · 명령 default(평소 --permission-mode 없음).
     /// 대화 · 읽기는 null — 계획 뒤 고칠 도구가 없다 (결정 "편집 · 명령 방만").
     /// </summary>
+    /// <summary>서브에이전트를 쓸 수 있는 단계 (읽기 · 편집 — <see cref="AgentTool"/>).</summary>
+    public static bool AllowsAgents(PermissionLevel level) => level is PermissionLevel.Read or PermissionLevel.Edit;
+
     public static string? PlanMode(PermissionLevel level) => level switch
     {
         PermissionLevel.Edit => "acceptEdits",
@@ -185,6 +188,14 @@ public static partial class ClaudeArgs
     /// 읽기 · 편집 · 명령 단계의 --tools 끝에 붙는다.
     /// </summary>
     public const string HostTools = AskTool + ",TaskCreate,TaskGet,TaskList,TaskUpdate";
+
+    /// <summary>
+    /// 서브에이전트 도구 (Claude 앱 기능 D) — 읽기 · 편집 단계만 (결정: /self-review security 42f9d47dc4 C1 "명령 방은 서브에이전트 끄기").
+    /// 2.1.312 실측: 서브에이전트는 세션 --tools · 금지 규칙 · 승인 요청(agent_id)을 따르지만, 작업 폴더 정의의 permissionMode: acceptEdits는 먹어서
+    /// 명령 방에서는 mkdir · cp가 카드 없이 돌았다(36e4e20e04 C1로 막은 길). 읽기(Bash · Edit 없음) · 편집(이미 acceptEdits, Bash 없음)은 넓어지지 않는다.
+    /// bypassPermissions는 무시, 정의의 mcpServers는 --strict-mcp-config 아래 붙지 않음, hooks는 돌지 않음(같은 실측).
+    /// </summary>
+    public const string AgentTool = "Agent";
 
     private static void AddMcp(List<string> args, RunSpec spec)
     {

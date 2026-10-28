@@ -40,10 +40,15 @@ public sealed class ClaudeArgsTests
     {
         // Claude 앱 기능 C (2.1.312 실측): 계획 모드 + 승인 도구 ExitPlanMode. 편집은 acceptEdits 대신 plan
         var edit = Joined(ClaudeArgs.Build(Spec(PermissionLevel.Edit) with { Plan = true }, Models));
-        Assert.Contains("TaskUpdate,ExitPlanMode | --permission-mode | plan", edit);
+        Assert.Contains("TaskUpdate,Agent,ExitPlanMode | --permission-mode | plan", edit);
         Assert.DoesNotContain("acceptEdits", edit);
         var command = Joined(ClaudeArgs.Build(Spec(PermissionLevel.Command) with { Plan = true }, Models));
         Assert.Contains("TaskUpdate,ExitPlanMode | --permission-mode | plan", command);
+        // 서브에이전트는 읽기 · 편집 방만 — 명령 방은 정의의 acceptEdits가 명령 카드를 건너뛰었다 (/self-review security 42f9d47dc4 C1)
+        Assert.DoesNotContain(",Agent", Joined(ClaudeArgs.Build(Spec(PermissionLevel.Command), Models)));
+        Assert.DoesNotContain(",Agent", command);
+        Assert.Equal((true, true, false, false), (ClaudeArgs.AllowsAgents(PermissionLevel.Read), ClaudeArgs.AllowsAgents(PermissionLevel.Edit),
+            ClaudeArgs.AllowsAgents(PermissionLevel.Command), ClaudeArgs.AllowsAgents(PermissionLevel.Chat)));
         Assert.DoesNotContain("ExitPlanMode", Joined(ClaudeArgs.Build(Spec(PermissionLevel.Edit), Models))); // 끄면 없음
         Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Read) with { Plan = true }, Models));
         Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Chat, mcp: null) with { Plan = true }, Models));
@@ -108,7 +113,7 @@ public sealed class ClaudeArgsTests
     {
         var args = ClaudeArgs.Build(Spec(PermissionLevel.Read), Models);
         // AskUserQuestion: 질문 카드 (3차 a — stdio 호스트에서만 도구 목록에 들어온다)
-        Assert.Contains("--tools | Read,Grep,Glob,AskUserQuestion,TaskCreate,TaskGet,TaskList,TaskUpdate | --strict-mcp-config | --mcp-config | C:/data/mcp.json | --allowedTools | mcp__hb-orchestration", Joined(args));
+        Assert.Contains("--tools | Read,Grep,Glob,AskUserQuestion,TaskCreate,TaskGet,TaskList,TaskUpdate,Agent | --strict-mcp-config | --mcp-config | C:/data/mcp.json | --allowedTools | mcp__hb-orchestration", Joined(args));
         Assert.DoesNotContain("--permission-mode", args);
         Assert.Equal("stdio", args[args.ToList().IndexOf("--permission-prompt-tool") + 1]);
     }
@@ -117,7 +122,7 @@ public sealed class ClaudeArgsTests
     public void Edit_AddsEditToolsAndAcceptEdits_ButNoBash()
     {
         var args = ClaudeArgs.Build(Spec(PermissionLevel.Edit), Models);
-        Assert.Contains("--tools | Read,Grep,Glob,Edit,Write,AskUserQuestion,TaskCreate,TaskGet,TaskList,TaskUpdate | --permission-mode | acceptEdits", Joined(args));
+        Assert.Contains("--tools | Read,Grep,Glob,Edit,Write,AskUserQuestion,TaskCreate,TaskGet,TaskList,TaskUpdate,Agent | --permission-mode | acceptEdits", Joined(args));
         Assert.DoesNotContain(args, a => a.Contains("Bash", StringComparison.OrdinalIgnoreCase));
         Assert.Contains("--strict-mcp-config", args);
     }

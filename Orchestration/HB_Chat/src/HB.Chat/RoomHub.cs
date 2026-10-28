@@ -46,6 +46,9 @@ public sealed record LiveEvent(string Kind)
 
     /// <summary>status 알림 · snapshot: 지휘자 상태 한 줄 (post_turn_summary, 3차 b).</summary>
     public RoomStatus? Status { get; init; }
+
+    /// <summary>agent 알림: 서브에이전트 진행 (Claude 앱 기능 D — task_started · task_progress · task_notification).</summary>
+    public TaskEvent? Task { get; init; }
 }
 
 /// <summary>
@@ -60,6 +63,9 @@ public sealed record ApprovalView(string Id, string Tool, string Summary, string
 
     /// <summary>계획 승인 카드 (Summary = 계획 글).</summary>
     public bool Plan { get; init; }
+
+    /// <summary>서브에이전트가 낸 요청 (Claude 앱 기능 D).</summary>
+    public bool FromAgent { get; init; }
 }
 
 /// <summary>
@@ -125,6 +131,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             Extra = Request.Extra,
             Risky = Request.Risky,
             Plan = Request.IsPlan,
+            FromAgent = Request.FromAgent,
         };
     }
 
@@ -960,6 +967,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                     DeniedEvent d => new LiveEvent("denied") { Text = $"{d.Tool}: {d.Reason}" },
                     RetryEvent r => new LiveEvent("retry") { Text = $"API 재시도 {r.Attempt}회 ({r.Error})" },
                     StatusEvent s => new LiveEvent("status") { Status = new RoomStatus(s.Category, s.Detail, s.NeedsAction) },
+                    TaskEvent t => new LiveEvent("agent") { Task = t }, // 서브에이전트 진행 줄 (Claude 앱 기능 D)
                     _ => null,
                 };
                 if (shown is not null) Broadcast(live, shown);
