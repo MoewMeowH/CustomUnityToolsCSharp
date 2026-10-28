@@ -53,6 +53,15 @@ builder.Services.AddSingleton<RoomRuns>();
 
 var app = builder.Build();
 
+// 데이터 폴더 쓰기가 Claude 데스크톱 앱(MSIX) 패키지 캐시로 옮겨지면 켜지 않는다 (4차 A) — 밖에서 띄운 앱과 방 목록 · 기록이 두 벌로 갈린다.
+// 데이터 폴더를 설정 · 인자로 준 실행도 같이 본다: 옮겨지지 않는 폴더(F: · %TEMP% — 시험 서버의 scratchpad)는 Probe가 null이라 막히지 않는다
+// (/self-review dc27a724bf C3).
+{
+    var chat = app.Services.GetRequiredService<IOptions<ChatOptions>>().Value;
+    if (RedirectedFolder.Probe(chat.DataFolder) is { } redirected)
+        throw new InvalidOperationException(RedirectedFolder.Message(chat.DataFolder, redirected));
+}
+
 // 앱에서 더한 작업 폴더 (3차 d): 켤 때 한 번 읽어 설정 값에 붙인다 — 설정 파일(Chat:Workspaces)이 먼저다.
 // 아래 보호 폴더를 품거나 그 안인 폴더는 더하지 못한다 — 편집 금지 규칙이 작업 폴더 기준 상대 경로라, 이 폴더들을 따로 작업 폴더로 두면
 // 앱 · MCP 서버 · Claude 설정을 고칠 수 있게 되므로 (/self-review security eee1adb777 C2 · 460430d647 C1 · C2).
@@ -126,7 +135,16 @@ app.Use(async (ctx, next) =>
     {
         if (ctx.Request.ContentLength is { } length && length > limit)
         {
+            // 프로필은 양식 POST라 브라우저가 응답 화면으로 옮겨 간다 — 글 대신 설정 화면으로 돌려보내 오류 한 줄 (4차 B2: 글자가 깨져 보였음).
+            // 첨부는 화면 스크립트(fetch)가 받으므로 글 그대로, 문자 집합을 붙인다.
+            if (string.Equals(handler, "Profile", StringComparison.OrdinalIgnoreCase))
+            {
+                ctx.Response.StatusCode = StatusCodes.Status303SeeOther;
+                ctx.Response.Headers.Location = "/Settings?fail=image-size";
+                return;
+            }
             ctx.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
+            ctx.Response.ContentType = "text/plain; charset=utf-8";
             await ctx.Response.WriteAsync(text);
             return;
         }

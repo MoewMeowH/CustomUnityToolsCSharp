@@ -72,7 +72,8 @@ select, input[type=text], textarea { background: var(--panel); border: 1px solid
 .side-tabs .side-x { flex: 0 0 34px; font-size: 16px; }
 .side-tablist { display: flex; flex: 1; min-width: 0; }
 /* 설정 화면 (3차 d) */
-.settings { max-width: 1000px; }
+/* 설정 화면 (4차 B3): 칸 너비 그대로 — 폭을 묶으면 넓은 창에서 스크롤바가 화면 중간에 서고 오른쪽이 빈다 */
+.welcome.settings { max-width: none; }
 .settings-table td, .settings-table th { padding: 6px 8px; font-size: 13px; overflow-wrap: anywhere; }
 .settings-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
 .settings-add input[name=path] { flex: 1; min-width: 220px; }

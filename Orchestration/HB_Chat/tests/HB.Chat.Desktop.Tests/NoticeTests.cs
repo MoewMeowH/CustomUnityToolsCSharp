@@ -25,6 +25,21 @@ public sealed class NoticeTests
     }
 
     [Fact]
+    public void Question_IsApprovalWithQuestionWords()
+    {
+        // 4차 B4 (3차 a C7): 질문 카드도 서버는 Approval — 표정 Question으로 글만 '질문' · '답 기다림'
+        var rooms = RoomStates.Parse("[{\"id\":\"q\",\"title\":\"질문 방\",\"activity\":\"Approval\",\"failed\":false,\"unread\":0,\"face\":\"Question\"}," +
+                                     "{\"id\":\"a\",\"title\":\"승인 방\",\"activity\":\"Approval\",\"failed\":false,\"unread\":0,\"face\":\"Approval\"}]")!;
+        Assert.True(rooms[0].IsApproval && rooms[0].IsQuestion);
+        Assert.False(rooms[1].IsQuestion);
+        var n = Notices.Diff(Map(R("q", "Busy"), R("a", "Busy")), rooms, null);
+        Assert.Equal([true, false], n.Select(x => x.Question));
+        Assert.Equal(("질문", "질문 방"), Notices.Balloon([n[0]]));
+        Assert.Equal("HB Chat — 승인 기다림 1 · 답 기다림 1", TrayStatus.Tooltip(rooms));
+        Assert.Equal(TrayLevel.Approval, TrayStatus.Level(rooms, new HashSet<string>()));
+    }
+
+    [Fact]
     public void Diff_FirstSnapshotIsSilent() => Assert.Empty(Notices.Diff(null, [R("a", "Approval")], null));
 
     [Fact]

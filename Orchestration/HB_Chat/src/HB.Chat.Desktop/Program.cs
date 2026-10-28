@@ -37,6 +37,15 @@ internal static class Program
             show.Set();
             return 0;
         }
+
+        // 데이터 폴더 쓰기가 Claude 데스크톱 앱(MSIX) 패키지 캐시로 옮겨지면 켜지 않는다 (4차 A) — 띄우는 서버도 기본 폴더를 쓰므로
+        // 방 목록 · 기록이 밖에서 띄운 앱과 두 벌로 갈린다. --data=로 준 폴더도 같이 본다(옮겨지지 않으면 null — dc27a724bf C1 · C3).
+        // 첫 실행만 — 두 번째 실행은 첫 창을 부르기만 하고 쓰지 않는다 (C2).
+        if (HB.Chat.RedirectedFolder.Probe(settings.DataFolder) is { } redirected)
+        {
+            MessageBox.Show(HB.Chat.RedirectedFolder.Message(settings.DataFolder, redirected), "HB Chat", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return 1;
+        }
         Application.Run(new MainForm(settings, warning, show, exitSignal));
         GC.KeepAlive(mutex);
         return 0;

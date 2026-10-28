@@ -1174,6 +1174,44 @@
         };
     }
 
+    // 설정 · 프로필 그림 (4차 B2): 고른 그림을 올리기 전에 브라우저에서 줄인다 (긴 변 256px, webp) — 아바타는 작게만 보이고
+    // 큰 원본은 본문 상한(1MB)에 걸린다. 줄이지 못하면(그림이 아님 · 캔버스 실패) 원본 그대로 보내 서버가 형식 · 크기를 본다.
+    const AvatarMaxPx = 256, AvatarKeepBytes = 256 * 1024;
+    async function shrinkImage(file) {
+        const bitmap = await createImageBitmap(file);
+        try {
+            const scale = Math.min(1, AvatarMaxPx / Math.max(bitmap.width, bitmap.height));
+            if (scale === 1 && file.size <= AvatarKeepBytes) return null; // 작으면 그대로
+            const canvas = document.createElement("canvas");
+            canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+            canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+            canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+            const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/webp", 0.9));
+            return blob?.type === "image/webp" ? new File([blob], "avatar.webp", { type: "image/webp" }) : null;
+        } finally {
+            bitmap.close();
+        }
+    }
+    document.querySelectorAll("form.settings-profile").forEach(form => {
+        const input = form.querySelector("input[type=file][name=image]");
+        // 그림을 새로 고르면 다시 줄인다 — 뒤로 가기(bfcache)로 돌아온 화면에 앞 표시가 남아 원본이 올라가지 않게 (dc27a724bf C5)
+        input?.addEventListener("change", () => { delete form.dataset.shrunk; });
+        form.addEventListener("submit", async (e) => {
+            const file = input?.files?.[0];
+            if (!file || form.dataset.shrunk === "1") return;
+            e.preventDefault();
+            if (form.dataset.shrinking === "1") return; // 줄이는 중에 또 누름 — 한 번만 보낸다
+            form.dataset.shrinking = "1";
+            try {
+                const small = await shrinkImage(file);
+                if (small) { const dt = new DataTransfer(); dt.items.add(small); input.files = dt.files; }
+            } catch { /* 원본 그대로 */ }
+            delete form.dataset.shrinking;
+            form.dataset.shrunk = "1"; // 다시 부르는 submit은 그냥 보낸다 (그림을 새로 고르면 지워짐)
+            form.requestSubmit();
+        });
+    });
+
     const first = pane?.querySelector(".room");
     if (first) room = mountRoom(first);
     else openAppEvents();

@@ -18,4 +18,9 @@
     <InternalsVisibleTo Include="HB.Chat.Desktop.Tests" />
   </ItemGroup>
 
+  <!-- 데이터 폴더가 Claude 앱(MSIX) 패키지 캐시로 옮겨지는지 (4차 A) — 서버와 같은 검사. 참조 대신 파일 하나만 함께 컴파일한다. -->
+  <ItemGroup>
+    <Compile Include="..\HB.Chat\RedirectedFolder.cs" Link="RedirectedFolder.cs" />
+  </ItemGroup>
+
 </Project>

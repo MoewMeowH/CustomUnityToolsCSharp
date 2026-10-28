@@ -95,7 +95,8 @@ public sealed class MainForm : Form
         }
 
         var bar = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden, Dock = DockStyle.Top, Padding = new Padding(6, 2, 6, 2) };
-        _chatTab.Click += (_, _) => ShowTab(AppTab.Chat, null);
+        // 설정 화면에서 '채팅'을 누르면 방 목록으로 돌아간다 (4차 B1 — 설정은 채팅 탭 안의 화면)
+        _chatTab.Click += (_, _) => ShowTab(AppTab.Chat, OnSettingsPage ? _chatUrl.AbsoluteUri : null);
         _dashTab.Click += (_, _) => ShowTab(AppTab.Dashboard, null);
         _settingsButton.Click += (_, _) => ShowTab(AppTab.Chat, new Uri(_chatUrl, "/Settings").AbsoluteUri);
         bar.Items.AddRange([_chatTab, _dashTab, new ToolStripSeparator(), _settingsButton, _status]);
@@ -261,7 +262,8 @@ public sealed class MainForm : Form
         };
         core.PermissionRequested += (_, e) => e.State = CoreWebView2PermissionState.Deny;
         // 그 방을 열면(방 전환은 pushState라 SourceChanged로 온다) 안 본 실패 표시를 지운다
-        if (tab == AppTab.Chat) core.SourceChanged += (_, _) => UpdateTray();
+        // 설정 화면에 들어가고 나오면 탭 줄의 눌린 단추도 바꾼다 (4차 B1)
+        if (tab == AppTab.Chat) core.SourceChanged += (_, _) => { UpdateTray(); UpdateTabs(); };
         core.ProcessFailed += (_, e) => BeginInvoke(() => SetStatus(e.ProcessFailedKind == CoreWebView2ProcessFailedKind.BrowserProcessExited
             ? "화면 엔진이 끝났습니다 — 앱을 다시 켜세요" // 브라우저 프로세스는 새로 고침으로 돌아오지 않는다 (26d478170f C6)
             : $"화면 프로세스 오류({e.ProcessFailedKind}) — F5로 새로 고침"));
@@ -303,9 +305,18 @@ public sealed class MainForm : Form
         UpdateTray(); // 채팅 탭으로 돌아오면 보고 있는 방의 안 본 실패를 지운다 (0f0b6007a4 C3)
     }
 
+    /// <summary>채팅 탭이 설정 화면(/Settings)을 보고 있는지 — 그때는 '채팅' 대신 '설정'이 눌린 모양 (4차 B1).</summary>
+    private bool OnSettingsPage => _tab == AppTab.Chat && IsSettingsPage(_chatView.CoreWebView2?.Source, _chatUrl);
+
+    internal static bool IsSettingsPage(string? source, Uri chatUrl) =>
+        Uri.TryCreate(source, UriKind.Absolute, out var u) && Uri.Compare(u, chatUrl, UriComponents.SchemeAndServer, UriFormat.Unescaped, StringComparison.OrdinalIgnoreCase) == 0
+        && string.Equals(u.AbsolutePath.TrimEnd('/'), "/Settings", StringComparison.OrdinalIgnoreCase);
+
     private void UpdateTabs()
     {
-        _chatTab.Checked = _tab == AppTab.Chat;
+        var settings = OnSettingsPage;
+        _chatTab.Checked = _tab == AppTab.Chat && !settings;
+        _settingsButton.Checked = settings;
         _dashTab.Checked = _tab == AppTab.Dashboard;
         _settingsButton.Enabled = _chatError is null; // 채팅 화면이 준비되기 전에는 주소를 받을 곳이 없다 (/self-review 460430d647 C8)
         var error = _tab == AppTab.Chat ? _chatError : _dashError;

@@ -90,7 +90,7 @@ public sealed class MiniForm : Form
     {
         _last = rooms;
         Pinned = MiniRoom.KeepPin(rooms, Pinned);
-        var items = new List<RoomItem> { new(null, "자동 (승인 기다림 · 최근 방)") };
+        var items = new List<RoomItem> { new(null, "자동 (승인 · 답 기다림 · 최근 방)") };
         items.AddRange(rooms.Select(r => new RoomItem(r.Id, Label(r))));
         var key = string.Join("\n", items.Select(i => i.Id + "\t" + i.Label)) + "\n" + Pinned;
         if (key != _itemsKey)
@@ -114,7 +114,7 @@ public sealed class MiniForm : Form
 
     private static string Label(RoomState r)
     {
-        var mark = r.IsApproval ? "● 승인 · " : r.IsBusy ? "… " : "";
+        var mark = r.IsQuestion ? "● 질문 · " : r.IsApproval ? "● 승인 · " : r.IsBusy ? "… " : "";
         var title = r.Title.Length > 40 ? r.Title[..40] + "…" : r.Title;
         return mark + (title.Length > 0 ? title : r.Id);
     }

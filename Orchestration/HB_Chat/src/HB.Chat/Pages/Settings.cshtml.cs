@@ -80,6 +80,16 @@ public sealed class SettingsModel(
         _ => null,
     };
 
+    /// <summary>요청을 받기 전에 막힌 오류 (리다이렉트 뒤 한 줄, 4차 B2) — Done처럼 코드만 받고 문구는 여기서 고른다.</summary>
+    [BindProperty(SupportsGet = true)]
+    public string? Fail { get; set; }
+
+    public string? FailText => Fail switch
+    {
+        "image-size" => $"그림이 너무 커서 받지 않았습니다 ({ProfileStore.MaxImageBytes / 1024}KB까지). 다른 그림을 고르세요 — 보통은 화면이 줄여서 올립니다.",
+        _ => null,
+    };
+
     /// <summary>되돌려 보일 입력 (더하기 실패 때).</summary>
     public string? NewName { get; private set; }
     public string? NewPath { get; private set; }

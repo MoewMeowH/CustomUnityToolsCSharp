@@ -14,9 +14,9 @@
             {
                 <div class="panel" style="padding:8px 12px;margin-bottom:12px;border-color:var(--ok)">@done</div>
             }
-            @if (Model.Error is not null)
+            @if ((Model.Error ?? Model.FailText) is { } error)
             {
-                <div class="panel" style="padding:8px 12px;margin-bottom:12px;border-color:var(--warn)" role="alert">@Model.Error</div>
+                <div class="panel" style="padding:8px 12px;margin-bottom:12px;border-color:var(--warn)" role="alert">@error</div>
             }
 
             <section class="panel" style="padding:12px 14px;margin-bottom:16px">

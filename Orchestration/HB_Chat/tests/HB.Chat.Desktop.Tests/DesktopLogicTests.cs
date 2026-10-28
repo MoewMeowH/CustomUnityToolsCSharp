@@ -16,6 +16,17 @@ public sealed class DesktopLogicTests : IDisposable
     private static readonly NavigationPolicy Policy = new(new Uri("http://localhost:5290"), new Uri("http://localhost:5280"));
 
     [Theory]
+    [InlineData("http://localhost:5290/Settings", true)]
+    [InlineData("http://localhost:5290/settings/", true)]
+    [InlineData("http://localhost:5290/Settings?done=profile", true)]
+    [InlineData("http://localhost:5290/", false)]
+    [InlineData("http://localhost:5290/Room/0123456789ab", false)]
+    [InlineData("http://localhost:5280/Settings", false)] // 다른 서버
+    [InlineData(null, false)]
+    public void SettingsPage_PressesSettingsButton(string? source, bool settings) =>
+        Assert.Equal(settings, MainForm.IsSettingsPage(source, new Uri("http://localhost:5290")));
+
+    [Theory]
     [InlineData("http://localhost:5290/Room/0123456789ab", AppTab.Chat, NavAction.Allow, AppTab.Chat)]
     [InlineData("http://localhost:5280/Call/c1", AppTab.Chat, NavAction.Switch, AppTab.Dashboard)]       // 호출 상세 → 대시보드 탭
     [InlineData("http://LOCALHOST:5290/Room/x", AppTab.Dashboard, NavAction.Switch, AppTab.Chat)]      // 앱에서 열기 → 채팅 탭 (호스트 대소문자)
