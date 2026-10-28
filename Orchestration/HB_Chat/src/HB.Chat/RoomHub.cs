@@ -57,6 +57,9 @@ public sealed record ApprovalView(string Id, string Tool, string Summary, string
 {
     public string? Extra { get; init; }
     public bool Risky { get; init; }
+
+    /// <summary>계획 승인 카드 (Summary = 계획 글).</summary>
+    public bool Plan { get; init; }
 }
 
 /// <summary>
@@ -121,6 +124,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         {
             Extra = Request.Extra,
             Risky = Request.Risky,
+            Plan = Request.IsPlan,
         };
     }
 
@@ -137,6 +141,9 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     }
 
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Live> _rooms = new();
+
+    /// <summary>승인 기록에 남길 계획 글 길이 (글자).</summary>
+    public const int PlanLogChars = 2_000;
 
     /// <summary>방마다 마지막 실행의 init (명령 · 스킬 · 플러그인 목록 — Claude 앱 기능 A). 메모리만.</summary>
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, InitEvent> _commandSets = new();
@@ -391,6 +398,41 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     /// </summary>
     private async Task<string> DecideToolAsync(Room room, Live live, int generation, ToolPermission ask, CancellationToken aborted)
     {
+        // 계획 승인 (Claude 앱 기능 C): 계획 모드로 돈 편집 · 명령 방의 ExitPlanMode → 계획 카드. 허용이면 그 방 단계의 원래 모드로 돌려
+        // 같은 턴에서 진행하고 "계획 먼저"를 끈다. 거절이면 이유가 지휘자에게 가서 계획을 고쳐 다시 묻는다 (결정 "이유 적어 다시 계획").
+        // 계획 모드로 시작한 실행(시작 때 "계획 먼저")에서만 — 그 밖에서 온 ExitPlanMode는 카드 없이 거절 (지휘자 검토 S1, 겹 방어)
+        if (ask.Tool == ApprovalRequest.PlanTool && room.PlanNext && ClaudeArgs.PlanMode(room.Level) is not null)
+        {
+            if (ApprovalRequest.Parse(ask.RequestJson) is not { IsPlan: true } plan) return PermissionDecision.Deny("계획 승인 요청 모양을 읽지 못해 거절했습니다.");
+            var answer = await RequestApprovalAsync(room.Id, live, generation, plan, aborted);
+            if (answer is { Allow: true })
+            {
+                // 허용 직전에 지금 단계를 다시 본다 — 카드에 답한 뒤 단계를 내렸으면 거절, 돌아갈 모드도 지금 단계 기준 (/self-review security d3dd55b237 C2)
+                if (store.Get(room.Id) is not { } now || ClaudeArgs.PlanMode(now.Level) is not { } mode)
+                    return PermissionDecision.Deny("사용자가 이 방 권한을 편집 단계 아래로 내렸습니다 — 계획대로 진행하지 않습니다.");
+                try
+                {
+                    store.Update(room.Id, r => r with { PlanNext = false });
+                    Touch(room.Id); // 화면의 "계획 먼저" 표시가 꺼지게
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+                {
+                    // 못 꺼도 이번 승인은 그대로 — 다음 말이 다시 계획부터 시작할 뿐
+                }
+                // 입력은 계획 글 · 파일 경로만 다시 담아 돌려준다 — 카드에 보이지 않는 키는 승인하지 않는다 (d3dd55b237 C1)
+                return PermissionDecision.AllowPlan(ApprovalRequest.PlanInput(ask.InputJson), mode);
+            }
+            var why = answer?.Message ?? "실행이 이미 끝나 거절했습니다.";
+            return PermissionDecision.Deny($"{why} — 이 내용을 반영해 계획을 고친 뒤 다시 승인을 요청하세요.");
+        }
+        if (ask.Tool == ApprovalRequest.PlanTool)
+        {
+            lock (live.Gate)
+            {
+                if (live.Generation == generation) Broadcast(live, new LiveEvent("denied") { Text = "ExitPlanMode: 계획 모드로 시작한 실행이 아니라 거절" });
+            }
+            return PermissionDecision.Deny("이 실행은 계획 모드로 시작하지 않았습니다 — 계획 승인을 받을 수 없습니다.");
+        }
         if (room.Level == PermissionLevel.Command && ClaudeArgs.CommandTools.Contains(ask.Tool))
         {
             // 실행 중에 곁칸에서 단계를 내렸으면(명령 → 그 아래) 이 턴의 명령도 카드 없이 거절한다 — 내리기는 바로 막힌다
@@ -478,7 +520,9 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             // Busy가 아니라 Cts로 본다: 실행이 끝나는 잠금에서 Cts를 먼저 비우므로 end 뒤에 face가 나가지 않는다 (/self-review 83b453653b C3).
             if (live.Cts is not null && live.Approvals.Count == 0) SetFace(live, live.Questions.Count > 0 ? Face.Question : Face.Tool);
         }
-        Log?.Write(roomId, request, pending.Label ?? (answer.Allow ? "허용" : "거절"));
+        // 계획 글은 앞 2,000자만 기록한다 — 승인 기록이 계획 전문으로 커지지 않게 (지휘자 검토 S4)
+        var logged = request.IsPlan && request.Summary.Length > PlanLogChars ? request with { Summary = request.Summary[..PlanLogChars] + "…" } : request;
+        Log?.Write(roomId, logged, pending.Label ?? (answer.Allow ? "허용" : "거절"));
         return answer;
     }
 
@@ -559,14 +603,18 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     public string? Decide(string roomId, string approvalId, ApprovalChoice choice, string? reason)
     {
         if (!_rooms.TryGetValue(roomId, out var live)) return "없는 방입니다.";
-        // 카드가 뜬 뒤 곁칸에서 권한을 명령 아래로 내렸으면 허용 · 항상 허용을 받지 않는다 (/self-review security 8ccecae84d C1)
-        if (choice != ApprovalChoice.Deny && store.Get(roomId) is not { Level: PermissionLevel.Command })
-            return "이 방 권한을 명령 단계 아래로 내려 허용할 수 없습니다 — 거절만 됩니다.";
         string? rule = null;
         lock (live.Gate)
         {
             if (!live.Approvals.TryGetValue(approvalId, out var pending) || pending.Answer.Task.IsCompleted)
                 return "이미 끝난 승인 요청입니다.";
+            // 카드가 뜬 뒤 곁칸에서 권한을 내렸으면 허용 · 항상 허용을 받지 않는다 (/self-review security 8ccecae84d C1) —
+            // 명령 카드는 명령 단계가 아니면, 계획 카드는 편집 · 명령 단계가 아니면. 단계는 이 잠금 안에서 읽는다 (d3dd55b237 C2)
+            var level = store.Get(roomId)?.Level;
+            if (choice != ApprovalChoice.Deny && (pending.Request.IsPlan ? level is not { } l || ClaudeArgs.PlanMode(l) is null : level != PermissionLevel.Command))
+                return pending.Request.IsPlan
+                    ? "이 방 권한을 편집 단계 아래로 내려 계획을 진행할 수 없습니다 — 거절만 됩니다."
+                    : "이 방 권한을 명령 단계 아래로 내려 허용할 수 없습니다 — 거절만 됩니다.";
             if (choice != ApprovalChoice.Deny && pending.Request.DenyOnly)
                 return pending.Request.Risky
                     ? "위험한 입력(dangerously · bypass)이 있어 거절만 할 수 있습니다."
@@ -862,6 +910,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             // 그 방 첨부 폴더가 있으면 Read로 열 수 있게 (2-2 d, 대화 단계는 ClaudeArgs가 뺀다)
             AttachDir = attachDir,
             Effort = room.Effort, // 곁칸에서 바꾸면 다음 실행부터 (Claude 앱 기능 B)
+            Plan = room.PlanNext && ClaudeArgs.PlanMode(room.Level) is not null, // "계획 먼저" (C) — 편집 · 명령 단계만
         };
         ProcessSpec process;
         try

@@ -110,6 +110,16 @@ switch ($mode) {
         Emit '{"type":"system","subtype":"post_turn_summary","status_category":"blocked","status_detail":"step alpha in progress","needs_action":"check alpha"}'
         Emit '{"type":"result","subtype":"success","is_error":false,"result":"working","total_cost_usd":0.001,"permission_denials":[]}'
     }
+    'plan' {
+        # plan approval (feature C, 2.1.312 shape): ExitPlanMode {plan, planFilePath}. Prompt "plan <mode>": allow must carry setMode <mode>
+        $want = ($prompt.Trim() -split '\s+')[1]
+        # input also carries a hidden key (allowedPrompts) that the app must drop from updatedInput (security review d3dd55b237 C1)
+        $d = Ask 'req_plan' '{"subtype":"can_use_tool","tool_name":"ExitPlanMode","display_name":"ExitPlanMode","input":{"plan":"# Plan\n1. edit notes","planFilePath":"C:\\Users\\x\\.claude\\plans\\p.md","allowedPrompts":[{"tool":"Bash","prompt":"run anything"}]},"permission_suggestions":null,"tool_use_id":"toolu_fake5"}'
+        if ($d -and $d.behavior -eq 'allow' -and ($d.updatedInput.plan -ne "# Plan`n1. edit notes" -or $null -ne $d.updatedInput.allowedPrompts -or $d.updatedPermissions[0].type -ne 'setMode' -or [string]$d.updatedPermissions[0].mode -ne $want)) {
+            $d = [pscustomobject]@{ behavior = 'deny'; message = ('bad plan answer: mode ' + [string]$d.updatedPermissions[0].mode) }
+        }
+        Finish $d 'ExitPlanMode' 'planned'
+    }
     'write' {
         # 앱이 카드로 받지 않는 승인 요청 (작업 폴더 밖 쓰기) — 카드 없이 거절돼야 한다
         $d = Ask 'req_write' '{"subtype":"can_use_tool","tool_name":"Write","display_name":"Write","input":{"file_path":"C:\\outside\\x.txt","content":"x"},"tool_use_id":"toolu_fake3"}'

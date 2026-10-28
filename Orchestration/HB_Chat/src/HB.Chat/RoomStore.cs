@@ -63,6 +63,9 @@ public sealed record Room
 
     /// <summary>추론 강도 (claude --effort, <see cref="RoomEffort.Levels"/> 중 하나). null이면 인자를 넣지 않는다 — CLI 기본.</summary>
     public string? Effort { get; init; }
+
+    /// <summary>"계획 먼저" (Claude 앱 기능 C): 다음 실행을 계획 모드로. 계획을 승인하면 앱이 끈다. 편집 · 명령 단계에서만 쓰인다.</summary>
+    public bool PlanNext { get; init; }
 }
 
 /// <summary>추론 강도 (Claude 앱 기능 B): claude 2.1.312 --effort가 받는 값. 화면 select · 저장 · 인자 검사가 같이 쓴다.</summary>

@@ -122,6 +122,73 @@ public sealed class ApprovalFlowTests : IDisposable
         Assert.Empty((await Until(ch, e => e.Kind == "rules")).Last().Rules!);
     }
 
+    [Theory]
+    [InlineData(PermissionLevel.Edit, "acceptEdits")]
+    [InlineData(PermissionLevel.Command, "default")]
+    public async Task PlanCard_AllowRestoresLevelMode_AndTurnsPlanNextOff(PermissionLevel level, string mode)
+    {
+        // Claude 앱 기능 C: 계획 먼저 → 실행이 계획 모드 → ExitPlanMode 계획 카드 → 승인 = setMode(단계 모드) · 계획 먼저 꺼짐
+        var room = _store.Create("ws", level, "opus", null);
+        _store.Update(room.Id, r => r with { PlanNext = true });
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "plan " + mode); // 가짜 claude는 허용 답의 setMode가 이 모드일 때만 성공으로 끝낸다
+        var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        Assert.True(card.Plan);
+        Assert.Equal("ExitPlanMode", card.Tool);
+        Assert.Equal("# Plan\n1. edit notes", card.Summary);
+        Assert.Null(card.Rule); // 항상 허용 없음
+        Assert.Equal("allowedPrompts", card.Extra); // 보이지 않는 입력은 이름을 보이고 허용 답에서 뺀다 (가짜 claude가 확인)
+        Assert.NotNull(_hub.Decide(room.Id, card.Id, ApprovalChoice.AlwaysAllow, null));
+
+        Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null));
+        var end = (await Until(ch, e => e.Kind == "idle")).Single(e => e.Kind == "end");
+        Assert.True(end.Ok, end.Text);
+        Assert.False(_store.Get(room.Id)!.PlanNext);
+        lock (_specs) Assert.True(_specs.Last().Plan);
+    }
+
+    [Fact]
+    public async Task PlanRequest_WithoutPlanFirst_DeniedWithoutCard()
+    {
+        // 지휘자 검토 S1: 계획 모드로 시작하지 않은 실행의 ExitPlanMode는 카드 없이 거절
+        var room = _store.Create("ws", PermissionLevel.Edit, "opus", null);
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "plan acceptEdits");
+        var seen = await Until(ch, e => e.Kind == "idle");
+        Assert.DoesNotContain(seen, e => e.Kind == "approval");
+        Assert.Contains(seen, e => e.Kind == "denied" && e.Text!.Contains("계획 모드로 시작한 실행이 아니라"));
+    }
+
+    [Fact]
+    public async Task PlanCard_DenyPassesReasonToReplan()
+    {
+        var room = _store.Create("ws", PermissionLevel.Edit, "opus", null);
+        _store.Update(room.Id, r => r with { PlanNext = true });
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "plan please");
+        var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Deny, "테스트를 먼저"));
+        var end = (await Until(ch, e => e.Kind == "idle")).Single(e => e.Kind == "end");
+        Assert.False(end.Ok);
+        Assert.Contains("테스트를 먼저", end.Text);
+        Assert.Contains("계획을 고친 뒤", end.Text); // 지휘자에게 다시 계획하라고 전한다
+        Assert.True(_store.Get(room.Id)!.PlanNext); // 승인 전까지 그대로
+    }
+
+    [Fact]
+    public async Task PlanCard_LoweredBelowEdit_CanOnlyBeDenied()
+    {
+        var room = _store.Create("ws", PermissionLevel.Edit, "opus", null);
+        _store.Update(room.Id, r => r with { PlanNext = true });
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "plan please");
+        var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        _store.Update(room.Id, r => r with { Level = PermissionLevel.Read });
+        Assert.Contains("거절만", _hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null));
+        Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Deny, null));
+        await Until(ch, e => e.Kind == "idle");
+    }
+
     [Fact]
     public async Task LoweredLevel_PendingCardCanOnlyBeDenied()
     {

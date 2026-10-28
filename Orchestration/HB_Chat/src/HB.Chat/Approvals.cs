@@ -23,8 +23,40 @@ public sealed record ApprovalRequest(string Tool, string Summary, string? Descri
     public string? Extra { get; init; }
     public bool Risky { get; init; }
 
+    /// <summary>
+    /// 계획 승인 (Claude 앱 기능 C — ExitPlanMode): Summary가 계획 글. 계획이 길어 잘려도 허용은 받는다 — 허용은 명령 실행이 아니라
+    /// "이 계획대로 진행"이고, 그 뒤 명령은 명령 카드로 다시 묻는다.
+    /// </summary>
+    public bool IsPlan { get; init; }
+
     /// <summary>카드에 보이는 것이 허용될 입력 전부가 아니어서 거절만 받는지.</summary>
-    public bool DenyOnly => Truncated || Risky;
+    public bool DenyOnly => !IsPlan && (Truncated || Risky);
+
+    /// <summary>계획 모드에서 지휘자가 계획 승인을 묻는 도구.</summary>
+    public const string PlanTool = "ExitPlanMode";
+
+    /// <summary>계획 승인 입력 중 앱이 돌려주는 키 (2.1.312 실측 입력 그대로). 그 밖의 키는 카드에 보이지 않으므로 허용하지 않는다.</summary>
+    private static readonly HashSet<string> PlanKeys = new(StringComparer.Ordinal) { "plan", "planFilePath" };
+
+    /// <summary>
+    /// 계획 승인 허용 때 돌려줄 입력: 받은 입력에서 plan · planFilePath(글자일 때)만 새로 담는다 — "본 것 = 허용되는 것" (5e747ff851 C1),
+    /// 보이지 않는 키(예 명령 권한을 적는 항목)가 같이 승인되지 않게 (/self-review security d3dd55b237 C1). 읽지 못하면 빈 객체.
+    /// </summary>
+    public static string PlanInput(string inputJson)
+    {
+        var clean = new JsonObject();
+        try
+        {
+            using var doc = JsonDocument.Parse(inputJson);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object)
+                foreach (var key in PlanKeys)
+                    if (Str(doc.RootElement, key) is { } value) clean[key] = value;
+        }
+        catch (JsonException)
+        {
+        }
+        return clean.ToJsonString();
+    }
 
     /// <summary>요약으로 보이는 키 (명령이면 command · description, 파일이면 file_path · description).</summary>
     private static readonly HashSet<string> ShownKeys = new(StringComparer.Ordinal) { "command", "description", "file_path" };
@@ -39,6 +71,20 @@ public sealed record ApprovalRequest(string Tool, string Summary, string? Descri
             using var doc = JsonDocument.Parse(body);
             var e = doc.RootElement;
             if (e.ValueKind != JsonValueKind.Object || Str(e, "tool_name") is not { Length: > 0 } tool) return null;
+            // 계획 승인: 입력 plan(계획 글)만 보인다 — 2.1.312 실측 input {plan, planFilePath}
+            if (tool == PlanTool)
+            {
+                var hasInput = e.TryGetProperty("input", out var planInput) && planInput.ValueKind == JsonValueKind.Object;
+                var plan = hasInput ? Str(planInput, "plan") ?? "" : "";
+                var cut = plan.Length > MaxSummaryChars;
+                // 계획 글 · 파일 경로 밖의 입력은 허용 답에서 뺀다(PlanInput) — 카드에도 그 이름을 보인다 (/self-review security d3dd55b237 C1)
+                var others = hasInput ? planInput.EnumerateObject().Select(p => p.Name).Where(n => !PlanKeys.Contains(n)).ToList() : [];
+                return new ApprovalRequest(tool, cut ? plan[..MaxSummaryChars] + "…" : plan, null, null, cut)
+                {
+                    IsPlan = true,
+                    Extra = others.Count == 0 ? null : string.Join(", ", others),
+                };
+            }
             string summary;
             string? description = null;
             var extras = new List<string>();
@@ -124,6 +170,17 @@ public static class PermissionDecision
         new JsonObject { ["behavior"] = "allow", ["updatedInput"] = JsonNode.Parse(updatedInputJson) }.ToJsonString();
 
     public static string Deny(string message) => JsonSerializer.Serialize(new { behavior = "deny", message });
+
+    /// <summary>
+    /// 계획 승인 허용 (Claude 앱 기능 C): 입력 그대로 + 세션 권한 모드를 그 방 단계의 원래 모드로 (편집 acceptEdits · 명령 default).
+    /// 2.1.312 실측: setMode가 없으면 허용 뒤 default가 되어 편집 방의 Edit도 승인을 물어 와 앱이 거절했다.
+    /// </summary>
+    public static string AllowPlan(string updatedInputJson, string mode) => new JsonObject
+    {
+        ["behavior"] = "allow",
+        ["updatedInput"] = JsonNode.Parse(updatedInputJson),
+        ["updatedPermissions"] = new JsonArray(new JsonObject { ["type"] = "setMode", ["mode"] = mode, ["destination"] = "session" }),
+    }.ToJsonString();
 }
 
 /// <summary>"이 방에서 항상 허용" 규칙 모양 검사.</summary>

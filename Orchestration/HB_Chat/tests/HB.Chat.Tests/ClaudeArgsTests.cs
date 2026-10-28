@@ -35,6 +35,47 @@ public sealed class ClaudeArgsTests
         Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Read) with { Effort = "high --dangerously" }, Models));
     }
 
+    [Fact]
+    public void Plan_PermissionModePlan_AndExitPlanModeTool_EditCommandOnly()
+    {
+        // Claude 앱 기능 C (2.1.312 실측): 계획 모드 + 승인 도구 ExitPlanMode. 편집은 acceptEdits 대신 plan
+        var edit = Joined(ClaudeArgs.Build(Spec(PermissionLevel.Edit) with { Plan = true }, Models));
+        Assert.Contains("TaskUpdate,ExitPlanMode | --permission-mode | plan", edit);
+        Assert.DoesNotContain("acceptEdits", edit);
+        var command = Joined(ClaudeArgs.Build(Spec(PermissionLevel.Command) with { Plan = true }, Models));
+        Assert.Contains("TaskUpdate,ExitPlanMode | --permission-mode | plan", command);
+        Assert.DoesNotContain("ExitPlanMode", Joined(ClaudeArgs.Build(Spec(PermissionLevel.Edit), Models))); // 끄면 없음
+        Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Read) with { Plan = true }, Models));
+        Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Chat, mcp: null) with { Plan = true }, Models));
+        Assert.Equal(("acceptEdits", "default", (string?)null, (string?)null),
+            (ClaudeArgs.PlanMode(PermissionLevel.Edit), ClaudeArgs.PlanMode(PermissionLevel.Command), ClaudeArgs.PlanMode(PermissionLevel.Read), ClaudeArgs.PlanMode(PermissionLevel.Chat)));
+    }
+
+    [Fact]
+    public void PlanRequest_ParsesPlanText_AllowAnswerSetsMode()
+    {
+        var plan = ApprovalRequest.Parse("""{"tool_name":"ExitPlanMode","input":{"plan":"# 계획\n1. 고치기","planFilePath":"C:\\p.md"},"permission_suggestions":null}""")!;
+        Assert.True(plan.IsPlan);
+        Assert.Equal("# 계획\n1. 고치기", plan.Summary);
+        Assert.Null(plan.Rule);
+        var big = ApprovalRequest.Parse("{\"tool_name\":\"ExitPlanMode\",\"input\":{\"plan\":\"" + new string('x', ApprovalRequest.MaxSummaryChars + 5) + "\"}}")!;
+        Assert.True(big.Truncated);
+        Assert.False(big.DenyOnly); // 계획은 잘려도 허용 가능 (명령 실행이 아님)
+
+        // 보이지 않는 키는 이름을 카드에, 허용 입력에서는 뺀다 (/self-review security d3dd55b237 C1)
+        var withExtra = ApprovalRequest.Parse("""{"tool_name":"ExitPlanMode","input":{"plan":"p","planFilePath":"f","allowedPrompts":[{"tool":"Bash"}]}}""")!;
+        Assert.Equal("allowedPrompts", withExtra.Extra);
+        Assert.Equal("""{"plan":"p","planFilePath":"f"}""", ApprovalRequest.PlanInput("""{"plan":"p","planFilePath":"f","allowedPrompts":[{"tool":"Bash"}],"x":1}"""));
+        Assert.Equal("{}", ApprovalRequest.PlanInput("not json"));
+
+        using var doc = System.Text.Json.JsonDocument.Parse(PermissionDecision.AllowPlan("""{"plan":"p"}""", "acceptEdits"));
+        var r = doc.RootElement;
+        Assert.Equal("allow", r.GetProperty("behavior").GetString());
+        Assert.Equal("p", r.GetProperty("updatedInput").GetProperty("plan").GetString());
+        var perm = r.GetProperty("updatedPermissions")[0];
+        Assert.Equal(("setMode", "acceptEdits", "session"), (perm.GetProperty("type").GetString(), perm.GetProperty("mode").GetString(), perm.GetProperty("destination").GetString()));
+    }
+
     [Theory]
     [InlineData(null, null, null)]
     [InlineData("  ", null, null)]

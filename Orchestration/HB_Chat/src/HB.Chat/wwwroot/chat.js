@@ -289,6 +289,14 @@
         const textBox = $("#text");
         const stopBtn = $("#stop");
         const interruptBtn = $("#interrupt");
+        // "계획 먼저" (Claude 앱 기능 C): 다음 말을 계획 모드로 — 바꾸면 바로 저장, 실패하면 되돌린다
+        const planToggle = $("#plan-next");
+        planToggle?.addEventListener("change", async () => {
+            const data = new FormData(); data.append("on", planToggle.checked ? "true" : "false");
+            planToggle.disabled = true;
+            if (!await post("PlanNext", data)) planToggle.checked = !planToggle.checked;
+            planToggle.disabled = false;
+        });
         const live = $("#live");
         const notice = $("#notice");
         const conn = $("#conn");
@@ -778,6 +786,7 @@
         const cards = new Map();
         function showApproval(a) {
             if (cards.has(a.id)) return;
+            if (a.plan) { showPlan(a); return; }
             const follow = atBottom();
             const card = el("div", "approval");
             const head = el("div", "head");
@@ -821,10 +830,47 @@
             tickApprovals();
             if (follow) toBottom();
         }
+        // 계획 카드 (Claude 앱 기능 C): 지휘자의 계획(ExitPlanMode)을 글로 보이고 "승인하고 진행" · 이유 적어 거절(다시 계획). 항상 허용은 없다.
+        function showPlan(a) {
+            const follow = atBottom();
+            const card = el("div", "approval plan-card");
+            const head = el("div", "head");
+            const left = el("span"); left.style.marginLeft = "auto";
+            head.append(el("span", null, "계획 승인"), left);
+            card.append(head, el("div", "plan-text", a.summary));
+            if (a.truncated) card.append(el("div", "warn-line", "계획이 길어 끝부분이 잘려 보입니다 — 지휘자는 전체 계획대로 진행합니다."));
+            // 계획 글 · 파일 경로 밖의 입력은 승인해도 넘기지 않는다 (/self-review security d3dd55b237 C1)
+            if (a.extra) card.append(el("div", "warn-line", "보이지 않는 추가 입력(" + a.extra + ")은 빼고 승인합니다."));
+            card.append(el("div", "desc", "승인하면 지휘자가 지금 바로 이 계획대로 진행합니다. 명령은 따로 명령 카드로 묻습니다."));
+            const acts = el("div", "acts");
+            const ok = el("button", "btn primary", "승인하고 진행");
+            ok.type = "button";
+            ok.addEventListener("click", () => decide(a.id, "allow", card));
+            const reasonBox = el("input", "reason");
+            reasonBox.type = "text"; reasonBox.maxLength = 500; reasonBox.placeholder = "고칠 점 (지휘자가 계획을 고쳐 다시 묻습니다)";
+            reasonBox.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); decide(a.id, "deny", card); } });
+            const no = el("button", "btn", "고쳐 달라고 거절");
+            no.type = "button";
+            no.addEventListener("click", () => decide(a.id, "deny", card));
+            acts.append(ok, reasonBox, no);
+            card.append(acts);
+            card.dataset.expires = String(Date.parse(a.expiresAt));
+            card.left = left;
+            live.append(card);
+            cards.set(a.id, card);
+            tickApprovals();
+            if (follow) toBottom();
+        }
         function doneApproval(a, label) {
             const card = cards.get(a.id);
             if (!card) return;
             cards.delete(a.id);
+            if (a.plan) {
+                // 승인하면 서버가 "계획 먼저"를 껐다 — 토글도 맞춘다
+                if (label === "허용" && planToggle) planToggle.checked = false;
+                card.replaceWith(el("div", "live-line" + (label === "허용" ? "" : " denied"), "계획 " + (label === "허용" ? "승인 — 진행합니다" : (label || "끝남"))));
+                return;
+            }
             card.replaceWith(el("div", "live-line" + (label === "허용" || label === "항상 허용" ? "" : " denied"),
                 "승인 " + (label || "끝남") + " — " + a.tool + ": " + a.summary.slice(0, 120)));
         }

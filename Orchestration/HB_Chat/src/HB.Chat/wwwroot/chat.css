@@ -279,6 +279,15 @@ input.rename { font-size: 15px; font-weight: 600; min-width: 200px; }
 .live-line.denied { color: var(--warn); }
 .composer { border-top: 1px solid var(--line); background: var(--bg); padding: 8px 16px 8px; }
 .composer form { max-width: 920px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end; }
+/* 계획 먼저 토글 · 계획 카드 (Claude 앱 기능 C) */
+.plan-row { max-width: 920px; margin: 0 auto 6px; display: flex; font-size: 12.5px; }
+.plan-row .switch:has(input:checked) { color: var(--accent); }
+.plan-card { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
+.plan-card .head { color: var(--accent); }
+.plan-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; margin: 6px 0; max-height: 420px; overflow-y: auto;
+             background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
+#live .plan-card { max-width: 760px; margin-left: 44px; }
+[data-theme=discord] #live .plan-card { margin-left: 54px; }
 /* 입력칸 '/' 명령 · 스킬 목록 (Claude 앱 기능 A): 입력칸 바로 위 */
 .cmd-list { max-width: 920px; margin: 0 auto 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 4px;
             box-shadow: 0 6px 18px rgb(0 0 0 / .18); max-height: 300px; overflow-y: auto; }

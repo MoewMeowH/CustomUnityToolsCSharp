@@ -25,6 +25,9 @@ public sealed record RunSpec(
 
     /// <summary>추론 강도 (--effort, <see cref="RoomEffort.Levels"/>). null이면 넣지 않는다.</summary>
     public string? Effort { get; init; }
+
+    /// <summary>계획 모드로 시작 (Claude 앱 기능 C — "계획 먼저"). 편집 · 명령 단계만 (<see cref="ClaudeArgs.PlanMode"/>).</summary>
+    public bool Plan { get; init; }
 }
 
 /// <summary>
@@ -96,6 +99,10 @@ public static partial class ClaudeArgs
         if (!string.IsNullOrWhiteSpace(spec.AppendSystemPrompt))
             args.AddRange(["--append-system-prompt", spec.AppendSystemPrompt]);
 
+        // 계획 모드 (Claude 앱 기능 C): --permission-mode plan + 승인 도구 ExitPlanMode (2.1.312 실측 — --tools에 없으면 계획만 쓰고 턴이 끝났다).
+        // 계획 승인 뒤 모드는 앱의 허용 답(setMode)이 그 단계의 원래 모드로 돌린다.
+        if (spec.Plan && PlanMode(spec.Level) is null) throw new ArgumentException($"{spec.Level} 단계는 계획 모드를 쓰지 않는다");
+        var planTool = spec.Plan ? "," + ApprovalRequest.PlanTool : "";
         switch (spec.Level)
         {
             case PermissionLevel.Chat:
@@ -107,7 +114,7 @@ public static partial class ClaudeArgs
                 AddMcp(args, spec);
                 break;
             case PermissionLevel.Edit:
-                args.AddRange(["--tools", "Read,Grep,Glob,Edit,Write," + HostTools, "--permission-mode", "acceptEdits"]);
+                args.AddRange(["--tools", "Read,Grep,Glob,Edit,Write," + HostTools + planTool, "--permission-mode", spec.Plan ? "plan" : "acceptEdits"]);
                 args.Add("--disallowedTools");
                 args.AddRange(EditDenied.Select(p => $"Edit({p})"));
                 if (attachDeny is not null) args.Add(attachDeny);
@@ -118,7 +125,8 @@ public static partial class ClaudeArgs
                 // acceptEdits는 쓰지 않는다: 그 모드는 작업 폴더 안 cp · mv 같은 파일 명령을 묻지 않고 허용해, 편집 금지 규칙(Edit 도구에만 걸림)과
                 // 카드를 둘 다 지나치게 한다 (/self-review 36e4e20e04 C1). 대신 작업 폴더 안 편집만 `Edit(**)`로 미리 허용한다 —
                 // 실측(2026-10-28): 작업 폴더 안 Write는 묻지 않음, 밖 Write는 거절, Bash cp는 승인 요청으로 옴.
-                args.AddRange(["--tools", "Read,Grep,Glob,Edit,Write,Bash,PowerShell," + HostTools]);
+                args.AddRange(["--tools", "Read,Grep,Glob,Edit,Write,Bash,PowerShell," + HostTools + planTool]);
+                if (spec.Plan) args.AddRange(["--permission-mode", "plan"]);
                 args.Add("--disallowedTools");
                 args.AddRange(EditDenied.Select(p => $"Edit({p})"));
                 if (attachDeny is not null) args.Add(attachDeny);
@@ -151,6 +159,17 @@ public static partial class ClaudeArgs
             ? "//" + char.ToLowerInvariant(full[0]) + full[2..]
             : "/" + full;
     }
+
+    /// <summary>
+    /// 계획 모드를 쓸 수 있는 단계와, 계획 승인 뒤 돌아갈 권한 모드: 편집 acceptEdits(평소 인자와 같음) · 명령 default(평소 --permission-mode 없음).
+    /// 대화 · 읽기는 null — 계획 뒤 고칠 도구가 없다 (결정 "편집 · 명령 방만").
+    /// </summary>
+    public static string? PlanMode(PermissionLevel level) => level switch
+    {
+        PermissionLevel.Edit => "acceptEdits",
+        PermissionLevel.Command => "default",
+        _ => null,
+    };
 
     /// <summary>명령 단계에서 작업 폴더 안 편집을 묻지 않게 하는 규칙 (Edit 규칙은 Write 도구에도 걸린다 — 2026-10-28 실측).</summary>
     public const string CommandEditAllow = "Edit(**)";

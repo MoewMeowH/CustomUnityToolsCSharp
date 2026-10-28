@@ -257,6 +257,16 @@ public sealed class RoomModel(
         return result;
     }
 
+    /// <summary>
+    /// "계획 먼저" 켜기 · 끄기 (Claude 앱 기능 C — 입력칸 토글): 다음 실행을 계획 모드로. 편집 · 명령 단계만 켤 수 있다. 계획을 승인하면 서버가 끈다.
+    /// </summary>
+    public IActionResult OnPostPlanNext(string id, bool on)
+    {
+        if (!RoomStore.IsRoomId(id) || store.Get(id) is not { } room) return NotFound();
+        if (on && ClaudeArgs.PlanMode(room.Level) is null) return BadRequest("계획 모드는 편집 · 명령 방에서만 쓸 수 있습니다.");
+        return Change(id, r => r with { PlanNext = on }, "계획 먼저를 바꾸지 못했습니다");
+    }
+
     /// <summary>휴지통으로 (30일 뒤 완전히 지움). 실행 중인 방은 먼저 중지해야 한다 — 기다리는 승인 · 큐가 버려지지 않게.</summary>
     public IActionResult OnPostTrash(string id)
     {

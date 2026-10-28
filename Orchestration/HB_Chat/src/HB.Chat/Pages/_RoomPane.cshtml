@@ -131,6 +131,17 @@
         </div>
         @* 첨부 칩 (2-2 d): 끌어 놓기 · 캡처 붙여 넣기 · 첨부 단추로 올리면 바로 그 방 첨부 폴더에 저장되고, 보낼 때 [첨부] 줄로 붙는다 *@
         <div class="attach-chips" id="attach-chips" hidden></div>
+        @* 계획 먼저 (Claude 앱 기능 C, 결정 "입력칸 토글" · "편집 · 명령 방만"): 다음 말을 계획 모드로 — 계획을 승인하면 저절로 꺼진다 *@
+        @if (ClaudeArgs.PlanMode(room.Level) is not null && room.DeletedAt is null)
+        {
+            <div class="plan-row">
+                <label class="switch" title="켜면 다음 말은 지휘자가 먼저 계획을 세워 계획 카드로 묻습니다. 승인하면 바로 진행하고 이 스위치는 꺼집니다.">
+                    <input type="checkbox" id="plan-next" checked="@room.PlanNext" />
+                    <span class="track"></span>
+                    계획 먼저
+                </label>
+            </div>
+        }
         <form id="send-form" autocomplete="off">
             @Html.AntiForgeryToken()
             @if (canAttach)
