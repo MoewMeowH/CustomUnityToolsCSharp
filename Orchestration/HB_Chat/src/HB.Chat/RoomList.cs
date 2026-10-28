@@ -19,6 +19,9 @@ public sealed record RoomSummary(
 
     /// <summary>마지막 턴의 지휘자 상태 한 줄 (3차 b).</summary>
     public RoomStatus? Status { get; init; }
+
+    /// <summary>작업 폴더 이름 (목록 폴더별 묶음, 3차 d).</summary>
+    public string Workspace { get; init; } = "";
 }
 
 /// <summary>말풍선 한 쪽: 보일 말들과 그 앞에 더 있는지 (계획서 2-2 b, 50개씩 위로 불러오기).</summary>
@@ -57,7 +60,19 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
             Face = hub.FaceOf(room, transient: false),
             Steps = hub.StepProgress(room.Id),
             Status = room.Status,
+            Workspace = room.Workspace,
         };
+
+    /// <summary>
+    /// 방 목록 묶음 (3차 d — 노션 "채팅방 세션 폴더 별 묶음"): 작업 폴더가 둘 이상이면 폴더별로, 묶음은 가장 최근 방 순 · 안은 받은 순 그대로.
+    /// 하나뿐이면 묶지 않는다(null 이름 하나).
+    /// </summary>
+    public static IReadOnlyList<(string? Workspace, IReadOnlyList<RoomSummary> Rooms)> Groups(IReadOnlyList<RoomSummary> rooms)
+    {
+        var groups = rooms.GroupBy(r => r.Workspace, StringComparer.OrdinalIgnoreCase).ToList();
+        if (groups.Count <= 1) return [(null, rooms)];
+        return [.. groups.Select(g => ((string?)g.Key, (IReadOnlyList<RoomSummary>)[.. g]))]; // 받은 목록이 최근 순이라 첫 방 순서 = 최근 순
+    }
 
     /// <summary>검색 결과 상한 · 검색어 길이 상한.</summary>
     public const int SearchMax = 50, QueryMax = 100;

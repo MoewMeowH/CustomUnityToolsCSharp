@@ -26,6 +26,7 @@
                 const top = old.scrollTop; // 목록을 내려 둔 자리를 지킨다
                 fresh.hidden = old.hidden; // 검색 중이면 목록은 가려 둔 채로
                 old.replaceWith(fresh);
+                applyGroups(fresh); // 접은 묶음은 접힌 채로 (높이가 바뀌기 전에)
                 fresh.scrollTop = top;
                 const trash = document.getElementById("trash-count");
                 if (trash && fresh.dataset.trash != null) trash.textContent = fresh.dataset.trash;
@@ -35,6 +36,21 @@
         } catch { /* 다음 알림 때 다시 */ }
     }
     function scheduleList() { clearTimeout(listTimer); listTimer = setTimeout(refreshList, 250); }
+    // 작업 폴더별 묶음 (3차 d): 접은 폴더 이름을 브라우저에 저장한다 (편의만 — 못 읽으면 모두 펼침). 목록을 다시 받을 때마다 다시 적용.
+    function closedGroups() { try { return new Set(JSON.parse(localStorage.getItem("hbchat.wsClosed") || "[]")); } catch { return new Set(); } }
+    function applyGroups(list) {
+        const closed = closedGroups();
+        list?.querySelectorAll("details.ws-group").forEach(d => {
+            // 기다리는 방 · 지금 방이 있는 묶음은 접힌 기억과 상관없이 펼친다 (서버가 data-keep-open)
+            d.open = d.dataset.keepOpen === "1" || !closed.has(d.dataset.ws);
+            d.addEventListener("toggle", () => {
+                const now = closedGroups();
+                if (d.open) now.delete(d.dataset.ws); else now.add(d.dataset.ws);
+                try { localStorage.setItem("hbchat.wsClosed", JSON.stringify([...now])); } catch { }
+            });
+        });
+    }
+    applyGroups(document.getElementById("room-list"));
     function markActive(id) {
         document.querySelectorAll("#room-list .room-item").forEach(a => a.classList.toggle("active", a.dataset.room === id));
     }

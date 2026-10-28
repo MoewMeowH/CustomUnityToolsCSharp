@@ -756,6 +756,9 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         var o = options.Value;
         if (o.WorkspacePath(room.Workspace) is not { } workspace || !Directory.Exists(workspace))
             return Record(room, new RunResult(false, false, $"작업 폴더 '{room.Workspace}'가 허용 목록에 없거나 없는 폴더입니다.", null, null, null, 0, 0, null));
+        // 앱에서 더한 작업 폴더는 실행 전에 다시 검사 — 더한 뒤 링크로 바뀌었을 수 있다 (3차 d, /self-review security eee1adb777 C5)
+        if (!o.Workspaces.ContainsKey(room.Workspace) && o.AppWorkspaces?.WhyUnsafe(workspace) is { } unsafeWhy)
+            return Record(room, new RunResult(false, false, $"작업 폴더 '{room.Workspace}'를 지금은 쓸 수 없습니다: {unsafeWhy}", null, null, null, 0, 0, null));
 
         var size = transcripts.Size(room.SessionId);
         var resume = size is not null;

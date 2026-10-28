@@ -36,6 +36,9 @@ public sealed class MainForm : Form
     private readonly Uri _chatUrl, _dashboardUrl;
     private readonly NavigationPolicy _policy;
     private readonly ToolStripButton _chatTab = new("채팅"), _dashTab = new("대시보드");
+
+    /// <summary>설정 (3차 d): 채팅 탭에서 /Settings를 연다 — 탭이 아니라 바로 가기.</summary>
+    private readonly ToolStripButton _settingsButton = new("설정") { ToolTipText = "작업 폴더 · 방 이름 (채팅 탭에서 열림)" };
     private readonly ToolStripLabel _status = new() { Alignment = ToolStripItemAlignment.Right };
     private readonly WebView2 _chatView = new() { Dock = DockStyle.Fill };
     private readonly WebView2 _dashView = new() { Dock = DockStyle.Fill, Visible = false };
@@ -94,7 +97,8 @@ public sealed class MainForm : Form
         var bar = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden, Dock = DockStyle.Top, Padding = new Padding(6, 2, 6, 2) };
         _chatTab.Click += (_, _) => ShowTab(AppTab.Chat, null);
         _dashTab.Click += (_, _) => ShowTab(AppTab.Dashboard, null);
-        bar.Items.AddRange([_chatTab, _dashTab, _status]);
+        _settingsButton.Click += (_, _) => ShowTab(AppTab.Chat, new Uri(_chatUrl, "/Settings").AbsoluteUri);
+        bar.Items.AddRange([_chatTab, _dashTab, new ToolStripSeparator(), _settingsButton, _status]);
         var body = new Panel { Dock = DockStyle.Fill };
         body.Controls.AddRange([_chatView, _dashView, _message]);
         Controls.Add(body);
@@ -303,6 +307,7 @@ public sealed class MainForm : Form
     {
         _chatTab.Checked = _tab == AppTab.Chat;
         _dashTab.Checked = _tab == AppTab.Dashboard;
+        _settingsButton.Enabled = _chatError is null; // 채팅 화면이 준비되기 전에는 주소를 받을 곳이 없다 (/self-review 460430d647 C8)
         var error = _tab == AppTab.Chat ? _chatError : _dashError;
         _message.Text = error ?? "";
         _message.Visible = error is not null;

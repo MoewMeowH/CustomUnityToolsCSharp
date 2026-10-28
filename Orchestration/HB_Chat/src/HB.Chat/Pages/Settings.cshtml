@@ -1,0 +1,105 @@
+@page
+@model SettingsModel
+@{
+    ViewData["Title"] = "HB Chat · 설정";
+}
+@* 설정 화면 (3차 d): 왼쪽 방 목록 + 오른쪽 작업 폴더 · 방 이름. 좁은 폭에서는 이 칸만 (in-room). *@
+<div class="app in-room">
+    <partial name="_Sidebar" model="Model.Sidebar" />
+    <section class="pane" id="pane">
+        <div class="welcome settings">
+            <p class="mobile-only" style="margin:0 0 8px"><a class="back" href="/">← 방 목록</a></p>
+            <h2 style="margin:0 0 12px;font-size:18px">설정</h2>
+            @if (Model.DoneText is { } done)
+            {
+                <div class="panel" style="padding:8px 12px;margin-bottom:12px;border-color:var(--ok)">@done</div>
+            }
+            @if (Model.Error is not null)
+            {
+                <div class="panel" style="padding:8px 12px;margin-bottom:12px;border-color:var(--warn)" role="alert">@Model.Error</div>
+            }
+
+            <section class="panel" style="padding:12px 14px;margin-bottom:16px">
+                <h3 style="margin:0 0 6px;font-size:15px">작업 폴더</h3>
+                <p class="muted" style="margin:0 0 8px;font-size:12.5px">
+                    방은 작업 폴더 안에서 읽고 · 편집하고 · (명령 방이면) 명령을 실행합니다. 설정 파일(appsettings) 것은 여기서 바꿀 수 없습니다.
+                    읽기 이상 방은 그 폴더 .mcp.json의 <span class="mono">@Model.McpServer</span> 항목 명령을 <b>승인 없이</b> MCP 서버로 띄우고,
+                    그 폴더 .claude/settings.json의 훅도 돕니다 — 믿을 수 있는 폴더만 더하세요.
+                </p>
+                @if (Model.WorkspaceLoadError is { } wsError)
+                {
+                    <p style="color:var(--warn);margin:0 0 8px">workspaces.json을 읽지 못해 더하기 · 지우기를 막았습니다 (덮어쓰지 않음): @wsError</p>
+                }
+                @foreach (var warning in Model.WorkspaceWarnings)
+                {
+                    <p style="color:var(--warn);margin:0 0 6px">쓰지 않는 앱 항목 — @warning (workspaces.json에는 남겨 둠 — 고치려면 앱을 끄고 그 파일을 고친 뒤 다시 켭니다)</p>
+                }
+                <table class="settings-table">
+                    <thead><tr><th>이름</th><th>경로</th><th>출처</th><th>MCP 서버 명령</th><th>훅</th><th>방</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var w in Model.Workspaces)
+                        {
+                            <tr>
+                                <td>@w.Entry.Name</td>
+                                <td class="mono">@w.Entry.Path@(w.Exists ? "" : " (없는 폴더)")</td>
+                                <td class="muted">@(w.Entry.FromConfig ? "설정 파일" : "앱")</td>
+                                <td class="mono">@(w.McpCommand ?? "없음 (읽기 이상 방은 실패)")</td>
+                                <td>@(w.HasHooks ? "있음" : "없음")</td>
+                                <td>@w.Rooms</td>
+                                <td>
+                                    @if (!w.Entry.FromConfig)
+                                    {
+                                        <form method="post" asp-page-handler="RemoveWorkspace" onsubmit="return confirm('목록에서 뺄까요? 폴더 · 파일은 지우지 않습니다.')">
+                                            <input type="hidden" name="name" value="@w.Entry.Name" />
+                                            <button class="btn" type="submit" @(w.Rooms > 0 ? "disabled" : null)
+                                                    title="@(w.Rooms > 0 ? "이 폴더를 쓰는 방(휴지통 포함)이 있어 뺄 수 없습니다" : "목록에서 빼기")">빼기</button>
+                                        </form>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                <form method="post" asp-page-handler="AddWorkspace" class="settings-add">
+                    <input type="text" name="name" placeholder="이름 (예: MyProject)" maxlength="40" required value="@Model.NewName" />
+                    <input type="text" name="path" placeholder="절대 경로 (예: F:/AI/MyProject)" maxlength="400" required value="@Model.NewPath" class="mono" />
+                    <label class="muted"><input type="checkbox" name="confirm" value="true" /> 이 폴더에서 지휘자가 편집 · 명령 실행을 하고, 그 폴더의 MCP 서버 명령 · 프로젝트 훅이 돈다는 것을 압니다</label>
+                    <button class="btn primary" type="submit">더하기</button>
+                </form>
+                <p class="muted" style="margin:6px 0 0;font-size:12px">
+                    드라이브 문자 경로만 받습니다. 드라이브 루트 · Windows · Program Files · 사용자 홈 전체 · 이 앱과 그 저장소 · 데이터 폴더 · Claude 설정 폴더(.claude)를
+                    품거나 그 안인 폴더, 링크(정션)를 거치는 경로, 방이 쓰던 이름은 받지 않습니다.
+                </p>
+            </section>
+
+            <section class="panel" style="padding:12px 14px">
+                <h3 style="margin:0 0 6px;font-size:15px">방 이름</h3>
+                <p class="muted" style="margin:0 0 8px;font-size:12.5px">비우면 첫 말이 제목이 됩니다. 방의 작업 폴더는 바꿀 수 없습니다 — 세션 기록이 폴더마다 저장돼서 새 방을 만들어야 합니다.</p>
+                <table class="settings-table">
+                    <thead><tr><th>제목</th><th>작업 폴더</th><th>권한</th></tr></thead>
+                    <tbody>
+                        @foreach (var (room, title) in Model.Rooms)
+                        {
+                            <tr>
+                                <td>
+                                    <form method="post" asp-page-handler="Rename" class="settings-rename">
+                                        <input type="hidden" name="id" value="@room.Id" />
+                                        <input type="text" name="title" value="@(room.Title ?? "")" placeholder="@title" maxlength="200" aria-label="@title 방 제목" />
+                                        <button class="btn" type="submit">바꾸기</button>
+                                        <a href="/Room/@room.Id" class="muted" title="방 열기">열기</a>
+                                    </form>
+                                </td>
+                                <td>@room.Workspace</td>
+                                <td>@RoomRules.LevelName(room.Level)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                @if (Model.Rooms.Count == 0)
+                {
+                    <p class="muted" style="margin:6px 0 0">아직 방이 없습니다.</p>
+                }
+            </section>
+        </div>
+    </section>
+</div>

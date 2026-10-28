@@ -90,9 +90,21 @@ public sealed class ChatOptions
         }
     }
 
-    /// <summary>작업 폴더 이름 → 경로. 목록에 없으면 null.</summary>
+    /// <summary>
+    /// 앱에서 더한 작업 폴더 (3차 d, 데이터 폴더 workspaces.json). 설정에서 바인딩하지 않고 켤 때 Program이 채운다 — 없으면(테스트) 설정 파일 것만.
+    /// </summary>
+    [Microsoft.Extensions.Configuration.ConfigurationKeyName("__app_workspaces_not_bound__")]
+    public WorkspaceStore? AppWorkspaces { get; set; }
+
+    /// <summary>작업 폴더 이름 → 경로: 설정 파일(Chat:Workspaces) 먼저, 그다음 앱에서 더한 것. 목록에 없으면 null.</summary>
     public string? WorkspacePath(string? name) =>
-        name is not null && Workspaces.TryGetValue(name, out var path) && !string.IsNullOrWhiteSpace(path) ? path.Trim() : null;
+        name is null ? null
+        : Workspaces.TryGetValue(name, out var path) && !string.IsNullOrWhiteSpace(path) ? path.Trim()
+        : AppWorkspaces?.PathOf(name);
+
+    /// <summary>새 방 화면 · 설정 화면에 보일 작업 폴더 전체 (설정 파일 것 먼저).</summary>
+    public IReadOnlyList<WorkspaceEntry> AllWorkspaces =>
+        AppWorkspaces?.All() ?? [.. Workspaces.Where(p => !string.IsNullOrWhiteSpace(p.Value)).Select(p => new WorkspaceEntry(p.Key, p.Value.Trim(), true))];
 
     /// <summary>claude 실행 파일 경로. 설정이 없고 PATH에서도 못 찾으면 "claude" (실행할 때 실패로 보인다).</summary>
     public string ResolveClaude()

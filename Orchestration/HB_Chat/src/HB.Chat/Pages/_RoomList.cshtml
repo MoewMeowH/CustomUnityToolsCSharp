@@ -19,8 +19,9 @@
         _ => s.Failed ? "failed" : "",
     };
 }
-<nav id="room-list" data-trash="@Model.TrashCount">
-    @foreach (var s in Model.Rooms)
+@{
+    // 방 한 줄 (묶음 안 · 밖 같은 모양)
+    void Item(RoomSummary s)
     {
         var local = s.LastAt.ToLocalTime();
         var state = StateClass(s);
@@ -62,6 +63,32 @@
                 }
             </div>
         </a>
+    }
+}
+<nav id="room-list" data-trash="@Model.TrashCount">
+    @* 작업 폴더가 둘 이상이면 폴더별로 접는 묶음 (3차 d — 노션 "채팅방 세션 폴더 별 묶음"). 접힘은 화면이 브라우저에 저장한다 (data-ws). *@
+    @foreach (var (ws, rooms) in RoomList.Groups(Model.Rooms))
+    {
+        if (ws is null)
+        {
+            foreach (var s in rooms) { Item(s); }
+            continue;
+        }
+        // 접어도 승인 · 질문 기다림과 안 읽은 수는 머리에 보이고, 기다리는 방 · 지금 방이 있는 묶음은 접지 않는다 (/self-review 460430d647 C7).
+        // 접힘 키는 소문자 — 같은 폴더를 대소문자 다르게 쓴 방이 맨 앞에 와도 그대로
+        var waiting = rooms.Count(r => r.Activity == RoomActivity.Approval);
+        var unread = rooms.Sum(r => r.Unread);
+        var keepOpen = waiting > 0 || rooms.Any(r => r.Id == Model.CurrentId);
+        <details class="ws-group" open data-ws="@ws.ToLowerInvariant()" data-keep-open="@(keepOpen ? "1" : null)">
+            <summary>@ws <span class="muted">(@rooms.Count)</span>@if (waiting > 0)
+                {
+                    <span class="state approval"> · 답 기다림 @waiting</span>
+                }@if (unread > 0)
+                {
+                    <span class="unread" title="안 읽은 지휘자 말">@(unread > 99 ? "99+" : unread.ToString())</span>
+                }</summary>
+            @foreach (var s in rooms) { Item(s); }
+        </details>
     }
     @if (Model.Rooms.Count == 0)
     {
