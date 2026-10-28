@@ -420,7 +420,8 @@
         ".reveal pre{font-size:.62em;background:rgba(127,127,127,.15);padding:.5em .7em;border-radius:6px;overflow:hidden;white-space:pre-wrap}" +
         ".reveal pre code{background:none;padding:0}.reveal blockquote{margin:.4em 0;padding-left:.6em;border-left:5px solid var(--hb-line);opacity:.85}" +
         ".reveal table{border-collapse:collapse;font-size:.75em}.reveal th,.reveal td{border:1px solid var(--hb-line);padding:.15em .5em}" +
-        ".reveal .controls,.reveal .progress{color:var(--hb-fg)}.reveal .slide-number{background:none;color:var(--hb-fg);opacity:.6}" +
+        // 쪽 번호는 reveal이 <a href="#/n">로 그린다 — srcdoc 틀에서 #/n은 부모 화면 주소로 풀려 틀이 앱 주소로 이동하다 막혔다(사용자 발견) → 누르지 못하게
+        ".reveal .controls,.reveal .progress{color:var(--hb-fg)}.reveal .slide-number{background:none;color:var(--hb-fg);opacity:.6;pointer-events:none}" +
         ".hb-chart{position:relative;height:330px;margin-top:.3em}.err{white-space:pre-wrap;padding:8px;font:13px system-ui,sans-serif}";
     function slidesConfig(source) {
         if (source.length > SlidesMaxChars) return { error: `슬라이드 데이터가 너무 커서(${source.length.toLocaleString()}자) 코드로만 보입니다.` };
@@ -446,6 +447,8 @@
             "<script>(()=>{const d=JSON.parse(document.getElementById(\"hb-deck\").textContent),k=d.deck,t=d.theme,r=document.documentElement;" +
             NoWebRtc +
             "r.style.setProperty(\"--hb-bg\",t.panel);r.style.setProperty(\"--hb-fg\",t.text);r.style.setProperty(\"--hb-line\",t.line);" +
+            // 틀 안의 링크는 모두 따라가지 않는다 — 틀 밖으로 나가는 이동은 어차피 막히고(차단 화면), 넘김은 화살표 · 키보드로 (겹친 방어)
+            "document.addEventListener(\"click\",e=>{if(e.target instanceof Element&&e.target.closest(\"a\"))e.preventDefault();},true);" +
             // 그리기 실패: 인쇄용 틀이면 끝났다고 알려 부모가 지우게 한다 — 보이지 않는 틀이 allow-modals를 가진 채 남지 않게 (607bd5ec77 C3)
             "const fail=e=>{const p=document.createElement(\"div\");p.className=\"err\";p.style.color=t.text;p.textContent=\"슬라이드를 그리지 못했습니다: \"+e.message;document.body.replaceChildren(p);" +
             "if(d.print)parent.postMessage({hbPrintDone:true},\"*\");};" +
