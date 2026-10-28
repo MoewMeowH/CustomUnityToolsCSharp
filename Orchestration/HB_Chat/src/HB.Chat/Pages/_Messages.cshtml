@@ -56,6 +56,49 @@
             </div>
         }
     }
+
+    // 같은 말 앞(· 맨 뒤)의 외부 실행 말풍선과 질문 답을 시각 차례로 (e8091295fe C1)
+    void Placed(IReadOnlyList<RunBubble> runs, IReadOnlyList<ChatAnswer> answers, bool trailing = false)
+    {
+        foreach (var (run, answer) in AnswerPlacement.Merge(runs, answers))
+        {
+            if (run is not null) RunBubbleList([run], trailing);
+            else AnswerList([answer!], trailing);
+        }
+    }
+
+    // 질문 카드 답 (4차 D1): '나' 말풍선 — 질문은 작게, 고른 답이 본문. 답하지 않았으면(거절 · 시간 초과) 회색 한 줄.
+    // data-line은 달지 않는다(사용자 말이 아니라 쪽 경계 · 읽음에 쓰지 않음). trailing은 외부 실행처럼 run-trailing — 새 말 받기 조각이 바꿔 끼운다.
+    void AnswerList(IReadOnlyList<ChatAnswer> answers, bool trailing = false)
+    {
+        foreach (var a in answers)
+        {
+            var extra = trailing ? " run-trailing" : "";
+            if (a.Declined is { } declined)
+            {
+                <div class="system@(extra)"><span class="body" title="@declined">질문에 답하지 않음 — @AnswerPlacement.DeclinedLabel(declined)</span> <span class="when">@a.Timestamp?.ToLocalTime().ToString("HH:mm")</span></div>
+                continue;
+            }
+            <div class="msg user answer@(extra)" data-speaker="user">
+                @Profiles.Avatar(ProfileStore.User, Profiles.UserName)
+                <div class="bubble">
+                    <div class="who">
+                        <b>@Profiles.UserName</b>
+                        <span class="detail">질문에 답함</span>
+                        <span class="when">@a.Timestamp?.ToLocalTime().ToString("MM-dd HH:mm:ss")</span>
+                        <button class="reply" type="button" title="이 답에 답장 (인용)">답장</button>
+                    </div>
+                    <div class="body">
+                        @foreach (var item in a.Items)
+                        {
+                            <div class="answer-q">@item.Question</div>
+                            <div class="answer-a">@(item.Answer ?? "(답 글을 읽지 못함)")</div>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+    }
 }
 @* data-error: 세션 기록을 읽지 못한 채 그린 쪽 — 화면은 다음 새 말 받기 대신 쪽 전체를 다시 받는다 (/self-review 83b453653b C6) *@
 <div class="chat" id="chat" data-title="@Model.Title" data-last-line="@Model.LastLine"
@@ -88,7 +131,7 @@
                 }
             </div>
         }
-        RunBubbleList(Model.Runs.For(e));
+        Placed(Model.Runs.For(e), Model.Answers.For(e));
         if (RoomModel.IsStoppedTurn(e))
         {
             <div class="system" data-line="@e.Line"><span class="body">중지된 턴</span> <span class="when">@e.Timestamp?.ToLocalTime().ToString("HH:mm")</span></div>
@@ -118,7 +161,7 @@
        (다음 말이 생기면 그 말 앞으로 옮겨 간다). 위로 불러오기 조각에는 없다 *@
     @if (!Model.Fragment || Model.AfterFragment)
     {
-        RunBubbleList(Model.Runs.Trailing, trailing: true);
+        Placed(Model.Runs.Trailing, Model.Answers.Trailing, trailing: true);
     }
     @if (!Model.Fragment && items.Count == 0 && Model.Transcript?.FormatError is null)
     {

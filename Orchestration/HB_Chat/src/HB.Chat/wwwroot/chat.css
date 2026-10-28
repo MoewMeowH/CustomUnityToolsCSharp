@@ -237,6 +237,10 @@ input.rename { font-size: 15px; font-weight: 600; min-width: 200px; }
 #notice { padding: 8px 12px; margin-bottom: 12px; border-color: var(--warn); }
 #live { max-width: 920px; margin: 10px auto 0; display: flex; flex-direction: column; gap: 10px; }
 #live .msg.pending .bubble { opacity: .7; }
+/* 질문 카드 답 (4차 D1): 질문은 작게, 고른 답이 본문 */
+.msg.answer .answer-q { font-size: 12px; color: var(--muted); }
+.msg.answer .answer-a { font-weight: 600; white-space: pre-wrap; }
+.msg.answer .answer-a + .answer-q { margin-top: 6px; }
 /* 보내지 못한 말 (4차 C2): 실행 전에 막혀 세션 기록에 없는 말 */
 #live .msg.failed .bubble { opacity: .75; border: 1px dashed var(--err); }
 #live .stream { white-space: pre-wrap; }

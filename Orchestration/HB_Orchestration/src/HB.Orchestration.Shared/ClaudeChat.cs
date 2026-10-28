@@ -31,6 +31,15 @@ public sealed record ChatEntry(int Line, DateTimeOffset? Timestamp, ChatSpeaker 
 }
 
 /// <summary>
+/// 지휘자 객관식 질문(AskUserQuestion)에 대한 사용자 답 (HB_Chat 4차 D1). Line은 답(tool_result)이 든 줄.
+/// Items는 질문 차례의 (질문 · 머리 · 고른 답). Declined가 있으면 답하지 않고 끝남(거절 · 시간 초과 — 그 글)이고 Items는 질문만.
+/// <see cref="ChatTranscript.Entries"/>와 따로 둔다 — 대시보드 채팅방은 쓰지 않는다 (4차 결정 "HB_Chat만").
+/// </summary>
+public sealed record ChatAnswer(int Line, DateTimeOffset? Timestamp, IReadOnlyList<ChatAnswerItem> Items, string? Declined = null);
+
+public sealed record ChatAnswerItem(string Question, string? Header, string? Answer);
+
+/// <summary>
 /// 채팅방용 세션 기록 (계획서 2026-10-27_에이전트-채팅방). <see cref="TranscriptSummary"/>와 달리 대화 본문을 담는다:
 /// 사용자 글 · 지휘자 글(text 블록)만. 도구 호출 · 결과 · thinking · system-reminder · isMeta 줄은 넣지 않는다.
 /// </summary>
@@ -44,6 +53,9 @@ public sealed record ChatTranscript
     public string? Title { get; init; }
 
     public IReadOnlyList<ChatEntry> Entries { get; init; } = [];
+
+    /// <summary>객관식 질문에 대한 답 (HB_Chat 4차 D1, 줄 차례). 말 목록과 따로.</summary>
+    public IReadOnlyList<ChatAnswer> Answers { get; init; } = [];
 
     public int UnknownLines { get; init; }
     public string? FormatError { get; init; }
@@ -127,6 +139,10 @@ public static partial class ClaudeChatReader
         public int Unknown, PendingTools;
         public readonly List<string> PendingToolNames = [];
         public readonly List<ChatEntry> Entries = [];
+        public readonly List<ChatAnswer> Answers = [];
+
+        /// <summary>답을 기다리는 AskUserQuestion 호출: tool_use ID → 질문들 (답 줄에 toolUseResult가 없을 때 질문을 보이려고).</summary>
+        public readonly Dictionary<string, List<ChatAnswerItem>> AskCalls = new(StringComparer.Ordinal);
 
         /// <summary>목록은 복사한다 — 이어 읽기가 같은 State에 계속 더하므로, 앞서 돌려준 결과가 바뀌지 않게.</summary>
         public ChatTranscript ToTranscript(string path) => new()
@@ -136,6 +152,7 @@ public static partial class ClaudeChatReader
             Cwd = Cwd,
             Title = CustomTitle ?? AiTitle,
             Entries = Entries.ToList(),
+            Answers = Answers.ToList(),
             UnknownLines = Unknown,
         };
 
@@ -211,6 +228,8 @@ public static partial class ClaudeChatReader
                 case "tool_use":
                     s.PendingTools++;
                     s.PendingToolNames.Add(Str(block, "name") ?? "?");
+                    if (Str(block, "name") == AskTool && Str(block, "id") is { } askId && block.TryGetProperty("input", out var askInput))
+                        s.AskCalls[askId] = QuestionItems(askInput, null);
                     break;
             }
         }
@@ -239,9 +258,66 @@ public static partial class ClaudeChatReader
                 case "image":
                     text.Append("[이미지]\n");
                     break;
+                case "tool_result" when Str(block, "tool_use_id") is { } id && s.AskCalls.Remove(id, out var asked):
+                    s.Answers.Add(ReadAnswer(root, block, lineNo, ts, asked));
+                    break;
             }
         }
         if (text.Length > 0) ReadUserString(text.ToString(), lineNo, ts, s);
+    }
+
+    private const string AskTool = "AskUserQuestion";
+
+    /// <summary>
+    /// 객관식 질문의 답 줄 (HB_Chat 3차 0번 실측 A: 답한 결과는 줄의 toolUseResult = { questions, answers: { 질문 글: 고른 답 } }).
+    /// 오류 결과(거절 · 시간 초과 — 앱이 deny로 답함)면 답하지 않음 — 그 결과 글(앞 200자)을 Declined로.
+    /// 오류가 아닌데 answers를 읽지 못하면 질문만 (답은 null).
+    /// </summary>
+    private static ChatAnswer ReadAnswer(JsonElement root, JsonElement block, int lineNo, DateTimeOffset? ts, List<ChatAnswerItem> asked)
+    {
+        if (!Bool(block, "is_error"))
+        {
+            if (!root.TryGetProperty("toolUseResult", out var result) || result.ValueKind != JsonValueKind.Object
+                || !result.TryGetProperty("answers", out var answers) || answers.ValueKind != JsonValueKind.Object)
+                return new ChatAnswer(lineNo, ts, asked);
+            // 결과에 questions가 없거나 비었으면 tool_use 입력의 질문 글로 답을 찾는다 (/self-review e8091295fe C5)
+            return new ChatAnswer(lineNo, ts, QuestionItems(result, answers) is { Count: > 0 } items ? items
+                : [.. asked.Select(i => i with { Answer = answers.TryGetProperty(i.Question, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null })]);
+        }
+        var note = ResultText(block).Trim();
+        return new ChatAnswer(lineNo, ts, asked, note.Length == 0 ? "답 없음" : Cut(note, 200));
+    }
+
+    /// <summary>앞 max자 + "…" — 서로게이트 쌍을 가르지 않게 (/self-review e8091295fe C7).</summary>
+    private static string Cut(string text, int max)
+    {
+        if (text.Length <= max) return text;
+        var end = char.IsHighSurrogate(text[max - 1]) ? max - 1 : max;
+        return text[..end] + "…";
+    }
+
+    /// <summary>입력(또는 결과)의 questions[] → 질문 · 머리 (answers가 있으면 그 답).</summary>
+    private static List<ChatAnswerItem> QuestionItems(JsonElement obj, JsonElement? answers)
+    {
+        var items = new List<ChatAnswerItem>();
+        if (obj.ValueKind != JsonValueKind.Object || !obj.TryGetProperty("questions", out var qs) || qs.ValueKind != JsonValueKind.Array) return items;
+        foreach (var q in qs.EnumerateArray())
+        {
+            if (q.ValueKind != JsonValueKind.Object || Str(q, "question") is not { } question) continue;
+            var answer = answers is { } a && a.TryGetProperty(question, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+            items.Add(new ChatAnswerItem(question, Str(q, "header"), answer));
+        }
+        return items;
+    }
+
+    /// <summary>tool_result의 글 (문자열이거나 text 블록 배열).</summary>
+    private static string ResultText(JsonElement block)
+    {
+        if (!block.TryGetProperty("content", out var content)) return "";
+        if (content.ValueKind == JsonValueKind.String) return content.GetString()!;
+        if (content.ValueKind != JsonValueKind.Array) return "";
+        return string.Join("\n", content.EnumerateArray()
+            .Where(b => b.ValueKind == JsonValueKind.Object && Str(b, "type") == "text").Select(b => Str(b, "text") ?? ""));
     }
 
     private static void ReadUserString(string raw, int lineNo, DateTimeOffset? ts, State s)

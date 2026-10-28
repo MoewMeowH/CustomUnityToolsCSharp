@@ -75,6 +75,90 @@ public sealed class ChatRoomTests : IDisposable
     }
 
     [Fact]
+    public void Reader_CollectsQuestionAnswers_OutsideEntries()
+    {
+        // HB_Chat 4차 D1: AskUserQuestion의 답(toolUseResult.answers)은 Answers로 — 말 목록(대시보드도 씀)에는 넣지 않는다.
+        // 거절 · 시간 초과(오류 결과)는 Declined, 다른 도구 결과는 넣지 않는다.
+        var questions = new object[]
+        {
+            new { question = "어느 쪽?", header = "방향", options = new[] { new { label = "A" }, new { label = "B" } }, multiSelect = false },
+            new { question = "무엇을 더?", header = "더할 것", options = new[] { new { label = "x" }, new { label = "y" } }, multiSelect = true },
+        };
+        var answered = Line(new
+        {
+            type = "user", sessionId = Session, timestamp = Ts(3),
+            message = new { role = "user", content = new object[] { Result("q1", "Your questions have been answered: ...") } },
+            toolUseResult = new { questions, answers = new Dictionary<string, string> { ["어느 쪽?"] = "A", ["무엇을 더?"] = "x, y" } },
+        });
+        var declined = Line(new
+        {
+            type = "user", sessionId = Session, timestamp = Ts(7),
+            message = new { role = "user", content = new object[] { new { type = "tool_result", tool_use_id = "q2", is_error = true, content = "답하지 않음: 시간 초과" } } },
+            toolUseResult = "Error: 답하지 않음: 시간 초과",
+        });
+        var path = Write(
+            User(1, "골라 줘"),
+            Assistant(2, Use("q1", "AskUserQuestion", new { questions })),
+            answered,
+            Assistant(4, Text("A로 갑니다")),
+            Assistant(5, Use("t1", "Bash", new { command = "ls" })),
+            User(6, new object[] { Result("t1", "목록") }),
+            Assistant(6, Use("q2", "AskUserQuestion", new { questions = new[] { questions[0] } })),
+            declined);
+
+        var chat = ClaudeChatReader.Read(path);
+
+        Assert.Equal(["골라 줘", "A로 갑니다"], chat.Entries.Select(e => e.Text));
+        Assert.Collection(chat.Answers,
+            a =>
+            {
+                Assert.Equal(3, a.Line); // 답 줄 (파일 셋째 줄)
+                Assert.Null(a.Declined);
+                Assert.Equal([new ChatAnswerItem("어느 쪽?", "방향", "A"), new ChatAnswerItem("무엇을 더?", "더할 것", "x, y")], a.Items);
+            },
+            a =>
+            {
+                Assert.Equal("답하지 않음: 시간 초과", a.Declined);
+                Assert.Equal([new ChatAnswerItem("어느 쪽?", "방향", null)], a.Items); // 질문은 tool_use 입력에서
+            });
+
+        // 이어 읽기도 같은 결과 — 질문 줄과 답 줄이 다른 읽기로 나뉘어도 (HB_Chat이 카드를 기다리는 동안 방을 열면, e8091295fe C6)
+        var lines = File.ReadAllLines(path);
+        var split = Path.Combine(_dir, "split.jsonl");
+        File.WriteAllText(split, string.Join("\n", lines.Take(2)) + "\n", new UTF8Encoding(false)); // 질문 줄까지
+        var (first, resume) = ClaudeChatReader.ReadMore(split, null);
+        Assert.Empty(first.Answers);
+        File.AppendAllText(split, string.Join("\n", lines.Skip(2)) + "\n", new UTF8Encoding(false));
+        var (more, _) = ClaudeChatReader.ReadMore(split, resume);
+        Assert.Equal(chat.Answers.Select(a => (a.Line, a.Declined, string.Join("|", a.Items))),
+            more.Answers.Select(a => (a.Line, a.Declined, string.Join("|", a.Items))));
+    }
+
+    [Fact]
+    public void Reader_Answers_FallBackToAskedQuestions_AndCutsNoteSafely()
+    {
+        // e8091295fe C5: 결과에 questions가 없으면 tool_use 입력의 질문 글로 답을 찾는다. C7: 200자 자르기가 서로게이트 쌍을 가르지 않음
+        var answered = Line(new
+        {
+            type = "user", sessionId = Session, timestamp = Ts(3),
+            message = new { role = "user", content = new object[] { Result("q1", "answered") } },
+            toolUseResult = new { answers = new Dictionary<string, string> { ["어느 쪽?"] = "B" } },
+        });
+        var longNote = new string('가', 199) + "😀끝";
+        var declined = Line(new
+        {
+            type = "user", sessionId = Session, timestamp = Ts(5),
+            message = new { role = "user", content = new object[] { new { type = "tool_result", tool_use_id = "q2", is_error = true, content = longNote } } },
+        });
+        var ask = new { questions = new[] { new { question = "어느 쪽?", header = "방향", options = new[] { new { label = "A" } } } } };
+        var path = Write(Assistant(2, Use("q1", "AskUserQuestion", ask)), answered, Assistant(4, Use("q2", "AskUserQuestion", ask)), declined);
+
+        var answers = ClaudeChatReader.Read(path).Answers;
+        Assert.Equal([new ChatAnswerItem("어느 쪽?", "방향", "B")], answers[0].Items);
+        Assert.Equal(new string('가', 199) + "…", answers[1].Declined); // 😀의 앞 반쪽에서 자르지 않음
+    }
+
+    [Fact]
     public void Reader_SkipsMetaSidechainAndReminders_FencesPastes()
     {
         var path = Write(

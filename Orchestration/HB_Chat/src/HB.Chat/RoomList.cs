@@ -99,6 +99,16 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
                 var at = e.Text.IndexOf(q, StringComparison.OrdinalIgnoreCase);
                 if (at >= 0) hits.Add(new SearchHit(room.Id, title, e.Line, e.Speaker, e.Timestamp, Snippet(e.Text, at, q.Length)));
             }
+            // 질문 카드 답 (4차 D1 보류 K1): 고른 답 · 질문 글도 찾는다. 답 말풍선은 줄 번호가 없어 그 다음 말(말풍선이 놓인 자리)로 데려간다
+            foreach (var a in transcript?.Answers ?? [])
+            {
+                if (a.Declined is not null) continue;
+                var text = string.Join("\n", a.Items.Select(i => $"{i.Question} → {i.Answer}"));
+                var at = text.IndexOf(q, StringComparison.OrdinalIgnoreCase);
+                if (at < 0) continue;
+                var next = transcript!.Entries.FirstOrDefault(e => e.Line > a.Line);
+                hits.Add(new SearchHit(room.Id, title, next?.Line, ChatSpeaker.User, a.Timestamp, Snippet(text, at, q.Length)));
+            }
         }
         return [.. hits.OrderByDescending(h => h.At ?? DateTimeOffset.MinValue).Take(SearchMax)];
     }

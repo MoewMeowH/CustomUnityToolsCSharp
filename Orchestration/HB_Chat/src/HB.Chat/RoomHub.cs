@@ -25,6 +25,9 @@ public sealed record LiveEvent(string Kind)
     public ApprovalView? Approval { get; init; }
     public QuestionView? Question { get; init; }
 
+    /// <summary>question-done 알림: 고른 답 (질문 글 → 답, 4차 D1 — 화면이 '나' 말풍선으로). 답하지 않았으면 null.</summary>
+    public IReadOnlyDictionary<string, string>? Answers { get; init; }
+
     /// <summary>rules 알림: 이 방의 "항상 허용" 규칙 전체 (바뀐 뒤 화면 목록을 다시 그린다).</summary>
     public IReadOnlyList<string>? Rules { get; init; }
 
@@ -502,6 +505,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 Question = pending.View,
                 Text = answers is null ? label : QuestionRequest.Summary(request.Items, answers),
                 Ok = answers is not null, // 화면이 글 모양으로 가르지 않게 (지휘자 검토 C5)
+                Answers = answers, // 화면이 바로 '나' 말풍선으로 그린다 (4차 D1 — 턴이 끝나면 세션 기록의 답으로 바뀜)
             });
             if (live.Cts is not null && !live.Waiting) SetFace(live, Face.Thinking); // 답을 받으면 지휘자가 이어 생각한다
         }

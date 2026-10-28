@@ -262,6 +262,52 @@ public sealed class RoomListTests : IDisposable
     }
 
     [Fact]
+    public void Answers_PlacedBeforeNextEntry_OrTrailing()
+    {
+        // 4차 D1: 답 줄보다 뒤의 첫 말 앞, 없으면 맨 뒤. 말은 참조로 (같은 줄의 말이 여럿이어도 첫 말에만)
+        var user = E(1, ChatSpeaker.User, "골라 줘");
+        var reply = E(5, ChatSpeaker.Conductor, "A로 갑니다");
+        var sameLine = E(5, ChatSpeaker.Conductor, "둘째 글");
+        var a1 = new ChatAnswer(3, T0, [new ChatAnswerItem("어느 쪽?", null, "A")]);
+        var a2 = new ChatAnswer(9, T0, [new ChatAnswerItem("또?", null, null)], "시간 초과");
+        var placed = AnswerPlacement.Of(new ChatTranscript { FilePath = "x", Entries = [user, reply, sameLine], Answers = [a1, a2] });
+        Assert.Empty(placed.For(user));
+        Assert.Equal([a1], placed.For(reply));
+        Assert.Empty(placed.For(sameLine));
+        Assert.Equal([a2], placed.Trailing);
+        Assert.Same(AnswerPlacement.Empty, AnswerPlacement.Of(new ChatTranscript { FilePath = "x", FormatError = "잠김", Answers = [a1] }));
+    }
+
+    [Theory]
+    [InlineData("사용자가 질문 카드에 답하지 않았습니다 (시간 초과). 필요하면 채팅 글로 다시 물어 주세요.", "시간 초과")]
+    [InlineData("사용자가 질문 카드에 답하지 않았습니다 (답하지 않음). 필요하면 …", "답하지 않음")]
+    [InlineData("질문 카드로 보일 수 없는 모양이라 거절했습니다 — 같은 질문을 채팅 글로 물어 주세요.", "질문 카드로 보일 수 없는 모양이라 거절했습니다 — 같은 질문을 채팅 글로 물어 주세요")]
+    public void Answers_DeclinedLabel(string note, string label) => Assert.Equal(label, AnswerPlacement.DeclinedLabel(note));
+
+    [Fact]
+    public void Answers_MergeWithRunsByTime_ExportAndSearch()
+    {
+        // e8091295fe C1: 같은 말 앞 실행 · 답은 시각 차례. 보류 K1: 내보내기 · 검색에도 답
+        var run = new RunBubble("k", T0.AddMinutes(2), RunBubbleKind.External, "gpt", null, "응답", null, false, "r1", "c1");
+        var answer = new ChatAnswer(3, T0.AddMinutes(1), [new ChatAnswerItem("어느 쪽?", null, "파랑")]);
+        Assert.Equal([(null, answer), (run, null)], AnswerPlacement.Merge([run], [answer]).ToList());
+
+        var room = NewRoom(title: "질문 방");
+        var t = Transcript(E(1, ChatSpeaker.User, "골라 줘", 0), E(5, ChatSpeaker.Conductor, "파랑이군요", 3));
+        t = t with { Answers = [answer, new ChatAnswer(7, T0.AddMinutes(4), [new ChatAnswerItem("또?", null, null)], "사용자가 질문 카드에 답하지 않았습니다 (시간 초과). 필요하면 …")] };
+        var md = ChatExport.Markdown(room, t, T0, null, AnswerPlacement.Of(t));
+        Assert.Contains("### 나 (질문에 답함) · ", md);
+        Assert.Contains("> 어느 쪽?\n\n파랑\n\n", md);
+        Assert.Contains("> 질문에 답하지 않음 · ", md);
+        Assert.Contains(": 시간 초과\n", md);
+        Assert.True(md.IndexOf("파랑\n", StringComparison.Ordinal) < md.IndexOf("파랑이군요", StringComparison.Ordinal));
+
+        var hit = Assert.Single(RoomList.Search([(room, t)], "파랑").Where(h => h.Speaker == ChatSpeaker.User));
+        Assert.Equal(5, hit.Line); // 답 말풍선이 놓인 다음 말
+        Assert.Contains("어느 쪽? → 파랑", hit.Snippet);
+    }
+
+    [Fact]
     public void Trash_DeleteNow_OnlyTrashRooms()
     {
         // 4차 C1: 휴지통 즉시 비우기 — 방 하나 · 전체, 휴지통 밖 방은 id를 줘도 지우지 않는다

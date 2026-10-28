@@ -10,9 +10,10 @@ namespace HB.Chat;
 /// </summary>
 public static class ChatExport
 {
-    public static string Markdown(Room room, ChatTranscript? transcript, DateTimeOffset now, RunPlacement? runs = null)
+    public static string Markdown(Room room, ChatTranscript? transcript, DateTimeOffset now, RunPlacement? runs = null, AnswerPlacement? answers = null)
     {
         runs ??= RunPlacement.Empty;
+        answers ??= AnswerPlacement.Empty;
         var sb = new StringBuilder();
         sb.Append("# ").Append(RoomList.TitleOf(room, transcript)).Append("\n\n");
         sb.Append("- 내보낸 시각: ").Append(now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)).Append('\n');
@@ -28,7 +29,7 @@ public static class ChatExport
             if (e.Tools.Count > 0)
                 sb.Append("_도구: ").Append(string.Join(", ", RoomList.ToolChips(e.Tools).Select(c => c.Count > 1 ? $"{c.Name} ×{c.Count}" : c.Name)))
                   .Append("_\n\n");
-            AppendRuns(sb, runs.For(e));
+            AppendPlaced(sb, runs.For(e), answers.For(e));
             if (RoomList.IsStoppedTurn(e))
             {
                 sb.Append("> 중지된 턴 · ").Append(when).Append("\n\n");
@@ -42,8 +43,26 @@ public static class ChatExport
             sb.Append("### ").Append(e.Speaker == ChatSpeaker.User ? "나" : "지휘자").Append(" · ").Append(when).Append("\n\n");
             sb.Append(e.Text.TrimEnd()).Append("\n\n");
         }
-        AppendRuns(sb, runs.Trailing);
+        AppendPlaced(sb, runs.Trailing, answers.Trailing);
         return sb.ToString();
+    }
+
+    /// <summary>실행 말풍선과 질문 답을 화면처럼 시각 차례로 (4차 D1 — 보류 K1: 내보낸 대화에서 고른 답이 빠졌다).</summary>
+    private static void AppendPlaced(StringBuilder sb, IReadOnlyList<RunBubble> runs, IReadOnlyList<ChatAnswer> answers)
+    {
+        foreach (var (run, answer) in AnswerPlacement.Merge(runs, answers))
+        {
+            if (run is not null) { AppendRuns(sb, [run]); continue; }
+            var when = answer!.Timestamp?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) ?? "";
+            if (answer.Declined is { } declined)
+            {
+                sb.Append("> 질문에 답하지 않음 · ").Append(when).Append(": ").Append(AnswerPlacement.DeclinedLabel(declined)).Append("\n\n");
+                continue;
+            }
+            sb.Append("### 나 (질문에 답함) · ").Append(when).Append("\n\n");
+            foreach (var item in answer.Items)
+                sb.Append("> ").Append(item.Question.Replace("\n", " ")).Append("\n\n").Append(item.Answer?.Trim() ?? "(답 글을 읽지 못함)").Append("\n\n");
+        }
     }
 
     /// <summary>

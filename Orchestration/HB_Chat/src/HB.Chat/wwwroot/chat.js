@@ -633,6 +633,8 @@
                 const fresh = parseChat(await res.text());
                 if (!fresh || disposed || chatEl() !== chat) return false;
                 if (Number(fresh.dataset.lastLine) < Number(chat.dataset.lastLine)) return await reloadMessages(follow);
+                // 기록의 질문 답 말풍선이 오면 진행 중 칸의 실시간 답은 지운다 — 턴 도중 새 말 받기에 같은 답이 두 번 보이지 않게 (e8091295fe C3)
+                if (fresh.querySelector(":scope > .msg.answer")) live.querySelectorAll(":scope > .msg.answer").forEach(m => m.remove());
                 // 새 말이 한 쪽보다 많으면(갈래 첫 턴 등) 서버가 맨 끝 쪽을 준다 — 붙이지 않고 쪽을 바꾼다 (95e8b1c242 C3)
                 if (fresh.dataset.reset) {
                     decorate(fresh);
@@ -865,11 +867,31 @@
             if (answers) data.append("answers", JSON.stringify(answers)); else data.append("skip", "true");
             if (!await post("Answer", data)) controls.forEach(b => b.disabled = false);
         }
-        function doneQuestion(q, text, answered) {
+        function doneQuestion(q, text, answered, answers) {
             const card = cards.get(q.id);
             if (!card) return;
             cards.delete(q.id);
-            card.replaceWith(el("div", "live-line" + (answered ? "" : " denied"), "질문 " + (answered ? "답함 — " + text : (text || "끝남"))));
+            if (!answered || !answers) {
+                // q-done: 턴 끝에 세션 기록의 같은 줄(답하지 않음)로 바뀌므로 그때 지운다
+                card.replaceWith(el("div", "live-line q-done" + (answered ? "" : " denied"), "질문 " + (answered ? "답함 — " + text : (text || "끝남"))));
+                return;
+            }
+            // 답한 질문은 '나' 말풍선 (4차 D1, 서버 _Messages의 answer 말풍선과 같은 모양)
+            const m = el("div", "msg user answer"), b = el("div", "bubble");
+            m.dataset.speaker = "user";
+            const w = el("div", "who");
+            // 서버 말풍선과 같게 시각 · 답장 단추 (e8091295fe C2 — 턴이 끝날 때까지도 인용할 수 있게)
+            const now = new Date(), p2 = n => String(n).padStart(2, "0");
+            const when = `${p2(now.getMonth() + 1)}-${p2(now.getDate())} ${p2(now.getHours())}:${p2(now.getMinutes())}:${p2(now.getSeconds())}`;
+            const reply = el("button", "reply", "답장"); reply.type = "button"; reply.title = "이 답에 답장 (인용)";
+            w.append(el("b", null, profiles.user?.name || "나"), " ", el("span", "detail", "질문에 답함"), " ", el("span", "when", when), " ", reply);
+            const body = el("div", "body");
+            for (const item of q.questions) {
+                body.append(el("div", "answer-q", item.question), el("div", "answer-a", answers[item.question] ?? ""));
+            }
+            b.append(w, body);
+            m.append(avatar(profiles.user, "나"), b);
+            card.replaceWith(m);
         }
         async function decide(id, choice, card) {
             const reason = choice === "deny" ? card.querySelector("input.reason")?.value.trim() : null;
@@ -956,7 +978,7 @@
                     showQuestion(ev.question);
                     break;
                 case "question-done":
-                    doneQuestion(ev.question, ev.text, ev.ok === true);
+                    doneQuestion(ev.question, ev.text, ev.ok === true, ev.answers);
                     break;
                 case "rules":
                     renderRules(ev.rules || []);
@@ -1001,7 +1023,9 @@
                     // 이 턴의 말은 세션 기록으로 다시 그린다. 다시 받지 못하면 진행 중 말풍선을 남겨 둔다 (지휘자 검토 R7).
                     // 실패 · 중지면 이유를 한 줄 남긴다.
                     const refreshed = await refreshMessages();
-                    if (refreshed) live.querySelectorAll(":scope > .msg:not(.failed)").forEach(m => m.remove()); // 보내지 못한 말은 남김 (C2)
+                    // 보내지 못한 말은 남김 (C2). 질문 답 말풍선은 세션 기록의 것으로 바뀌므로 지운다 (4차 D1).
+                    // 답하지 않은 질문 줄(q-done)은 성공으로 끝난 턴에서만 — 중지 · 실패면 기록에 결과 줄이 없을 수 있어 남긴다 (e8091295fe C4)
+                    if (refreshed) live.querySelectorAll(":scope > .msg:not(.failed)" + (ev.ok ? ", :scope > .q-done" : "")).forEach(m => m.remove());
                     else live.prepend(el("div", "live-line denied", "말풍선을 다시 받지 못했습니다 — 새로고침하면 보입니다."));
                     stream = null; chips = null;
                     if (!ev.ok && ev.text) live.prepend(el("div", "live-line denied", ev.text));

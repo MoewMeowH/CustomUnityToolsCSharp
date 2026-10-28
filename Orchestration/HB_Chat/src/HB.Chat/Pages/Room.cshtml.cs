@@ -40,6 +40,10 @@ public sealed class RoomModel(
     public RunPlacement Runs => _runs ??= runs.For(Transcript);
     private RunPlacement? _runs;
 
+    /// <summary>질문 카드 답 말풍선의 자리 (4차 D1, 세션 기록에서).</summary>
+    public AnswerPlacement Answers => _answers ??= AnswerPlacement.Of(Transcript);
+    private AnswerPlacement? _answers;
+
     /// <summary>길면 접어 둔다 (외부 에이전트 응답은 수천 자가 흔하다).</summary>
     public const int RunFoldChars = 1500;
 
@@ -218,7 +222,7 @@ public sealed class RoomModel(
         if (!Load(id)) return NotFound();
         var now = DateTimeOffset.Now;
         Response.Headers.CacheControl = "no-store";
-        return File(System.Text.Encoding.UTF8.GetBytes(ChatExport.Markdown(Room, Transcript, now, Runs)), "text/markdown; charset=utf-8",
+        return File(System.Text.Encoding.UTF8.GetBytes(ChatExport.Markdown(Room, Transcript, now, Runs, Answers)), "text/markdown; charset=utf-8",
             ChatExport.FileName(Title, now));
     }
 
@@ -374,6 +378,7 @@ public sealed class RoomModel(
         Transcript = transcripts.Read(room.SessionId);
         Messages = RoomList.Page(Transcript?.FormatError is null ? Transcript?.Entries ?? [] : [], null, null);
         _runs = null;
+        _answers = null;
         return true;
     }
 
