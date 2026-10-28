@@ -14,6 +14,12 @@ public static partial class ResponseChecker
     public const int MinForeignChars = 5;
 
     /// <summary>
+    /// 소량 섞임: 비율 경고가 없을 때, 코드 · 따옴표 밖 가나가 이 수 이상이면 경고 ('ログ 수집' 같은 낱말 하나도).
+    /// 기준은 지난 응답 836건으로 정함 (계획서 2026-10-28_소량-외국어-섞임-경고).
+    /// </summary>
+    public const int MinMixedKana = 2;
+
+    /// <summary>
     /// 영어 문장 줄: 코드 밖, 한글이 없고 영어 낱말(글자 2개 이상)이 이만큼 있는 줄. 이런 줄이 <see cref="MinEnglishLines"/>줄 이상이면 경고.
     /// 기준은 지난 응답 754건으로 정함 — 걸린 것은 sol의 작업 메모 · 이탈 두 건(5e81a2ed47 · 8f8065bf09)뿐 (계획서 2026-10-27_한국어-응답-지시-강화).
     /// </summary>
@@ -62,6 +68,9 @@ public static partial class ResponseChecker
                 warnings.Add($"[경고] 응답 언어 이탈 감지 (가나 비율 {Percent(kanaRatio)}%, {kana:N0}자)");
             else if (Exceeds(han, letters, threshold, out var hanRatio))
                 warnings.Add($"[경고] 응답 언어 이탈 감지 (한자 비율 {Percent(hanRatio)}%, {han:N0}자)");
+            // 비율 문턱 아래의 몇 줄 · 낱말 하나 섞임 — 비율 경고가 났으면 같은 사건이라 알리지 않는다
+            else if (MixedForeign(text) is { } mixed)
+                warnings.Add(mixed);
 
             // 가나 · 한자 비율로는 안 잡히는 영어 이탈 · 작업 메모("Need not generate too long…")
             if (EnglishLines(text) is { Count: >= MinEnglishLines } english)
@@ -74,6 +83,37 @@ public static partial class ResponseChecker
             warnings.Add($"[경고] 출력 형식 절 빠짐 ({string.Join(", ", missing.Select(n => $"{n}."))} / 전체 {outputSections}절). 응답이 중간에 끊겼을 수 있습니다.");
 
         return warnings;
+    }
+
+    /// <summary>
+    /// 소량 외국어 섞임 경고 문구, 없으면 null. 코드 · 큰따옴표류(`"…"` · `“…”` · `「…」` · `『…』`, 인용한 문자열) 밖에서
+    /// 가나가 <see cref="MinMixedKana"/>자 이상이거나, 한글 · 영문자 · 가나에 바로 붙은 한자 덩어리("디렉터리를指定的하면" · "실제既存")가 있으면.
+    /// 괄호 안이 한자뿐인 한자 병기("주(州)" · "정적(靜的)")는 보지 않는다. 해석에 실패한 구조화 출력(JSON 원문)은 따옴표를 빼지 않는다.
+    /// </summary>
+    public static string? MixedForeign(string text)
+    {
+        var body = StripCode(text);
+        if (!JsonStart().IsMatch(text)) body = Quoted().Replace(body, " ");
+        body = HanGloss().Replace(body, " ");
+
+        int kana = 0, firstKana = -1;
+        for (var i = 0; i < body.Length; i++)
+        {
+            if (!char.IsLetter(body[i]) || !IsKana(body[i])) continue;
+            kana++;
+            if (firstKana < 0) firstKana = i;
+        }
+        var attached = AttachedHan().Matches(body);
+        var hasKana = kana >= MinMixedKana;
+        if (!hasKana && attached.Count == 0) return null;
+
+        var at = hasKana && (attached.Count == 0 || firstKana < attached[0].Index) ? firstKana : attached[0].Index;
+        var parts = new List<string>(2);
+        if (hasKana) parts.Add($"가나 {kana:N0}자");
+        if (attached.Count > 0) parts.Add($"한자 {attached.Count:N0}곳");
+        var start = Math.Max(0, at - 15);
+        var sample = body[start..Math.Min(body.Length, at + 25)].Replace('\r', ' ').Replace('\n', ' ').Trim();
+        return $"[경고] 외국어 소량 섞임 ({string.Join(" · ", parts)}, 예: \"{Clip(sample, 60)}\")";
     }
 
     /// <summary>
@@ -167,18 +207,34 @@ public static partial class ResponseChecker
         {
             if (!char.IsLetter(c)) continue;
             letters++;
-            if (c is >= '぀' and <= 'ヿ'      // 히라가나 · 가타카나
-                  or >= 'ㇰ' and <= 'ㇿ'      // 가타카나 음성 확장
-                  or >= 'ｦ' and <= 'ﾝ')     // 반각 가타카나
-                kana++;
-            // 호환 한자는 글자로 쓰면 편집기가 통합 한자로 정규화할 수 있어 숫자로 둔다
-            else if (c is >= (char)0x4E00 and <= (char)0x9FFF   // CJK 통합 한자
-                       or >= (char)0x3400 and <= (char)0x4DBF   // 확장 A
-                       or >= (char)0xF900 and <= (char)0xFAFF)  // 호환 한자
-                han++;
+            if (IsKana(c)) kana++;
+            else if (IsHan(c)) han++;
         }
         return (kana, han, letters);
     }
+
+    private static bool IsKana(char c) =>
+        c is >= '぀' and <= 'ヿ'      // 히라가나 · 가타카나
+          or >= 'ㇰ' and <= 'ㇿ'      // 가타카나 음성 확장
+          or >= 'ｦ' and <= 'ﾝ';     // 반각 가타카나
+
+    // 호환 한자는 글자로 쓰면 편집기가 통합 한자로 정규화할 수 있어 숫자로 둔다
+    private static bool IsHan(char c) =>
+        c is >= (char)0x4E00 and <= (char)0x9FFF   // CJK 통합 한자
+          or >= (char)0x3400 and <= (char)0x4DBF   // 확장 A
+          or >= (char)0xF900 and <= (char)0xFAFF;  // 호환 한자
+
+    /// <summary>인용한 문자열: 큰따옴표 · 둥근 큰따옴표 · 낫표 · 겹낫표 (한 줄 안).</summary>
+    [GeneratedRegex("\"[^\"\n]*\"|“[^”\n]*”|「[^」\n]*」|『[^』\n]*』")]
+    private static partial Regex Quoted();
+
+    /// <summary>한자 병기: 괄호(반각 · 전각) 안이 한자 · 가운뎃점 · 공백뿐.</summary>
+    [GeneratedRegex(@"[(（][㐀-䶿一-鿿豈-﫿·・\s]+[)）]")]
+    private static partial Regex HanGloss();
+
+    /// <summary>앞이나 뒤가 한글 · 영문자 · 가나에 바로 붙은 한자 덩어리.</summary>
+    [GeneratedRegex(@"(?<=[가-힣A-Za-z぀-ヿ])[㐀-䶿一-鿿豈-﫿]+|[㐀-䶿一-鿿豈-﫿]+(?=[가-힣A-Za-z぀-ヿ])")]
+    private static partial Regex AttachedHan();
 
     [GeneratedRegex("`[^`\n]*`")]
     private static partial Regex InlineCode();

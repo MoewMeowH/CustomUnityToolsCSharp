@@ -68,10 +68,12 @@ public class ResponseCheckerTests
     }
 
     [Fact]
-    public void FewKana_BelowMinimum_IsNotWarned()
+    public void FewKana_BelowMinimum_IsMixedNotDrift()
     {
-        // 가나 4자: 비율은 높아도 최소 글자 수(5) 미만이면 고유명사 수준이라 경고하지 않는다.
-        Assert.Empty(ResponseChecker.Warnings("짧은 응답 カタカ 입니다", ChatFinishReason.Stop, 10, Ko));
+        // 가나 3자: 비율은 높아도 최소 글자 수(5) 미만이라 언어 이탈 경고는 없고, 소량 섞임 경고만 (2026-10-28)
+        var warnings = ResponseChecker.Warnings("짧은 응답 カタカ 입니다", ChatFinishReason.Stop, 10, Ko);
+        Assert.False(HasLanguageWarning(warnings));
+        Assert.Single(warnings, w => w.StartsWith("[경고] 외국어 소량 섞임 (가나 3자,", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -147,6 +149,76 @@ public class ResponseCheckerTests
         // 경계: 한자 정확히 5자(靜的 · 同期化)면 최소 글자 수를 채워 경고 (짧아서 비율도 2% 이상)
         var warnings = ResponseChecker.Warnings("이 값은 정적(靜的) 동기화(同期化) 상태로 남는다", ChatFinishReason.Stop, 20, Ko);
         Assert.Contains(warnings, w => w.StartsWith("[경고] 응답 언어 이탈 감지 (한자 비율 ", StringComparison.Ordinal) && w.EndsWith(", 5자)", StringComparison.Ordinal));
+    }
+
+    private static string? Mixed(IReadOnlyList<string> warnings) =>
+        warnings.SingleOrDefault(w => w.StartsWith("[경고] 외국어 소량 섞임", StringComparison.Ordinal));
+
+    private static readonly string LongKorean =
+        string.Concat(Enumerable.Repeat("한국어로 쓴 계획 본문입니다. 검사 순서와 정리 방식을 설명합니다.\n", 60));
+
+    [Fact]
+    public void FewJapaneseLines_InLongResponse_IsMixed()
+    {
+        // 2026-10-27 preflight P3(runId 403c73b171) sol 응답 일부 — 긴 한국어 응답에 일본어 몇 줄 (비율 2% 밑)
+        var text = LongKorean + "- 파일数はシーンを除く物理ファイル数とする。複数のSO・머티리얼이 들어 있는 파일도 하나로 센다.\n" + LongKorean;
+        var warnings = ResponseChecker.Warnings(text, ChatFinishReason.Stop, 9000, Ko);
+        Assert.False(HasLanguageWarning(warnings));
+        var mixed = Mixed(warnings);
+        Assert.NotNull(mixed);
+        Assert.StartsWith("[경고] 외국어 소량 섞임 (가나 ", mixed);
+        Assert.Contains("한자 ", mixed);
+        Assert.Contains("파일数はシーン", mixed); // 예시는 처음 걸린 곳 주변
+    }
+
+    [Fact]
+    public void OneJapaneseWord_IsMixed()
+    {
+        // 6b356bed3c P2 argon "のように" · 5324f8ce55 sol "ログ 수집 시작"
+        Assert.NotNull(Mixed(ResponseChecker.Warnings(LongKorean + "단,  のように 개별 검사로 나눈다.", ChatFinishReason.Stop, 900, Ko)));
+        Assert.NotNull(Mixed(ResponseChecker.Warnings("**ログ 수집 시작**\n" + LongKorean, ChatFinishReason.Stop, 900, Ko)));
+    }
+
+    [Theory]
+    [InlineData("디렉터리를指定的하면 GetFullPath 결과가 달라진다.")] // DeepSeek dfa133bccc
+    [InlineData("45~49행 루프는 링크自身의 LinkTarget을 보지 않는다.")] // DeepSeek 53460096fa
+    [InlineData("실제既存 게터 형식은 원본을 보존한다.")] // sol df95602af7
+    [InlineData("\"detail\":\"app道settings.json 99줄\"")] // 따옴표 안이어도 JSON 원문이면 본다 — 아래 JsonRaw 시험과 짝
+    public void HanAttachedToHangulOrLatin_IsMixed(string line)
+    {
+        var text = line.StartsWith('"') ? "{" + line + "}" : LongKorean + line;
+        var mixed = Mixed(ResponseChecker.Warnings(text, ChatFinishReason.Stop, 900, Ko));
+        Assert.NotNull(mixed);
+        Assert.StartsWith("[경고] 외국어 소량 섞임 (한자 1곳,", mixed);
+    }
+
+    [Theory]
+    [InlineData("하루 사이 주인이 바뀐 주(州)의 일일 변화량")] // 한자 병기
+    [InlineData("\"정적(靜的)\"의 한자는 靜·的 2자뿐이다")] // 한자 병기 · 띄어 쓴 한자
+    [InlineData("예: \"修正案: 競合発生箇所を特定\"처럼 따옴표로 인용한 일본어")] // 인용
+    [InlineData("「ログ」 낫표로 인용한 낱말")]
+    [InlineData("인라인 코드 `既存の値` 안은 코드")]
+    [InlineData("한 글자 は 가나는 기준(2자) 미만")]
+    [InlineData("Application.focusChanged 的 구독")] // 띄어 쓴 한자 한 글자는 잡지 않는다 (알려진 놓침)
+    public void LegitOrBelowMinimum_IsNotMixed(string line)
+    {
+        Assert.Empty(ResponseChecker.Warnings(LongKorean + line + "\n" + LongKorean, ChatFinishReason.Stop, 900, Ko));
+    }
+
+    [Fact]
+    public void DriftWarned_NoMixedWarning()
+    {
+        // 비율 경고가 난 응답에는 소량 경고를 따로 붙이지 않는다 (같은 사건)
+        var warnings = ResponseChecker.Warnings(Data("ch3_cross_p1_A_japanese_drift.md"), ChatFinishReason.Stop, 7000, Ko);
+        Assert.True(HasLanguageWarning(warnings));
+        Assert.Null(Mixed(warnings));
+    }
+
+    [Fact]
+    public void MixedCheck_Off_WhenLanguageCheckOff()
+    {
+        var off = new ResponseChecksOptions { ExpectedLanguage = "" };
+        Assert.Empty(ResponseChecker.Warnings(LongKorean + "실제既存 のように", ChatFinishReason.Stop, 900, off));
     }
 
     [Fact]
