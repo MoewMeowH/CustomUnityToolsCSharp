@@ -201,6 +201,27 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
     /// 칩으로 묶기: 바로 이어진 같은 도구만 한 칩에 횟수 ("Read ×3"), 차례 그대로 — 진행 중 칩(chat.js addChip)과 같은 규칙이라
     /// 턴이 끝나 기록으로 바뀌어도 모양이 같다 (/self-review 83b453653b C9).
     /// </summary>
+    /// <summary>칩을 몇 개까지 보일지 — 넘으면 앞을 "앞 N개"로 접는다 (화면 chat.js MaxChips와 같음).</summary>
+    public const int MaxChips = 20;
+
+    /// <summary>
+    /// 끝난 턴 칩 (4차 C3 — 실행 중 칩과 같은 글): 이름 + 대상(ChatEntry.ToolTargets), 같은 글이 이어지면 ×N,
+    /// <see cref="MaxChips"/>개를 넘으면 맨 앞에 ("앞 N개", 0). 실행 중 칩은 chat.js addChip이 같은 규칙으로 그린다.
+    /// </summary>
+    public static IReadOnlyList<(string Label, int Count)> TargetChips(IReadOnlyList<string> tools, IReadOnlyList<string?> targets)
+    {
+        var chips = new List<(string Label, int Count)>();
+        for (var i = 0; i < tools.Count; i++)
+        {
+            var label = ShortTool(tools[i]) + (i < targets.Count && targets[i] is { } target ? " " + target : "");
+            if (chips.Count > 0 && chips[^1].Label == label) chips[^1] = (label, chips[^1].Count + 1);
+            else chips.Add((label, 1));
+        }
+        if (chips.Count <= MaxChips) return chips;
+        var older = chips.Take(chips.Count - MaxChips).Sum(c => c.Count);
+        return [($"앞 {older}개", 0), .. chips.Skip(chips.Count - MaxChips)];
+    }
+
     public static IReadOnlyList<(string Name, int Count)> ToolChips(IEnumerable<string> tools)
     {
         var chips = new List<(string Name, int Count)>();

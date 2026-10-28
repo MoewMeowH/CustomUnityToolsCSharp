@@ -278,6 +278,21 @@ public sealed class RoomListTests : IDisposable
         Assert.Same(AnswerPlacement.Empty, AnswerPlacement.Of(new ChatTranscript { FilePath = "x", FormatError = "잠김", Answers = [a1] }));
     }
 
+    [Fact]
+    public void TargetChips_NameAndTarget_GroupsAndFolds()
+    {
+        // 4차 C3: 끝난 턴 칩 = 실행 중 칩과 같은 글 (이름 + 대상), 같은 글이 이어지면 ×N, 20개 넘으면 앞을 접음
+        var chips = RoomList.TargetChips(["Read", "Read", "Read", "mcp__x__run_mode", "Grep"], ["a.cs", "a.cs", "b.cs", "review_main", null]);
+        Assert.Equal([("Read a.cs", 2), ("Read b.cs", 1), ("run_mode review_main", 1), ("Grep", 1)], chips);
+        Assert.Equal([("Read", 1)], RoomList.TargetChips(["Read"], [])); // 대상 목록이 없는 기록
+
+        var many = Enumerable.Range(0, 25).Select(i => "f" + i + ".cs").ToList();
+        var folded = RoomList.TargetChips([.. many.Select(_ => "Read")], [.. many]);
+        Assert.Equal(RoomList.MaxChips + 1, folded.Count);
+        Assert.Equal(("앞 5개", 0), folded[0]);
+        Assert.Equal(("Read f24.cs", 1), folded[^1]);
+    }
+
     [Theory]
     [InlineData("사용자가 질문 카드에 답하지 않았습니다 (시간 초과). 필요하면 채팅 글로 다시 물어 주세요.", "시간 초과")]
     [InlineData("사용자가 질문 카드에 답하지 않았습니다 (답하지 않음). 필요하면 …", "답하지 않음")]

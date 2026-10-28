@@ -75,6 +75,25 @@ public sealed class ChatRoomTests : IDisposable
     }
 
     [Fact]
+    public void Reader_KeepsToolTargets_InToolOrder()
+    {
+        // HB_Chat 4차 C3: 끝난 턴 칩에도 대상 — 실행 중 칩(ToolTargets.Of)과 같은 글. 모르는 도구는 null
+        var path = Write(
+            User(1, "봐 줘"),
+            Assistant(2, Use("t1", "Read", new { file_path = @"F:\AI\x\Program.cs" }), Use("t2", "Bash", new { command = "git status\ngit log" })),
+            User(3, new object[] { Result("t1", "본문"), Result("t2", "출력") }),
+            Assistant(4, Use("t3", "mcp__hb-orchestration__run_mode", new { mode = "review_main" }), Use("t4", "Unknown", new { x = 1 })),
+            User(5, new object[] { Result("t3", "r"), Result("t4", "u") }),
+            Assistant(6, Text("끝")));
+
+        var e = ClaudeChatReader.Read(path).Entries[^1];
+        Assert.Equal(["Read", "Bash", "mcp__hb-orchestration__run_mode", "Unknown"], e.Tools);
+        Assert.Equal(["Program.cs", "git status", "review_main", null], e.ToolTargets);
+        Assert.Equal(new string('a', ToolTargets.MaxChars) + "…",
+            ToolTargets.Of("Grep", JsonDocument.Parse($$"""{"pattern":"{{new string('a', 80)}}"}""").RootElement));
+    }
+
+    [Fact]
     public void Reader_CollectsQuestionAnswers_OutsideEntries()
     {
         // HB_Chat 4차 D1: AskUserQuestion의 답(toolUseResult.answers)은 Answers로 — 말 목록(대시보드도 씀)에는 넣지 않는다.

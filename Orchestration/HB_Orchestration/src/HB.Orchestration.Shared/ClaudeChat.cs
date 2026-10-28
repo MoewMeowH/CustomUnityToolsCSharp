@@ -22,10 +22,13 @@ public sealed record ChatEntry(int Line, DateTimeOffset? Timestamp, ChatSpeaker 
 {
     public IReadOnlyList<string> Tools { get; init; } = [];
 
+    /// <summary>Tools와 같은 차례의 짧은 대상 (<see cref="ToolTargets"/>, 모르면 null — HB_Chat 4차 C3: 끝난 턴 칩에도 대상).</summary>
+    public IReadOnlyList<string?> ToolTargets { get; init; } = [];
+
     /// <summary>값 비교: Tools는 목록 내용으로 (기본 레코드 비교는 참조라 이어 읽기 = 전체 읽기 검사가 깨진다).</summary>
     public bool Equals(ChatEntry? other) =>
         other is not null && Line == other.Line && Timestamp == other.Timestamp && Speaker == other.Speaker && Text == other.Text
-        && ToolsBefore == other.ToolsBefore && Tools.SequenceEqual(other.Tools);
+        && ToolsBefore == other.ToolsBefore && Tools.SequenceEqual(other.Tools) && ToolTargets.SequenceEqual(other.ToolTargets);
 
     public override int GetHashCode() => HashCode.Combine(Line, Timestamp, Speaker, Text, ToolsBefore, Tools.Count);
 }
@@ -138,6 +141,7 @@ public static partial class ClaudeChatReader
         public string? SessionId, Cwd, CustomTitle, AiTitle;
         public int Unknown, PendingTools;
         public readonly List<string> PendingToolNames = [];
+        public readonly List<string?> PendingToolTargets = [];
         public readonly List<ChatEntry> Entries = [];
         public readonly List<ChatAnswer> Answers = [];
 
@@ -160,9 +164,10 @@ public static partial class ClaudeChatReader
         {
             text = text.Trim();
             if (text.Length == 0) return;
-            Entries.Add(new ChatEntry(line, ts, speaker, text, PendingTools) { Tools = [.. PendingToolNames] });
+            Entries.Add(new ChatEntry(line, ts, speaker, text, PendingTools) { Tools = [.. PendingToolNames], ToolTargets = [.. PendingToolTargets] });
             PendingTools = 0;
             PendingToolNames.Clear();
+            PendingToolTargets.Clear();
         }
     }
 
@@ -228,6 +233,8 @@ public static partial class ClaudeChatReader
                 case "tool_use":
                     s.PendingTools++;
                     s.PendingToolNames.Add(Str(block, "name") ?? "?");
+                    s.PendingToolTargets.Add(Str(block, "name") is { } toolName && block.TryGetProperty("input", out var toolInput)
+                        ? ToolTargets.Of(toolName, toolInput) : null);
                     if (Str(block, "name") == AskTool && Str(block, "id") is { } askId && block.TryGetProperty("input", out var askInput))
                         s.AskCalls[askId] = QuestionItems(askInput, null);
                     break;

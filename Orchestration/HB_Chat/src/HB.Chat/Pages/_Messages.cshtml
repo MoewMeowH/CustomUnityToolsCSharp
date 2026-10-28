@@ -57,6 +57,20 @@
         }
     }
 
+    // 그 말 앞 도구들의 칩 (대상 포함, 4차 C3). 이름이 없는 옛 기록은 "도구 N개"
+    void Chips(ChatEntry e)
+    {
+        if (e.Tools.Count == 0)
+        {
+            <span class="chip">도구 @(e.ToolsBefore)개</span>
+            return;
+        }
+        foreach (var (label, count) in RoomList.TargetChips(e.Tools, e.ToolTargets))
+        {
+            <span class="chip@(count == 0 ? " older-chips" : "")">@(count > 1 ? $"{label} ×{count}" : label)</span>
+        }
+    }
+
     // 같은 말 앞(· 맨 뒤)의 외부 실행 말풍선과 질문 답을 시각 차례로 (e8091295fe C1)
     void Placed(IReadOnlyList<RunBubble> runs, IReadOnlyList<ChatAnswer> answers, bool trailing = false)
     {
@@ -115,21 +129,11 @@
     }
     @foreach (var e in items)
     {
-        if (e.ToolsBefore > 0)
+        // 도구 칩 (4차 C3): 지휘자 말이면 실행 중처럼 그 말풍선 안 위쪽에 대상과 함께, 아니면(사용자 말 · 안내 앞) 지금처럼 가운데 줄
+        var chipsInBubble = e.Speaker == ChatSpeaker.Conductor && !RoomModel.IsStoppedTurn(e);
+        if (e.ToolsBefore > 0 && !chipsInBubble)
         {
-            <div class="tools" data-line="@e.Line">
-                @if (e.Tools.Count > 0)
-                {
-                    foreach (var (name, count) in RoomList.ToolChips(e.Tools))
-                    {
-                        <span class="chip">@(count > 1 ? $"{name} ×{count}" : name)</span>
-                    }
-                }
-                else
-                {
-                    <span class="chip">도구 @(e.ToolsBefore)개</span>
-                }
-            </div>
+            <div class="tools" data-line="@e.Line">@{ Chips(e); }</div>
         }
         Placed(Model.Runs.For(e), Model.Answers.For(e));
         if (RoomModel.IsStoppedTurn(e))
@@ -153,6 +157,10 @@
                     <span class="when">@e.Timestamp?.ToLocalTime().ToString("MM-dd HH:mm:ss")</span>
                     <button class="reply" type="button" title="이 말에 답장 (인용)">답장</button>
                 </div>
+                @if (chipsInBubble && e.ToolsBefore > 0)
+                {
+                    <div class="chips">@{ Chips(e); }</div>
+                }
                 <div class="body">@Model.Render(e)</div>
             </div>
         </div>

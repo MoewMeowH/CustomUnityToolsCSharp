@@ -138,7 +138,7 @@ public static class StreamParser
     public const int StatusChars = 300;
 
     /// <summary>도구 대상 글 상한 (글자, 칩).</summary>
-    public const int DetailChars = 60;
+    public const int DetailChars = HB.Orchestration.Shared.ToolTargets.MaxChars;
 
     private static StreamEvent ParseUsage(JsonElement e)
     {
@@ -161,35 +161,8 @@ public static class StreamParser
         return list;
     }
 
-    /// <summary>
-    /// 칩에 보일 짧은 대상: 파일 도구는 파일 이름(경로는 빼고), 명령은 첫 줄, 검색은 패턴, run_mode는 모드, 할 일 도구는 제목 · 번호 → 상태.
-    /// 모르는 도구는 null. 한 줄 · <see cref="DetailChars"/>자로 자른다 (화면에만 — 세션 기록에 이미 있는 글).
-    /// </summary>
-    public static string? Detail(string name, JsonElement input)
-    {
-        var tool = name.StartsWith("mcp__", StringComparison.Ordinal) ? name[(name.LastIndexOf("__", StringComparison.Ordinal) + 2)..] : name;
-        var text = tool switch
-        {
-            "Read" or "Edit" or "Write" or "NotebookEdit" => Str(input, "file_path") is { } p ? FileName(p) : null,
-            "Bash" or "PowerShell" => Str(input, "command"),
-            "Grep" or "Glob" => Str(input, "pattern"),
-            "run_mode" => Str(input, "mode"),
-            "TaskCreate" => Str(input, "subject"),
-            "TaskUpdate" => Str(input, "taskId") is { } id ? "#" + id + (Str(input, "status") is { } s ? " → " + s : "") : null,
-            "WebFetch" => Str(input, "url"),
-            "WebSearch" => Str(input, "query"),
-            _ => null,
-        };
-        if (string.IsNullOrWhiteSpace(text)) return null;
-        var line = text.Trim().Split('\n')[0].Trim();
-        return line.Length > DetailChars ? line[..DetailChars] + "…" : line;
-    }
-
-    private static string FileName(string path)
-    {
-        var cut = path.Replace('\\', '/').TrimEnd('/');
-        return cut[(cut.LastIndexOf('/') + 1)..];
-    }
+    /// <summary>칩에 보일 짧은 대상 — 끝난 턴 칩(세션 기록)과 같은 규칙이라 공용 <see cref="ToolTargets"/>로 옮김 (4차 C3).</summary>
+    public static string? Detail(string name, JsonElement input) => HB.Orchestration.Shared.ToolTargets.Of(name, input);
 
     private static string? Cap(string? s, int max) =>
         string.IsNullOrWhiteSpace(s) ? null : s.Length > max ? s[..max] + "…" : s.Trim();

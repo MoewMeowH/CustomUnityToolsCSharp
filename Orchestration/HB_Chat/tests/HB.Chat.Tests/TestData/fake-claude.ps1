@@ -94,11 +94,18 @@ switch ($mode) {
         # 할 일 도구 (3차 0번 실측 B): TaskCreate 둘 → 파일 → TaskUpdate → 파일 → 글. 앱은 도구 다음 출력에서 폴더를 다시 읽는다.
         $dir = Join-Path $TasksRoot $Sid
         New-Item -ItemType Directory -Force $dir | Out-Null
+        # 앱이 그 파일을 읽는 순간과 겹치면 쓰기가 실패할 수 있다 — 다시 시도한다 (앞서 다섯 번에 한 번꼴로 마지막 상태가 pending으로 남던 시험 실패, 4차 C3)
+        function Put([string]$path, [string]$text) {
+            for ($i = 0; $i -lt 40; $i++) {
+                try { [System.IO.File]::WriteAllText($path, $text); return } catch { Start-Sleep -Milliseconds 25 }
+            }
+            throw "할 일 파일을 쓰지 못함: $path"
+        }
         Emit '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"TaskCreate","input":{"subject":"alpha","description":"a"}},{"type":"tool_use","id":"t2","name":"TaskCreate","input":{"subject":"beta","description":"b"}}]}}'
-        Set-Content -Encoding UTF8 (Join-Path $dir '1.json') '{"id":"1","subject":"alpha","description":"a","status":"pending","blocks":[],"blockedBy":[]}'
-        Set-Content -Encoding UTF8 (Join-Path $dir '2.json') '{"id":"2","subject":"beta","description":"b","status":"pending","blocks":[],"blockedBy":[]}'
+        Put (Join-Path $dir '1.json') '{"id":"1","subject":"alpha","description":"a","status":"pending","blocks":[],"blockedBy":[]}'
+        Put (Join-Path $dir '2.json') '{"id":"2","subject":"beta","description":"b","status":"pending","blocks":[],"blockedBy":[]}'
         Emit '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t3","name":"TaskUpdate","input":{"taskId":"1","status":"in_progress"}}]}}'
-        Set-Content -Encoding UTF8 (Join-Path $dir '1.json') '{"id":"1","subject":"alpha","description":"a","status":"in_progress","blocks":[],"blockedBy":[]}'
+        Put (Join-Path $dir '1.json') '{"id":"1","subject":"alpha","description":"a","status":"in_progress","blocks":[],"blockedBy":[]}'
         Emit '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"working"}}}'
         Emit '{"type":"system","subtype":"post_turn_summary","status_category":"blocked","status_detail":"step alpha in progress","needs_action":"check alpha"}'
         Emit '{"type":"result","subtype":"success","is_error":false,"result":"working","total_cost_usd":0.001,"permission_denials":[]}'
