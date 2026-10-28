@@ -14,9 +14,119 @@ namespace HB.Chat.Pages;
 /// </summary>
 public sealed class RoomModel(
     RoomStore store, RoomHub hub, RoomList list, ChatTranscripts transcripts, StickerPacks packs, FaceCatalog faces, RoomRuns runs,
-    RoomNotes notes, Terminals terminals, AgentBrowser browser, IOptions<ChatOptions> options)
+    RoomNotes notes, Terminals terminals, AgentBrowser browser, McpProbe probe, IOptions<ChatOptions> options)
     : PageModel
 {
+    // ---- 연결 탭 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결 — Claude 앱 커넥터처럼) ----
+
+    /// <summary>
+    /// 연결 한 줄. Kind: base(기본 MCP) · app(앱 MCP hb-chat) · extra(작업 폴더 .mcp.json의 다른 서버) · unity. On: 이 방에서 켬.
+    /// Applies: 지금 단계에서 실제로 붙는지 (끈 것과 따로 — 켜 둬도 단계가 낮으면 안 붙음). Init: 마지막 실행 init의 상태 (connected · failed …).
+    /// </summary>
+    public sealed record Connection(string Name, string Kind, string Transport, string? Command, bool On, bool Applies, string? Note,
+        string? Init, ProbeResult? Probe, bool Probing, IReadOnlyList<(string Name, string? Description)>? StaticTools = null);
+
+    public McpProbe Probe => probe;
+
+    /// <summary>등록된 Unity 프로젝트 (연결 탭 select).</summary>
+    public IReadOnlyList<WorkspaceEntry> UnityProjects => options.Value.AllUnityProjects;
+
+    public IReadOnlyList<Connection> Connections
+    {
+        get
+        {
+            var o = options.Value;
+            var room = Room;
+            var ws = WorkspacePath;
+            var init = hub.Commands(room.Id)?.McpServers ?? [];
+            string? Init(string name) => init.FirstOrDefault(s => s.Name == name) is { Name: not null } s ? s.Status : null;
+            string Transport(string name) => ws is not null && McpConfigFile.Entry(ws, name)?["url"] is not null ? "http" : "stdio";
+            var readUp = room.Level != PermissionLevel.Chat;
+            var rows = new List<Connection>
+            {
+                new(o.McpServer, "base", ws is null ? "?" : Transport(o.McpServer), ws is null ? null : WorkspaceStore.McpCommand(ws, o.McpServer),
+                    !room.McpOff.Contains(o.McpServer), readUp, readUp ? null : "대화 방은 MCP를 붙이지 않습니다",
+                    Init(o.McpServer), probe.Last(room.Id, o.McpServer), probe.IsRunning(room.Id, o.McpServer)),
+                new(TerminalMcp.Server, "app", "http", "이 앱 (터미널 · 지휘자 브라우저 도구)", !room.McpOff.Contains(TerminalMcp.Server),
+                    room.Level == PermissionLevel.Command, room.Level == PermissionLevel.Command ? null : "명령 방에서만 붙습니다",
+                    Init(TerminalMcp.Server), null, false, McpProbe.AppTools()),
+            };
+            var names = ws is null ? [] : McpConfigFile.ServerNames(ws);
+            foreach (var name in names.Concat(room.McpExtra).Distinct(StringComparer.Ordinal)
+                         .Where(n => n != o.McpServer && n != TerminalMcp.Server && n != McpConfigFile.UnityServer))
+            {
+                var exists = names.Contains(name);
+                rows.Add(new(name, "extra", exists ? Transport(name) : "?", exists ? WorkspaceStore.McpCommand(ws!, name) : null,
+                    room.McpExtra.Contains(name), readUp && exists,
+                    !exists ? "작업 폴더 .mcp.json에 없어졌습니다 — 끄면 목록에서 빠집니다" : readUp ? null : "대화 방은 MCP를 붙이지 않습니다",
+                    Init(name), probe.Last(room.Id, name), probe.IsRunning(room.Id, name)));
+            }
+            if (room.UnityProject is { } unity)
+            {
+                var path = o.UnityProjectPath(unity);
+                var cli = o.ResolveUnityCli();
+                rows.Add(new(McpConfigFile.UnityServer, "unity", "stdio", cli is null || path is null ? null : $"unity mcp --project-path {path}",
+                    true, room.Level == PermissionLevel.Command && path is not null && cli is not null,
+                    path is null ? $"'{unity}'가 설정에 없습니다" : cli is null ? "Unity CLI(unity.exe)를 찾지 못했습니다 — 설정 Chat:UnityCliPath"
+                    : room.Level == PermissionLevel.Command ? null : "명령 방에서만 붙습니다",
+                    Init(McpConfigFile.UnityServer), probe.Last(room.Id, McpConfigFile.UnityServer), probe.IsRunning(room.Id, McpConfigFile.UnityServer)));
+            }
+            return rows;
+        }
+    }
+
+    /// <summary>연결 켜기 · 끄기: 기본 · 앱은 McpOff, 작업 폴더의 다른 서버는 McpExtra. 다음 실행부터.</summary>
+    public IActionResult OnPostMcpToggle(string id, string? name, bool on)
+    {
+        if (!RoomStore.IsRoomId(id) || store.Get(id) is not { } room) return NotFound();
+        var o = options.Value;
+        if (string.IsNullOrWhiteSpace(name) || !ClaudeArgs.IsServerName(name) || name == McpConfigFile.UnityServer) return BadRequest("알 수 없는 연결입니다.");
+        if (name == o.McpServer || name == TerminalMcp.Server)
+            return Change(id, r => r with { McpOff = on ? [.. r.McpOff.Where(n => n != name)] : [.. r.McpOff.Where(n => n != name), name] }, "연결을 바꾸지 못했습니다");
+        // 켤 때는 작업 폴더 .mcp.json에 있는 이름만 (끄기는 없어진 이름도 받는다)
+        if (on && (o.WorkspacePath(room.Workspace) is not { } ws || !McpConfigFile.ServerNames(ws).Contains(name)))
+            return BadRequest("작업 폴더 .mcp.json에 없는 서버입니다.");
+        return Change(id, r => r with { McpExtra = on ? [.. r.McpExtra.Where(n => n != name), name] : [.. r.McpExtra.Where(n => n != name)] }, "연결을 바꾸지 못했습니다");
+    }
+
+    /// <summary>Unity 프로젝트 연결 (명령 방만 — 결정). 빈 값이면 끊는다. 다음 실행부터.</summary>
+    public IActionResult OnPostUnity(string id, string? project)
+    {
+        if (!RoomStore.IsRoomId(id) || store.Get(id) is not { } room) return NotFound();
+        var p = string.IsNullOrWhiteSpace(project) ? null : project.Trim();
+        if (p is not null)
+        {
+            if (room.Level != PermissionLevel.Command) return BadRequest("Unity 프로젝트는 명령 방에서만 연결합니다.");
+            if (options.Value.UnityProjectPath(p) is null) return BadRequest("설정에 없는 Unity 프로젝트입니다.");
+            p = options.Value.AllUnityProjects.First(u => string.Equals(u.Name, p, StringComparison.OrdinalIgnoreCase)).Name;
+        }
+        return Change(id, r => r with { UnityProject = p }, "Unity 프로젝트를 바꾸지 못했습니다");
+    }
+
+    /// <summary>"확인": 앱이 그 서버를 띄워 도구 목록만 받고 닫는다 (<see cref="McpProbe"/>). 결과는 곁칸을 다시 받으면 보인다.</summary>
+    public async Task<IActionResult> OnPostMcpProbe(string id, string? name)
+    {
+        if (!RoomStore.IsRoomId(id) || store.Get(id) is not { } room) return NotFound();
+        var o = options.Value;
+        if (string.IsNullOrWhiteSpace(name) || !ClaudeArgs.IsServerName(name) || name == TerminalMcp.Server) return BadRequest("확인할 수 없는 연결입니다.");
+        // 대화 방은 MCP를 하나도 띄우지 않는 단계 — 확인도 띄우지 않는다 (지휘자 검토 K2)
+        if (room.Level == PermissionLevel.Chat) return BadRequest("대화 방은 MCP를 붙이지 않아 확인하지 않습니다.");
+        if (o.WorkspacePath(room.Workspace) is not { } ws || !Directory.Exists(ws)) return BadRequest("작업 폴더가 없습니다.");
+        System.Text.Json.Nodes.JsonObject? entry;
+        if (name == McpConfigFile.UnityServer)
+        {
+            if (room.UnityProject is not { } unity || o.UnityProjectPath(unity) is not { } path) return BadRequest("연결한 Unity 프로젝트가 없습니다.");
+            if (!o.UnityProjects.ContainsKey(unity) && o.AppUnityProjects?.WhyUnusable(path) is { } why) return BadRequest($"지금은 쓸 수 없는 프로젝트입니다: {why}");
+            if (o.ResolveUnityCli() is not { } cli) return BadRequest("Unity CLI(unity.exe)를 찾지 못했습니다.");
+            entry = McpConfigFile.UnityEntry(cli, path);
+        }
+        else entry = McpConfigFile.Entry(ws, name);
+        if (entry is null) return BadRequest("작업 폴더 .mcp.json에 없는 서버입니다.");
+        var result = await probe.ProbeAsync(id, name, entry, ws, HttpContext.RequestAborted);
+        if (result is null) return BadRequest("이미 확인 중입니다.");
+        return new JsonResult(new { ok = result.Ok, tools = result.Tools.Count, error = result.Error });
+    }
+
     public Room Room { get; private set; } = null!;
 
     /// <summary>이 방 마지막 실행이 알려 준 서브에이전트 이름 (Claude 앱 기능 D — 곁칸 목록). 이 앱을 켠 뒤 아직 돌지 않았으면 null.</summary>
@@ -288,6 +398,7 @@ public sealed class RoomModel(
         hub.ForgetCommands(id);
         terminals.StopRoom(id, "방 삭제"); // 그 방 터미널도 끝낸다 (계획서 2026-10-29_HB_Chat-터미널-곁칸)
         browser.Close(id, "방 삭제");
+        probe.Forget(id); // 연결 탭 확인 결과
         return Change(id, r => r with { DeletedAt = DateTimeOffset.Now }, "휴지통에 넣지 못했습니다");
     }
 
@@ -313,8 +424,12 @@ public sealed class RoomModel(
             var fork = store.Create(Room.Workspace, Room.Level, Room.Model, title, forkOf: Room.SessionId,
                 forkSourceSize: transcripts.Size(Room.SessionId));
             // 이 방에 고른 스티커 팩 · 추론 강도도 따라간다 (4차 D2 — ef2c83416c C6). "항상 허용" 규칙은 그대로 옮기지 않는다
-            if (Room.StickerPack is not null || Room.Effort is not null)
-                store.Update(fork.Id, r => r with { StickerPack = Room.StickerPack, Effort = Room.Effort });
+            // 연결(더한 서버 · 끈 기본 연결 · Unity)도 따라간다 — 갈래가 원래 방과 다른 도구로 시작하지 않게 (/self-review 0bcf01451b C5)
+            if (Room.StickerPack is not null || Room.Effort is not null || Room.McpExtra.Count > 0 || Room.McpOff.Count > 0 || Room.UnityProject is not null)
+                store.Update(fork.Id, r => r with
+                {
+                    StickerPack = Room.StickerPack, Effort = Room.Effort, McpExtra = Room.McpExtra, McpOff = Room.McpOff, UnityProject = Room.UnityProject,
+                });
             hub.Touch(fork.Id);
             return new JsonResult(new { ok = true, id = fork.Id });
         }
@@ -377,11 +492,11 @@ public sealed class RoomModel(
     /// <summary>방 기록의 스크린샷 그림: 그 방 폴더 · 이름 모양이 맞을 때만, nosniff · 같은 출처.</summary>
     public IActionResult OnGetShot(string id, string? name)
     {
-        if (browser.ShotPath(id, name) is not { } path) return NotFound();
+        if (RoomShots.PathOf(options.Value.DataFolder, id, name) is not { } path) return NotFound();
         Response.Headers.XContentTypeOptions = "nosniff";
         Response.Headers["Cross-Origin-Resource-Policy"] = "same-origin";
         Response.Headers.CacheControl = "private, max-age=86400"; // 이름이 시각이라 바뀌지 않는다
-        return PhysicalFile(path, "image/png");
+        return PhysicalFile(path, RoomShots.ContentType(path)); // 브라우저 png · Unity png/jpg
     }
 
     /// <summary>곁칸 브라우저 탭을 열 때: 마지막 실시간 화면(jpeg). 없으면 204.</summary>

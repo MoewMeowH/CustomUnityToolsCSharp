@@ -15,12 +15,13 @@ public sealed class RoomHubTests : IDisposable
     private readonly RoomStore _store;
     private readonly RoomHub _hub;
     private readonly List<RunSpec> _specs = [];
+    private readonly ChatOptions _options;
 
     public RoomHubTests()
     {
         Directory.CreateDirectory(Path.Combine(_dir, "ws"));
         Directory.CreateDirectory(Path.Combine(_dir, "projects"));
-        var options = new ChatOptions
+        var options = _options = new ChatOptions
         {
             DataDir = Path.Combine(_dir, "data"),
             ClaudeProjectsDir = Path.Combine(_dir, "projects"), // 할 일 폴더는 그 옆 tasks (3차 b)
@@ -32,12 +33,19 @@ public sealed class RoomHubTests : IDisposable
         {
             ProcessFactory = (room, spec, workspace) =>
             {
-                lock (_specs) _specs.Add(spec);
+                lock (_specs)
+                {
+                    _specs.Add(spec);
+                    // 방별 설정 파일은 실행이 끝나면 지워진다 — 띄울 때의 내용을 남긴다
+                    _configTexts.Add(spec.McpConfigPath is { } p && File.Exists(p) ? File.ReadAllText(p) : null);
+                }
                 return new ProcessSpec("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, spec.SessionId,
                     Path.Combine(_dir, "tasks")], workspace);
             },
         };
     }
+
+    private readonly List<string?> _configTexts = [];
 
     public void Dispose()
     {
@@ -631,6 +639,103 @@ public sealed class RoomHubTests : IDisposable
         var text = File.ReadAllText(spec.McpConfigPath);
         Assert.Contains("hb-orchestration", text);
         Assert.DoesNotContain("evil", text);
+    }
+
+    // ---- 방별 연결 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결) ----
+
+    [Fact]
+    public async Task RoomExtraServer_WritesRoomConfig_AllowsIt_AndDeletesAfterRun()
+    {
+        File.WriteAllText(Path.Combine(_dir, "ws", ".mcp.json"),
+            """{"mcpServers":{"hb-orchestration":{"command":"dotnet","args":["x.dll"]},"notion":{"url":"https://example.com/mcp"},"other":{"command":"evil"}}}""");
+        var room = _store.Create("ws", PermissionLevel.Read, "opus", null);
+        _store.Update(room.Id, r => r with { McpExtra = ["notion", "gone"] });
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "hello");
+        var events = await Until(ch, e => e.Kind == "idle");
+        Assert.True(events.Single(e => e.Kind == "end").Ok);
+        Assert.Contains(events, e => e.Kind == "notice" && e.Text!.Contains("gone"));
+
+        var spec = Assert.Single(_specs);
+        Assert.Equal(McpConfigFile.RoomPath(Path.Combine(_dir, "data"), room.Id), spec.McpConfigPath);
+        Assert.False(File.Exists(spec.McpConfigPath)); // 실행이 끝나면 지운다
+        Assert.Equal(["notion"], spec.ExtraMcpServers);
+        var config = Assert.Single(_configTexts);
+        Assert.Contains("hb-orchestration", config);
+        Assert.Contains("example.com/mcp", config);
+        Assert.DoesNotContain("evil", config);
+    }
+
+    [Fact]
+    public async Task RoomBaseServerOff_LeavesItOut()
+    {
+        File.WriteAllText(Path.Combine(_dir, "ws", ".mcp.json"), """{"mcpServers":{"notion":{"url":"https://example.com/mcp"}}}""");
+        var room = _store.Create("ws", PermissionLevel.Read, "opus", null);
+        _store.Update(room.Id, r => r with { McpOff = ["hb-orchestration"], McpExtra = ["notion"] });
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "hello");
+        Assert.True((await Until(ch, e => e.Kind == "idle")).Single(e => e.Kind == "end").Ok); // 기본 서버가 .mcp.json에 없어도 꺼 두면 돈다
+        var config = Assert.Single(_configTexts);
+        Assert.Contains("notion", config);
+        Assert.DoesNotContain("hb-orchestration", config);
+    }
+
+    [Fact]
+    public async Task CommandRoomWithUnity_AddsUnityServer_AndKeepsCaptureImage()
+    {
+        File.WriteAllText(Path.Combine(_dir, "ws", ".mcp.json"), """{"mcpServers":{"hb-orchestration":{"command":"dotnet"}}}""");
+        var project = Path.Combine(_dir, "MyGame");
+        Directory.CreateDirectory(Path.Combine(project, "ProjectSettings"));
+        var cli = Path.Combine(_dir, "unity.exe");
+        File.WriteAllText(cli, "");
+        _options.UnityProjects["MyGame"] = project;
+        _options.UnityCliPath = cli;
+        var log = new ApprovalLog(() => Path.Combine(_dir, "data"));
+        var notes = new RoomNotes(() => Path.Combine(_dir, "data"));
+        using var hub = new RoomHub(_store, new ChatTranscripts(() => Path.Combine(_dir, "projects")), Options.Create(_options))
+        {
+            Log = log,
+            ProcessFactory = (r, spec, workspace) =>
+            {
+                lock (_specs) _specs.Add(spec);
+                return new ProcessSpec("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
+                    Path.Combine(AppContext.BaseDirectory, "TestData", "fake-claude.ps1"), spec.SessionId, Path.Combine(_dir, "tasks")], workspace);
+            },
+        };
+        var room = _store.Create("ws", PermissionLevel.Command, "opus", null);
+        _store.Update(room.Id, r => r with { UnityProject = "MyGame" });
+        var ch = hub.Subscribe(room.Id);
+        hub.Send(room.Id, "unityshot");
+        Assert.True((await Until(ch, e => e.Kind == "idle")).Single(e => e.Kind == "end").Ok);
+
+        var spec = Assert.Single(_specs);
+        Assert.Contains(McpConfigFile.UnityServer, spec.ExtraMcpServers);
+        Assert.Contains("MyGame", spec.AppendSystemPrompt);
+        var shots = notes.Notes(room.Id).Where(n => n.Image is not null).ToList();
+        Assert.Equal(2, shots.Count); // 캡처 결과의 두 장(png · jpg) 다 — editor_status 그림은 남기지 않는다 (/self-review 0bcf01451b C7)
+        Assert.All(shots, shot => Assert.Contains("capture_game_view", shot.Text));
+        Assert.All(shots, shot => Assert.NotNull(RoomShots.PathOf(Path.Combine(_dir, "data"), room.Id, shot.Image)));
+        Assert.Contains(shots, shot => shot.Image!.EndsWith(".jpg", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task UnityProjectOnReadRoom_IsNotAttached()
+    {
+        File.WriteAllText(Path.Combine(_dir, "ws", ".mcp.json"), """{"mcpServers":{"hb-orchestration":{"command":"dotnet"}}}""");
+        var project = Path.Combine(_dir, "MyGame");
+        Directory.CreateDirectory(project);
+        var cli = Path.Combine(_dir, "unity.exe");
+        File.WriteAllText(cli, "");
+        _options.UnityProjects["MyGame"] = project;
+        _options.UnityCliPath = cli;
+        var room = _store.Create("ws", PermissionLevel.Read, "opus", null);
+        _store.Update(room.Id, r => r with { UnityProject = "MyGame" });
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "hello");
+        Assert.True((await Until(ch, e => e.Kind == "idle")).Single(e => e.Kind == "end").Ok);
+        var spec = Assert.Single(_specs);
+        Assert.Empty(spec.ExtraMcpServers);
+        Assert.DoesNotContain("unity", File.ReadAllText(spec.McpConfigPath!)); // 공용 파일 (실행 뒤에도 남음)
     }
 
     [Fact]

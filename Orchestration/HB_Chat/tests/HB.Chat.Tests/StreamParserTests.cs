@@ -40,7 +40,7 @@ public sealed class StreamParserTests
         var ev = Assert.IsType<UsageEvent>(StreamParser.Parse(
             """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"a","name":"Read","input":{"file_path":"C:\\ws\\src\\RoomHub.cs"}},{"type":"tool_use","id":"b","name":"Bash","input":{"command":"git status\ngit log"}},{"type":"text","text":"x"}]}}"""));
         Assert.Equal(0, ev.ContextTokens); // usage가 없는 줄 — 실행기는 컨텍스트로 쓰지 않는다
-        Assert.Equal([new ToolUse("Read", "RoomHub.cs"), new ToolUse("Bash", "git status")], ev.Tools);
+        Assert.Equal([new ToolUse("Read", "RoomHub.cs") { Id = "a" }, new ToolUse("Bash", "git status") { Id = "b" }], ev.Tools);
 
         using var doc = System.Text.Json.JsonDocument.Parse("""{"mode":"review_main","input":"x"}""");
         Assert.Equal("review_main", StreamParser.Detail("mcp__hb-orchestration__run_mode", doc.RootElement));

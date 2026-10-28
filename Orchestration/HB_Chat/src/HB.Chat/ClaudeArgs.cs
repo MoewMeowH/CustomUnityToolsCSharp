@@ -31,6 +31,13 @@ public sealed record RunSpec(
 
     /// <summary>앱 MCP(터미널 도구) 설정 파일 — 명령 단계에서만 쓴다 (<see cref="TerminalMcp"/>). null이면 터미널 도구 없이.</summary>
     public string? TerminalMcpConfigPath { get; init; }
+
+    /// <summary>
+    /// McpConfigPath 파일에 기본 서버 말고 더 든 서버 이름 (방이 더한 .mcp.json 서버 · unity, 계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결).
+    /// --allowedTools에 넣지 않는다 — 호출마다 앱(stdio 호스트)이 지금 방 단계 · 연결을 다시 보고 허용한다 (결정 4: 실행 중 내리기가 바로 막히게).
+    /// 여기서는 이름 모양만 검사한다.
+    /// </summary>
+    public IReadOnlyList<string> ExtraMcpServers { get; init; } = [];
 }
 
 /// <summary>
@@ -55,6 +62,12 @@ public static partial class ClaudeArgs
 
     /// <summary>모델 · MCP 서버 이름에 쓸 수 있는 모양인지 (인자 · 파일 이름에 들어간다).</summary>
     public static bool IsSafeName(string? value) => value is not null && SafeOption().IsMatch(value);
+
+    /// <summary>
+    /// MCP 서버 이름: 영숫자로 시작, 영숫자 _ - 만 64자까지. 파일 이름 · <c>mcp__서버__도구</c> 도구 이름에 그대로 들어가므로 . : / 를 받지 않는다
+    /// (/self-review security 00d712e2c7 C4 · 0bcf01451b C2 — CLI가 도구 이름에서 그 글자를 바꾸면 규칙과 어긋난다).
+    /// </summary>
+    public static bool IsServerName(string? value) => value is not null && ServerName().IsMatch(value);
 
     public static IReadOnlyList<string> Build(RunSpec spec, IReadOnlyCollection<string> allowedModels)
     {
@@ -209,12 +222,17 @@ public static partial class ClaudeArgs
         args.AddRange(["--strict-mcp-config", "--mcp-config", spec.McpConfigPath]);
         if (terminal) args.Add(spec.TerminalMcpConfigPath!);
         args.AddRange(["--allowedTools", $"mcp__{spec.McpServer}"]);
+        foreach (var extra in spec.ExtraMcpServers)
+            if (!IsServerName(extra) || extra == TerminalMcp.Server) throw new ArgumentException($"MCP 서버 이름 형식이 올바르지 않다: {extra}");
         if (terminal) args.AddRange(TerminalMcp.QuietTools);
     }
 
     /// <summary>모델 · 서버 이름: 영숫자로 시작, 영숫자 . _ : / - 만 64자까지.</summary>
     [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$")]
     private static partial Regex SafeOption();
+
+    [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")]
+    private static partial Regex ServerName();
 
     [GeneratedRegex("dangerously|bypass", RegexOptions.IgnoreCase)]
     private static partial Regex DangerousArg();

@@ -70,7 +70,20 @@ public sealed record UsageEvent(long ContextTokens) : StreamEvent
 }
 
 /// <summary>도구 호출 하나: 이름 · 화면에 보일 짧은 대상(파일 이름 · 명령 첫 줄 · 검색어 · 모드 — 없으면 null, 3차 b).</summary>
-public sealed record ToolUse(string Name, string? Detail);
+public sealed record ToolUse(string Name, string? Detail)
+{
+    /// <summary>tool_use id — 결과(tool_result)와 잇는다 (Unity 그림 기록, 계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결).</summary>
+    public string? Id { get; init; }
+}
+
+/// <summary>
+/// user 메시지의 tool_result 속 그림 (MCP 도구가 돌려준 base64 그림 — capture_game_view 등). 메인 대화만 (서브에이전트 줄은 뺀다).
+/// 그림 하나가 <see cref="RoomShots.MaxBytes"/>를 넘거나 png · jpeg가 아니면 넣지 않는다.
+/// </summary>
+public sealed record ToolImagesEvent(IReadOnlyList<ToolImage> Images) : StreamEvent;
+
+/// <summary>그림 하나. 풀기(base64)는 남길 그림에서만 — Read로 연 첨부 그림 · 브라우저 스크린샷도 여기로 온다.</summary>
+public sealed record ToolImage(string ToolUseId, string MediaType, string Base64);
 
 /// <summary>
 /// system/post_turn_summary: CLI가 턴마다 내는 지휘자 상태 한 줄 (3차 0번 실측 B — status_category blocked · completed · review_ready,
@@ -154,6 +167,7 @@ public static class StreamParser
                 "system" when subtype == "post_turn_summary" =>
                     new StatusEvent(Cap(Str(e, "status_category"), 40), Cap(Str(e, "status_detail"), StatusChars), Cap(Str(e, "needs_action"), StatusChars)),
                 "assistant" => ParseUsage(e),
+                "user" => ParseToolImages(e),
                 "result" => new ResultEvent(
                     Ok: subtype == "success" && !(e.TryGetProperty("is_error", out var err) && err.ValueKind == JsonValueKind.True),
                     Text: Str(e, "result"),
@@ -206,8 +220,34 @@ public static class StreamParser
         var list = new List<ToolUse>();
         foreach (var c in content.EnumerateArray())
             if (c.ValueKind == JsonValueKind.Object && Str(c, "type") == "tool_use" && Str(c, "name") is { Length: > 0 } name)
-                list.Add(new ToolUse(name, c.TryGetProperty("input", out var input) && input.ValueKind == JsonValueKind.Object ? Detail(name, input) : null));
+                list.Add(new ToolUse(name, c.TryGetProperty("input", out var input) && input.ValueKind == JsonValueKind.Object ? Detail(name, input) : null)
+                {
+                    Id = Str(c, "id"),
+                });
         return list;
+    }
+
+    /// <summary>user 줄의 tool_result 그림들. 없으면 OtherEvent("user").</summary>
+    private static StreamEvent ParseToolImages(JsonElement e)
+    {
+        if (e.TryGetProperty("parent_tool_use_id", out var parent) && parent.ValueKind == JsonValueKind.String) return new OtherEvent("user/subagent");
+        if (!e.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object
+            || !message.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array) return new OtherEvent("user");
+        var images = new List<ToolImage>();
+        foreach (var block in content.EnumerateArray())
+        {
+            if (block.ValueKind != JsonValueKind.Object || Str(block, "type") != "tool_result" || Str(block, "tool_use_id") is not { Length: > 0 } id
+                || !block.TryGetProperty("content", out var inner) || inner.ValueKind != JsonValueKind.Array) continue;
+            foreach (var part in inner.EnumerateArray())
+            {
+                if (part.ValueKind != JsonValueKind.Object || Str(part, "type") != "image"
+                    || !part.TryGetProperty("source", out var source) || source.ValueKind != JsonValueKind.Object
+                    || Str(source, "type") != "base64" || RoomShots.Ext(Str(source, "media_type")) is null
+                    || Str(source, "data") is not { Length: > 0 } data || data.Length / 4 * 3 > RoomShots.MaxBytes) continue;
+                images.Add(new ToolImage(id, Str(source, "media_type")!, data));
+            }
+        }
+        return images.Count > 0 ? new ToolImagesEvent(images) : new OtherEvent("user");
     }
 
     /// <summary>칩에 보일 짧은 대상 — 끝난 턴 칩(세션 기록)과 같은 규칙이라 공용 <see cref="ToolTargets"/>로 옮김 (4차 C3).</summary>

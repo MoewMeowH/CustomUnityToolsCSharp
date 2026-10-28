@@ -32,6 +32,7 @@ public static class Trash
         if (store.LoadError is not null) return [];
         var removed = store.RemoveWhere(which);
         foreach (var id in removed.Where(RoomStore.IsRoomId))
+        {
             // 첨부 · 지휘자 브라우저 프로필(쿠키 · 로그인) · 스크린샷 (/self-review security 8b11177bd5 C6). 브라우저는 휴지통에 넣을 때 닫았다
             foreach (var dir in new[] { Path.Combine(dataFolder, "attachments", id), Path.Combine(dataFolder, "browser", id), Path.Combine(dataFolder, "browser-shots", id) })
             {
@@ -41,6 +42,9 @@ public static class Trash
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { } // 다음 지우기 때 남은 폴더는 그대로 — 색인에서는 빠졌다
             }
+            // 실행 도중 앱이 죽어 남은 방별 MCP 설정 파일 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결, 지휘자 검토 K7)
+            McpConfigFile.DeleteRoom(McpConfigFile.RoomPath(dataFolder, id));
+        }
         return removed;
     }
 }

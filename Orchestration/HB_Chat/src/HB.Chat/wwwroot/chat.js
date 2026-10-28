@@ -1192,7 +1192,7 @@
         // ---- 오른쪽 곁칸 (3차 c): 단계 · 방 정보 · 외부 실행 · 첨부. 열림 · 탭은 브라우저 저장(편의만 — 못 읽으면 닫힌 채 · 단계 탭) ----
         const side = $("#side"), sideToggle = $("#side-toggle");
         const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch { } } };
-        const sideTabs = ["steps", "info", "runs", "files", "term", "browser"];
+        const sideTabs = ["steps", "info", "runs", "files", "mcp", "term", "browser"];
         // 저장값이 모르는 탭이면 단계 탭 — 모든 칸이 숨던 문제 (c216951e79 C7)
         let sideTab = sideTabs.includes(store.get("hbchat.sideTab")) ? store.get("hbchat.sideTab") : "steps";
         if (sideTab === "term" && !$("#side-tab-term")) sideTab = "steps"; // 터미널 탭이 없는 칸(옛 화면)이면
@@ -1252,6 +1252,30 @@
                     button.disabled = true;
                     if (await post("Settings", new FormData(settings))) { reopenRoom(roomId); return; }
                     button.disabled = false;
+                });
+                // 연결 탭 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결): 켜기 · 끄기 · Unity 고르기 · 확인. 다음 실행부터 — 성공하면 곁칸만 다시 받는다
+                $("#side-sec-mcp")?.addEventListener("change", async (e) => {
+                    const t = e.target;
+                    if (t.matches("input[data-mcp]")) {
+                        const data = new FormData(); data.append("name", t.dataset.mcp); data.append("on", String(t.checked));
+                        t.disabled = true;
+                        if (!await post("McpToggle", data)) t.checked = !t.checked;
+                        loadSide();
+                    } else if (t.id === "side-unity") {
+                        const data = new FormData(); data.append("project", t.value);
+                        t.disabled = true;
+                        await post("Unity", data);
+                        loadSide();
+                    }
+                });
+                $("#side-sec-mcp")?.addEventListener("click", async (e) => {
+                    const b = e.target.closest("button[data-probe]");
+                    if (!b) return;
+                    const data = new FormData(); data.append("name", b.dataset.probe);
+                    b.disabled = true;
+                    b.textContent = "확인 중…";
+                    await post("McpProbe", data); // 결과(성공 · 실패 · 도구)는 곁칸이 그린다
+                    loadSide();
                 });
                 showTab(sideTab);
             } catch {

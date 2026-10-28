@@ -789,4 +789,38 @@ public sealed class ApprovalFlowTests : IDisposable
         Assert.DoesNotContain(seen, e => e.Kind == "question");
         Assert.Contains(ClaudeRunner.NoApprover, seen.Single(e => e.Kind == "end").Text);
     }
+
+    // ---- 방별 서버 도구 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결 결정 4) ----
+
+    [Fact]
+    public async Task UnityTools_NoCardButEval_AndRecheckedAfterLowering()
+    {
+        var project = Path.Combine(_dir, "Game");
+        Directory.CreateDirectory(project);
+        var cli = Path.Combine(_dir, "unity.exe");
+        File.WriteAllText(cli, "");
+        _options.UnityProjects["Game"] = project;
+        _options.UnityCliPath = cli;
+        var room = CommandRoom();
+        _store.Update(room.Id, r => r with { UnityProject = "Game" });
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "roomtools");
+
+        // editor_status는 카드 없이 지나가고 eval만 카드 ("항상 허용" 없음)
+        var before = await Until(ch, e => e.Kind == "approval");
+        var card = before.Single(e => e.Kind == "approval").Approval!;
+        Assert.Equal("mcp__unity__eval", card.Tool);
+        Assert.Contains("Debug.Log(1);", card.Summary);
+        Assert.Null(card.Rule);
+
+        // 카드를 기다리는 사이 권한을 내리면 카드 허용도 막히고(기존 장치), 그 뒤 Unity 호출은 카드 없이 거절된다 (미리 허용하지 않으므로)
+        _store.Update(room.Id, r => r with { Level = PermissionLevel.Edit });
+        Assert.NotNull(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null));
+        Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Deny, null));
+        var seen = await Until(ch, e => e.Kind == "idle");
+        var end = seen.Single(e => e.Kind == "end");
+        Assert.True(end.Ok, end.Text);
+        Assert.Contains("Unity 연결을 끊었거나 권한을 명령 아래로 내림", Log());
+        Assert.DoesNotContain(_specs.Single().ExtraMcpServers, s => s != "unity");
+    }
 }

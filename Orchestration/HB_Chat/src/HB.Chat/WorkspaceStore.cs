@@ -27,6 +27,12 @@ public sealed partial class WorkspaceStore
     private readonly string _path;
     private readonly IReadOnlyDictionary<string, string> _configured;
     private readonly IReadOnlyList<string> _protectedFolders;
+    /// <summary>방이 이 목록의 이름을 가리키는 칸 — 작업 폴더면 Workspace, Unity 프로젝트면 UnityProject (지우기 · 이름 다시 쓰기 막기).</summary>
+    private readonly Func<Room, string?> _usedBy;
+    /// <summary>더할 때 더 보는 검사 (Unity 프로젝트: ProjectSettings/ProjectVersion.txt). null이면 없음.</summary>
+    private readonly Func<string, string?>? _extraCheck;
+    private readonly string _noun;
+    private string FileName => System.IO.Path.GetFileName(_path);
 
     /// <summary>파일에 있는 그대로 (쓸 수 없는 항목도 — 저장할 때 잃지 않게, 460430d647 C5).</summary>
     private readonly Dictionary<string, string> _saved = new(StringComparer.OrdinalIgnoreCase);
@@ -45,10 +51,17 @@ public sealed partial class WorkspaceStore
     /// 작업 폴더가 품거나 그 안이면 안 되는 폴더 — 이 앱 · 그 git 저장소 · 데이터 폴더 · Claude 설정 폴더 · 설정 작업 폴더 기준 편집 금지 폴더.
     /// 편집 금지 규칙이 작업 폴더 기준 상대 경로라, 이 폴더들을 따로 작업 폴더로 두면 그 보호가 사라지므로.
     /// </param>
-    public WorkspaceStore(string path, IReadOnlyDictionary<string, string> configured, IEnumerable<string> protectedFolders)
+    /// <param name="usedBy">방이 이름을 가리키는 칸 (기본 작업 폴더). Unity 프로젝트 목록은 r => r.UnityProject.</param>
+    /// <param name="extraCheck">더할 때 · 켤 때 · 실행 전에 더 보는 검사 (최종 경로 → 오류 문구).</param>
+    /// <param name="noun">오류 문구에 쓸 항목 이름 (작업 폴더 · Unity 프로젝트).</param>
+    public WorkspaceStore(string path, IReadOnlyDictionary<string, string> configured, IEnumerable<string> protectedFolders,
+        Func<Room, string?>? usedBy = null, Func<string, string?>? extraCheck = null, string noun = "작업 폴더")
     {
         _path = path;
+        _noun = noun;
         _configured = configured;
+        _usedBy = usedBy ?? (r => r.Workspace);
+        _extraCheck = extraCheck;
         _protectedFolders = [.. protectedFolders.Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => Resolve(p) ?? Full(p)).OfType<string>()
             .Distinct(StringComparer.OrdinalIgnoreCase)];
         var warnings = new List<string>();
@@ -62,7 +75,7 @@ public sealed partial class WorkspaceStore
                     // 읽을 때도 같은 검사 — 파일을 앱 밖에서 고쳤어도(명령 방 등) 위험한 폴더가 들어오지 않게 (eee1adb777 C5 · 460430d647 C4)
                     var why = _configured.ContainsKey(name) ? "설정 파일에 같은 이름이 있어 그쪽을 씁니다"
                         : !NameShape().IsMatch(name) ? "이름 모양이 맞지 않습니다"
-                        : WhyUnsafe(folder);
+                        : WhyUnsafe(folder) ?? _extraCheck?.Invoke(Resolve(folder!)!);
                     if (why is null) _added[name] = Resolve(folder!)!;
                     else warnings.Add($"{name}: {why}");
                 }
@@ -101,12 +114,13 @@ public sealed partial class WorkspaceStore
         var n = name?.Trim() ?? "";
         lock (_lock)
         {
-            if (LoadError is not null) return $"workspaces.json을 읽지 못해 쓰지 않습니다: {LoadError}";
+            if (LoadError is not null) return $"{FileName}을 읽지 못해 쓰지 않습니다: {LoadError}";
             if (!NameShape().IsMatch(n)) return "이름은 글자 · 숫자로 시작하고 글자 · 숫자 · 공백 · . _ - 만 40자까지 씁니다.";
             if (_configured.ContainsKey(n) || _saved.ContainsKey(n)) return "이미 있는 이름입니다.";
-            if (rooms.Any(r => string.Equals(r.Workspace, n, StringComparison.OrdinalIgnoreCase)))
+            if (rooms.Any(r => string.Equals(_usedBy(r), n, StringComparison.OrdinalIgnoreCase)))
                 return "그 이름을 쓰던 방이 남아 있습니다(휴지통 포함) — 다른 이름을 쓰세요.";
             if (WhyUnsafe(path) is { } why) return why;
+            if (_extraCheck?.Invoke(Resolve(path!)!) is { } extra) return extra;
             var final = Resolve(path!)!;
             foreach (var other in _configured.Values.Concat(_added.Values))
                 if ((Resolve(other) ?? Full(other)) is { } o && Same(final, o)) return "이미 다른 이름으로 있는 폴더입니다.";
@@ -132,12 +146,12 @@ public sealed partial class WorkspaceStore
         var n = name?.Trim() ?? "";
         lock (_lock)
         {
-            if (LoadError is not null) return $"workspaces.json을 읽지 못해 쓰지 않습니다: {LoadError}";
+            if (LoadError is not null) return $"{FileName}을 읽지 못해 쓰지 않습니다: {LoadError}";
             if (!_saved.TryGetValue(n, out var before))
-                return _configured.ContainsKey(n) ? "설정 파일(appsettings)의 작업 폴더는 앱에서 지울 수 없습니다." : "없는 작업 폴더입니다.";
+                return _configured.ContainsKey(n) ? $"설정 파일(appsettings)의 {_noun}는 앱에서 지울 수 없습니다." : $"없는 {_noun}입니다.";
             // 설정 파일에 같은 이름이 있으면 방은 그쪽을 쓰고 있다 — 앱 항목만 지운다
-            var used = _configured.ContainsKey(n) ? 0 : rooms.Count(r => string.Equals(r.Workspace, n, StringComparison.OrdinalIgnoreCase));
-            if (used > 0) return $"이 작업 폴더를 쓰는 방이 {used}개 있습니다(휴지통 포함) — 그 방을 먼저 정리하세요.";
+            var used = _configured.ContainsKey(n) ? 0 : rooms.Count(r => string.Equals(_usedBy(r), n, StringComparison.OrdinalIgnoreCase));
+            if (used > 0) return $"이 항목을 쓰는 방이 {used}개 있습니다(휴지통 포함) — 그 방에서 먼저 빼세요.";
             var hadAdded = _added.Remove(n, out var added);
             _saved.Remove(n);
             try
@@ -185,6 +199,10 @@ public sealed partial class WorkspaceStore
                 return $"이 앱 · 그 저장소 · 데이터 · Claude 설정 폴더를 품거나 그 안인 폴더는 쓸 수 없습니다 (지휘자가 앱 · 설정을 고칠 수 있게 됨): {guarded}";
         return null;
     }
+
+    /// <summary>지금 쓸 수 없는 이유 — <see cref="WhyUnsafe"/>에 더해 그 목록의 검사(Unity 프로젝트 모양)까지. 실행 전 · 화면 표시에 쓴다.</summary>
+    public string? WhyUnusable(string path) =>
+        WhyUnsafe(path) ?? (_extraCheck is null || Resolve(path) is not { } final ? null : _extraCheck(final));
 
     /// <summary>
     /// 그 폴더 .mcp.json의 MCP 서버 항목이 실행할 명령 (command + args, 200자) — 읽기 이상 방은 이 명령을 승인 없이 띄운다 (<see cref="McpConfigFile"/>,

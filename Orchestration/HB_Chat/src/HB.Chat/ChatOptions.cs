@@ -112,6 +112,45 @@ public sealed class ChatOptions
     public IReadOnlyList<WorkspaceEntry> AllWorkspaces =>
         AppWorkspaces?.All() ?? [.. Workspaces.Where(p => !string.IsNullOrWhiteSpace(p.Value)).Select(p => new WorkspaceEntry(p.Key, p.Value.Trim(), true))];
 
+    // ---- Unity 프로젝트 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결) ----
+
+    /// <summary>설정 파일의 Unity 프로젝트 이름 → 경로 (작업 폴더와 같은 모양). 앱에서 더한 것은 <see cref="AppUnityProjects"/>.</summary>
+    public Dictionary<string, string> UnityProjects { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>앱에서 더한 Unity 프로젝트 (데이터 폴더 unity-projects.json, 작업 폴더와 같은 검사). 켤 때 Program이 채운다.</summary>
+    [Microsoft.Extensions.Configuration.ConfigurationKeyName("__app_unity_projects_not_bound__")]
+    public WorkspaceStore? AppUnityProjects { get; set; }
+
+    /// <summary>Unity CLI 실행 파일 (`unity mcp`를 띄운다). 비우면 %LOCALAPPDATA%\Unity\bin\unity.exe, 없으면 PATH의 unity.</summary>
+    public string? UnityCliPath { get; set; }
+
+    /// <summary>Unity 프로젝트 이름 → 경로 (설정 파일 먼저). 없으면 null.</summary>
+    public string? UnityProjectPath(string? name) =>
+        name is null ? null
+        : UnityProjects.TryGetValue(name, out var path) && !string.IsNullOrWhiteSpace(path) ? path.Trim()
+        : AppUnityProjects?.PathOf(name);
+
+    public IReadOnlyList<WorkspaceEntry> AllUnityProjects =>
+        AppUnityProjects?.All() ?? [.. UnityProjects.Where(p => !string.IsNullOrWhiteSpace(p.Value)).Select(p => new WorkspaceEntry(p.Key, p.Value.Trim(), true))];
+
+    /// <summary>unity.exe 경로. 못 찾으면 null — 그 방 실행에 Unity 연결을 붙이지 않는다.</summary>
+    public string? ResolveUnityCli()
+    {
+        if (!string.IsNullOrWhiteSpace(UnityCliPath)) return File.Exists(UnityCliPath.Trim()) ? UnityCliPath.Trim() : null;
+        var local = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Unity", "bin", "unity.exe");
+        if (File.Exists(local)) return local;
+        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            try
+            {
+                var candidate = Path.Combine(dir.Trim(), "unity.exe");
+                if (File.Exists(candidate)) return candidate;
+            }
+            catch (ArgumentException) { }
+        }
+        return null;
+    }
+
     /// <summary>claude 실행 파일 경로. 설정이 없고 PATH에서도 못 찾으면 "claude" (실행할 때 실패로 보인다).</summary>
     public string ResolveClaude()
     {

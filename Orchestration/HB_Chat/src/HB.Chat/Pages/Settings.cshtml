@@ -77,6 +77,62 @@
                 </p>
             </section>
 
+            @* Unity 프로젝트 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결): 명령 방이 곁칸 '연결'에서 하나를 고르면 그 실행에 unity mcp가 붙는다 *@
+            <section class="panel" style="padding:12px 14px;margin-bottom:16px">
+                <h3 style="margin:0 0 6px;font-size:15px">Unity 프로젝트</h3>
+                <p class="muted" style="margin:0 0 8px;font-size:12.5px">
+                    명령 방의 곁칸 → 연결에서 고르면 그 방 지휘자가 열린 에디터를 <b>묻지 않고</b> 조작합니다 (씬 · 에셋 편집 · 빌드 · 패키지 포함, C# 코드 실행만 카드로 묻습니다).
+                    Unity CLI: <span class="mono">@(Model.UnityCli ?? "찾지 못함 — Chat:UnityCliPath")</span>
+                </p>
+                @if (Model.UnityLoadError is { } uError)
+                {
+                    <p style="color:var(--warn);margin:0 0 8px">unity-projects.json을 읽지 못해 더하기 · 지우기를 막았습니다 (덮어쓰지 않음): @uError</p>
+                }
+                @foreach (var warning in Model.UnityWarnings)
+                {
+                    <p style="color:var(--warn);margin:0 0 6px">쓰지 않는 앱 항목 — @warning</p>
+                }
+                <table class="settings-table">
+                    <thead><tr><th>이름</th><th>경로</th><th>출처</th><th>방</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var u in Model.UnityRows)
+                        {
+                            <tr>
+                                <td>@u.Entry.Name</td>
+                                <td class="mono">@u.Entry.Path@(u.Exists ? "" : " (없는 폴더)")
+                                    @if (u.Unusable is { } why)
+                                    {
+                                        <br /><span style="color:var(--warn);font-family:inherit">지금 쓸 수 없음 — @why</span>
+                                    }
+                                </td>
+                                <td class="muted">@(u.Entry.FromConfig ? "설정 파일" : "앱")</td>
+                                <td>@u.Rooms</td>
+                                <td>
+                                    @if (!u.Entry.FromConfig)
+                                    {
+                                        <form method="post" asp-page-handler="RemoveUnity" onsubmit="return confirm('목록에서 뺄까요? 프로젝트 파일은 지우지 않습니다.')">
+                                            <input type="hidden" name="name" value="@u.Entry.Name" />
+                                            <button class="btn" type="submit" @(u.Rooms > 0 ? "disabled" : null)
+                                                    title="@(u.Rooms > 0 ? "이 프로젝트를 연결한 방(휴지통 포함)이 있어 뺄 수 없습니다" : "목록에서 빼기")">@Icons.Svg("minus") 빼기</button>
+                                        </form>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                @if (Model.UnityRows.Count == 0)
+                {
+                    <p class="muted" style="margin:6px 0 0">아직 없습니다.</p>
+                }
+                <form method="post" asp-page-handler="AddUnity" class="settings-add">
+                    <input type="text" name="name" placeholder="이름 (예: ToolCreate)" maxlength="40" required value="@Model.NewUnityName" />
+                    <input type="text" name="path" placeholder="프로젝트 폴더 (예: F:/AI/ToolCreate)" maxlength="400" required value="@Model.NewUnityPath" class="mono" />
+                    <label class="muted"><input type="checkbox" name="confirm" value="true" /> 연결한 명령 방의 지휘자가 이 프로젝트 에디터를 묻지 않고 조작한다는 것을 압니다</label>
+                    <button class="btn primary" type="submit">@Icons.Svg("plus") 더하기</button>
+                </form>
+            </section>
+
             <section class="panel" style="padding:12px 14px">
                 <h3 style="margin:0 0 6px;font-size:15px">방 이름</h3>
                 <p class="muted" style="margin:0 0 8px;font-size:12.5px">비우면 첫 말이 제목이 됩니다. 방의 작업 폴더는 바꿀 수 없습니다 — 세션 기록이 폴더마다 저장돼서 새 방을 만들어야 합니다.</p>

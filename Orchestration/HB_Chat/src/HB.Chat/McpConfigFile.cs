@@ -14,7 +14,7 @@ public static class McpConfigFile
     public static string Write(string workspaceDir, string server, string dataDir)
     {
         // 이름이 파일 이름에 들어가므로 쓰기 전에 검사한다 (설정 값에 ..\ 가 있으면 데이터 폴더 밖에 쓰게 된다 — b19234c862 C4).
-        if (!ClaudeArgs.IsSafeName(server)) throw new InvalidOperationException($"MCP 서버 이름 형식이 올바르지 않습니다: {server}");
+        if (!ClaudeArgs.IsServerName(server)) throw new InvalidOperationException($"MCP 서버 이름 형식이 올바르지 않습니다: {server}");
         var source = Path.Combine(workspaceDir, ".mcp.json");
         JsonNode? entry;
         try
@@ -61,6 +61,83 @@ public static class McpConfigFile
                 Thread.Sleep(20);
             }
         }
+    }
+
+    /// <summary>Unity 연결 항목 이름 — 도구 이름이 <c>mcp__unity__&lt;명령&gt;</c> (0단계 실측).</summary>
+    public const string UnityServer = "unity";
+
+    /// <summary>
+    /// 방마다 고른 연결로 만든 --mcp-config 파일 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결): 작업 폴더 .mcp.json에서 servers 이름들을 옮기고,
+    /// unity가 있으면 <c>unity.exe mcp --project-path 경로</c> 항목을 더한다. 방 ID 이름의 파일이라 실행이 끝나면 <see cref="DeleteRoom"/>로 지운다.
+    /// .mcp.json에 없는 이름은 빼고 missing으로 돌려준다 (방 칸이 알린다). servers가 비고 unity도 없으면 빈 mcpServers.
+    /// </summary>
+    public static (string Path, IReadOnlyList<string> Missing) WriteRoom(string workspaceDir, IEnumerable<string> servers,
+        (string Cli, string Project)? unity, string dataDir, string roomId)
+    {
+        if (!RoomStore.IsRoomId(roomId)) throw new InvalidOperationException($"방 ID 모양이 아닙니다: {roomId}");
+        var source = Path.Combine(workspaceDir, ".mcp.json");
+        JsonObject? all = null;
+        var names = servers.Distinct(StringComparer.Ordinal).ToList();
+        if (names.Count > 0)
+        {
+            foreach (var name in names)
+                if (!ClaudeArgs.IsServerName(name) || name == UnityServer || name == TerminalMcp.Server)
+                    throw new InvalidOperationException($"MCP 서버 이름 형식이 올바르지 않습니다: {name}");
+            try
+            {
+                all = JsonNode.Parse(File.ReadAllText(source))?["mcpServers"] as JsonObject;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+            {
+                throw new InvalidOperationException($"{source}를 읽지 못했습니다: {ex.Message}", ex);
+            }
+        }
+        var picked = new JsonObject();
+        var missing = new List<string>();
+        foreach (var name in names)
+            if (all?[name] is JsonObject entry) picked[name] = entry.DeepClone();
+            else missing.Add(name);
+        if (unity is { } u) picked[UnityServer] = UnityEntry(u.Cli, u.Project);
+        Directory.CreateDirectory(dataDir);
+        var path = RoomPath(dataDir, roomId);
+        var tmp = $"{path}.{Guid.NewGuid():N}.tmp";
+        File.WriteAllText(tmp, new JsonObject { ["mcpServers"] = picked }.ToJsonString(new() { WriteIndented = true }), new UTF8Encoding(false));
+        File.Move(tmp, path, overwrite: true); // 한 방은 한 번에 한 실행만 돈다
+        return (path, missing);
+    }
+
+    /// <summary>Unity 연결 항목: <c>unity.exe mcp --project-path 경로</c> (stdio, 0단계 실측).</summary>
+    public static JsonObject UnityEntry(string cli, string project) => new()
+    {
+        ["command"] = cli,
+        ["args"] = new JsonArray("mcp", "--project-path", project),
+    };
+
+    public static string RoomPath(string dataDir, string roomId) => Path.Combine(dataDir, $"mcp-room-{roomId}.json");
+
+    public static void DeleteRoom(string path) => TryDelete(path);
+
+    /// <summary>그 폴더 .mcp.json의 서버 이름들 (연결 칸 목록). 없거나 읽지 못하면 빈 목록.</summary>
+    public static IReadOnlyList<string> ServerNames(string workspaceDir)
+    {
+        try
+        {
+            var file = Path.Combine(workspaceDir, ".mcp.json");
+            if (!File.Exists(file) || JsonNode.Parse(File.ReadAllText(file))?["mcpServers"] is not JsonObject all) return [];
+            return [.. all.Select(p => p.Key).Where(ClaudeArgs.IsServerName)];
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or ArgumentException) { return []; }
+    }
+
+    /// <summary>그 폴더 .mcp.json의 서버 항목 (앱 쪽 "확인"이 띄운다). 없으면 null.</summary>
+    public static JsonObject? Entry(string workspaceDir, string server)
+    {
+        try
+        {
+            var file = Path.Combine(workspaceDir, ".mcp.json");
+            return File.Exists(file) ? JsonNode.Parse(File.ReadAllText(file))?["mcpServers"]?[server] as JsonObject : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or ArgumentException) { return null; }
     }
 
     private static bool SameContent(string path, string json)

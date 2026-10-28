@@ -23,7 +23,6 @@ public sealed partial class AgentBrowser(Func<string> dataFolder, Func<string?>?
     public const int Width = 1280, Height = 800;
     public const int ReadMaxChars = 8000;
     public const int TitleMaxChars = 200;
-    public const int MaxShotsPerRoom = 200;
     private static readonly TimeSpan LoadWait = TimeSpan.FromSeconds(15);
     /// <summary>screencast 프레임 사이 최소 간격 — ack를 늦춰 Chrome이 초당 4장 안쪽으로 보내게 (/self-review 822a55c0cf C5).</summary>
     private static readonly TimeSpan FrameGap = TimeSpan.FromMilliseconds(250);
@@ -495,31 +494,10 @@ public sealed partial class AgentBrowser(Func<string> dataFolder, Func<string?>?
     // ---- 스크린샷 기록 (결정 "기록에 그림으로 남김") ----
 
     /// <summary>방 기록용 스크린샷 파일을 남기고 이름을 준다. 같은 밀리초면 뒤에 번호. 방마다 오래된 것부터 상한 안으로.</summary>
-    public string SaveShot(string roomId, byte[] png)
-    {
-        if (!RoomStore.IsRoomId(roomId)) throw new InvalidOperationException("방 ID 모양이 아닙니다.");
-        var dir = ShotFolder(roomId);
-        Directory.CreateDirectory(dir);
-        var stem = $"{DateTime.Now:yyyyMMdd-HHmmss-fff}";
-        var name = stem + ".png";
-        for (var i = 1; File.Exists(Path.Combine(dir, name)); i++) name = $"{stem}-{i}.png"; // 지휘자 검토 K3
-        File.WriteAllBytes(Path.Combine(dir, name), png);
-        foreach (var old in Directory.GetFiles(dir, "*.png").Order(StringComparer.Ordinal).SkipLast(MaxShotsPerRoom))
-        {
-            try { File.Delete(old); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-        }
-        return name;
-    }
+    public string SaveShot(string roomId, byte[] png) => RoomShots.Save(dataFolder(), roomId, png);
 
-    /// <summary>방 기록 그림 파일 경로 — 이름 모양이 맞고 그 방 폴더에 있을 때만.</summary>
-    public string? ShotPath(string roomId, string? name)
-    {
-        if (!RoomStore.IsRoomId(roomId) || name is null || !ShotName().IsMatch(name)) return null;
-        var path = Path.Combine(ShotFolder(roomId), name);
-        return File.Exists(path) ? path : null;
-    }
-
-    private string ShotFolder(string roomId) => Path.Combine(dataFolder(), "browser-shots", roomId);
+    /// <summary>방 기록 그림 파일 경로 — 이름 모양이 맞고 그 방 폴더에 있을 때만 (<see cref="RoomShots"/>, Unity 그림도 같은 폴더).</summary>
+    public string? ShotPath(string roomId, string? name) => RoomShots.PathOf(dataFolder(), roomId, name);
 
     public void Dispose()
     {
@@ -539,8 +517,6 @@ public sealed partial class AgentBrowser(Func<string> dataFolder, Func<string?>?
         ["PageUp"] = (33, null), ["PageDown"] = (34, null), ["Home"] = (36, null), ["End"] = (35, null),
     };
 
-    [GeneratedRegex(@"^\d{8}-\d{6}-\d{3}(-\d{1,4})?\.png$")]
-    private static partial Regex ShotName();
 
     private sealed class Session(string roomId, Process process, CdpClient cdp, CdpClient root, string mainTarget)
     {

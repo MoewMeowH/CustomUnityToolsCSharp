@@ -146,6 +146,115 @@
         }
     </ul>
 </section>
+@* 연결 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결 — Claude 앱 커넥터처럼): 종류 · 켬 · 상태 · 도구 · 확인. 다음 실행부터 반영 *@
+<section class="side-sec" data-tab="mcp" id="side-sec-mcp" role="tabpanel" aria-labelledby="side-tab-mcp">
+    @* 결정 4: 더한 서버는 단계와 상관없이 묻지 않는다 — 단계 설명과 다른 점을 적는다 (/self-review security 00d712e2c7 C2) *@
+    <p class="muted side-settings-note">다음 말부터 적용됩니다. 켠 연결의 도구는 지휘자가 <b>묻지 않고</b> 씁니다 — 방 권한 단계와 상관없이 (읽기 방이어도 그 서버의 쓰기 도구는 돕니다). 끄거나 권한을 내리면 실행 중인 턴에서도 바로 막힙니다. 상태는 이 방 마지막 실행 · '확인' 결과입니다.</p>
+    <ul class="mcp-list">
+        @foreach (var c in Model.Connections)
+        {
+            var kind = c.Kind switch { "base" => "기본", "app" => "앱", "unity" => "Unity", _ => "작업 폴더" };
+            var probe = c.Probe;
+            var tools = c.StaticTools ?? probe?.Tools;
+            <li class="mcp-item @(c.On && c.Applies ? "" : "off")">
+                <div class="mcp-head">
+                    <span class="mcp-name mono">@c.Name</span>
+                    <span class="mcp-tag">@kind</span>
+                    <span class="mcp-tag">@c.Transport</span>
+                    @if (c.Kind != "unity")
+                    {
+                        <label class="switch mcp-switch" title="@(c.On ? "이 방에서 끄기" : "이 방에서 켜기")">
+                            <input type="checkbox" data-mcp="@c.Name" checked="@c.On" aria-label="@c.Name 켜기" />
+                            <span class="track"></span>
+                        </label>
+                    }
+                </div>
+                @if (c.Command is { } cmd)
+                {
+                    <div class="mcp-cmd mono muted" title="@cmd">@cmd</div>
+                }
+                <div class="mcp-state">
+                    @if (c.Note is { } note)
+                    {
+                        <span class="muted">@note</span>
+                    }
+                    else if (!c.On)
+                    {
+                        <span class="muted">꺼짐</span>
+                    }
+                    else
+                    {
+                        <span class="mcp-dot @(c.Init switch { "connected" => "ok", null => "", _ => "bad" })"></span>
+                        @* 마지막 실행에 없던 연결(막 켬 · 앱을 다시 켬)은 다음 실행부터 붙는다 (지휘자 검토 K6) *@
+                        <span>@(c.Init switch { "connected" => "연결됨", null => "다음 실행부터 붙습니다 (상태는 그 뒤에)", var s => s })</span>
+                    }
+                    @if (probe is not null)
+                    {
+                        <span class="muted"> · 확인 @probe.At.ToLocalTime().ToString("HH:mm") — </span>
+                        @if (probe.Ok)
+                        {
+                            <span>도구 @(probe.Tools.Count)개 (@(probe.Millis)ms)</span>
+                            @if (c.Kind == "unity" && probe.Tools.Count == 0)
+                            {
+                                <span class="warn-text"> — 에디터가 꺼져 있습니다 (그 프로젝트 에디터를 켜야 도구가 보입니다)</span>
+                            }
+                        }
+                        else
+                        {
+                            <span class="warn-text">실패: @probe.Error</span>
+                        }
+                    }
+                    @if (c.Kind != "app")
+                    {
+                        <button type="button" class="btn mcp-probe" data-probe="@c.Name" disabled="@c.Probing">@(c.Probing ? "확인 중…" : "확인")</button>
+                    }
+                </div>
+                @if (tools is { Count: > 0 })
+                {
+                    <details class="mcp-tools">
+                        <summary>도구 @(tools.Count)개</summary>
+                        <ul>
+                            @foreach (var (name, desc) in tools.Take(300))
+                            {
+                                <li><span class="mono">@name</span>@if (!string.IsNullOrWhiteSpace(desc))
+                                    {
+                                        <span class="muted"> — @(desc.Length > 160 ? desc[..160] + "…" : desc)</span>
+                                    }</li>
+                            }
+                        </ul>
+                    </details>
+                }
+            </li>
+        }
+    </ul>
+    @* Unity 프로젝트 연결 (결정: 명령 방만 · 권한 나누지 않음 — 연결하면 편집) *@
+    <div class="mcp-unity">
+        <label for="side-unity"><b>Unity 프로젝트</b></label>
+        @if (room.Level != PermissionLevel.Command && room.UnityProject is null)
+        {
+            <p class="muted side-settings-note">명령 방에서만 연결합니다.</p>
+        }
+        else if (Model.UnityProjects.Count == 0 && room.UnityProject is null)
+        {
+            <p class="muted side-settings-note">설정 화면에서 Unity 프로젝트를 먼저 더하세요.</p>
+        }
+        else
+        {
+            <select id="side-unity">
+                <option value="" selected="@(room.UnityProject is null)">연결 안 함</option>
+                @foreach (var u in Model.UnityProjects)
+                {
+                    <option value="@u.Name" selected="@(string.Equals(u.Name, room.UnityProject, StringComparison.OrdinalIgnoreCase))" disabled="@(room.Level != PermissionLevel.Command)">@u.Name</option>
+                }
+                @if (room.UnityProject is { } gone && Model.UnityProjects.All(u => !string.Equals(u.Name, gone, StringComparison.OrdinalIgnoreCase)))
+                {
+                    <option value="@gone" selected>@gone (설정에 없음)</option>
+                }
+            </select>
+            <p class="muted side-settings-note">연결하면 지휘자가 열린 에디터를 묻지 않고 조작합니다 (씬 · 에셋 편집 · 빌드 · 패키지 포함). C# 코드 실행(eval · eval_file · run_script)만 카드로 묻습니다 — 허용한 코드는 편집 금지 경로도 막지 못합니다. capture_game_view 그림은 대화 기록에 남습니다.</p>
+        }
+    </div>
+</section>
 <section class="side-sec" data-tab="files" id="side-sec-files" role="tabpanel" aria-labelledby="side-tab-files">
     @{ var files = Model.AttachmentFiles; }
     @if (files.Count == 0)

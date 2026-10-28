@@ -38,6 +38,7 @@ builder.Services.AddSingleton(sp => new RoomStore(Path.Combine(sp.GetRequiredSer
 builder.Services.AddSingleton(sp => new ChatTranscripts(() => sp.GetRequiredService<IOptions<ChatOptions>>().Value.ProjectsRoot));
 // 터미널 곁칸 (계획서 2026-10-29_HB_Chat-터미널-곁칸): 지휘자가 띄운 서버를 앱이 ConPTY로 붙잡는다 + 앱 MCP(명령 방 실행만, 실행 토큰)
 builder.Services.AddSingleton<Terminals>();
+builder.Services.AddSingleton<McpProbe>(); // 곁칸 연결 탭 "확인" (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결)
 builder.Services.AddHttpContextAccessor();
 // 지휘자 브라우저 (계획서 2026-10-29_HB_Chat-지휘자-브라우저): 방마다 화면 없는 Chrome(없으면 Edge) · 별도 프로필 — 같은 앱 MCP
 builder.Services.AddSingleton(sp => new AgentBrowser(() => sp.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder,
@@ -95,6 +96,16 @@ var app = builder.Build();
         app.Logger.LogWarning("앱에서 더한 작업 폴더(workspaces.json)를 읽지 못했습니다 — 덮어쓰지 않고 설정 파일 것만 씁니다: {Error}", wsError);
     foreach (var warning in chat.AppWorkspaces.LoadWarnings)
         app.Logger.LogWarning("앱에서 더한 작업 폴더를 쓰지 않습니다: {Warning}", warning);
+
+    // Unity 프로젝트 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결): 작업 폴더와 같은 검사 + Unity 프로젝트 모양. 방은 UnityProject 칸으로 가리킨다.
+    chat.AppUnityProjects = new WorkspaceStore(Path.Combine(chat.DataFolder, "unity-projects.json"), chat.UnityProjects, guarded,
+        usedBy: r => r.UnityProject,
+        extraCheck: p => File.Exists(Path.Combine(p, "ProjectSettings", "ProjectVersion.txt")) ? null : "Unity 프로젝트 폴더가 아닙니다 (ProjectSettings/ProjectVersion.txt 없음).",
+        noun: "Unity 프로젝트");
+    if (chat.AppUnityProjects.LoadError is { } unityError)
+        app.Logger.LogWarning("앱에서 더한 Unity 프로젝트(unity-projects.json)를 읽지 못했습니다: {Error}", unityError);
+    foreach (var warning in chat.AppUnityProjects.LoadWarnings)
+        app.Logger.LogWarning("앱에서 더한 Unity 프로젝트를 쓰지 않습니다: {Warning}", warning);
 }
 
 // 앱이 비정상 종료돼도 claude 프로세스 트리가 남지 않게 (ProcessJob). 실패해도 켜기는 한다 — 정상 종료 · 중지의 트리 종료는 그대로 돈다.

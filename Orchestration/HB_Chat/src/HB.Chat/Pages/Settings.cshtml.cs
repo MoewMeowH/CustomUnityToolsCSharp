@@ -167,6 +167,36 @@ public sealed class SettingsModel(
 
     public IReadOnlyList<WorkspaceRow> Workspaces { get; private set; } = [];
 
+    // ---- Unity 프로젝트 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결) ----
+
+    public sealed record UnityRow(WorkspaceEntry Entry, bool Exists, int Rooms, string? Unusable);
+
+    public IReadOnlyList<UnityRow> UnityRows { get; private set; } = [];
+    public string? UnityLoadError => options.Value.AppUnityProjects?.LoadError;
+    public IReadOnlyList<string> UnityWarnings => options.Value.AppUnityProjects?.LoadWarnings ?? [];
+    public string? UnityCli => options.Value.ResolveUnityCli();
+    public string? NewUnityName { get; private set; }
+    public string? NewUnityPath { get; private set; }
+
+    public IActionResult OnPostAddUnity(string? name, string? path, bool confirm)
+    {
+        if (!confirm) Error = "연결한 방이 에디터를 묻지 않고 조작한다는 확인에 체크해 주세요.";
+        else if (options.Value.AppUnityProjects is not { } added) Error = "Unity 프로젝트 저장소가 준비되지 않았습니다.";
+        else Error = added.Add(name, path, store.All());
+        if (Error is null) return RedirectToPage(new { done = "added" });
+        (NewUnityName, NewUnityPath) = (name, path);
+        Fill();
+        return Page();
+    }
+
+    public IActionResult OnPostRemoveUnity(string? name)
+    {
+        Error = options.Value.AppUnityProjects is { } added ? added.Remove(name, store.All()) : "Unity 프로젝트 저장소가 준비되지 않았습니다.";
+        if (Error is null) return RedirectToPage(new { done = "removed" });
+        Fill();
+        return Page();
+    }
+
     /// <summary>방 줄 (휴지통 밖, 최근 순): 방 · 보이는 제목.</summary>
     public IReadOnlyList<(Room Room, string Title)> Rooms { get; private set; } = [];
 
@@ -224,6 +254,12 @@ public sealed class SettingsModel(
                 WorkspaceStore.McpCommand(w.Path, options.Value.McpServer), WorkspaceStore.HasProjectHooks(w.Path), Directory.Exists(w.Path),
                 all.Count(r => string.Equals(r.Workspace, w.Name, StringComparison.OrdinalIgnoreCase)),
                 w.FromConfig || !Directory.Exists(w.Path) ? null : options.Value.AppWorkspaces?.WhyUnsafe(w.Path))),
+        ];
+        UnityRows =
+        [
+            .. options.Value.AllUnityProjects.Select(u => new UnityRow(u, Directory.Exists(u.Path),
+                all.Count(r => string.Equals(r.UnityProject, u.Name, StringComparison.OrdinalIgnoreCase)),
+                u.FromConfig || !Directory.Exists(u.Path) ? null : options.Value.AppUnityProjects?.WhyUnusable(u.Path))),
         ];
         Rooms = [.. all.Where(r => r.DeletedAt is null).OrderByDescending(r => r.LastRunAt ?? r.CreatedAt)
             .Select(r => (r, RoomList.TitleOf(r, transcripts.Read(r.SessionId))))];

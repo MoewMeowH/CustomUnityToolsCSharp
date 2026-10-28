@@ -171,6 +171,23 @@ select, input[type=text], textarea { background: var(--panel); border: 1px solid
 .side-settings-note.warn-rules { color: var(--warn); }
 .side-settings-note.warn-rules ul { margin: 2px 0 0; padding-left: 18px; overflow-wrap: anywhere; }
 .side-rename input { flex: 1; min-width: 0; }
+/* 연결 탭 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결) */
+.mcp-list { list-style: none; margin: 8px 0 0; padding: 0; }
+.mcp-item { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.mcp-item.off .mcp-name { color: var(--muted); }
+.mcp-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.mcp-name { font-weight: 600; overflow-wrap: anywhere; }
+.mcp-tag { font-size: 11px; padding: 0 6px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); }
+.mcp-switch { margin-left: auto; }
+.mcp-cmd { font-size: 11px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mcp-state { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 4px; font-size: 12px; margin-top: 4px; }
+.mcp-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); flex: none; }
+.mcp-dot.ok { background: var(--ok); } .mcp-dot.bad { background: var(--err); }
+.mcp-probe { margin-left: auto; padding: 1px 8px; font-size: 12px; }
+.mcp-tools { margin-top: 4px; font-size: 12px; }
+.mcp-tools ul { margin: 4px 0 0; padding-left: 16px; max-height: 260px; overflow: auto; overflow-wrap: anywhere; }
+.mcp-unity { margin-top: 12px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.warn-text { color: var(--warn); }
 .side-list { list-style: none; margin: 0; padding: 0; }
 .side-list li { padding: 6px 0; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 2px 8px; overflow-wrap: anywhere; }
 #side-toggle[aria-expanded=true] { border-color: var(--accent); color: var(--accent); }

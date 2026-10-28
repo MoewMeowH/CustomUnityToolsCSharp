@@ -66,6 +66,18 @@ public sealed record Room
 
     /// <summary>"계획 먼저" (Claude 앱 기능 C): 다음 실행을 계획 모드로. 계획을 승인하면 앱이 끈다. 편집 · 명령 단계에서만 쓰인다.</summary>
     public bool PlanNext { get; init; }
+
+    /// <summary>
+    /// 이 방에 더 붙일 작업 폴더 .mcp.json의 MCP 서버 이름 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결 — Notion E). 읽기 이상 단계에서만 붙는다.
+    /// 기본 서버(hb-orchestration)는 여기 넣지 않는다 — 늘 붙고, 끄려면 <see cref="McpOff"/>.
+    /// </summary>
+    public IReadOnlyList<string> McpExtra { get; init; } = [];
+
+    /// <summary>이 방에서 끈 기본 연결: 기본 MCP 서버 이름(hb-orchestration) · 앱 MCP(<see cref="TerminalMcp.Server"/>). 다음 실행부터 안 붙는다.</summary>
+    public IReadOnlyList<string> McpOff { get; init; } = [];
+
+    /// <summary>연결한 Unity 프로젝트 이름 (설정에 등록한 것). 명령 방에서만 그 실행에 `unity mcp`가 붙는다 (결정 "명령 방만").</summary>
+    public string? UnityProject { get; init; }
 }
 
 /// <summary>추론 강도 (Claude 앱 기능 B): claude 2.1.312 --effort가 받는 값. 화면 select · 저장 · 인자 검사가 같이 쓴다.</summary>

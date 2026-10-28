@@ -45,6 +45,9 @@ public sealed class RoomNotes(Func<string> dataFolder)
     /// <summary>지휘자 브라우저 스크린샷 줄 (계획서 2026-10-29_HB_Chat-지휘자-브라우저, 결정 "기록에 그림으로 남김") — 요약 칸 = 그림 파일 이름.</summary>
     public const string BrowserShotTool = "브라우저 스크린샷";
 
+    /// <summary>Unity 캡처 그림 줄 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결 결정 3) — 브라우저 스크린샷과 같은 모양.</summary>
+    public const string UnityShotTool = "Unity 스크린샷";
+
     private readonly Lock _gate = new();
     private string? _path;
     private long _end;
@@ -126,7 +129,7 @@ public sealed class RoomNotes(Func<string> dataFolder)
             if (tool == ClaudeArgs.AskTool) return null; // 질문 카드 답은 '나' 말풍선으로 이미 있다
             var decision = Str(e, "decision") ?? "";
             var summary = FirstLine(Str(e, "summary") ?? "", 120);
-            if (tool == BrowserShotTool) return (room, new RoomNote(at, decision, false) { Image = Str(e, "summary") });
+            if (tool is BrowserShotTool or UnityShotTool) return (room, new RoomNote(at, decision, false) { Image = Str(e, "summary") });
             var text = tool switch
             {
                 BackgroundTool or TerminalTool => decision,
