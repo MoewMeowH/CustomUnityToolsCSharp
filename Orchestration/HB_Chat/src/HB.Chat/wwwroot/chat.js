@@ -258,9 +258,100 @@
             box.append(bar, frame, details);
         });
     }
+    // ---- 차트 시안 (계획서 Orchestration/HB_Chat/docs/plans/2026-10-29_HB_Chat-차트-시안.md) ----
+    // 지휘자 말풍선의 ```chart 코드 블록(Chart.js 설정 JSON)을 앱에 넣어 둔 Chart.js(wwwroot/lib, 4.6.1)로 그린다.
+    // 지휘자 스크립트는 없다: 틀은 앱이 만들고, 데이터는 JSON 블록으로만 들어간다 (< > & 를 \u 이스케이프 — 글이 태그를 닫지 못하게).
+    // 격리는 위젯과 같다 — srcdoc, allow-same-origin 없음, 같은 문서 CSP(네트워크 막음). 결정 "바로 그림"이라 처음부터 allow-scripts.
+    // 바로 그리는 차트는 말풍선 하나에 ChartAutoMax개까지, 넘으면 "그리기"를 눌러야 — 차트마다 210KB 틀이라 수백 개로 화면이 멈추지 않게 (f8602c9ccd C1)
+    const ChartMaxChars = 50000, ChartHeight = 320, ChartAutoMax = 6;
+    // 설정 JSON에서 버릴 키: 틀 스크립트의 Object.assign이 __proto__를 setter로 타지 않게 (Chart.js 4.6.1 병합은 이미 거름, f8602c9ccd C2)
+    const ChartDropKeys = new Set(["__proto__", "constructor", "prototype"]);
+    const ChartTypes = new Set(["bar", "line", "pie", "doughnut", "radar", "polarArea", "scatter", "bubble"]);
+    let chartLib = null; // Promise<string> — 처음 쓸 때 한 번 받는다, 실패하면 다음에 다시
+    function loadChartLib() {
+        chartLib ??= fetch("/lib/chart.umd.min.js", { credentials: "omit" })
+            .then(r => { if (!r.ok) throw new Error(String(r.status)); return r.text(); })
+            .catch(e => { chartLib = null; throw e; });
+        return chartLib;
+    }
+    function chartConfig(source) {
+        if (source.length > ChartMaxChars) return { error: `차트 데이터가 너무 커서(${source.length.toLocaleString()}자) 코드로만 보입니다.` };
+        let config;
+        try { config = JSON.parse(source, (k, v) => ChartDropKeys.has(k) ? undefined : v); } catch { return { error: "차트 JSON을 읽지 못해 코드로만 보입니다." }; }
+        if (config === null || typeof config !== "object" || Array.isArray(config) || !ChartTypes.has(config.type))
+            return { error: "차트 종류(type)가 없거나 지원하지 않는 종류라 코드로만 보입니다." };
+        return { config };
+    }
+    // <script> 안에 넣을 JSON: 글이 </script>나 <!--로 틀을 깨지 못하게 < > & 와 줄 구분 문자를 \u 이스케이프 (JSON.parse로는 같은 값)
+    function scriptJson(value) {
+        return JSON.stringify(value).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026")
+            .replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+    }
+    function chartTheme() {
+        const s = getComputedStyle(document.documentElement), v = name => s.getPropertyValue(name).trim();
+        return { text: v("--text") || "#888", line: v("--line") || "#8884", panel: v("--panel") || "transparent" };
+    }
+    function chartDoc(lib, config, theme) {
+        return "<!doctype html><html><head><meta charset=\"utf-8\">" +
+            "<meta http-equiv=\"Content-Security-Policy\" content=\"" + WidgetCsp + "\">" +
+            "<style>html,body{margin:0}body{padding:8px;font:13px system-ui,\"Malgun Gothic\",sans-serif}" +
+            ".box{position:relative;height:" + ChartHeight + "px}.err{white-space:pre-wrap}</style>" +
+            "<script>" + lib.replace(/<\/script/gi, "<\\/script") + "<\/script>" +
+            "<script type=\"application/json\" id=\"hb-chart\">" + scriptJson({ config, theme }) + "<\/script>" +
+            "</head><body><div class=\"box\"><canvas></canvas></div>" +
+            // 그리기 실패(설정 오류)는 틀 안에 글로만. 높이 알림은 위젯과 같은 메시지 — 부모가 보낸 창 · 상한을 확인한다
+            "<script>(()=>{const d=JSON.parse(document.getElementById(\"hb-chart\").textContent),c=d.config,t=d.theme;" +
+            // 틀 문서는 color-scheme이 부모(다크)와 달라 흰 바탕을 칠한다 — 앱 패널 색으로 (실제 확인: 흰 바탕에 밝은 글자)
+            "document.documentElement.style.background=t.panel;document.body.style.color=t.text;" +
+            // 겹친 방어: 그리기 전에 WebRTC 생성자를 지운다 — CSP · sandbox로 못 막는 전송 길 (완전하지 않음, f8602c9ccd C2)
+            "for(const k of[\"RTCPeerConnection\",\"webkitRTCPeerConnection\",\"RTCDataChannel\"]){try{delete window[k];}catch(e){}try{window[k]=undefined;}catch(e){}}" +
+            "try{Chart.defaults.color=t.text;Chart.defaults.borderColor=t.line;Chart.defaults.animation=false;" +
+            // devicePixelRatio는 앱이 정한다 — 큰 값으로 캔버스 메모리를 키우지 못하게 (f8602c9ccd C1)
+            "c.options=Object.assign({},c.options,{responsive:true,maintainAspectRatio:false,devicePixelRatio:Math.min(window.devicePixelRatio||1,2)});" +
+            "new Chart(document.querySelector(\"canvas\"),c);}" +
+            "catch(e){const p=document.createElement(\"div\");p.className=\"err\";p.textContent=\"차트를 그리지 못했습니다: \"+e.message;" +
+            "document.querySelector(\".box\").replaceWith(p);}" +
+            "const s=()=>parent.postMessage({hbWidgetHeight:Math.ceil(document.body.getBoundingClientRect().height)},\"*\");" +
+            "s();new ResizeObserver(s).observe(document.body);})()<\/script></body></html>";
+    }
+    function charts(container) {
+        container.querySelectorAll(".msg.conductor .body pre > code.language-chart").forEach(code => {
+            const pre = code.parentElement;
+            if (pre.closest(".widget")) return;
+            const box = el("div", "widget chart");
+            pre.replaceWith(box);
+            const note = text => { const n = el("div", "muted widget-note"); n.dataset.note = text; return n; };
+            const parsed = chartConfig(code.textContent);
+            if (parsed.error) { box.append(note(parsed.error), pre); return; }
+            const details = el("details", "widget-code");
+            details.append(el("summary"), pre);
+            const bar = el("div", "widget-bar");
+            box.append(bar, details);
+            const draw = () => loadChartLib().then(lib => {
+                const frame = el("iframe", "widget-frame running chart-frame");
+                frame.setAttribute("sandbox", "allow-scripts");
+                frame.setAttribute("referrerpolicy", "no-referrer");
+                frame.setAttribute("loading", "lazy");
+                frame.title = "차트";
+                frame.srcdoc = chartDoc(lib, parsed.config, chartTheme());
+                details.before(frame);
+            }, () => details.before(note("차트 라이브러리를 불러오지 못해 데이터로만 보입니다.")));
+            // 이 말풍선에서 몇 번째 차트인지 (그릴 수 있는 것만 센다)
+            const msg = box.closest(".msg");
+            const nth = Number(msg.dataset.charts || 0) + 1;
+            msg.dataset.charts = String(nth);
+            if (nth <= ChartAutoMax) { draw(); return; }
+            const go = el("button", "widget-run chart-draw");
+            go.type = "button";
+            go.setAttribute("aria-label", "차트 그리기");
+            go.addEventListener("click", () => { go.remove(); draw(); });
+            bar.append(go);
+        });
+    }
     // 코드 블록 복사 단추 (2-2 b). 글자는 CSS ::after로 넣는다 — 인용 답장이 innerText로 본문을 읽을 때 섞이지 않게.
     function decorate(container) {
         widgets(container);
+        charts(container);
         container.querySelectorAll(".body pre").forEach(pre => {
             if (pre.querySelector(":scope > .copy")) return;
             const b = el("button", "copy");

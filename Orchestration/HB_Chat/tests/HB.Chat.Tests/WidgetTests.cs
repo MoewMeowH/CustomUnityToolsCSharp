@@ -48,8 +48,41 @@ public sealed class WidgetTests
     [InlineData("앞\r\n```widget\r\n<b>x</b>\r\n```\r\n뒤", "앞 [위젯] 뒤")]       // CRLF
     [InlineData("앞\n```widget\n<b>x</b> 끝나지 않음", "앞 [위젯]")]               // 닫히지 않음 (중지된 턴)
     [InlineData("앞\n```widgets\n<b>x</b>\n```", "앞 <b>x</b>")]                  // 다른 언어 이름은 접지 않음 (울타리 줄만 지움)
+    [InlineData("앞\n```chart\n{\"type\":\"bar\"}\n```\n뒤", "앞 [차트] 뒤")]       // 차트 시안 (2026-10-29)
+    [InlineData("앞\n~~~chart\n{\"type\":\"pie\"}\n~~~\n뒤", "앞 [차트] 뒤")]
+    [InlineData("앞\n```chart\n{\"type\":\"bar\" 끝나지 않음", "앞 [차트]")]
+    [InlineData("앞\n```charts\n{}\n```", "앞 {}")]                                 // 다른 언어 이름은 접지 않음
     public void Preview_WidgetBlockShapesMatchRenderer(string text, string preview) =>
         Assert.Equal(preview, RoomList.Preview(text)); // (803e5f13eb C6)
+
+    [Fact]
+    public void ChartFence_RendersAsEscapedCodeWithLanguageClass()
+    {
+        // 화면(chat.js charts)은 code.language-chart의 textContent를 JSON으로 읽는다 — 부모 페이지에는 글자로만 들어와야 한다
+        var html = SafeMarkdown.ToHtml("```chart\n{\"type\":\"bar\",\"data\":{\"labels\":[\"</script><b>\"]}}\n```\n", SafeMarkdown.Default);
+        Assert.Contains("<code class=\"language-chart\">", html);
+        Assert.Contains("&lt;/script&gt;&lt;b&gt;", html);
+        Assert.DoesNotContain("</script>", html);
+    }
+
+    [Fact]
+    public void RoomRules_TellChartFormat()
+    {
+        var rules = RoomRules.For(PermissionLevel.Chat);
+        Assert.Contains("```chart", rules);
+        Assert.Contains("Chart.js 설정 JSON", rules);
+    }
+
+    [Fact]
+    public void ChartLibrary_IsBundledWithLicense()
+    {
+        // 앱이 내주는 Chart.js 4.6.1 (npm 배포 파일 그대로, 계획서 2026-10-29_HB_Chat-차트-시안) — 바뀌면 SHA를 계획서 · 작업 로그와 같이 갱신
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "HB.Chat", "wwwroot", "lib"));
+        var lib = File.ReadAllBytes(Path.Combine(root, "chart.umd.min.js"));
+        Assert.Equal("87364cc2b2a76a6684929e7d6b80b18a897794db38400caff1fcf1791c6925d2",
+            Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(lib)));
+        Assert.Contains("MIT License", File.ReadAllText(Path.Combine(root, "chart.js.LICENSE.md")));
+    }
 
     [Fact]
     public async Task UseWidgetCsp_SetsFrameSrcNoneOnResponses()

@@ -193,6 +193,11 @@ select, input[type=text], textarea { background: var(--panel); border: 1px solid
 .widget-frame.running { height: 160px; resize: none; }
 .widget-code > summary { cursor: pointer; font-size: 12px; color: var(--muted); margin-top: 4px; }
 .widget-code > summary::after { content: "코드 보기"; }
+/* 차트 시안 (2026-10-29): 지휘자 스크립트 없이 앱이 그린다 — 표시 글도 그렇게 */
+.widget.chart .widget-bar::before { content: "지휘자가 준 데이터로 앱이 그린 차트"; }
+.widget-frame.chart-frame { height: 336px; }
+.widget.chart .widget-code > summary::after { content: "데이터 보기"; }
+.widget-run.chart-draw::after { content: "▶ 그리기"; }
 .widget-note { font-size: 12px; margin-bottom: 4px; }
 .widget-note::before { content: attr(data-note); }
 
