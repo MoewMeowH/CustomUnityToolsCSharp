@@ -54,7 +54,13 @@ public sealed record Room
     /// <summary>마지막 실행이 끝날 때의 컨텍스트 크기 · 창 (토큰, 계획서 2-2 b 컨텍스트 표시). 첫 턴 전에는 없다.</summary>
     public long? ContextTokens { get; init; }
     public int? ContextWindow { get; init; }
+
+    /// <summary>마지막 턴의 지휘자 상태 한 줄 (CLI post_turn_summary, 3차 b). 방 머리 · 목록 · 미니 창에 보인다.</summary>
+    public RoomStatus? Status { get; init; }
 }
+
+/// <summary>지휘자 상태 한 줄: 종류(blocked · completed · review_ready …) · 상태 글 · 사용자가 할 일.</summary>
+public sealed record RoomStatus(string? Category, string? Detail, string? NeedsAction);
 
 /// <summary>
 /// 방 색인 rooms.json. 쓸 때마다 임시 파일 → 바꾸기로 원자적으로 쓴다.

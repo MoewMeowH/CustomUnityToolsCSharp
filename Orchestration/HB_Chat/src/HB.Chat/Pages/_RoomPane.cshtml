@@ -19,6 +19,11 @@
         <div class="head-title">
             <h2 id="room-title" title="눌러서 이름 바꾸기">@Model.Title</h2>
             <span class="muted" id="face-label">@FaceCatalog.Label(face)</span>
+            @* 지휘자 상태 한 줄 (CLI post_turn_summary, 3차 b) — 사용자가 할 일이 있으면 그것을 *@
+            @{ var st = room.Status; var stLine = st?.NeedsAction ?? st?.Detail; var stText = (st?.NeedsAction is not null ? "할 일: " : "") + stLine; }
+            @* title은 전체 글 — 말줄임된 뒷부분을 마우스로 본다 *@
+            <span class="status-line@(st?.NeedsAction is not null ? " needs" : "")" id="status-line" title="@stText"
+                  @(stLine is null ? "hidden" : null)>@stText</span>
         </div>
         <span class="badge" title="@RoomRules.Describe(room.Level)">@RoomRules.LevelName(room.Level)</span>
         <span class="mono muted">@room.Model</span>
@@ -111,7 +116,9 @@
     }
     <div class="composer" data-attach="@(canAttach ? "1" : "0")" data-attach-why="@(canAttach ? null : noAttachWhy)"
          data-attach-max="@Attachments.MaxPerMessage" data-attach-bytes="@Attachments.MaxBytes">
-        @* 기다리는 말 (하나씩 취소, 2-2 d) — 화면이 queued · start · snapshot 알림으로 그린다 *@
+        @* 진행 단계 (3차 b): 지휘자 할 일 목록 — 화면이 snapshot · steps 알림으로 그린다 *@
+        <details class="steps" id="steps" hidden><summary id="steps-summary"></summary><ol id="steps-list"></ol></details>
+        @* 기다리는 말 (하나씩 취소 · 지금 보내기, 2-2 d · 3차 b) — 화면이 queued · start · snapshot 알림으로 그린다 *@
         <div class="queue" id="queue" hidden></div>
         <div class="quote" id="quote" hidden>
             <span class="quote-text" id="quote-text"></span>

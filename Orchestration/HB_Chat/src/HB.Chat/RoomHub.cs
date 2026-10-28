@@ -34,6 +34,15 @@ public sealed record LiveEvent(string Kind)
     /// <summary>end 알림: 이번 턴이 끝날 때의 컨텍스트 크기 · 창 (토큰).</summary>
     public long? ContextTokens { get; init; }
     public int? ContextWindow { get; init; }
+
+    /// <summary>tool 알림: 도구의 짧은 대상 (파일 이름 · 명령 첫 줄 …, 3차 b). 없으면 null.</summary>
+    public string? Detail { get; init; }
+
+    /// <summary>steps 알림 · snapshot: 지휘자 할 일 목록 전체 (3차 b).</summary>
+    public IReadOnlyList<StepItem>? Steps { get; init; }
+
+    /// <summary>status 알림 · snapshot: 지휘자 상태 한 줄 (post_turn_summary, 3차 b).</summary>
+    public RoomStatus? Status { get; init; }
 }
 
 /// <summary>
@@ -70,7 +79,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         public CancellationTokenSource? Cts;
         public string? Current;
         public readonly System.Text.StringBuilder Partial = new();
-        public string? Tool;
+        public ToolUse? Tool;
         public string? Notice;
         public readonly List<Channel<LiveEvent>> Subscribers = [];
 
@@ -83,6 +92,14 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         public bool Interrupted;
         public readonly Dictionary<string, PendingApproval> Approvals = [];
         public readonly Dictionary<string, PendingQuestion> Questions = [];
+
+        /// <summary>
+        /// 지휘자 할 일 목록 (마지막으로 읽은 것, 3차 b). 이번 턴에 할 일 도구를 썼으면(StepsWatch) 그 뒤 글 조각이 아닌 출력마다 · 턴 끝에 다시 읽는다 —
+        /// CLI가 도구 결과 줄을 낸 뒤에 파일을 쓰는 일이 있어 한 번만 읽으면 마지막 변경을 놓쳤다 (실제 확인).
+        /// </summary>
+        public IReadOnlyList<StepItem>? Steps;
+        public bool StepsWatch;
+        public DateTimeOffset StepsReadAt;
 
         /// <summary>답을 기다리는 카드(승인 · 질문)가 있는지.</summary>
         public bool Waiting => Approvals.Values.Any(p => !p.Answer.Task.IsCompleted) || Questions.Values.Any(q => !q.Answer.Task.IsCompleted);
@@ -130,7 +147,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     private readonly List<Channel<LiveEvent>> _roomListeners = [];
 
     /// <summary>방 목록 줄을 바꾸는 알림 (바쁨 · 승인 · 끝). 흘림 글(delta) 같은 잦은 알림은 넣지 않는다.</summary>
-    private static readonly HashSet<string> ListKinds = ["start", "end", "idle", "approval", "approval-done", "question", "question-done", "queued"];
+    private static readonly HashSet<string> ListKinds = ["start", "end", "idle", "approval", "approval-done", "question", "question-done", "queued", "steps"];
 
     /// <summary>
     /// 이 실행기를 바꿀 때 (테스트: 가짜 claude). 기본은 claude 실행 파일 + <see cref="ClaudeArgs"/> 인자.
@@ -246,6 +263,31 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     /// 실행 중이 아니면 보통 보내기와 같다.
     /// </summary>
     public string? Interrupt(string roomId, string text) => Enqueue(roomId, text, interrupt: true);
+
+    /// <summary>
+    /// 기다리는 말 하나를 지금 보내기 (3차 b, 노션 "지금보내기"): 큐 맨 앞으로 옮기고 지금 실행만 끝낸다 — 끼어들기와 같은 길이라
+    /// 다른 기다리는 말은 남고, 기다리던 승인 · 질문은 "끼어들기"로 끝난다. 실행 중이 아니면 맨 앞으로만 옮긴다(곧 차례가 온다).
+    /// </summary>
+    public string? SendNow(string roomId, string queuedId)
+    {
+        if (!_rooms.TryGetValue(roomId, out var live)) return "없는 방입니다.";
+        lock (live.Gate)
+        {
+            var i = live.Pending.FindIndex(p => p.Id == queuedId);
+            if (i < 0) return "이미 보냈거나 없는 말입니다.";
+            var message = live.Pending[i];
+            live.Pending.RemoveAt(i);
+            live.Pending.Insert(0, message);
+            if (live.Busy && live.Cts is { } running)
+            {
+                EndApprovals(live, "끼어들기");
+                live.Interrupted = true;
+                running.Cancel();
+            }
+            Broadcast(live, QueueEvent("queued", live));
+        }
+        return null;
+    }
 
     /// <summary>기다리는 말 하나 취소 (계획서 2-2 d). 이미 보냈거나 없는 말이면 오류 문구.</summary>
     public string? CancelQueued(string roomId, string queuedId)
@@ -583,8 +625,13 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         var live = _rooms.GetOrAdd(roomId, id => new Live(id));
         var ch = Channel.CreateUnbounded<LiveEvent>(new UnboundedChannelOptions { SingleReader = true });
         var room = store.Get(roomId);
+        // 처음 여는 방의 할 일 목록은 파일에서 (실행 중이면 들고 있는 것) — 잠금 밖에서 읽는다 (3차 b)
+        IReadOnlyList<StepItem>? disk = null;
+        lock (live.Gate) if (live.Steps is null && room is not null) disk = [];
+        if (disk is not null) disk = Steps.Read(options.Value.TasksRoot, room!.SessionId);
         lock (live.Gate)
         {
+            if (live.Steps is null && disk is not null) live.Steps = disk;
             // 표정도 Busy · Partial과 같은 잠금에서 정한다 (/self-review 83b453653b C4)
             var face = LiveFace(live, transient: true) ?? (room is null ? Face.Idle : RestFace(room));
             ch.Writer.TryWrite(QueueEvent("snapshot", live) with
@@ -593,8 +640,10 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 Busy = live.Busy,
                 Text = live.Busy ? live.Partial.ToString() : null,
                 Prompt = live.Current,
+                Steps = live.Steps,
+                Status = room?.Status,
             });
-            if (live.Busy && live.Tool is { } tool) ch.Writer.TryWrite(new LiveEvent("tool") { Text = tool });
+            if (live.Busy && live.Tool is { } tool) ch.Writer.TryWrite(new LiveEvent("tool") { Text = tool.Name, Detail = tool.Detail });
             if (live.Notice is { } notice) ch.Writer.TryWrite(new LiveEvent("notice") { Text = notice });
             foreach (var p in live.Approvals.Values.Where(p => !p.Answer.Task.IsCompleted))
                 ch.Writer.TryWrite(new LiveEvent("approval") { Approval = p.View });
@@ -785,22 +834,39 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 stopOnMismatch.Cancel();
                 return;
             }
+            // 할 일 도구를 쓴 뒤의 출력이면 그 사이 도구가 돌아 파일이 바뀌었을 수 있다 — 잠금 밖에서 읽는다 (3차 b).
+            // 잦은 stream_event(글 · 도구 입력 · 생각 조각)에서는 읽지 않고, 300ms 안에 다시 읽지 않는다 — 마지막 상태는 턴 끝 읽기가 맞춘다 (/self-review ea28ba9185 C1).
+            var fragment = ev is DeltaEvent || (ev is OtherEvent other && other.Type.StartsWith("stream_event", StringComparison.Ordinal));
+            var steps = fragment ? null : RefreshSteps(room, live, generation);
             lock (live.Gate)
             {
                 if (live.Generation != generation) return;
+                if (steps is not null) Broadcast(live, new LiveEvent("steps") { Steps = steps });
                 if (ev is DeltaEvent) SetFace(live, Face.Writing);
                 else if (ev is ToolEvent te) SetFace(live, Face.Tool, te.Name); // 화면은 표정을 face 알림으로만 바꾼다 (83b453653b C1)
+                // 칩은 tool_use 입력이 다 온 assistant 줄에서 — 대상(파일 이름 · 명령 첫 줄)까지 보인다 (3차 b, 0번 실측 C)
+                if (ev is UsageEvent u)
+                    foreach (var tool in u.Tools)
+                    {
+                        Broadcast(live, SetTool(live, tool));
+                        if (tool.Name is "TaskCreate" or "TaskUpdate") live.StepsWatch = true; // 목록을 바꾸는 도구만
+                    }
                 var shown = ev switch
                 {
                     DeltaEvent d => AppendPartial(live, d.Text),
-                    ToolEvent t => SetTool(live, t.Name),
                     DeniedEvent d => new LiveEvent("denied") { Text = $"{d.Tool}: {d.Reason}" },
                     RetryEvent r => new LiveEvent("retry") { Text = $"API 재시도 {r.Attempt}회 ({r.Error})" },
+                    StatusEvent s => new LiveEvent("status") { Status = new RoomStatus(s.Category, s.Detail, s.NeedsAction) },
                     _ => null,
                 };
                 if (shown is not null) Broadcast(live, shown);
             }
         }, (ask, aborted) => DecideToolAsync(room, live, generation, ask, aborted), stopOnMismatch.Token);
+
+        // 턴 끝에 한 번 더 — 마지막 변경이 출력 뒤에 써졌거나 중지된 경우 (실제 확인). 중지는 세대를 올리므로 세대 · 간격 검사 없이 (ea28ba9185 C2).
+        if (RefreshSteps(room, live, generation, turnEnd: true) is { } last)
+            lock (live.Gate) Broadcast(live, new LiveEvent("steps") { Steps = last });
+        lock (live.Gate) live.StepsWatch = false;
 
         if (mismatch is not null) result = result with { Ok = false, Cancelled = false, Error = mismatch };
         return Record(room, result, forked: spec.ForkFrom is not null && result.Ok);
@@ -829,6 +895,8 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 ContextWindow = result.ContextWindow ?? r.ContextWindow,
                 KnownSize = size ?? r.KnownSize,
                 RunStartedAt = null,
+                // 지휘자 상태 한 줄은 이번 턴 것으로 — 없으면(실패 · 중지 등) 앞 것을 그대로 (3차 b)
+                Status = result.Status is { } s ? new RoomStatus(s.Category, s.Detail, s.NeedsAction) : r.Status,
             });
         }
         catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
@@ -845,10 +913,43 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         return new LiveEvent("delta") { Text = text };
     }
 
-    private static LiveEvent SetTool(Live live, string name)
+    private static LiveEvent SetTool(Live live, ToolUse tool)
     {
-        live.Tool = name;
-        return new LiveEvent("tool") { Text = name };
+        live.Tool = tool;
+        return new LiveEvent("tool") { Text = tool.Name, Detail = tool.Detail };
+    }
+
+    /// <summary>할 일 폴더를 실행 중 다시 읽는 최소 간격 (ea28ba9185 C1).</summary>
+    private static readonly TimeSpan StepsReadGap = TimeSpan.FromMilliseconds(300);
+
+    /// <summary>
+    /// 이번 턴에 할 일 도구를 썼으면(StepsWatch) 할 일 목록을 다시 읽어, 바뀌었으면 새 목록을 돌려준다 (잠금 밖에서 파일을 읽고 잠금 안에서 바꾼다).
+    /// 실행 중에는 그 세대일 때만 · 간격(<see cref="StepsReadGap"/>)을 두고, 턴 끝(turnEnd)은 둘 다 보지 않는다. 바뀐 것이 없으면 null.
+    /// </summary>
+    private IReadOnlyList<StepItem>? RefreshSteps(Room room, Live live, int generation, bool turnEnd = false)
+    {
+        lock (live.Gate)
+        {
+            if (!live.StepsWatch) return null;
+            if (!turnEnd && (live.Generation != generation || DateTimeOffset.Now - live.StepsReadAt < StepsReadGap)) return null;
+            live.StepsReadAt = DateTimeOffset.Now;
+        }
+        var fresh = Steps.Read(options.Value.TasksRoot, room.SessionId);
+        lock (live.Gate)
+        {
+            if (live.Steps is { } before && before.SequenceEqual(fresh)) return null;
+            live.Steps = fresh;
+            return fresh;
+        }
+    }
+
+    /// <summary>
+    /// 목록에 보일 진행 글 ("2/5") — 실행 중이고 이번 턴에 할 일 도구를 썼을 때만 (3차 b). 지난 턴의 끝난 목록이 진행처럼 보이지 않게 (ea28ba9185 C3).
+    /// </summary>
+    public string? StepProgress(string roomId)
+    {
+        if (!_rooms.TryGetValue(roomId, out var live)) return null;
+        lock (live.Gate) return live.Busy && live.StepsWatch && live.Steps is { } steps ? Steps.Progress(steps) : null;
     }
 
     private void Broadcast(Live live, LiveEvent ev)

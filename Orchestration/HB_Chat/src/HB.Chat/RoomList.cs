@@ -13,6 +13,12 @@ public sealed record RoomSummary(
 {
     /// <summary>목록 아바타의 지휘자 표정 (끝난 턴의 잠깐 표정은 빼고 — <see cref="RoomHub.FaceOf"/>).</summary>
     public Face Face { get; init; } = Face.Idle;
+
+    /// <summary>실행 중인 방의 진행 단계 ("2/5", 3차 b). 없으면 null.</summary>
+    public string? Steps { get; init; }
+
+    /// <summary>마지막 턴의 지휘자 상태 한 줄 (3차 b).</summary>
+    public RoomStatus? Status { get; init; }
 }
 
 /// <summary>말풍선 한 쪽: 보일 말들과 그 앞에 더 있는지 (계획서 2-2 b, 50개씩 위로 불러오기).</summary>
@@ -46,7 +52,12 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
         [.. store.All().Where(r => r.DeletedAt is null).Select(Summarize).OrderByDescending(s => s.LastAt)];
 
     public RoomSummary Summarize(Room room) =>
-        Build(room, transcripts.Read(room.SessionId), hub.ActivityOf(room.Id)) with { Face = hub.FaceOf(room, transient: false) };
+        Build(room, transcripts.Read(room.SessionId), hub.ActivityOf(room.Id)) with
+        {
+            Face = hub.FaceOf(room, transient: false),
+            Steps = hub.StepProgress(room.Id),
+            Status = room.Status,
+        };
 
     /// <summary>검색 결과 상한 · 검색어 길이 상한.</summary>
     public const int SearchMax = 50, QueryMax = 100;

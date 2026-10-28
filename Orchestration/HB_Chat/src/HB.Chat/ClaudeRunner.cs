@@ -22,6 +22,9 @@ public sealed record RunResult(
 
     /// <summary>모델의 컨텍스트 창 (result modelUsage). result가 없으면 null.</summary>
     public int? ContextWindow { get; init; }
+
+    /// <summary>이 턴의 마지막 지휘자 상태 한 줄 (post_turn_summary, 3차 b). 없으면 null.</summary>
+    public StatusEvent? Status { get; init; }
 }
 
 /// <summary>
@@ -102,6 +105,7 @@ public static class ClaudeRunner
             string? sessionId = null;
             long? context = null;
             string? contextModel = null;
+            StatusEvent? status = null;
             var other = 0;
             while (await proc.StandardOutput.ReadLineAsync() is { } line)
             {
@@ -137,7 +141,8 @@ public static class ClaudeRunner
                         result = r;
                         await input.CloseAsync(); // 턴 끝 — 다음 입력이 없으므로 CLI가 끝난다 (0번 실측)
                         break;
-                    case UsageEvent u: (context, contextModel) = (u.ContextTokens, u.Model ?? contextModel); break;
+                    case UsageEvent { ContextTokens: > 0 } u: (context, contextModel) = (u.ContextTokens, u.Model ?? contextModel); break;
+                    case StatusEvent s: status = s; break;
                 }
                 try { onEvent(ev); } catch { /* 화면 쪽 실패가 실행을 멈추지 않게 */ }
             }
@@ -148,13 +153,13 @@ public static class ClaudeRunner
             var stderr = await stderrTask;
             if (ct.IsCancellationRequested)
                 return new RunResult(false, true, "중지됨", null, result?.CostUsd, sessionId, result?.Denials ?? 0, other, stderr)
-                    { ContextTokens = context, ContextWindow = result?.WindowFor(contextModel) };
+                    { ContextTokens = context, ContextWindow = result?.WindowFor(contextModel), Status = status };
             if (error is null && result is null)
                 error = $"결과 없이 끝났습니다 (종료 코드 {proc.ExitCode}).";
             if (error is null && !result!.Ok)
                 error = $"실행 오류 ({result.Subtype}): {result.Text}";
             return new RunResult(error is null, false, error, result?.Text, result?.CostUsd, sessionId, result?.Denials ?? 0, other,
-                string.IsNullOrWhiteSpace(stderr) ? null : stderr) { ContextTokens = context, ContextWindow = result?.WindowFor(contextModel) };
+                string.IsNullOrWhiteSpace(stderr) ? null : stderr) { ContextTokens = context, ContextWindow = result?.WindowFor(contextModel), Status = status };
         }
     }
 

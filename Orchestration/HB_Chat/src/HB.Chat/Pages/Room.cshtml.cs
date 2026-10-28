@@ -233,6 +233,13 @@ public sealed class RoomModel(
         return hub.Decide(id, approval, parsed.Value, reason) is { } error ? BadRequest(error) : new JsonResult(new { ok = true });
     }
 
+    /// <summary>기다리는 말 하나를 지금 보내기 (3차 b): 큐 맨 앞으로 옮기고 지금 턴을 끊는다.</summary>
+    public IActionResult OnPostSendNow(string id, string? queued)
+    {
+        if (!RoomStore.IsRoomId(id) || string.IsNullOrEmpty(queued)) return NotFound();
+        return hub.SendNow(id, queued) is { } error ? BadRequest(error) : new JsonResult(new { ok = true });
+    }
+
     /// <summary>질문 카드의 답 (3차 a). answers는 JSON 객체(질문 글 → 답). skip이면 답하지 않기.</summary>
     public IActionResult OnPostAnswer(string id, string? question, string? answers, bool skip)
     {

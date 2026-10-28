@@ -28,7 +28,21 @@ public sealed record UsageEvent(long ContextTokens) : StreamEvent
 {
     /// <summary>그 메시지의 모델 (message.model). result modelUsage에서 이 모델의 창을 고른다.</summary>
     public string? Model { get; init; }
+
+    /// <summary>
+    /// 그 메시지의 도구 호출 (content의 tool_use — 입력 전체가 여기 온다, 도구 실행 전, 3차 0번 실측 C). ContextTokens가 0이면 usage가 없던 줄이다.
+    /// </summary>
+    public IReadOnlyList<ToolUse> Tools { get; init; } = [];
 }
+
+/// <summary>도구 호출 하나: 이름 · 화면에 보일 짧은 대상(파일 이름 · 명령 첫 줄 · 검색어 · 모드 — 없으면 null, 3차 b).</summary>
+public sealed record ToolUse(string Name, string? Detail);
+
+/// <summary>
+/// system/post_turn_summary: CLI가 턴마다 내는 지휘자 상태 한 줄 (3차 0번 실측 B — status_category blocked · completed · review_ready,
+/// status_detail 한 줄 상태, needs_action 사용자가 할 일).
+/// </summary>
+public sealed record StatusEvent(string? Category, string? Detail, string? NeedsAction) : StreamEvent;
 
 /// <summary>result modelUsage 한 항목: 모델 · 컨텍스트 창 · 이 턴의 입력(input + cache 읽기 · 생성) 토큰.</summary>
 public sealed record ModelWindow(string Model, int Window, long Input);
@@ -88,6 +102,8 @@ public static class StreamParser
                 "system" when subtype == "init" => new InitEvent(Str(e, "session_id"), Str(e, "claude_code_version"), McpServers(e)),
                 "system" when subtype == "permission_denied" => new DeniedEvent(Str(e, "tool_name"), Str(e, "decision_reason")),
                 "system" when subtype == "api_retry" => new RetryEvent(Int(e, "attempt") ?? 0, Str(e, "error")),
+                "system" when subtype == "post_turn_summary" =>
+                    new StatusEvent(Cap(Str(e, "status_category"), 40), Cap(Str(e, "status_detail"), StatusChars), Cap(Str(e, "needs_action"), StatusChars)),
                 "assistant" => ParseUsage(e),
                 "result" => new ResultEvent(
                     Ok: subtype == "success" && !(e.TryGetProperty("is_error", out var err) && err.ValueKind == JsonValueKind.True),
@@ -118,14 +134,65 @@ public static class StreamParser
         return new OtherEvent($"stream_event/{type}");
     }
 
+    /// <summary>상태 한 줄 · 할 일 글 상한 (글자).</summary>
+    public const int StatusChars = 300;
+
+    /// <summary>도구 대상 글 상한 (글자, 칩).</summary>
+    public const int DetailChars = 60;
+
     private static StreamEvent ParseUsage(JsonElement e)
     {
         if (e.TryGetProperty("parent_tool_use_id", out var parent) && parent.ValueKind == JsonValueKind.String) return new OtherEvent("assistant/subagent");
-        if (!e.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object
-            || !message.TryGetProperty("usage", out var usage) || usage.ValueKind != JsonValueKind.Object) return new OtherEvent("assistant");
-        var total = Long(usage, "input_tokens") + Long(usage, "cache_creation_input_tokens") + Long(usage, "cache_read_input_tokens") + Long(usage, "output_tokens");
-        return total > 0 ? new UsageEvent(total) { Model = Str(message, "model") } : new OtherEvent("assistant");
+        if (!e.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object) return new OtherEvent("assistant");
+        var total = message.TryGetProperty("usage", out var usage) && usage.ValueKind == JsonValueKind.Object
+            ? Long(usage, "input_tokens") + Long(usage, "cache_creation_input_tokens") + Long(usage, "cache_read_input_tokens") + Long(usage, "output_tokens")
+            : 0;
+        var tools = ToolUses(message);
+        return total > 0 || tools.Count > 0 ? new UsageEvent(total) { Model = Str(message, "model"), Tools = tools } : new OtherEvent("assistant");
     }
+
+    private static IReadOnlyList<ToolUse> ToolUses(JsonElement message)
+    {
+        if (!message.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array) return [];
+        var list = new List<ToolUse>();
+        foreach (var c in content.EnumerateArray())
+            if (c.ValueKind == JsonValueKind.Object && Str(c, "type") == "tool_use" && Str(c, "name") is { Length: > 0 } name)
+                list.Add(new ToolUse(name, c.TryGetProperty("input", out var input) && input.ValueKind == JsonValueKind.Object ? Detail(name, input) : null));
+        return list;
+    }
+
+    /// <summary>
+    /// 칩에 보일 짧은 대상: 파일 도구는 파일 이름(경로는 빼고), 명령은 첫 줄, 검색은 패턴, run_mode는 모드, 할 일 도구는 제목 · 번호 → 상태.
+    /// 모르는 도구는 null. 한 줄 · <see cref="DetailChars"/>자로 자른다 (화면에만 — 세션 기록에 이미 있는 글).
+    /// </summary>
+    public static string? Detail(string name, JsonElement input)
+    {
+        var tool = name.StartsWith("mcp__", StringComparison.Ordinal) ? name[(name.LastIndexOf("__", StringComparison.Ordinal) + 2)..] : name;
+        var text = tool switch
+        {
+            "Read" or "Edit" or "Write" or "NotebookEdit" => Str(input, "file_path") is { } p ? FileName(p) : null,
+            "Bash" or "PowerShell" => Str(input, "command"),
+            "Grep" or "Glob" => Str(input, "pattern"),
+            "run_mode" => Str(input, "mode"),
+            "TaskCreate" => Str(input, "subject"),
+            "TaskUpdate" => Str(input, "taskId") is { } id ? "#" + id + (Str(input, "status") is { } s ? " → " + s : "") : null,
+            "WebFetch" => Str(input, "url"),
+            "WebSearch" => Str(input, "query"),
+            _ => null,
+        };
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var line = text.Trim().Split('\n')[0].Trim();
+        return line.Length > DetailChars ? line[..DetailChars] + "…" : line;
+    }
+
+    private static string FileName(string path)
+    {
+        var cut = path.Replace('\\', '/').TrimEnd('/');
+        return cut[(cut.LastIndexOf('/') + 1)..];
+    }
+
+    private static string? Cap(string? s, int max) =>
+        string.IsNullOrWhiteSpace(s) ? null : s.Length > max ? s[..max] + "…" : s.Trim();
 
     private static IReadOnlyList<ModelWindow> ModelWindows(JsonElement e)
     {

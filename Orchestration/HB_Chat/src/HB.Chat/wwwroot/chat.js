@@ -486,7 +486,20 @@
             const c = el("span", "chip", name);
             c.dataset.name = name; c.dataset.count = "1";
             chips.append(c);
+            // 대상이 붙어 칩이 잘 묶이지 않는다 — 최근 MaxChips개만 두고 앞은 "앞 N개"로 접는다 (/self-review ea28ba9185 C6)
+            const items = chips.querySelectorAll(":scope > .chip:not(.older-chips)");
+            if (items.length > MaxChips) {
+                let older = chips.querySelector(":scope > .older-chips");
+                if (!older) { older = el("span", "chip older-chips"); older.dataset.count = "0"; chips.prepend(older); }
+                const gone = items.length - MaxChips;
+                for (let i = 0; i < gone; i++) {
+                    older.dataset.count = String(Number(older.dataset.count) + Number(items[i].dataset.count));
+                    items[i].remove();
+                }
+                older.textContent = "앞 " + older.dataset.count + "개";
+            }
         }
+        const MaxChips = 20;
         // 기다리는 말 목록 (2-2 d): 말마다 × — 누르면 그 말만 취소 (서버 CancelQueued, 목록은 queued 알림으로 다시 그린다)
         const queueBox = $("#queue");
         function showQueue(items) {
@@ -500,6 +513,14 @@
                 const chip = el("span", "chip queued");
                 chip.append(el("span", "t", oneLine.length > 40 ? oneLine.slice(0, 40) + "…" : oneLine));
                 chip.title = displayText(item.text).slice(0, 500);
+                // 지금 보내기 (3차 b): 이 말을 맨 앞으로 옮기고 지금 턴을 끊는다 (끼어들기와 같은 길 — 다른 기다리는 말은 남음)
+                const now = el("button", "queue-now", "지금");
+                now.type = "button"; now.title = "지금 턴을 멈추고 이 말을 바로 보냅니다";
+                now.addEventListener("click", async () => {
+                    now.disabled = true;
+                    const data = new FormData(); data.append("queued", item.id);
+                    if (!await post("SendNow", data)) now.disabled = false;
+                });
                 const x = el("button", "queue-x", "×");
                 x.type = "button"; x.title = "이 말 취소"; x.setAttribute("aria-label", "이 말 취소");
                 x.addEventListener("click", async () => {
@@ -507,11 +528,33 @@
                     const data = new FormData(); data.append("queued", item.id);
                     if (!await post("CancelQueued", data)) x.disabled = false;
                 });
-                chip.append(x);
+                chip.append(now, x);
                 queueBox.append(chip);
             }
         }
         function setBusy(busy) { stopBtn.disabled = !busy; interruptBtn.disabled = !busy; }
+        // 진행 단계 (3차 b): 지휘자 할 일 목록. 요약 줄은 "단계 끝난 수/전체 · 지금: 하는 단계" — 펼치면 목록.
+        const stepsBox = $("#steps");
+        function renderSteps(steps) {
+            if (!stepsBox) return;
+            if (!steps || steps.length === 0) { stepsBox.hidden = true; return; }
+            const done = steps.filter(s => s.status === "completed").length;
+            const current = steps.find(s => s.status === "in_progress");
+            $("#steps-summary").textContent = "단계 " + done + "/" + steps.length
+                + (current ? " · 지금: " + current.subject : done === steps.length ? " · 모두 끝남" : "");
+            $("#steps-list").replaceChildren(...steps.map(s => el("li", s.status, s.subject)));
+            stepsBox.hidden = false;
+        }
+        // 지휘자 상태 한 줄 (3차 b, CLI post_turn_summary): 사용자가 할 일이 있으면 그것을
+        function showStatus(st) {
+            const line = $("#status-line");
+            if (!line || !st) return;
+            const text = st.needsAction || st.detail;
+            line.textContent = text ? (st.needsAction ? "할 일: " : "") + text : "";
+            line.title = line.textContent; // 말줄임된 뒷부분은 마우스를 올려 본다
+            line.classList.toggle("needs", !!st.needsAction);
+            line.hidden = !text;
+        }
         // 보낸 글의 끝 [첨부] 줄을 "파일 n개: 이름"으로 — 절대 경로를 그대로 보이지 않게 (5b26cff7df C7, 서버 Attachments.Split과 같은 규칙)
         function displayText(text) {
             const lines = text.replace(/\r\n/g, "\n").split("\n");
@@ -791,6 +834,8 @@
                     if (ev.busy) startTurn(ev.prompt, ev.text, ev.pendingItems);
                     else { live.replaceChildren(); stream = null; chips = null; setBusy(false); showQueue([]); }
                     if (ev.face) setFace(ev.face);
+                    renderSteps(ev.steps);
+                    if (ev.status) showStatus(ev.status);
                     break;
                 case "face":
                     setFace(ev.face, ev.face === "Tool" && ev.text ? shortTool(ev.text) : null);
@@ -825,9 +870,15 @@
                 }
                 case "tool":
                     // 칩만 — 표정은 서버 face 알림 · snapshot만 따른다. snapshot 뒤 다시 보내는 tool이 승인 기다림 · 답 쓰는 중을
-                    // "도구 실행 중"으로 덮던 문제 (/self-review 83b453653b C1).
+                    // "도구 실행 중"으로 덮던 문제 (/self-review 83b453653b C1). 대상(파일 이름 · 명령 첫 줄)이 있으면 같이 (3차 b).
                     if (!stream) startTurn(null, "", null);
-                    addChip(shortTool(ev.text));
+                    addChip(shortTool(ev.text) + (ev.detail ? " " + ev.detail : ""));
+                    break;
+                case "steps":
+                    renderSteps(ev.steps);
+                    break;
+                case "status":
+                    showStatus(ev.status);
                     break;
                 case "denied":
                 case "retry":

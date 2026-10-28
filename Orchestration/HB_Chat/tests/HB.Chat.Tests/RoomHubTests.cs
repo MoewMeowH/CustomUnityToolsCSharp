@@ -23,6 +23,7 @@ public sealed class RoomHubTests : IDisposable
         var options = new ChatOptions
         {
             DataDir = Path.Combine(_dir, "data"),
+            ClaudeProjectsDir = Path.Combine(_dir, "projects"), // 할 일 폴더는 그 옆 tasks (3차 b)
             Workspaces = new(StringComparer.OrdinalIgnoreCase) { ["ws"] = Path.Combine(_dir, "ws") },
         };
         _store = new RoomStore(Path.Combine(_dir, "data", "rooms.json"));
@@ -32,7 +33,8 @@ public sealed class RoomHubTests : IDisposable
             ProcessFactory = (room, spec, workspace) =>
             {
                 lock (_specs) _specs.Add(spec);
-                return new ProcessSpec("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, spec.SessionId], workspace);
+                return new ProcessSpec("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, spec.SessionId,
+                    Path.Combine(_dir, "tasks")], workspace);
             },
         };
     }
@@ -202,6 +204,51 @@ public sealed class RoomHubTests : IDisposable
     }
 
     [Fact]
+    public async Task SendNow_MovesThatMessageFirst_AndCutsCurrentTurn()
+    {
+        // 기다리는 말의 "지금" (3차 b): 그 말이 먼저, 다른 기다리는 말은 남아 뒤에 돈다
+        var room = NewRoom();
+        var ch = _hub.Subscribe(room.Id);
+        Assert.Null(_hub.Send(room.Id, "sleep please"));
+        await Until(ch, e => e.Kind == "delta");
+        Assert.Null(_hub.Send(room.Id, "hello one"));
+        Assert.Null(_hub.Send(room.Id, "hello two"));
+        var items = (await Until(ch, e => e.Kind == "queued" && e.PendingItems!.Count == 2)).Last().PendingItems!;
+
+        Assert.Null(_hub.SendNow(room.Id, items[1].Id));
+        var seen = await Until(ch, e => e.Kind == "idle");
+        Assert.Equal("Stopped", seen.First(e => e.Kind == "end").Face);
+        Assert.Equal("끼어들기로 멈춤", seen.First(e => e.Kind == "end").Text);
+        Assert.Equal(["hello two", "hello one"], seen.Where(e => e.Kind == "start").Select(e => e.Prompt));
+        Assert.NotNull(_hub.SendNow(room.Id, items[1].Id)); // 이미 보냄
+    }
+
+    [Fact]
+    public async Task TaskTools_SendStepsFromTasksFolder()
+    {
+        // 할 일 도구 뒤 출력 · 턴 끝에 폴더를 다시 읽어 steps 알림 (3차 b, 0번 실측 B 모양) — 칩은 할 일 제목 · 번호 → 상태.
+        // 할 일 도구가 있는 단계(편집)로 — 대화 단계는 도구가 없다 (/self-review ea28ba9185 C7)
+        File.WriteAllText(Path.Combine(_dir, "ws", ".mcp.json"), """{"mcpServers":{"hb-orchestration":{"command":"dotnet"}}}""");
+        var room = _store.Create("ws", PermissionLevel.Edit, "opus", null);
+        var ch = _hub.Subscribe(room.Id);
+        Assert.Empty((await Until(ch, e => e.Kind == "snapshot")).Last().Steps!); // 아직 할 일 없음
+        Assert.Null(_hub.Send(room.Id, "tasks please"));
+        var seen = await Until(ch, e => e.Kind == "idle");
+        Assert.Equal(PermissionLevel.Edit, _specs.Last().Level);
+        Assert.Equal(["alpha", "beta", "#1 → in_progress"], seen.Where(e => e.Kind == "tool").Select(e => e.Detail));
+        Assert.Null(_hub.StepProgress(room.Id)); // 쉬는 방은 목록에 진행 글을 붙이지 않는다
+        var last = seen.Last(e => e.Kind == "steps").Steps!;
+        Assert.Equal([new StepItem("1", "alpha", "in_progress"), new StepItem("2", "beta", "pending")], last);
+        Assert.Equal("blocked", _store.Get(room.Id)!.Status!.Category);
+        Assert.Equal("check alpha", _store.Get(room.Id)!.Status!.NeedsAction);
+
+        // 다시 연 화면은 snapshot으로 같은 목록 · 상태를 받는다
+        var again = (await Until(_hub.Subscribe(room.Id), e => e.Kind == "snapshot")).Last();
+        Assert.Equal(last, again.Steps);
+        Assert.Equal("check alpha", again.Status!.NeedsAction);
+    }
+
+    [Fact]
     public async Task Interrupt_WhenIdle_IsPlainSend()
     {
         var room = NewRoom();
@@ -364,9 +411,12 @@ public sealed class RoomHubTests : IDisposable
 
         var seen = await Until(ch, e => e.Kind == "idle");
         var kinds = seen.Select(e => e.Kind).ToList();
-        Assert.Equal(["snapshot", "start", "tool", "denied", "delta", "delta", "end", "idle"], kinds);
+        Assert.Equal(["snapshot", "start", "tool", "denied", "delta", "delta", "status", "end", "idle"], kinds);
         Assert.Equal("hello there", seen[1].Prompt);
         Assert.Equal("Read", seen[2].Text);
+        Assert.Equal("notes.md", seen[2].Detail); // 칩 대상은 파일 이름만 (3차 b)
+        Assert.Equal("said hello", seen.Single(e => e.Kind == "status").Status!.Detail);
+        Assert.Null(seen.Single(e => e.Kind == "status").Status!.NeedsAction); // 빈 글은 없음으로
         Assert.StartsWith("Write:", seen[3].Text);
         Assert.Equal("Hello", string.Concat(seen.Where(e => e.Kind == "delta").Select(e => e.Text)));
         var end = seen.Single(e => e.Kind == "end");
@@ -377,6 +427,7 @@ public sealed class RoomHubTests : IDisposable
         Assert.Null(saved.LastError);
         Assert.Equal(0.0125, saved.TotalCostUsd);
         Assert.NotNull(saved.LastRunAt);
+        Assert.Equal(new RoomStatus("completed", "said hello", null), saved.Status); // 방 색인에 남아 목록 · 다음 화면에 보인다
         // 세션 기록이 아직 없으니 첫 말 (--session-id + 방 규칙).
         var spec = Assert.Single(_specs);
         Assert.False(spec.Resume);

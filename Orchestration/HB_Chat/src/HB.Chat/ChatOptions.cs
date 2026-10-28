@@ -26,7 +26,7 @@ public sealed class ChatOptions
     /// <summary>방 색인 · 만든 MCP 설정을 두는 폴더. 비우면 %LOCALAPPDATA%/HB_Chat.</summary>
     public string? DataDir { get; set; }
 
-    /// <summary>Claude 세션 기록 폴더. 비우면 ~/.claude/projects.</summary>
+    /// <summary>Claude 세션 기록 폴더. 비우면 ~/.claude/projects (CLAUDE_CONFIG_DIR가 있으면 그 아래). 지휘자 할 일 폴더는 이 폴더 옆의 tasks로 본다 (3차 b).</summary>
     public string? ClaudeProjectsDir { get; set; }
 
     /// <summary>작업 폴더 허용 목록 (이름 → 절대 경로). 방은 이 이름으로만 고른다.</summary>
@@ -69,6 +69,26 @@ public sealed class ChatOptions
 
     public string ProjectsRoot =>
         string.IsNullOrWhiteSpace(ClaudeProjectsDir) ? ClaudeTranscriptReader.DefaultProjectsRoot() : ClaudeProjectsDir.Trim();
+
+    /// <summary>
+    /// 지휘자 할 일 폴더 (세션마다 <c>&lt;세션 ID&gt;/*.json</c>, 3차 b). 세션 기록 폴더(projects) 옆의 tasks — 기본 ~/.claude/tasks
+    /// (CLAUDE_CONFIG_DIR를 쓰면 그 아래, ClaudeProjectsDir를 정하면 그 옆). 위치를 정하지 못하면 null — 단계 표시만 빠진다 (/self-review ea28ba9185 C4).
+    /// </summary>
+    public string? TasksRoot
+    {
+        get
+        {
+            try
+            {
+                return Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(Path.GetFullPath(ProjectsRoot))) is { Length: > 0 } parent
+                    ? Path.Combine(parent, "tasks") : null;
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException or System.Security.SecurityException)
+            {
+                return null;
+            }
+        }
+    }
 
     /// <summary>작업 폴더 이름 → 경로. 목록에 없으면 null.</summary>
     public string? WorkspacePath(string? name) =>

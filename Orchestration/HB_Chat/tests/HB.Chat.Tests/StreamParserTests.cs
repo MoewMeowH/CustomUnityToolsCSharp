@@ -34,6 +34,75 @@ public sealed class StreamParserTests
     }
 
     [Fact]
+    public void AssistantToolUse_GivesShortDetail()
+    {
+        // 3차 0번 실측 C: tool_use 입력 전체는 assistant 줄에 온다 (usage가 없는 줄도). 칩에는 짧은 대상만.
+        var ev = Assert.IsType<UsageEvent>(StreamParser.Parse(
+            """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"a","name":"Read","input":{"file_path":"C:\\ws\\src\\RoomHub.cs"}},{"type":"tool_use","id":"b","name":"Bash","input":{"command":"git status\ngit log"}},{"type":"text","text":"x"}]}}"""));
+        Assert.Equal(0, ev.ContextTokens); // usage가 없는 줄 — 실행기는 컨텍스트로 쓰지 않는다
+        Assert.Equal([new ToolUse("Read", "RoomHub.cs"), new ToolUse("Bash", "git status")], ev.Tools);
+
+        using var doc = System.Text.Json.JsonDocument.Parse("""{"mode":"review_main","input":"x"}""");
+        Assert.Equal("review_main", StreamParser.Detail("mcp__hb-orchestration__run_mode", doc.RootElement));
+        using var upd = System.Text.Json.JsonDocument.Parse("""{"taskId":"3","status":"completed"}""");
+        Assert.Equal("#3 → completed", StreamParser.Detail("TaskUpdate", upd.RootElement));
+        using var longCmd = System.Text.Json.JsonDocument.Parse($$"""{"command":"{{new string('a', 100)}}"}""");
+        Assert.Equal(StreamParser.DetailChars + 1, StreamParser.Detail("PowerShell", longCmd.RootElement)!.Length);
+        using var other = System.Text.Json.JsonDocument.Parse("""{"x":1}""");
+        Assert.Null(StreamParser.Detail("Mystery", other.RootElement));
+        // 서브에이전트 줄의 도구는 넣지 않는다
+        Assert.IsType<OtherEvent>(StreamParser.Parse("""{"type":"assistant","parent_tool_use_id":"t","message":{"content":[{"type":"tool_use","name":"Read","input":{}}]}}"""));
+    }
+
+    [Fact]
+    public void PostTurnSummary_IsStatus()
+    {
+        // 3차 0번 실측 B 모양
+        var ev = Assert.IsType<StatusEvent>(StreamParser.Parse(
+            """{"type":"system","subtype":"post_turn_summary","summarizes_uuid":"u","status_category":"blocked","status_detail":"asked which color you prefer; awaiting Red or Blue","needs_action":"answer the color question: Red or Blue","uuid":"v","session_id":"s"}"""));
+        Assert.Equal("blocked", ev.Category);
+        Assert.Equal("answer the color question: Red or Blue", ev.NeedsAction);
+        Assert.Null(Assert.IsType<StatusEvent>(StreamParser.Parse("""{"type":"system","subtype":"post_turn_summary","status_category":"completed","status_detail":"done","needs_action":""}""")).NeedsAction);
+    }
+
+    [Fact]
+    public void Steps_ReadTasksFolderInOrder()
+    {
+        // 3차 0번 실측 B: ~/.claude/tasks/<세션>/<번호>.json
+        var root = Path.Combine(Path.GetTempPath(), "hbchat-tasks-" + Guid.NewGuid().ToString("N"));
+        const string sid = "5660e916-64bb-46d5-b611-afc7c781fd8b";
+        var dir = Path.Combine(root, sid);
+        Directory.CreateDirectory(dir);
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "10.json"), """{"id":"10","subject":"ten","status":"pending"}""");
+            File.WriteAllText(Path.Combine(dir, "2.json"), """{"id":"2","subject":"two","status":"completed","blocks":[],"blockedBy":[]}""");
+            File.WriteAllText(Path.Combine(dir, "3.json"), """{"id":"3","subject":"three","status":"in_progress"}""");
+            File.WriteAllText(Path.Combine(dir, "4.json"), "{ broken");
+            File.WriteAllText(Path.Combine(dir, "5.json"), """{"id":"5","subject":"gone","status":"deleted"}""");
+            var steps = Steps.Read(root, sid);
+            Assert.Equal(["2", "3", "10"], steps.Select(s => s.Id));
+            Assert.Equal("1/3", Steps.Progress(steps));
+            Assert.Equal("three", Steps.Current(steps)!.Subject);
+            Assert.Empty(Steps.Read(root, "../escape")); // 세션 ID 모양이 아니면 읽지 않는다
+            Assert.Empty(Steps.Read(root, Guid.NewGuid().ToString("D")));
+            Assert.Empty(Steps.Read(null, sid)); // 위치를 모르면 빈 목록 (ea28ba9185 C4)
+            Assert.Null(Steps.Progress([]));
+
+            // 100개가 넘으면 번호 순 앞 100개 — 이름순(1, 10, 100, 101 …)으로 자르지 않는다 (ea28ba9185 C5)
+            for (var i = 1; i <= Steps.MaxFiles + 5; i++)
+                File.WriteAllText(Path.Combine(dir, $"{i}.json"), $$"""{"id":"{{i}}","subject":"s{{i}}","status":"pending"}""");
+            var many = Steps.Read(root, sid);
+            Assert.Equal(Steps.MaxFiles, many.Count);
+            Assert.Equal(Enumerable.Range(1, Steps.MaxFiles).Select(i => i.ToString()), many.Select(s => s.Id));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void Question_ParsesValidatesAndAddsAnswers()
     {
         // 3차 0번 실측 A의 AskUserQuestion 입력
@@ -133,7 +202,7 @@ public sealed class StreamParserTests
 
     [Theory]
     [InlineData("""{"type":"rate_limit_event"}""", "rate_limit_event")]
-    [InlineData("""{"type":"system","subtype":"post_turn_summary"}""", "system/post_turn_summary")]
+    [InlineData("""{"type":"system","subtype":"task_summary","detail":"x"}""", "system/task_summary")] // post_turn_summary는 3차 b부터 StatusEvent
     [InlineData("""{"type":"assistant","message":{"content":[]}}""", "assistant")]
     [InlineData("not json", "invalid")]
     [InlineData("[1,2]", "invalid")]

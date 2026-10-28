@@ -47,7 +47,7 @@ public sealed class ClaudeArgsTests
     {
         var args = ClaudeArgs.Build(Spec(PermissionLevel.Read), Models);
         // AskUserQuestion: 질문 카드 (3차 a — stdio 호스트에서만 도구 목록에 들어온다)
-        Assert.Contains("--tools | Read,Grep,Glob,AskUserQuestion | --strict-mcp-config | --mcp-config | C:/data/mcp.json | --allowedTools | mcp__hb-orchestration", Joined(args));
+        Assert.Contains("--tools | Read,Grep,Glob,AskUserQuestion,TaskCreate,TaskGet,TaskList,TaskUpdate | --strict-mcp-config | --mcp-config | C:/data/mcp.json | --allowedTools | mcp__hb-orchestration", Joined(args));
         Assert.DoesNotContain("--permission-mode", args);
         Assert.Equal("stdio", args[args.ToList().IndexOf("--permission-prompt-tool") + 1]);
     }
@@ -56,7 +56,7 @@ public sealed class ClaudeArgsTests
     public void Edit_AddsEditToolsAndAcceptEdits_ButNoBash()
     {
         var args = ClaudeArgs.Build(Spec(PermissionLevel.Edit), Models);
-        Assert.Contains("--tools | Read,Grep,Glob,Edit,Write,AskUserQuestion | --permission-mode | acceptEdits", Joined(args));
+        Assert.Contains("--tools | Read,Grep,Glob,Edit,Write,AskUserQuestion,TaskCreate,TaskGet,TaskList,TaskUpdate | --permission-mode | acceptEdits", Joined(args));
         Assert.DoesNotContain(args, a => a.Contains("Bash", StringComparison.OrdinalIgnoreCase));
         Assert.Contains("--strict-mcp-config", args);
     }

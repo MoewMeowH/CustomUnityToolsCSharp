@@ -94,11 +94,11 @@ public static partial class ClaudeArgs
                 args.AddRange(["--tools", "", "--strict-mcp-config"]);
                 break;
             case PermissionLevel.Read:
-                args.AddRange(["--tools", "Read,Grep,Glob," + AskTool]);
+                args.AddRange(["--tools", "Read,Grep,Glob," + HostTools]);
                 AddMcp(args, spec);
                 break;
             case PermissionLevel.Edit:
-                args.AddRange(["--tools", "Read,Grep,Glob,Edit,Write," + AskTool, "--permission-mode", "acceptEdits"]);
+                args.AddRange(["--tools", "Read,Grep,Glob,Edit,Write," + HostTools, "--permission-mode", "acceptEdits"]);
                 args.Add("--disallowedTools");
                 args.AddRange(EditDenied.Select(p => $"Edit({p})"));
                 if (attachDeny is not null) args.Add(attachDeny);
@@ -109,7 +109,7 @@ public static partial class ClaudeArgs
                 // acceptEdits는 쓰지 않는다: 그 모드는 작업 폴더 안 cp · mv 같은 파일 명령을 묻지 않고 허용해, 편집 금지 규칙(Edit 도구에만 걸림)과
                 // 카드를 둘 다 지나치게 한다 (/self-review 36e4e20e04 C1). 대신 작업 폴더 안 편집만 `Edit(**)`로 미리 허용한다 —
                 // 실측(2026-10-28): 작업 폴더 안 Write는 묻지 않음, 밖 Write는 거절, Bash cp는 승인 요청으로 옴.
-                args.AddRange(["--tools", "Read,Grep,Glob,Edit,Write,Bash,PowerShell," + AskTool]);
+                args.AddRange(["--tools", "Read,Grep,Glob,Edit,Write,Bash,PowerShell," + HostTools]);
                 args.Add("--disallowedTools");
                 args.AddRange(EditDenied.Select(p => $"Edit({p})"));
                 if (attachDeny is not null) args.Add(attachDeny);
@@ -151,6 +151,12 @@ public static partial class ClaudeArgs
 
     /// <summary>지휘자의 객관식 질문 도구 (3차 a). SDK식 실행(stdio 호스트)에서만 도구 목록에 들어온다 (3차 0번 실측 A).</summary>
     public const string AskTool = "AskUserQuestion";
+
+    /// <summary>
+    /// 질문 + 할 일 도구 (3차 b — 진행 단계). 2.1.312에는 TodoWrite가 없고 Task* 넷이 승인 없이 돈다 (0번 실측 B). 상태는 ~/.claude/tasks에만 쓴다.
+    /// 읽기 · 편집 · 명령 단계의 --tools 끝에 붙는다.
+    /// </summary>
+    public const string HostTools = AskTool + ",TaskCreate,TaskGet,TaskList,TaskUpdate";
 
     private static void AddMcp(List<string> args, RunSpec spec)
     {
