@@ -9,7 +9,14 @@ using ModelContextProtocol.Server;
 namespace HB.Chat;
 
 /// <summary>연결 칸 "확인" 결과: 연결됐는지 · 도구 이름과 설명 · 시각 · 오류.</summary>
-public sealed record ProbeResult(bool Ok, IReadOnlyList<(string Name, string? Description)> Tools, DateTimeOffset At, string? Error, long Millis);
+public sealed record ProbeResult(bool Ok, IReadOnlyList<(string Name, string? Description)> Tools, DateTimeOffset At, string? Error, long Millis)
+{
+    /// <summary>
+    /// http 서버가 401 · 403으로 답함 — OAuth로 로그인하는 서버(Notion 등)다. claude는 대화형 세션에서 받아 둔 토큰으로 붙지만 앱은 그 토큰이 없어
+    /// 직접 확인할 수 없다 (실패가 아님). 화면은 실행 상태(init)를 보라고 안내한다.
+    /// </summary>
+    public bool NeedsLogin { get; init; }
+}
 
 /// <summary>
 /// 곁칸 "연결" 탭의 "확인" 단추 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결): 앱이 MCP 클라이언트로 그 서버를 직접 띄워 tools/list만 받고 닫는다
@@ -55,6 +62,11 @@ public sealed partial class McpProbe
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             result = new ProbeResult(false, [], started, $"{Timeout.TotalSeconds:0}초 안에 답이 없었습니다", watch.ElapsedMilliseconds);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && IsUnauthorized(ex))
+        {
+            result = new ProbeResult(false, [], started, "OAuth 로그인 서버라 앱이 직접 확인할 수 없습니다 — 실제 연결 상태는 마지막 실행 상태를 보세요",
+                watch.ElapsedMilliseconds) { NeedsLogin = true };
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -115,6 +127,14 @@ public sealed partial class McpProbe
         Placeholder().Replace(text, m =>
             Environment.GetEnvironmentVariable(m.Groups[1].Value) is { Length: > 0 } v ? v
             : m.Groups[2].Success ? m.Groups[2].Value : "");
+
+    /// <summary>예외(안쪽 예외 포함)에 401 · 403 http 응답이 있는지.</summary>
+    private static bool IsUnauthorized(Exception ex)
+    {
+        for (Exception? e = ex; e is not null; e = e.InnerException)
+            if (e is HttpRequestException { StatusCode: System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden }) return true;
+        return false;
+    }
 
     private static string Key(string roomId, string server) => roomId + "|" + server;
 

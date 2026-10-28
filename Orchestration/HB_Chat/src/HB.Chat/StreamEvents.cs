@@ -19,6 +19,9 @@ public sealed record InitEvent(string? SessionId, string? Version, IReadOnlyList
     /// <summary>쓸 수 있는 서브에이전트 이름 (Claude 앱 기능 D — 곁칸 목록).</summary>
     public IReadOnlyList<string> Agents { get; init; } = [];
     public IReadOnlyList<(string Name, string Path)> Plugins { get; init; } = [];
+
+    /// <summary>쓸 수 있는 도구 이름 (MCP는 mcp__서버__도구, 설명 없음) — 연결 탭이 앱에서 확인할 수 없는 서버(OAuth)의 도구 목록으로 쓴다.</summary>
+    public IReadOnlyList<string> Tools { get; init; } = [];
 }
 
 /// <summary>
@@ -153,6 +156,7 @@ public static class StreamParser
                     TerminalCommands = Strs(e, "terminal_slash_commands"),
                     Agents = Strs(e, "agents"),
                     Plugins = Plugins(e),
+                    Tools = Strs(e, "tools"),
                 },
                 "system" when subtype is "task_started" or "task_progress" or "task_notification" && Str(e, "task_id") is { Length: > 0 } taskId =>
                     new TaskEvent(subtype switch { "task_started" => "started", "task_progress" => "progress", _ => "done" }, taskId,

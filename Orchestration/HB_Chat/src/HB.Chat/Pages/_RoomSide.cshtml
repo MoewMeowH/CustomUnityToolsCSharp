@@ -155,7 +155,7 @@
         {
             var kind = c.Kind switch { "base" => "기본", "app" => "앱", "unity" => "Unity", _ => "작업 폴더" };
             var probe = c.Probe;
-            var tools = c.StaticTools ?? probe?.Tools;
+            var tools = c.ShownTools;
             <li class="mcp-item @(c.On && c.Applies ? "" : "off")">
                 <div class="mcp-head">
                     <span class="mcp-name mono">@c.Name</span>
@@ -198,6 +198,11 @@
                             {
                                 <span class="warn-text"> — 에디터가 꺼져 있습니다 (그 프로젝트 에디터를 켜야 도구가 보입니다)</span>
                             }
+                        }
+                        else if (probe.NeedsLogin)
+                        {
+                            @* OAuth 서버(Notion 등): claude는 로그인 토큰으로 붙지만 앱은 확인할 수 없다 — 실패가 아님 *@
+                            <span class="muted">@probe.Error</span>
                         }
                         else
                         {

@@ -24,7 +24,15 @@ public sealed class RoomModel(
     /// Applies: 지금 단계에서 실제로 붙는지 (끈 것과 따로 — 켜 둬도 단계가 낮으면 안 붙음). Init: 마지막 실행 init의 상태 (connected · failed …).
     /// </summary>
     public sealed record Connection(string Name, string Kind, string Transport, string? Command, bool On, bool Applies, string? Note,
-        string? Init, ProbeResult? Probe, bool Probing, IReadOnlyList<(string Name, string? Description)>? StaticTools = null);
+        string? Init, ProbeResult? Probe, bool Probing, IReadOnlyList<(string Name, string? Description)>? StaticTools = null)
+    {
+        /// <summary>마지막 실행 init의 이 서버 도구 이름 (설명 없음) — 확인이 도구를 못 받았을 때(OAuth 서버 등) 대신 보인다.</summary>
+        public IReadOnlyList<(string Name, string? Description)> InitTools { get; init; } = [];
+
+        /// <summary>보일 도구 목록: 앱 도구 → 확인 결과 → 실행 init 이름 순.</summary>
+        public IReadOnlyList<(string Name, string? Description)> ShownTools =>
+            StaticTools ?? (Probe is { Ok: true } p ? p.Tools : InitTools);
+    }
 
     public McpProbe Probe => probe;
 
@@ -38,15 +46,21 @@ public sealed class RoomModel(
             var o = options.Value;
             var room = Room;
             var ws = WorkspacePath;
-            var init = hub.Commands(room.Id)?.McpServers ?? [];
+            var commands = hub.Commands(room.Id);
+            var init = commands?.McpServers ?? [];
             string? Init(string name) => init.FirstOrDefault(s => s.Name == name) is { Name: not null } s ? s.Status : null;
+            IReadOnlyList<(string, string?)> InitTools(string name) =>
+            [
+                .. (commands?.Tools ?? []).Where(t => t.StartsWith($"mcp__{name}__", StringComparison.Ordinal))
+                    .Select(t => (t[$"mcp__{name}__".Length..], (string?)null)).Order(),
+            ];
             string Transport(string name) => ws is not null && McpConfigFile.Entry(ws, name)?["url"] is not null ? "http" : "stdio";
             var readUp = room.Level != PermissionLevel.Chat;
             var rows = new List<Connection>
             {
                 new(o.McpServer, "base", ws is null ? "?" : Transport(o.McpServer), ws is null ? null : WorkspaceStore.McpCommand(ws, o.McpServer),
                     !room.McpOff.Contains(o.McpServer), readUp, readUp ? null : "대화 방은 MCP를 붙이지 않습니다",
-                    Init(o.McpServer), probe.Last(room.Id, o.McpServer), probe.IsRunning(room.Id, o.McpServer)),
+                    Init(o.McpServer), probe.Last(room.Id, o.McpServer), probe.IsRunning(room.Id, o.McpServer)) { InitTools = InitTools(o.McpServer) },
                 new(TerminalMcp.Server, "app", "http", "이 앱 (터미널 · 지휘자 브라우저 도구)", !room.McpOff.Contains(TerminalMcp.Server),
                     room.Level == PermissionLevel.Command, room.Level == PermissionLevel.Command ? null : "명령 방에서만 붙습니다",
                     Init(TerminalMcp.Server), null, false, McpProbe.AppTools()),
@@ -59,7 +73,7 @@ public sealed class RoomModel(
                 rows.Add(new(name, "extra", exists ? Transport(name) : "?", exists ? WorkspaceStore.McpCommand(ws!, name) : null,
                     room.McpExtra.Contains(name), readUp && exists,
                     !exists ? "작업 폴더 .mcp.json에 없어졌습니다 — 끄면 목록에서 빠집니다" : readUp ? null : "대화 방은 MCP를 붙이지 않습니다",
-                    Init(name), probe.Last(room.Id, name), probe.IsRunning(room.Id, name)));
+                    Init(name), probe.Last(room.Id, name), probe.IsRunning(room.Id, name)) { InitTools = InitTools(name) });
             }
             if (room.UnityProject is { } unity)
             {
@@ -69,7 +83,10 @@ public sealed class RoomModel(
                     true, room.Level == PermissionLevel.Command && path is not null && cli is not null,
                     path is null ? $"'{unity}'가 설정에 없습니다" : cli is null ? "Unity CLI(unity.exe)를 찾지 못했습니다 — 설정 Chat:UnityCliPath"
                     : room.Level == PermissionLevel.Command ? null : "명령 방에서만 붙습니다",
-                    Init(McpConfigFile.UnityServer), probe.Last(room.Id, McpConfigFile.UnityServer), probe.IsRunning(room.Id, McpConfigFile.UnityServer)));
+                    Init(McpConfigFile.UnityServer), probe.Last(room.Id, McpConfigFile.UnityServer), probe.IsRunning(room.Id, McpConfigFile.UnityServer))
+                {
+                    InitTools = InitTools(McpConfigFile.UnityServer),
+                });
             }
             return rows;
         }

@@ -223,6 +223,53 @@ public sealed class RoomConnectionTests : IDisposable
     }
 
     [Fact]
+    public async Task Probe_Unauthorized_IsLoginNotFailure()
+    {
+        // OAuth http 서버(Notion 등)는 앱이 토큰 없이 붙으면 401 — 실패가 아니라 "로그인 서버"로 (사용자 발견 2026-10-29)
+        var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+        using var stop = new CancellationTokenSource();
+        var server = Task.Run(async () =>
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                using var socket = await listener.AcceptTcpClientAsync(stop.Token);
+                var stream = socket.GetStream();
+                var buffer = new byte[8192];
+                await stream.ReadAsync(buffer, stop.Token);
+                var body = "{\"error\":\"invalid_token\"}";
+                await stream.WriteAsync(System.Text.Encoding.ASCII.GetBytes(
+                    $"HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n{body}"), stop.Token);
+            }
+        });
+        try
+        {
+            var probe = new McpProbe();
+            var entry = new JsonObject { ["type"] = "http", ["url"] = $"http://127.0.0.1:{port}/mcp" };
+            var result = await probe.ProbeAsync(Room, "notion", entry, Ws, CancellationToken.None);
+            Assert.NotNull(result);
+            Assert.False(result.Ok);
+            Assert.True(result.NeedsLogin, result.Error);
+            Assert.Contains("OAuth", result.Error);
+        }
+        finally
+        {
+            stop.Cancel();
+            listener.Stop();
+            try { await server; } catch (Exception ex) when (ex is OperationCanceledException or System.Net.Sockets.SocketException or ObjectDisposedException or IOException) { }
+        }
+    }
+
+    [Fact]
+    public void Parser_InitKeepsToolNames()
+    {
+        var init = Assert.IsType<InitEvent>(StreamParser.Parse(
+            """{"type":"system","subtype":"init","session_id":"s","tools":["Read","mcp__notion__search","mcp__notion__fetch"],"mcp_servers":[{"name":"notion","status":"connected"}]}"""));
+        Assert.Equal(["Read", "mcp__notion__search", "mcp__notion__fetch"], init.Tools);
+    }
+
+    [Fact]
     public void Rules_MentionUnity_OnlyWhenAttached()
     {
         Assert.DoesNotContain("Unity", RoomRules.For(PermissionLevel.Command, terminal: true));
