@@ -262,6 +262,33 @@ public sealed class RoomListTests : IDisposable
     }
 
     [Fact]
+    public void Trash_DeleteNow_OnlyTrashRooms()
+    {
+        // 4차 C1: 휴지통 즉시 비우기 — 방 하나 · 전체, 휴지통 밖 방은 id를 줘도 지우지 않는다
+        var data = Path.Combine(_dir, "data");
+        var store = new RoomStore(Path.Combine(data, "rooms.json"));
+        var now = DateTimeOffset.Now;
+        var a = store.Create("ws", PermissionLevel.Chat, "haiku", "a");
+        var b = store.Create("ws", PermissionLevel.Chat, "haiku", "b");
+        var alive = store.Create("ws", PermissionLevel.Chat, "haiku", "살아 있음");
+        store.Update(a.Id, r => r with { DeletedAt = now });
+        store.Update(b.Id, r => r with { DeletedAt = now });
+        Directory.CreateDirectory(Path.Combine(data, "attachments", a.Id));
+
+        Assert.Empty(Trash.DeleteNow(store, data, [alive.Id]));
+        Assert.NotNull(store.Get(alive.Id));
+        Assert.Equal([a.Id], Trash.DeleteNow(store, data, [a.Id]));
+        Assert.False(Directory.Exists(Path.Combine(data, "attachments", a.Id)));
+
+        // 비우기는 화면에 보인 방만 — 그사이 휴지통에 들어온 방은 남는다 (bd52c6f0d1 C3)
+        var late = store.Create("ws", PermissionLevel.Chat, "haiku", "늦게 넣음");
+        store.Update(late.Id, r => r with { DeletedAt = now });
+        Assert.Equal([b.Id], Trash.DeleteNow(store, data, [b.Id, alive.Id]));
+        Assert.NotNull(store.Get(late.Id));
+        Assert.Equal([alive.Id, late.Id], new RoomStore(Path.Combine(data, "rooms.json")).All().Select(r => r.Id));
+    }
+
+    [Fact]
     public void Export_Markdown_AndFileName()
     {
         var room = NewRoom(title: "빌드 확인");

@@ -163,7 +163,7 @@ public sealed class RoomStore
     }
 
     /// <summary>
-    /// 조건에 맞는 방을 색인에서 뺀다 (휴지통 30일 지남). 뺀 방 ID 목록. 조건은 잠금 안에서 본다 — 같은 순간의 되살리기와 겹쳐도
+    /// 조건에 맞는 방을 색인에서 뺀다 (휴지통 30일 지남 · 휴지통 즉시 비우기 — Trash). 뺀 방 ID 목록. 조건은 잠금 안에서 본다 — 같은 순간의 되살리기와 겹쳐도
     /// 되살린 방은 지우지 않는다 (/self-review 95e8b1c242 C7). 저장에 실패하면 메모리도 되돌린다.
     /// </summary>
     public IReadOnlyList<string> RemoveWhere(Func<Room, bool> remove)

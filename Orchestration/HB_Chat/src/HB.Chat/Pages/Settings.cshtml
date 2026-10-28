@@ -41,7 +41,12 @@
                         {
                             <tr>
                                 <td>@w.Entry.Name</td>
-                                <td class="mono">@w.Entry.Path@(w.Exists ? "" : " (없는 폴더)")</td>
+                                <td class="mono">@w.Entry.Path@(w.Exists ? "" : " (없는 폴더)")
+                                    @if (w.Unusable is { } why)
+                                    {
+                                        <br /><span style="color:var(--warn);font-family:inherit">지금 쓸 수 없음 — @why</span>
+                                    }
+                                </td>
                                 <td class="muted">@(w.Entry.FromConfig ? "설정 파일" : "앱")</td>
                                 <td class="mono">@(w.McpCommand ?? "없음 (읽기 이상 방은 실패)")</td>
                                 <td>@(w.HasHooks ? "있음" : "없음")</td>

@@ -103,7 +103,8 @@ public sealed class SettingsModel(
     /// <summary>
     /// 작업 폴더 줄: 이름 · 경로 · 설정 파일 것인지 · MCP 서버가 실행할 명령(읽기 이상 방이 승인 없이 띄움) · 프로젝트 훅 유무 · 쓰는 방 수(휴지통 포함).
     /// </summary>
-    public sealed record WorkspaceRow(WorkspaceEntry Entry, string? McpCommand, bool HasHooks, bool Exists, int Rooms);
+    // Unusable: 앱에서 더한 폴더가 지금 검사(WhyUnsafe — 방 실행 전과 같은)에 걸리는 이유 (4차 C2: 정션으로 바뀐 폴더가 표에서는 멀쩡해 보였음).
+    public sealed record WorkspaceRow(WorkspaceEntry Entry, string? McpCommand, bool HasHooks, bool Exists, int Rooms, string? Unusable = null);
 
     public IReadOnlyList<WorkspaceRow> Workspaces { get; private set; } = [];
 
@@ -162,7 +163,8 @@ public sealed class SettingsModel(
         [
             .. options.Value.AllWorkspaces.Select(w => new WorkspaceRow(w,
                 WorkspaceStore.McpCommand(w.Path, options.Value.McpServer), WorkspaceStore.HasProjectHooks(w.Path), Directory.Exists(w.Path),
-                all.Count(r => string.Equals(r.Workspace, w.Name, StringComparison.OrdinalIgnoreCase)))),
+                all.Count(r => string.Equals(r.Workspace, w.Name, StringComparison.OrdinalIgnoreCase)),
+                w.FromConfig || !Directory.Exists(w.Path) ? null : options.Value.AppWorkspaces?.WhyUnsafe(w.Path))),
         ];
         Rooms = [.. all.Where(r => r.DeletedAt is null).OrderByDescending(r => r.LastRunAt ?? r.CreatedAt)
             .Select(r => (r, RoomList.TitleOf(r, transcripts.Read(r.SessionId))))];

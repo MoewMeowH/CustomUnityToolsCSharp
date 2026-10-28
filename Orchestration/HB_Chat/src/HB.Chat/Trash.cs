@@ -1,7 +1,7 @@
 namespace HB.Chat;
 
 /// <summary>
-/// 휴지통 (계획서 2-2 c). 방은 DeletedAt을 적어 목록 · 검색 · 보내기에서 빼고, 30일이 지나면 방 색인과 그 방 첨부 폴더를 지운다.
+/// 휴지통 (계획서 2-2 c). 방은 DeletedAt을 적어 목록 · 검색 · 보내기에서 빼고, 30일이 지나면(또는 휴지통 화면에서 바로) 방 색인과 그 방 첨부 폴더를 지운다.
 /// 세션 기록(~/.claude/projects)은 지우지 않는다 — 사용자 결정 2026-10-28 "추천대로" (대시보드 기록 · 비용 근거가 남는다).
 /// </summary>
 public static class Trash
@@ -16,11 +16,22 @@ public static class Trash
     /// 30일이 지난 방을 지운다: 방 색인에서 빼고 데이터 폴더의 attachments/&lt;방 ID&gt; 폴더를 지운다. 지운 방 ID 목록.
     /// 방 ID는 12자 16진만 경로에 쓴다 (색인이 손으로 고쳐졌어도 다른 폴더를 지우지 않게). 방 색인이 깨졌으면 아무것도 하지 않는다.
     /// </summary>
-    public static IReadOnlyList<string> Purge(RoomStore store, string dataFolder, DateTimeOffset now)
+    public static IReadOnlyList<string> Purge(RoomStore store, string dataFolder, DateTimeOffset now) =>
+        Remove(store, dataFolder, r => r.DeletedAt is { } at && now - at >= KeepFor);
+
+    /// <summary>
+    /// 휴지통 즉시 비우기 (4차 C1 — 사용자 희망 "휴지통 즉시 비우기"): 준 방들 중 휴지통에 있는 방만 지운다 — 조건은 잠금 안에서 보므로
+    /// 같은 순간 되살린 방은 남는다. "비우기"도 화면에 보인 방 ID만 받는다 — 확인한 범위 밖(그사이 다른 탭이 넣은 방)을 지우지 않게
+    /// (/self-review bd52c6f0d1 C3). 세션 기록은 남김 (4차 결정 C1 "남김").
+    /// </summary>
+    public static IReadOnlyList<string> DeleteNow(RoomStore store, string dataFolder, IReadOnlyCollection<string> ids) =>
+        Remove(store, dataFolder, r => r.DeletedAt is not null && ids.Contains(r.Id));
+
+    private static IReadOnlyList<string> Remove(RoomStore store, string dataFolder, Func<Room, bool> which)
     {
         if (store.LoadError is not null) return [];
-        var expired = store.RemoveWhere(r => r.DeletedAt is { } at && now - at >= KeepFor);
-        foreach (var id in expired.Where(RoomStore.IsRoomId))
+        var removed = store.RemoveWhere(which);
+        foreach (var id in removed.Where(RoomStore.IsRoomId))
         {
             var dir = Path.Combine(dataFolder, "attachments", id);
             try
@@ -29,6 +40,6 @@ public static class Trash
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { } // 다음 지우기 때 남은 폴더는 그대로 — 색인에서는 빠졌다
         }
-        return expired;
+        return removed;
     }
 }

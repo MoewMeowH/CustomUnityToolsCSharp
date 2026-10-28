@@ -27,6 +27,19 @@
                     {
                         <p class="muted" style="margin:0">비어 있습니다.</p>
                     }
+                    else
+                    {
+                        @* 즉시 비우기 (4차 C1) — 되돌릴 수 없어 확인을 받는다 *@
+                        <form method="post" asp-page-handler="DeleteTrash" style="margin:0 0 10px"
+                              onsubmit="return confirm('휴지통의 방 @(Model.TrashRooms.Count)개를 지금 지울까요? 방 목록 · 첨부가 지워지고 되돌릴 수 없습니다 (세션 기록은 남습니다).')">
+                            @* 확인 창에 보인 방들만 (그사이 다른 탭이 넣은 방은 지우지 않음 — bd52c6f0d1 C3) *@
+                            @foreach (var r in Model.TrashRooms)
+                            {
+                                <input type="hidden" name="ids" value="@r.Id" />
+                            }
+                            <button class="btn" type="submit">휴지통 비우기 (@Model.TrashRooms.Count)</button>
+                        </form>
+                    }
                     @foreach (var r in Model.TrashRooms)
                     {
                         <form method="post" asp-page-handler="Restore" class="trash-row">
@@ -34,6 +47,8 @@
                             <a href="/Room/@r.Id">@Model.TitleOf(r)</a>
                             <span class="muted">@r.DeletedAt?.ToLocalTime().ToString("MM-dd HH:mm") · @Trash.DaysLeft(r, DateTimeOffset.Now)일 남음</span>
                             <button class="btn" type="submit">되살리기</button>
+                            <button class="btn" type="submit" asp-page-handler="DeleteTrash"
+                                    onclick="return confirm('이 방을 지금 지울까요? 방 목록 · 첨부가 지워지고 되돌릴 수 없습니다 (세션 기록은 남습니다).')">지금 지우기</button>
                         </form>
                     }
                 </section>

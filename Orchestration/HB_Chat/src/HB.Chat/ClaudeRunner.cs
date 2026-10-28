@@ -25,6 +25,9 @@ public sealed record RunResult(
 
     /// <summary>이 턴의 마지막 지휘자 상태 한 줄 (post_turn_summary, 3차 b). 없으면 null.</summary>
     public StatusEvent? Status { get; init; }
+
+    /// <summary>claude를 띄우기 전에 막힘 (작업 폴더 검사 등, 4차 C2) — 사용자 말이 세션 기록에 남지 않았다.</summary>
+    public bool NotStarted { get; init; }
 }
 
 /// <summary>

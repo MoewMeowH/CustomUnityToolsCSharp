@@ -101,6 +101,46 @@ public sealed class RoomHubTests : IDisposable
     }
 
     [Fact]
+    public async Task BlockedBeforeRun_EndCarriesPrompt()
+    {
+        // 4차 C2: claude를 띄우기 전에 막힌 말은 end에 Prompt를 실어 화면이 남긴다 (세션 기록에 없으므로). 돈 턴은 싣지 않는다.
+        var blocked = _store.Create("없는폴더", PermissionLevel.Chat, "opus", null);
+        var ch = _hub.Subscribe(blocked.Id);
+        Assert.Null(_hub.Send(blocked.Id, "여기 말"));
+        var end = (await Until(ch, e => e.Kind == "idle")).Single(e => e.Kind == "end");
+        Assert.False(end.Ok);
+        Assert.Contains("허용 목록에 없거나", end.Text);
+        Assert.Equal("여기 말", end.Prompt);
+
+        var room = NewRoom();
+        var ok = _hub.Subscribe(room.Id);
+        Assert.Null(_hub.Send(room.Id, "hello there"));
+        Assert.Null((await Until(ok, e => e.Kind == "idle")).Single(e => e.Kind == "end").Prompt);
+    }
+
+    [Fact]
+    public async Task ClaudeMissing_EndCarriesPrompt()
+    {
+        // /self-review bd52c6f0d1 C1: 실행 파일이 없어 띄우지 못한 실패도 세션 기록이 그대로라 Prompt를 싣는다
+        var options = new ChatOptions
+        {
+            DataDir = Path.Combine(_dir, "data"),
+            ClaudeProjectsDir = Path.Combine(_dir, "projects"),
+            Workspaces = new(StringComparer.OrdinalIgnoreCase) { ["ws"] = Path.Combine(_dir, "ws") },
+        };
+        using var hub = new RoomHub(_store, new ChatTranscripts(() => Path.Combine(_dir, "projects")), Options.Create(options))
+        {
+            ProcessFactory = (_, _, workspace) => new ProcessSpec(Path.Combine(_dir, "no-such-claude.exe"), [], workspace),
+        };
+        var room = NewRoom();
+        var ch = hub.Subscribe(room.Id);
+        Assert.Null(hub.Send(room.Id, "사라지면 안 되는 말"));
+        var end = (await Until(ch, e => e.Kind == "idle")).Single(e => e.Kind == "end");
+        Assert.False(end.Ok);
+        Assert.Equal("사라지면 안 되는 말", end.Prompt);
+    }
+
+    [Fact]
     public async Task OneTurn_FacesAndContext()
     {
         var room = NewRoom();

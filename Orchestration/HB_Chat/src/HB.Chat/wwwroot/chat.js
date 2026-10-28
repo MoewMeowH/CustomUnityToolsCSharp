@@ -292,6 +292,7 @@
         // ---- 인용 답장 (2-2 b): 말풍선의 "답장" → 입력칸 위 인용 칩, 보낼 때 본문 앞에 인용 블록 ----
         const quoteBox = $("#quote"), quoteText = $("#quote-text");
         let quote = null; // { who, when, text }
+        const sentTexts = []; // 이 탭이 보낸 글 (막혀서 돌아온 말을 입력칸에 돌려줄지 — 4차 C2 · bd52c6f0d1 C6)
         const QuoteChars = 300;
         function setQuote(q) {
             quote = q;
@@ -605,9 +606,11 @@
             const body = lines.slice(0, end).join("\n").trimEnd();
             return (body ? body + "\n" : "") + "📎 파일 " + names.length + "개: " + names.join(", ");
         }
+        // 진행 중 칸 비우기 — '보내지 못함' 말풍선은 남긴다 (세션 기록에 없어 지우면 되찾을 곳이 없다, /self-review bd52c6f0d1 C2)
+        function clearLive() { live.replaceChildren(...live.querySelectorAll(":scope > .msg.failed")); }
         function startTurn(prompt, partial, pending) {
             const follow = atBottom();
-            live.replaceChildren();
+            clearLive();
             cards.clear(); // 카드도 live 안에 있었다
             chips = null;
             if (prompt) bubble("user pending", profiles.user?.name || "나", displayText(prompt));
@@ -934,7 +937,7 @@
                     await refreshMessages();
                     cards.forEach(c => c.remove()); cards.clear(); // 기다리는 카드는 snapshot 뒤 approval로 다시 온다
                     if (ev.busy) startTurn(ev.prompt, ev.text, ev.pendingItems);
-                    else { live.replaceChildren(); stream = null; chips = null; setBusy(false); showQueue([]); }
+                    else { clearLive(); stream = null; chips = null; setBusy(false); showQueue([]); }
                     if (ev.face) setFace(ev.face);
                     renderSteps(ev.steps);
                     if (ev.status) showStatus(ev.status);
@@ -998,10 +1001,25 @@
                     // 이 턴의 말은 세션 기록으로 다시 그린다. 다시 받지 못하면 진행 중 말풍선을 남겨 둔다 (지휘자 검토 R7).
                     // 실패 · 중지면 이유를 한 줄 남긴다.
                     const refreshed = await refreshMessages();
-                    if (refreshed) live.querySelectorAll(".msg").forEach(m => m.remove());
+                    if (refreshed) live.querySelectorAll(":scope > .msg:not(.failed)").forEach(m => m.remove()); // 보내지 못한 말은 남김 (C2)
                     else live.prepend(el("div", "live-line denied", "말풍선을 다시 받지 못했습니다 — 새로고침하면 보입니다."));
                     stream = null; chips = null;
                     if (!ev.ok && ev.text) live.prepend(el("div", "live-line denied", ev.text));
+                    // claude를 띄우기 전에 막힌 말 (4차 C2): 세션 기록에 없어 말풍선이 사라지므로 '보내지 못함'으로 남기고
+                    // 입력칸이 비었으면 글을 돌려준다 (끝의 [첨부] 줄은 빼고 — 파일은 다시 붙인다)
+                    if (!ev.ok && ev.prompt) {
+                        live.querySelectorAll(":scope > .msg.pending").forEach(m => m.remove()); // 다시 받기 실패 때 같은 말이 두 번 보이지 않게 (C5)
+                        bubble("user failed", (profiles.user?.name || "나") + " · 보내지 못함", displayText(ev.prompt));
+                        const prompt = ev.prompt.replace(/\r\n/g, "\n");
+                        // 입력칸에는 이 탭에서 보낸 말일 때만 돌려준다 — 같은 방을 연 다른 탭까지 채우면 두 번 보낼 수 있다 (C6)
+                        const mine = sentTexts.indexOf(prompt);
+                        if (mine >= 0) {
+                            sentTexts.splice(mine, 1);
+                            const lines = prompt.split("\n");
+                            while (lines.length && (!lines[lines.length - 1].trim() || lines[lines.length - 1].startsWith("[첨부] "))) lines.pop();
+                            if (!textBox.value) textBox.value = lines.join("\n");
+                        }
+                    }
                     if (ev.costUsd != null) { const c = $("#cost"); if (c) c.textContent = "≈$" + ev.costUsd.toFixed(3); }
                     showContext(ev.contextTokens, ev.contextWindow);
                     if (ev.face) setFace(ev.face);
@@ -1127,6 +1145,9 @@
             let full = q ? quoteBlock(q) + "\n\n" + text : text;
             if (files.length) full = (full.trim() ? full.replace(/\s+$/, "") + "\n\n" : "") + files.map(a => "[첨부] " + a.path).join("\n");
             const data = new FormData(); data.append("text", full);
+            // 이 탭이 보낸 말 (막혀서 돌아오면 입력칸에 돌려줄지 판단 — bd52c6f0d1 C6). 오래된 것은 버린다
+            sentTexts.push(full.replace(/\r\n/g, "\n"));
+            if (sentTexts.length > 20) sentTexts.shift();
             if (await post(handler, data)) {
                 if (quote === q) setQuote(null);
                 attached = attached.filter(a => !files.includes(a));

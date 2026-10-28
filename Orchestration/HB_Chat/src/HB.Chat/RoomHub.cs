@@ -742,6 +742,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 {
                     Ok = result.Ok, Text = endText, CostUsd = result.CostUsd, Face = live.LastEnd.ToString(),
                     ContextTokens = result.ContextTokens, ContextWindow = window,
+                    Prompt = result.NotStarted ? text : null, // 보내지 못한 말 (4차 C2) — 화면이 남기고 입력칸에 돌려준다
                 });
             }
             cts.Dispose();
@@ -751,25 +752,34 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     private async Task<RunResult> RunOneAsync(string roomId, Live live, string text, int generation, CancellationToken ct)
     {
         if (store.Get(roomId) is not { } room) return new RunResult(false, false, "없는 방입니다.", null, null, null, 0, 0, null);
+        var before = transcripts.Size(room.SessionId);
+        RunResult result;
         try
         {
-            return await RunRoomAsync(room, live, text, generation, ct);
+            result = await RunRoomAsync(room, live, text, generation, ct);
         }
         catch (Exception ex)
         {
             // 예상 밖 실패(IO 등)도 방에 남긴다 — 안 남기면 KnownSize가 낡아 다음 말에 잘못된 "앱 밖에서 바뀜" 경고가 뜬다 (0a3b1d5155 C6).
-            return Record(room, new RunResult(false, false, $"내부 오류: {ex.GetType().Name}: {ex.Message}", null, null, null, 0, 0, null));
+            result = Record(room, new RunResult(false, false, $"내부 오류: {ex.GetType().Name}: {ex.Message}", null, null, null, 0, 0, null));
         }
+        // 실패했는데 세션 기록이 그대로면 사용자 말이 기록되지 않았다 — claude 실행 파일이 없음 · 인자 오류 · 바로 끝남도 '보내지 못함'으로
+        // (/self-review bd52c6f0d1 C1: 띄우기 전 검사 넷만 표시하면 그 밖의 경로에서 말이 사라졌다). 중지는 사용자가 멈춘 것이라 뺀다.
+        return !result.Ok && !result.Cancelled && !result.NotStarted && transcripts.Size(room.SessionId) == before
+            ? result with { NotStarted = true }
+            : result;
     }
 
     private async Task<RunResult> RunRoomAsync(Room room, Live live, string text, int generation, CancellationToken ct)
     {
         var o = options.Value;
+        // claude를 띄우기 전에 막힌 실패는 NotStarted — 화면이 그 말을 남기고 입력칸에 돌려준다 (4차 C2: 막힌 말이 사라졌음)
+        static RunResult Blocked(string error) => new(false, false, error, null, null, null, 0, 0, null) { NotStarted = true };
         if (o.WorkspacePath(room.Workspace) is not { } workspace || !Directory.Exists(workspace))
-            return Record(room, new RunResult(false, false, $"작업 폴더 '{room.Workspace}'가 허용 목록에 없거나 없는 폴더입니다.", null, null, null, 0, 0, null));
+            return Record(room, Blocked($"작업 폴더 '{room.Workspace}'가 허용 목록에 없거나 없는 폴더입니다."));
         // 앱에서 더한 작업 폴더는 실행 전에 다시 검사 — 더한 뒤 링크로 바뀌었을 수 있다 (3차 d, /self-review security eee1adb777 C5)
         if (!o.Workspaces.ContainsKey(room.Workspace) && o.AppWorkspaces?.WhyUnsafe(workspace) is { } unsafeWhy)
-            return Record(room, new RunResult(false, false, $"작업 폴더 '{room.Workspace}'를 지금은 쓸 수 없습니다: {unsafeWhy}", null, null, null, 0, 0, null));
+            return Record(room, Blocked($"작업 폴더 '{room.Workspace}'를 지금은 쓸 수 없습니다: {unsafeWhy}"));
 
         var size = transcripts.Size(room.SessionId);
         var resume = size is not null;
@@ -777,7 +787,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         if (!resume && room.ForkOf is { } source
             && store.All().FirstOrDefault(r => string.Equals(r.SessionId, source, StringComparison.OrdinalIgnoreCase)) is { } sourceRoom
             && IsBusy(sourceRoom.Id))
-            return Record(room, new RunResult(false, false, "원래 방이 실행 중입니다 — 그 턴이 끝난 뒤 다시 보내세요 (갈래는 그때까지의 대화를 이어받습니다).", null, null, null, 0, 0, null));
+            return Record(room, Blocked("원래 방이 실행 중입니다 — 그 턴이 끝난 뒤 다시 보내세요 (갈래는 그때까지의 대화를 이어받습니다)."));
         if (resume && room.KnownSize is { } known && known != size)
         {
             // 앞 실행이 끝을 남기지 못했으면(앱 종료) 그 실행이 쓴 것이다. 아니면 다른 곳(Claude 앱 · CLI)에서
@@ -801,7 +811,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             }
             catch (InvalidOperationException ex)
             {
-                return Record(room, new RunResult(false, false, ex.Message, null, null, null, 0, 0, null));
+                return Record(room, Blocked(ex.Message));
             }
         }
 

@@ -64,6 +64,27 @@ public sealed class IndexModel(RoomStore store, RoomHub hub, RoomList list, Chat
         return Redirect($"/Room/{id}");
     }
 
+    /// <summary>
+    /// 휴지통 즉시 비우기 (4차 C1): 줄의 "지금 지우기"는 id 하나, "휴지통 비우기"는 화면에 보인 방 ID들(ids — /self-review bd52c6f0d1 C3).
+    /// 휴지통 밖 방은 지우지 않는다(Trash.DeleteNow). 세션 기록은 남는다. 휴지통 방이 쓰던 작업 폴더를 설정에서 뺄 수 있게 된다.
+    /// </summary>
+    public IActionResult OnPostDeleteTrash(string? id, string[]? ids)
+    {
+        string[] targets = ids is { Length: > 0 } ? ids : id is null ? [] : [id];
+        if (targets.Length == 0 || !targets.All(RoomStore.IsRoomId)) return NotFound();
+        try
+        {
+            foreach (var removed in Trash.DeleteNow(store, options.Value.DataFolder, targets)) hub.Touch(removed);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            Error = $"휴지통에서 지우지 못했습니다: {ex.Message}";
+            OnGet(trash: "1");
+            return Page();
+        }
+        return Redirect("/?trash=1");
+    }
+
     public IActionResult OnPostCreate(string workspace, PermissionLevel level, string model, string? title)
     {
         var o = options.Value;
