@@ -1,0 +1,9 @@
+<Project>
+  <!-- WebView2 패키지는 .NET 5+ 앱에 WinForms용과 함께 WPF용 Microsoft.Web.WebView2.Wpf.dll도 늘 참조로 붙인다.
+       WinForms 앱(데스크톱 · 그 테스트)에는 WPF의 WindowsBase가 없어 빌드마다 MSB3277(버전 충돌) 경고가 난다 — 쓰지 않는 WPF 참조를 뺀다 (5차 b). -->
+  <Target Name="DropWebView2Wpf" BeforeTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <Reference Remove="@(Reference)" Condition="'%(Filename)' == 'Microsoft.Web.WebView2.Wpf'" />
+    </ItemGroup>
+  </Target>
+</Project>

@@ -15,9 +15,10 @@ public sealed class MiniForm : Form
     private readonly string _placementPath;
     private readonly ComboBox _rooms = new() { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
     private readonly Button _open = new() { Text = "큰 창", AutoSize = true, Dock = DockStyle.Right };
+    private readonly Panel _top;
     private IReadOnlyList<RoomState> _last = [];
     private string _itemsKey = "";
-    private bool _appClosing;
+    private bool _appClosing, _dark;
 
     /// <summary>고정한 방 (null = 자동).</summary>
     public string? Pinned { get; private set; }
@@ -45,7 +46,7 @@ public sealed class MiniForm : Form
         Location = new Point(area.Right - Width - 16, area.Bottom - Height - 16);
         if (WindowPlacement.Load(_placementPath)?.FitTo(Screen.AllScreens.Select(s => s.WorkingArea), MinSizeMini) is { } p) Bounds = p.Bounds;
 
-        var top = new Panel { Dock = DockStyle.Top, Height = 30, Padding = new Padding(4, 3, 4, 3) };
+        var top = _top = new Panel { Dock = DockStyle.Top, Height = 30, Padding = new Padding(4, 3, 4, 3) };
         top.Controls.Add(_rooms);
         top.Controls.Add(_open);
         _open.Click += (_, _) => OpenInMain?.Invoke(Current);
@@ -124,6 +125,32 @@ public sealed class MiniForm : Form
         if (!MainForm.IsRoomId(id) || View.CoreWebView2 is null) return;
         Current = id;
         View.CoreWebView2.Navigate(new Uri(_chatUrl, $"/Room/{id}?view=mini").AbsoluteUri);
+    }
+
+    /// <summary>
+    /// 화면 테마 (5차 b, 물을 것 2): 테두리는 Windows 것 그대로 두고 제목 줄만 어둡게(DWM) + 위 줄(방 고르기 · 큰 창) 색. 큰 창이 부른다.
+    /// </summary>
+    public void ApplyTheme(FrameColors colors, bool dark)
+    {
+        _dark = dark;
+        if (IsHandleCreated)
+        {
+            WindowFrame.SetDark(Handle, dark);
+            WindowFrame.Refresh(Handle); // 떠 있는 동안 바꾸면 제목 줄이 다음 활성화까지 옛 색일 수 있다 — 틀을 다시 그리게 (993ef3b338 C3)
+        }
+        BackColor = View.DefaultBackgroundColor = colors.Page;
+        _top.BackColor = colors.Back;
+        _rooms.FlatStyle = _open.FlatStyle = FlatStyle.Flat;
+        _rooms.BackColor = colors.Hover;
+        _rooms.ForeColor = _open.ForeColor = colors.Text;
+        _open.BackColor = colors.Selected;
+        _open.FlatAppearance.BorderColor = colors.Selected;
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        WindowFrame.SetDark(Handle, _dark);
     }
 
     public void Toggle()

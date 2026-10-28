@@ -3,11 +3,13 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
+using Microsoft.Win32;
 
 namespace HB.Chat.Desktop;
 
 /// <summary>
 /// 큰 창 (계획서 2-3 a): 위 탭 줄(채팅 · 대시보드) + WebView2 둘(같은 사용자 데이터 폴더). 켤 때 두 서버를 띄우거나 붙는다.
+/// 5차 b: Windows 제목 줄 없이 앱이 맨 위 줄(<see cref="TitleBar"/>)을 그리고, 채팅 서버의 화면 테마를 창 틀 · WebView2 색 설정에 입힌다.
 /// WebView2 규칙: 호스트 다리 없음(웹 메시지 · 호스트 객체 끔), 권한 요청 모두 거부, WebRTC를 문서 생성 스크립트로 지움(위젯 · 중첩 틀까지 — 0번 실측),
 /// localhost 말고 이름 조회를 막음(DNS로 알리는 길 — dns-prefetch 등), 큰 틀 이동 · 새 창은 <see cref="NavigationPolicy"/>와 사용자 클릭,
 /// 하위 틀은 about:srcdoc · about:blank만, 사용자 프로토콜 실행 거부. 화면은 HTTP 응답으로만 띄운다 (페이지 CSP가 붙게).
@@ -35,11 +37,13 @@ public sealed class MainForm : Form
     private RegisteredWaitHandle? _showWait, _exitWait;
     private readonly Uri _chatUrl, _dashboardUrl;
     private readonly NavigationPolicy _policy;
-    private readonly ToolStripButton _chatTab = new("채팅"), _dashTab = new("대시보드");
 
-    /// <summary>설정 (3차 d): 채팅 탭에서 /Settings를 연다 — 탭이 아니라 바로 가기.</summary>
-    private readonly ToolStripButton _settingsButton = new("설정") { ToolTipText = "작업 폴더 · 방 이름 (채팅 탭에서 열림)" };
-    private readonly ToolStripLabel _status = new() { Alignment = ToolStripItemAlignment.Right };
+    /// <summary>
+    /// 맨 위 줄 (5차 b — Windows 제목 줄 대신): 탭 채팅 · 대시보드 · 설정. 설정(3차 d)은 채팅 탭에서 /Settings를 여는 바로 가기.
+    /// </summary>
+    private readonly TitleBar _titleBar = new("HB Chat", [("채팅", null), ("대시보드", null), ("설정", "작업 폴더 · 방 이름 · 화면 테마 (채팅 탭에서 열림)")]);
+    private const int ChatTabIndex = 0, DashTabIndex = 1, SettingsTabIndex = 2;
+    private readonly Panel _body = new() { Dock = DockStyle.Fill };
     private readonly WebView2 _chatView = new() { Dock = DockStyle.Fill };
     private readonly WebView2 _dashView = new() { Dock = DockStyle.Fill, Visible = false };
     private readonly Label _message = new() { Dock = DockStyle.Fill, Visible = false, TextAlign = ContentAlignment.MiddleCenter, Padding = new Padding(24) };
@@ -82,6 +86,8 @@ public sealed class MainForm : Form
         _dashboardUrl = new Uri(settings.DashboardUrl);
         _policy = new NavigationPolicy(_chatUrl, _dashboardUrl);
         _placementPath = Path.Combine(settings.DataFolder, "desktop-window.json");
+        _themePath = Path.Combine(settings.DataFolder, "desktop-theme.json");
+        _theme = Appearance.LoadLast(_themePath) ?? Appearance.Default;
 
         Text = "HB Chat";
         MinimumSize = WindowPlacement.MinSize;
@@ -94,17 +100,27 @@ public sealed class MainForm : Form
             if (p.Maximized) WindowState = FormWindowState.Maximized;
         }
 
-        var bar = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden, Dock = DockStyle.Top, Padding = new Padding(6, 2, 6, 2) };
-        // 설정 화면에서 '채팅'을 누르면 방 목록으로 돌아간다 (4차 B1 — 설정은 채팅 탭 안의 화면)
-        _chatTab.Click += (_, _) => ShowTab(AppTab.Chat, OnSettingsPage ? _chatUrl.AbsoluteUri : null);
-        _dashTab.Click += (_, _) => ShowTab(AppTab.Dashboard, null);
-        _settingsButton.Click += (_, _) => ShowTab(AppTab.Chat, new Uri(_chatUrl, "/Settings").AbsoluteUri);
-        bar.Items.AddRange([_chatTab, _dashTab, new ToolStripSeparator(), _settingsButton, _status]);
-        var body = new Panel { Dock = DockStyle.Fill };
-        body.Controls.AddRange([_chatView, _dashView, _message]);
-        Controls.Add(body);
-        Controls.Add(bar);
+        _titleBar.TabClicked += tab =>
+        {
+            switch (tab)
+            {
+                // 설정 화면에서 '채팅'을 누르면 방 목록으로 돌아간다 (4차 B1 — 설정은 채팅 탭 안의 화면)
+                case ChatTabIndex: ShowTab(AppTab.Chat, OnSettingsPage ? _chatUrl.AbsoluteUri : null); break;
+                case DashTabIndex: ShowTab(AppTab.Dashboard, null); break;
+                case SettingsTabIndex: ShowTab(AppTab.Chat, new Uri(_chatUrl, "/Settings").AbsoluteUri); break;
+            }
+        };
+        _titleBar.MinimizeClicked += () => WindowState = FormWindowState.Minimized;
+        _titleBar.MaximizeClicked += () => WindowState = WindowState == FormWindowState.Maximized ? FormWindowState.Normal : FormWindowState.Maximized;
+        _titleBar.CloseClicked += Close; // 닫기(X)와 같다 — 트레이로 숨김
+        _titleBar.RequiredWidthChanged += UpdateMinimumSize;
+        _body.Controls.AddRange([_chatView, _dashView, _message]);
+        Controls.Add(_body);
+        Controls.Add(_titleBar);
         UpdateTabs();
+        ApplyTheme(_theme);
+        // 시스템 따름일 때 Windows 밝게 · 어둡게를 바꾸면 맨 위 줄도 따라간다 (웹 화면은 WebView2가 따라감)
+        SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
 
         // 트레이 (2-3 b): 닫기(X)는 여기로 숨김, 메뉴 열기 · 끝내기, 두 번 누르면 열기, 풍선을 누르면 그 방
         _trayMenu.Items.Add("열기", null, (_, _) => BringUp());
@@ -167,6 +183,8 @@ public sealed class MainForm : Form
         var env = _env = await CoreWebView2Environment.CreateAsync(null, _settings.WebViewFolder, new CoreWebView2EnvironmentOptions(arguments));
         await ConfigureAsync(_chatView, AppTab.Chat, env);
         await ConfigureAsync(_dashView, AppTab.Dashboard, env);
+        // 테마는 설정 화면에서 저장(폼 POST → 다시 열기)할 때 바뀐다 — 채팅 화면이 새로 열릴 때마다 다시 읽는다 (5차 b)
+        _chatView.CoreWebView2.NavigationCompleted += (_, _) => RefreshAppearance();
 
         // 서버마다 따로 기다린다 — 한쪽이 늦거나 실패해도 다른 탭은 준비되는 대로 연다 (26d478170f C3 · C4)
         var progress = new Progress<string>(SetStatus);
@@ -220,6 +238,7 @@ public sealed class MainForm : Form
         s.IsGeneralAutofillEnabled = false;
         s.IsPasswordAutosaveEnabled = false;
         s.AreDevToolsEnabled = true;        // 개인 앱 — 문제 볼 때
+        core.Profile.PreferredColorScheme = Appearance.Scheme(_theme); // 대시보드처럼 테마 설정이 없는 화면도 밝기를 따른다 (5차 b)
         await core.AddScriptToExecuteOnDocumentCreatedAsync(WebRtcBlock);
 
         // 큰 틀: 이 탭 출처는 그대로. 다른 탭 · 기본 브라우저로 보내는 것은 사용자가 시작한 이동만 — 스크립트 · meta refresh · 리다이렉트로
@@ -314,11 +333,8 @@ public sealed class MainForm : Form
 
     private void UpdateTabs()
     {
-        var settings = OnSettingsPage;
-        _chatTab.Checked = _tab == AppTab.Chat && !settings;
-        _settingsButton.Checked = settings;
-        _dashTab.Checked = _tab == AppTab.Dashboard;
-        _settingsButton.Enabled = _chatError is null; // 채팅 화면이 준비되기 전에는 주소를 받을 곳이 없다 (/self-review 460430d647 C8)
+        _titleBar.CheckedTab = OnSettingsPage ? SettingsTabIndex : _tab == AppTab.Chat ? ChatTabIndex : DashTabIndex;
+        _titleBar.SetTabEnabled(SettingsTabIndex, _chatError is null); // 채팅 화면이 준비되기 전에는 주소를 받을 곳이 없다 (/self-review 460430d647 C8)
         var error = _tab == AppTab.Chat ? _chatError : _dashError;
         _message.Text = error ?? "";
         _message.Visible = error is not null;
@@ -328,7 +344,7 @@ public sealed class MainForm : Form
 
     /// <summary>상태 줄: 이번 글 + 계속 남는 경고(시작 설정 · 단축키). 다른 글이 경고를 덮지 않게 한 곳에서 붙인다 (bde22e2224 C6).</summary>
     private void SetStatus(string text) =>
-        _status.Text = string.Join(" · ", new[] { text }.Concat(_warnings).Where(s => !string.IsNullOrEmpty(s)));
+        _titleBar.Status = string.Join(" · ", new[] { text }.Concat(_warnings).Where(s => !string.IsNullOrEmpty(s)));
 
     /// <summary>두 번째 실행 신호(앞으로 · --exit) (스레드 풀). 창이 닫히는 중이거나 핸들이 없으면 버린다 (26d478170f C7).</summary>
     private void OnShowSignal(Action action)
@@ -358,6 +374,8 @@ public sealed class MainForm : Form
     private void OnRooms(IReadOnlyList<RoomState> rooms)
     {
         if (_closing) return;
+        // 테마 저장(설정 화면 · 브라우저)도 앱 전체 신호를 보낸다 — 방이 없어도 (RoomHub.ProfilesChanged, 993ef3b338 C4)
+        RefreshAppearance();
         var viewing = ViewingRoom();
         var notices = Notices.Diff(_rooms, rooms, viewing);
         _rooms = rooms.ToDictionary(r => r.Id);
@@ -380,7 +398,13 @@ public sealed class MainForm : Form
     /// </summary>
     private void OnConnection(bool connected)
     {
-        if (_closing || connected || _rooms is null) return;
+        if (_closing) return;
+        if (connected)
+        {
+            RefreshAppearance(); // 서버를 다시 켰으면 테마도 다시 (5차 b)
+            return;
+        }
+        if (_rooms is null) return;
         _rooms = null;
         _trayLevel = TrayLevel.Idle;
         _tray.Icon = _trayIcons[TrayLevel.Idle];
@@ -449,6 +473,7 @@ public sealed class MainForm : Form
         try
         {
             mini.OpenInMain += OpenRoom;
+            mini.ApplyTheme(_titleBar.Colors, Appearance.IsDark(_theme, Appearance.SystemDark()));
             mini.Activated += (_, _) => UpdateTray();
             mini.CreateControl();
             await ConfigureAsync(mini.View, AppTab.Chat, env); // 큰 창과 같은 규칙 (다른 탭 · 밖 주소는 큰 창 · 브라우저로)
@@ -495,6 +520,9 @@ public sealed class MainForm : Form
     {
         base.OnHandleCreated(e);
         RegisterHotkey();
+        WindowFrame.SetDark(Handle, Appearance.IsDark(_theme, Appearance.SystemDark()));
+        WindowFrame.Refresh(Handle); // 제목 영역 지우기를 처음 틀에도 (5차 b)
+        UpdateMinimumSize();         // 좌우 테두리 폭은 틀이 생긴 뒤에야 안다
     }
 
     /// <summary>상태 줄에 서버 상태 뒤로 계속 보일 경고 (단축키 등).</summary>
@@ -507,7 +535,85 @@ public sealed class MainForm : Form
             ToggleMini();
             return;
         }
+        // 테두리 없는 창 (5차 b): 제목 영역을 지우고, 맨 위 줄의 빈 곳을 제목 줄로 · 맨 위 띠를 위쪽 크기 조절로
+        if (m.Msg == WindowFrame.WmNcCalcSize && m.WParam != IntPtr.Zero)
+        {
+            WindowFrame.CalcSize(ref m, msg => base.WndProc(ref msg), DeviceDpi);
+            return;
+        }
         base.WndProc(ref m);
+        if (m.Msg == WindowFrame.WmNcHitTest && m.Result == TitleLayout.HtClient)
+        {
+            var p = PointToClient(new Point(unchecked((short)(long)m.LParam), unchecked((short)((long)m.LParam >> 16))));
+            m.Result = TitleLayout.FrameHit(p, ClientSize.Width, _titleBar.ResizeBand, WindowState == FormWindowState.Maximized, _titleBar.Bounds.Contains(p));
+        }
+    }
+
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        var maximized = WindowState == FormWindowState.Maximized;
+        _titleBar.Maximized = maximized;
+        _titleBar.ResizeBand = maximized ? 0 : WindowFrame.ResizeBorder(DeviceDpi);
+    }
+
+    // ---- 화면 테마 (5차 b) ----
+
+    private readonly string _themePath;
+    private AppTheme _theme;
+    private int _appearanceRead;
+
+    /// <summary>창 최소 폭: 기본 최소 크기와 맨 위 줄이 겹치지 않는 폭(+ 좌우 테두리) 중 큰 쪽. 배율이 바뀌면 다시 (993ef3b338 C1).</summary>
+    private void UpdateMinimumSize()
+    {
+        var frame = IsHandleCreated ? Width - ClientSize.Width : 0;
+        MinimumSize = new Size(Math.Max(WindowPlacement.MinSize.Width, _titleBar.RequiredWidth + frame), WindowPlacement.MinSize.Height);
+    }
+
+    /// <summary>테마를 맨 위 줄 · 창 틀 · 화면 바탕 · WebView2 색 설정 · 미니 창에 입힌다.</summary>
+    private void ApplyTheme(AppTheme theme)
+    {
+        _theme = theme;
+        var dark = Appearance.IsDark(theme, Appearance.SystemDark());
+        var colors = Appearance.Colors(dark);
+        _titleBar.Colors = colors;
+        BackColor = _body.BackColor = _message.BackColor = colors.Page;
+        _message.ForeColor = colors.Text;
+        _chatView.DefaultBackgroundColor = _dashView.DefaultBackgroundColor = colors.Page; // 화면이 뜨기 전 흰 번쩍임 없게
+        if (_chatView.CoreWebView2 is { } core) core.Profile.PreferredColorScheme = Appearance.Scheme(theme); // 두 탭 · 미니 창이 같은 프로필
+        if (IsHandleCreated) WindowFrame.SetDark(Handle, dark);
+        _mini?.ApplyTheme(colors, dark);
+    }
+
+    /// <summary>
+    /// 채팅 서버의 `/api/appearance`를 읽어 바뀌었으면 입힌다. 읽기가 겹치면 마지막 것만 — 늦게 온 옛 응답이 새 테마를 덮지 않게.
+    /// 못 읽으면(서버 준비 전 · 옛 서버) 앞 테마 그대로.
+    /// </summary>
+    private async void RefreshAppearance()
+    {
+        if (_closing || _chatError is not null) return;
+        var read = ++_appearanceRead;
+        string json;
+        try
+        {
+            json = await _http.GetStringAsync(new Uri(_chatUrl, "/api/appearance"), _cts.Token);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or ObjectDisposedException)
+        {
+            return;
+        }
+        if (_closing || read != _appearanceRead || Appearance.Parse(json) is not { } theme || theme == _theme) return;
+        Trace($"테마 {_theme} → {theme}");
+        ApplyTheme(theme);
+        Appearance.SaveLast(_themePath, theme);
+    }
+
+    private void OnUserPreferenceChanged(object? sender, UserPreferenceChangedEventArgs e)
+    {
+        // 밝게 · 어둡게 전환은 General로 온다 — 창 지표 · 로캘 · 전원 같은 다른 범주는 무시 (지휘자 검토 R1)
+        if (_closing || e.Category != UserPreferenceCategory.General || _theme != AppTheme.System || !IsHandleCreated) return;
+        if (InvokeRequired) BeginInvoke(() => ApplyTheme(_theme));
+        else ApplyTheme(_theme);
     }
 
     [DllImport("user32.dll", SetLastError = true)]
@@ -644,6 +750,7 @@ public sealed class MainForm : Form
         {
             _mini?.Dispose();
             _closing = true;
+            SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged; // 정적 이벤트 — 안 빼면 창이 남는다
             _showWait?.Unregister(null);
             _exitWait?.Unregister(null);
             _cts.Cancel();
