@@ -21,6 +21,15 @@ public sealed class AppearanceTests
     public void Parse_OnlyKnownNames(string? json, AppTheme? expected) => Assert.Equal(expected, Appearance.Parse(json));
 
     [Theory]
+    [InlineData("""{"theme":"discord","notifyBody":true}""", true)]
+    [InlineData("""{"theme":"discord","notifyBody":false}""", false)]
+    [InlineData("""{"theme":"discord"}""", false)]          // 옛 서버
+    [InlineData("""{"notifyBody":"true"}""", false)]        // 글자는 받지 않는다
+    [InlineData("{ broken", false)]
+    [InlineData(null, false)]
+    public void NotifyBody_OnlyTrueLiteral(string? json, bool expected) => Assert.Equal(expected, Appearance.NotifyBody(json));
+
+    [Theory]
     [InlineData(AppTheme.Discord, false, CoreWebView2PreferredColorScheme.Dark, true)]
     [InlineData(AppTheme.Light, true, CoreWebView2PreferredColorScheme.Light, false)]
     [InlineData(AppTheme.System, true, CoreWebView2PreferredColorScheme.Auto, true)]

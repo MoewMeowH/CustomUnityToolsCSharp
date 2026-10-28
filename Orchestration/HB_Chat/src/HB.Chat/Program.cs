@@ -159,10 +159,11 @@ app.UseStaticFiles();
 app.MapRazorPages();
 app.MapStickerImages();
 // 화면 테마 (5차 a): 데스크톱 앱이 맨 위 줄 색 · WebView2 색 설정(대시보드 탭 포함)을 맞추려고 읽는다. 읽기만.
+// notifyBody: 데스크톱 알림에 답 앞부분을 보일지 (설정 화면 토글, 기본 끔)
 app.MapGet("/api/appearance", (ProfileStore profiles, HttpContext ctx) =>
 {
     ctx.Response.Headers.CacheControl = "no-store";
-    return Results.Json(new { theme = profiles.Theme() });
+    return Results.Json(new { theme = profiles.Theme(), notifyBody = profiles.NotifyBody() });
 });
 // 스티커 팩 그림 (4차 D2): 있는 팩 · 목록에 있는 태그만, 팩 폴더 → 없으면 기본 폴더 (StickerCatalog.FileFor가 폴더 밖을 막는다)
 app.MapGet("/sticker-pack/{pack}/{tag}", IResult (string pack, string tag, StickerPacks packs, HttpResponse response) =>
@@ -188,10 +189,10 @@ app.MapGet("/profile-image/{file}", IResult (string file, ProfileStore profiles,
 var sseJson = new JsonSerializerOptions(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
 
 // 데스크톱 앱 (계획서 2-3): 방 상태 요약 — 서버 확인 · 알림 · 트레이 상태용. 읽기만.
-app.MapGet("/api/rooms", (RoomList list, HttpContext ctx) =>
+app.MapGet("/api/rooms", (RoomList list, ProfileStore profiles, HttpContext ctx) =>
 {
     ctx.Response.Headers.CacheControl = "no-store";
-    return Results.Json(RoomApi.Rows(list.All()), RoomApi.Json);
+    return Results.Json(RoomApi.Rows(list.All(), withPreview: profiles.NotifyBody()), RoomApi.Json);
 });
 app.MapGet("/events/{id}", async (string id, RoomStore store, RoomHub hub, HttpContext ctx) =>
 {

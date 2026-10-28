@@ -54,6 +54,22 @@ public static class Appearance
         }
     }
 
+    /// <summary>`/api/appearance`의 notifyBody (알림에 답 앞부분 보이기). 없거나 모양이 틀리면 false — 본문을 띄우지 않는 쪽.</summary>
+    public static bool NotifyBody(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return false;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            return doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty("notifyBody", out var v)
+                && v.ValueKind == JsonValueKind.True;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>서버 · 저장 파일의 이름 (Parse의 반대).</summary>
     public static string Name(AppTheme theme) => theme switch
     {

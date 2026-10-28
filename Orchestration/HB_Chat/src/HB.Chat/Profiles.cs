@@ -30,6 +30,7 @@ public sealed partial class ProfileStore
     private Dictionary<string, string> _faces = new(StringComparer.OrdinalIgnoreCase);
     private string? _stickerPack;
     private string _theme = DefaultTheme;
+    private bool _notifyBody;
 
     /// <summary>화면 테마 (5차 a): 시스템 따름 · 밝게 · 디코 다크. 기본은 디코 다크 (결정 "모두 추천대로").</summary>
     public const string ThemeSystem = "system", ThemeLight = "light", ThemeDiscord = "discord", DefaultTheme = ThemeDiscord;
@@ -52,6 +53,7 @@ public sealed partial class ProfileStore
                         _profiles[key] = new Profile(CleanName(p.Name, key), IsColor(p.Color) ? p.Color : null, IsImageName(p.Image) ? p.Image : null);
                 _stickerPack = StickerPacks.IsPackName(saved.StickerPack) ? saved.StickerPack : null;
                 _theme = saved.Theme is { } t && Themes.Contains(t) ? t : DefaultTheme;
+                _notifyBody = saved.NotifyBody;
                 foreach (var (face, tag) in saved.Faces ?? [])
                     if (IsFaceName(face) && !string.IsNullOrWhiteSpace(tag) && tag.Length <= 40) _faces[face] = tag.Trim();
             }
@@ -95,6 +97,27 @@ public sealed partial class ProfileStore
             var before = _theme;
             _theme = theme;
             return TrySave(() => _theme = before);
+        }
+    }
+
+    /// <summary>
+    /// 데스크톱 알림에 답 앞부분을 보일지 (노션 "데스크톱 알림에 답변 내용 보이기", 결정 "설정 화면 토글"). 기본 끔 —
+    /// 켜면 글이 Windows 알림 센터에 남는다. 끄면 /api/rooms에 미리보기도 싣지 않는다.
+    /// </summary>
+    public bool NotifyBody()
+    {
+        lock (_lock) return _notifyBody;
+    }
+
+    /// <summary>알림 본문 설정 저장. 오류 문구(null이면 저장).</summary>
+    public string? SetNotifyBody(bool on)
+    {
+        lock (_lock)
+        {
+            if (LoadError is not null) return $"profiles.json을 읽지 못해 쓰지 않습니다: {LoadError}";
+            var before = _notifyBody;
+            _notifyBody = on;
+            return TrySave(() => _notifyBody = before);
         }
     }
 
@@ -245,7 +268,7 @@ public sealed partial class ProfileStore
         {
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(_file))!);
             var tmp = _file + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(new ProfileFile { Profiles = new(_profiles), Faces = new(_faces), StickerPack = _stickerPack, Theme = _theme }, Json), new UTF8Encoding(false));
+            File.WriteAllText(tmp, JsonSerializer.Serialize(new ProfileFile { Profiles = new(_profiles), Faces = new(_faces), StickerPack = _stickerPack, Theme = _theme, NotifyBody = _notifyBody }, Json), new UTF8Encoding(false));
             File.Move(tmp, _file, overwrite: true);
             return null;
         }
@@ -291,6 +314,7 @@ public sealed partial class ProfileStore
         public Dictionary<string, Profile>? Profiles { get; set; }
         public string? StickerPack { get; set; }
         public string? Theme { get; set; }
+        public bool NotifyBody { get; set; }
         public Dictionary<string, string>? Faces { get; set; }
     }
 

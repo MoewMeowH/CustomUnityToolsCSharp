@@ -148,6 +148,21 @@ public sealed class ProfileStoreTests : IDisposable
     }
 
     [Fact]
+    public void NotifyBody_DefaultOff_SavesAndReloads_KeepsTheme()
+    {
+        // 데스크톱 알림 본문: 기본 끔, 저장 · 다시 읽기, 다른 설정(테마)과 같이 저장돼도 서로 지우지 않는다
+        var store = New();
+        Assert.False(store.NotifyBody());
+        Assert.Null(store.SetTheme(ProfileStore.ThemeLight));
+        Assert.Null(store.SetNotifyBody(true));
+        var again = New();
+        Assert.True(again.NotifyBody());
+        Assert.Equal(ProfileStore.ThemeLight, again.Theme());
+        Assert.Null(again.SetNotifyBody(false));
+        Assert.False(New().NotifyBody());
+    }
+
+    [Fact]
     public void BrokenFile_IsNotOverwritten()
     {
         File.WriteAllText(Path.Combine(_dir, "profiles.json"), "{ broken");

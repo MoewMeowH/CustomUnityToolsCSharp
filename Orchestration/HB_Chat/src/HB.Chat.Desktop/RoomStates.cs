@@ -2,8 +2,8 @@ using System.Text.Json;
 
 namespace HB.Chat.Desktop;
 
-/// <summary>`/api/rooms`의 방 한 줄 (데스크톱이 쓰는 칸만).</summary>
-public sealed record RoomState(string Id, string Title, string Activity, bool Failed, int Unread, string? Face = null)
+/// <summary>`/api/rooms`의 방 한 줄 (데스크톱이 쓰는 칸만). Preview는 서버 설정 "알림에 답 앞부분 보이기"가 켜졌을 때만 온다.</summary>
+public sealed record RoomState(string Id, string Title, string Activity, bool Failed, int Unread, string? Face = null, string? Preview = null)
 {
     public bool IsIdle => Activity.Equals("Idle", StringComparison.OrdinalIgnoreCase);
     /// <summary>승인 · 질문 카드가 답을 기다린다 (서버는 둘 다 Approval). 알림 · 트레이 우선순위는 같게 둔다.</summary>
@@ -64,8 +64,8 @@ public enum NoticeKind
     Failed,
 }
 
-/// <summary>알림 하나. Question: Approval 중 질문 카드 (풍선 글만 다름).</summary>
-public sealed record Notice(NoticeKind Kind, string RoomId, string Title, bool Question = false);
+/// <summary>알림 하나. Question: Approval 중 질문 카드 (풍선 글만 다름). Preview: 답 끝 · 실패일 때 방의 미리보기 (승인 · 질문은 싣지 않음).</summary>
+public sealed record Notice(NoticeKind Kind, string RoomId, string Title, bool Question = false, string? Preview = null);
 
 /// <summary>
 /// 알림 판정 (계획서 2-3 b): 앞 · 뒤 방 상태를 비교한다 — 승인 기다림이 되면 "승인 요청", 실행(Busy · Approval)이 쉼으로 끝나면 "답 끝" · "실패".
@@ -81,13 +81,18 @@ public static class Notices
         {
             if (room.Id == viewingRoom || !before.TryGetValue(room.Id, out var was)) continue;
             if (room.IsApproval && !was.IsApproval) notices.Add(new Notice(NoticeKind.Approval, room.Id, room.Title, room.IsQuestion));
-            else if (room.IsIdle && !was.IsIdle) notices.Add(new Notice(room.Failed ? NoticeKind.Failed : NoticeKind.Done, room.Id, room.Title));
+            else if (room.IsIdle && !was.IsIdle)
+                notices.Add(new Notice(room.Failed ? NoticeKind.Failed : NoticeKind.Done, room.Id, room.Title, Preview: room.Preview));
         }
         return notices;
     }
 
-    /// <summary>풍선 한 개의 제목 · 글. 여럿이면 첫 줄은 개수, 글은 방 제목들 (본문은 싣지 않는다).</summary>
-    public static (string Title, string Text) Balloon(IReadOnlyList<Notice> notices)
+    /// <summary>
+    /// 풍선 한 개의 제목 · 글. 여럿이면 첫 줄은 개수, 글은 방 제목들.
+    /// withBody(설정 "알림에 답 앞부분 보이기")면 답 끝 · 실패에 미리보기를 붙인다 — 한 개는 제목 "답 끝 · 방 제목" · 글 미리보기,
+    /// 여럿은 줄마다 "종류 · 방 제목: 미리보기". 승인 · 질문은 늘 제목만 (결정 "지금처럼 제목만").
+    /// </summary>
+    public static (string Title, string Text) Balloon(IReadOnlyList<Notice> notices, bool withBody = false)
     {
         static string Label(Notice n) => n.Kind switch
         {
@@ -95,8 +100,15 @@ public static class Notices
             NoticeKind.Failed => "실패",
             _ => "답 끝",
         };
-        if (notices.Count == 1) return (Label(notices[0]), Cut(notices[0].Title, 200));
-        var lines = notices.Take(5).Select(n => $"{Label(n)} · {Cut(n.Title, 40)}");
+        string? Body(Notice n) => withBody && n.Kind != NoticeKind.Approval && !string.IsNullOrWhiteSpace(n.Preview) ? n.Preview : null;
+        if (notices.Count == 1)
+        {
+            var n = notices[0];
+            return Body(n) is { } body ? ($"{Label(n)} · {Cut(n.Title, 60)}", Cut(body, 200)) : (Label(n), Cut(n.Title, 200));
+        }
+        var lines = notices.Take(5).Select(n => Body(n) is { } body
+            ? $"{Label(n)} · {Cut(n.Title, 30)}: {Cut(body, 40)}"
+            : $"{Label(n)} · {Cut(n.Title, 40)}");
         return ($"알림 {notices.Count}개", string.Join("\n", lines) + (notices.Count > 5 ? "\n…" : ""));
     }
 

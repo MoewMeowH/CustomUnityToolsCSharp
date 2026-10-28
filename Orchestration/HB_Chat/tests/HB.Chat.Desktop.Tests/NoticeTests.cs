@@ -105,6 +105,31 @@ public sealed class NoticeTests
         Assert.Equal(new string('가', 200) + "…", Notices.Balloon([new Notice(NoticeKind.Done, "a", new string('가', 300))]).Text);
     }
 
+    [Fact]
+    public void Balloon_WithBody_AddsPreviewToDoneAndFailedOnly()
+    {
+        // 알림에 답 앞부분 보이기 (설정 켜짐): 답 끝 · 실패만, 승인 · 질문은 제목만 (결정). 미리보기가 없으면 제목만.
+        var done = new Notice(NoticeKind.Done, "a", "방 하나", Preview: "요약: 끝났습니다");
+        Assert.Equal(("답 끝 · 방 하나", "요약: 끝났습니다"), Notices.Balloon([done], withBody: true));
+        Assert.Equal(("답 끝", "방 하나"), Notices.Balloon([done]));                       // 꺼짐이면 지금과 같다
+        Assert.Equal(("승인 요청", "명령 방"), Notices.Balloon([new Notice(NoticeKind.Approval, "b", "명령 방", Preview: "rm -rf")], withBody: true));
+        Assert.Equal(("실패", "방 셋"), Notices.Balloon([new Notice(NoticeKind.Failed, "c", "방 셋")], withBody: true)); // 미리보기 없음
+
+        var (title, text) = Notices.Balloon([done, new Notice(NoticeKind.Approval, "b", "명령 방", true, "질문 글")], withBody: true);
+        Assert.Equal("알림 2개", title);
+        Assert.Equal("답 끝 · 방 하나: 요약: 끝났습니다\n질문 · 명령 방", text);
+    }
+
+    [Fact]
+    public void Diff_CarriesPreviewForDoneOnly()
+    {
+        var before = Map(R("a", "Busy"), R("b", "Busy"));
+        var notices = Notices.Diff(before, [R("a", "Idle") with { Preview = "끝 글" }, R("b", "Approval") with { Preview = "앞 말" }], null);
+        Assert.Equal("끝 글", notices.Single(n => n.Kind == NoticeKind.Done).Preview);
+        Assert.Null(notices.Single(n => n.Kind == NoticeKind.Approval).Preview);
+        Assert.Equal("미리보기", RoomStates.Parse("[{\"id\":\"a\",\"activity\":\"Idle\",\"preview\":\"미리보기\"}]")![0].Preview);
+    }
+
     [Theory]
     [InlineData("http://localhost:5290/Room/0123456789ab", "0123456789ab")]
     [InlineData("http://localhost:5290/Room/0123456789ab?x=1", "0123456789ab")]

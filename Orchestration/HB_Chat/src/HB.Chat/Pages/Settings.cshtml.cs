@@ -32,6 +32,19 @@ public sealed class SettingsModel(
         return Page();
     }
 
+    /// <summary>데스크톱 알림에 답 앞부분 보이기 저장 (체크 상자 — 끄면 값이 오지 않는다). 데스크톱 앱은 방 신호로 다시 읽는다.</summary>
+    public IActionResult OnPostNotify(bool notifyBody)
+    {
+        Error = profiles.Store.SetNotifyBody(notifyBody);
+        if (Error is null)
+        {
+            hub.ProfilesChanged(store.All().Select(r => r.Id));
+            return RedirectToPage(new { done = "notify" });
+        }
+        Fill();
+        return Page();
+    }
+
     /// <summary>테마 이름 (설정 화면).</summary>
     public static string ThemeName(string theme) => theme switch
     {
@@ -122,6 +135,7 @@ public sealed class SettingsModel(
         "faces" => "지휘자 표정을 저장했습니다.",
         "pack" => "스티커 팩을 바꿨습니다.",
         "theme" => "화면 테마를 바꿨습니다.",
+        "notify" => "데스크톱 알림 설정을 바꿨습니다.",
         _ => null,
     };
 

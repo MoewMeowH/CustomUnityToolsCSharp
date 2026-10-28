@@ -152,6 +152,20 @@
                 </form>
             </section>
 
+            @* 데스크톱 알림 (노션 "데스크톱 알림에 답변 내용 보이기", 결정 "설정 화면 토글" · 기본 끔). 승인 · 질문 풍선은 늘 제목만 *@
+            <section class="panel" style="padding:12px 14px;margin-top:16px">
+                <h3 style="margin:0 0 6px;font-size:15px">데스크톱 알림</h3>
+                <p class="muted" style="margin:0 0 8px;font-size:12.5px">켜면 '답 끝' · '실패' 풍선에 지휘자 답 앞부분(방 목록 미리보기와 같은 80자)이 보입니다. 글이 Windows 알림 센터에 남으니 회사에서는 끄세요. 승인 · 질문 풍선은 늘 방 제목만.</p>
+                <form method="post" asp-page-handler="Notify" class="settings-add">
+                    <label class="switch">
+                        <input type="checkbox" name="notifyBody" value="true" checked="@Model.Profiles.Store.NotifyBody()" />
+                        <span class="track"></span>
+                        알림에 답 앞부분 보이기
+                    </label>
+                    <button class="btn primary" type="submit">@Icons.Svg("check") 알림 저장</button>
+                </form>
+            </section>
+
             @* 스티커 팩 (4차 D2 — 노션 "이모티콘 사용 종류 변경"): 스티커 폴더 아래 폴더 하나가 팩 하나, 파일 이름은 기본과 같다. 방마다는 곁칸 방 정보에서 *@
             <section class="panel" style="padding:12px 14px;margin-top:16px">
                 <h3 style="margin:0 0 6px;font-size:15px">스티커 팩</h3>

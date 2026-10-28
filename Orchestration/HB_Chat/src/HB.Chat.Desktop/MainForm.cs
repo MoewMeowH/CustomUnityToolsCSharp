@@ -385,7 +385,7 @@ public sealed class MainForm : Form
         UpdateTray();
         if (notices.Count == 0) return;
         Trace("알림 " + string.Join(", ", notices.Select(n => $"{n.Kind} {n.RoomId}"))); // 방 ID만 (제목은 남기지 않음)
-        var (title, text) = Notices.Balloon(notices);
+        var (title, text) = Notices.Balloon(notices, _notifyBody);
         _balloonRoom = Notices.RoomToOpen(notices);
         var icon = notices.Any(n => n.Kind == NoticeKind.Approval) ? ToolTipIcon.Warning
             : notices.Any(n => n.Kind == NoticeKind.Failed) ? ToolTipIcon.Error : ToolTipIcon.Info;
@@ -602,11 +602,16 @@ public sealed class MainForm : Form
         {
             return;
         }
-        if (_closing || read != _appearanceRead || Appearance.Parse(json) is not { } theme || theme == _theme) return;
+        if (_closing || read != _appearanceRead) return;
+        _notifyBody = Appearance.NotifyBody(json); // 알림에 답 앞부분 보이기 (설정 화면 토글, 기본 끔)
+        if (Appearance.Parse(json) is not { } theme || theme == _theme) return;
         Trace($"테마 {_theme} → {theme}");
         ApplyTheme(theme);
         Appearance.SaveLast(_themePath, theme);
     }
+
+    /// <summary>알림 풍선에 답 앞부분을 보일지 — 서버 /api/appearance의 notifyBody. 읽기 전 · 못 읽으면 끔.</summary>
+    private bool _notifyBody;
 
     private void OnUserPreferenceChanged(object? sender, UserPreferenceChangedEventArgs e)
     {
