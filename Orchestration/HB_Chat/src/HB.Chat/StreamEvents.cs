@@ -25,7 +25,22 @@ public sealed record InitEvent(string? SessionId, string? Version, IReadOnlyList
 /// 서브에이전트 진행 (Claude 앱 기능 D — 2.1.312 실측 system task_started · task_progress · task_notification).
 /// Phase: started · progress · done. Agent는 subagent_type, Description은 지휘자가 준 설명 · 진행 글, Status는 끝 상태(completed · failed …).
 /// </summary>
-public sealed record TaskEvent(string Phase, string TaskId, string? Agent, string? Description, string? Status, int? ToolUses) : StreamEvent;
+public sealed record TaskEvent(string Phase, string TaskId, string? Agent, string? Description, string? Status, int? ToolUses) : StreamEvent
+{
+    /// <summary>task_type — "local_bash"면 지휘자가 Bash 백그라운드 실행으로 띄운 명령 (실측, 계획서 2026-10-29_HB_Chat-백그라운드-명령). 서브에이전트는 local_agent 등.</summary>
+    public string? Kind { get; init; }
+
+    /// <summary>끝 알림(task_notification)의 출력 파일 경로.</summary>
+    public string? OutputFile { get; init; }
+
+    public const string BashKind = "local_bash";
+}
+
+/// <summary>
+/// 메인 답(result)이 끝났는데 백그라운드 작업(서브에이전트 · 백그라운드 명령)이 남아 기다리는 중 — ClaudeRunner가 내는 이벤트(CLI 줄이 아님).
+/// Count가 0이면 기다림이 끝났다. Until은 그때까지 안 끝나면 정리하는 시각.
+/// </summary>
+public sealed record BackgroundWaitEvent(int Count, DateTimeOffset? Until) : StreamEvent;
 
 /// <summary>흘림 글 조각 (stream_event content_block_delta / text_delta).</summary>
 public sealed record DeltaEvent(string Text) : StreamEvent;
@@ -129,7 +144,11 @@ public static class StreamParser
                 "system" when subtype is "task_started" or "task_progress" or "task_notification" && Str(e, "task_id") is { Length: > 0 } taskId =>
                     new TaskEvent(subtype switch { "task_started" => "started", "task_progress" => "progress", _ => "done" }, taskId,
                         Cap(Str(e, "subagent_type"), 80), Cap(Str(e, "description"), StatusChars), Cap(Str(e, "status"), 40),
-                        e.TryGetProperty("usage", out var u) && u.ValueKind == JsonValueKind.Object ? Int(u, "tool_uses") : null),
+                        e.TryGetProperty("usage", out var u) && u.ValueKind == JsonValueKind.Object ? Int(u, "tool_uses") : null)
+                    {
+                        Kind = Cap(Str(e, "task_type"), 40),
+                        OutputFile = Cap(Str(e, "output_file"), 1000),
+                    },
                 "system" when subtype == "permission_denied" => new DeniedEvent(Str(e, "tool_name"), Str(e, "decision_reason")),
                 "system" when subtype == "api_retry" => new RetryEvent(Int(e, "attempt") ?? 0, Str(e, "error")),
                 "system" when subtype == "post_turn_summary" =>

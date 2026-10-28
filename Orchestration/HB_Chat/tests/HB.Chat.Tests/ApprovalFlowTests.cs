@@ -204,6 +204,119 @@ public sealed class ApprovalFlowTests : IDisposable
     }
 
     [Fact]
+    public async Task BackgroundBash_CardShowsMinutes_SecondAnswerReceived()
+    {
+        // 계획서 2026-10-29_HB_Chat-백그라운드-명령: 카드에 백그라운드 표시, 메인 답 뒤 기다림 알림, 끝 알림 뒤 두 번째 답까지 받고 끝난다
+        var room = CommandRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "bgbash please");
+        var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        Assert.Equal(ClaudeRunner.BackgroundBashMinutes, card.BackgroundMinutes);
+        Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null));
+        var seen = await Until(ch, e => e.Kind == "idle");
+        var waits = seen.Where(e => e.Kind == "background").ToList();
+        Assert.Equal(1, waits[0].BackgroundCount); // 첫 답 뒤 1개 기다림
+        Assert.NotNull(waits[0].BackgroundUntil);
+        Assert.Equal(0, waits[^1].BackgroundCount); // 끝 알림 뒤 0
+        Assert.Contains(seen, e => e.Kind == "agent" && e.Task!.Kind == TaskEvent.BashKind);
+        var end = seen.Single(e => e.Kind == "end");
+        Assert.True(end.Ok);
+    }
+
+    [Fact]
+    public async Task BackgroundServer_ClosedAfterCap_KilledAfterGrace_EndsOk()
+    {
+        // 안 끝나는 백그라운드 명령: 상한 뒤 stdin을 닫아도 CLI가 안 끝난다 → 유예 뒤 정리하고 정상 끝 (멈춤 결함, 실제 확인)
+        // 상한 · 유예는 전역이라 같은 클래스(차례로 도는) 안에서만 줄였다가 되돌린다
+        var (wait, grace) = (ClaudeRunner.BackgroundBashWait, ClaudeRunner.CloseGrace);
+        ClaudeRunner.BackgroundBashWait = TimeSpan.FromSeconds(1);
+        ClaudeRunner.CloseGrace = TimeSpan.FromSeconds(1);
+        try
+        {
+            var room = CommandRoom();
+            var ch = _hub.Subscribe(room.Id);
+            _hub.Send(room.Id, "bgserver please");
+            var seen = await Until(ch, e => e.Kind == "idle");
+            Assert.True(seen.Single(e => e.Kind == "end").Ok);
+        }
+        finally { (ClaudeRunner.BackgroundBashWait, ClaudeRunner.CloseGrace) = (wait, grace); }
+    }
+
+    [Fact]
+    public async Task BackgroundServer_WrapUp_EndsWithoutWaitingForCap()
+    {
+        // "지금 끝내기": 상한(10분)을 기다리지 않고 바로 정리 — 기다림 알림이 온 뒤에만 받는다
+        var grace = ClaudeRunner.CloseGrace;
+        ClaudeRunner.CloseGrace = TimeSpan.FromSeconds(1);
+        try
+        {
+            var room = CommandRoom();
+            var ch = _hub.Subscribe(room.Id);
+            _hub.Send(room.Id, "bgserver please");
+            var waiting = (await Until(ch, e => e.Kind == "background")).Last();
+            Assert.Equal(1, waiting.BackgroundCount);
+            _hub.WrapUp(room.Id);
+            var seen = await Until(ch, e => e.Kind == "idle");
+            Assert.True(seen.Single(e => e.Kind == "end").Ok);
+        }
+        finally { ClaudeRunner.CloseGrace = grace; }
+    }
+
+    [Fact]
+    public async Task ResumedSession_GhostResultBeforeTurn_DoesNotCloseStdin()
+    {
+        // 지난 실행에서 정리된 백그라운드 작업이 있는 세션: CLI가 사용자 말 전에 끝 알림 + 빈 result를 낸다 (실측).
+        // 그 result에서 stdin을 닫으면 이번 턴의 승인이 "Stream closed"로 실패했다 (실제 확인) — 승인이 가고 답까지 받아야 한다
+        var room = CommandRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "ghost please");
+        var before = await Until(ch, e => e.Kind == "approval");
+        Assert.DoesNotContain(before, e => e.Kind == "end"); // 빈 result가 턴 끝으로 새지 않는다 (6f64f4b039 C8)
+        var card = before.Last().Approval!;
+        Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null));
+        var end = (await Until(ch, e => e.Kind == "idle")).Single(e => e.Kind == "end");
+        Assert.True(end.Ok, end.Text);
+    }
+
+    [Fact]
+    public async Task UnknownNotification_ThenErrorResultWithoutText_EndsTurn()
+    {
+        // 시작 못 본 끝 알림 뒤 글 없는 실패 result는 거르지 않고 턴을 끝낸다 — 삼키면 stdin이 안 닫혀 방이 멈춘다 (6f64f4b039 C1 · C8)
+        var room = CommandRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "ghostfail please");
+        var end = (await Until(ch, e => e.Kind == "idle")).Single(e => e.Kind == "end");
+        Assert.False(end.Ok);
+    }
+
+    [Fact]
+    public async Task BackgroundServer_StopWhileWaiting_EndsWithAnswer()
+    {
+        // 답을 받은 뒤 기다리는 중에 중지하면 "중지됨"이 아니라 그 답으로 끝난다 (6f64f4b039 C4)
+        var room = CommandRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "bgserver please");
+        await Until(ch, e => e.Kind == "background");
+        _hub.Stop(room.Id);
+        var end = (await Until(ch, e => e.Kind == "idle")).Single(e => e.Kind == "end");
+        Assert.True(end.Ok, end.Text);
+    }
+
+    [Fact]
+    public async Task BackgroundRequestFromSubagent_CardShowsSubagentCap()
+    {
+        // 서브에이전트가 낸 백그라운드 요청은 서브에이전트 기다림 상한(30분)까지 돈다 (6f64f4b039 C5)
+        var room = CommandRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "bgfromagent please");
+        var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        Assert.True(card.FromAgent);
+        Assert.Equal(ClaudeRunner.BackgroundAgentMinutes, card.BackgroundMinutes);
+        Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Deny, null));
+        await Until(ch, e => e.Kind == "idle");
+    }
+
+    [Fact]
     public async Task Tasks_PlainOrLateProgress_DoNotHoldStdin()
     {
         // C2: subagent_type 없는 task는 기다리지 않고, 끝난 뒤 늦게 온 진행 줄은 다시 열지 않는다 (상한 30분 — 기다리면 시험 시간 초과)

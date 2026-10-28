@@ -47,8 +47,12 @@ public sealed record LiveEvent(string Kind)
     /// <summary>status 알림 · snapshot: 지휘자 상태 한 줄 (post_turn_summary, 3차 b).</summary>
     public RoomStatus? Status { get; init; }
 
-    /// <summary>agent 알림: 서브에이전트 진행 (Claude 앱 기능 D — task_started · task_progress · task_notification).</summary>
+    /// <summary>agent 알림: 서브에이전트 · 백그라운드 명령 진행 (Claude 앱 기능 D — task_started · task_progress · task_notification).</summary>
     public TaskEvent? Task { get; init; }
+
+    /// <summary>background 알림 · snapshot: 메인 답 뒤 기다리는 백그라운드 작업 수와 정리 시각 (0이면 기다림 끝 — 화면 "지금 끝내기" 줄).</summary>
+    public int? BackgroundCount { get; init; }
+    public DateTimeOffset? BackgroundUntil { get; init; }
 }
 
 /// <summary>
@@ -66,6 +70,9 @@ public sealed record ApprovalView(string Id, string Tool, string Summary, string
 
     /// <summary>서브에이전트가 낸 요청 (Claude 앱 기능 D).</summary>
     public bool FromAgent { get; init; }
+
+    /// <summary>백그라운드 실행 명령이면 답이 끝난 뒤에도 계속 도는 최대 분 (카드 표시, 결정 "넣음"). 아니면 null.</summary>
+    public int? BackgroundMinutes { get; init; }
 }
 
 /// <summary>
@@ -89,6 +96,11 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         public bool Busy;
         public readonly List<QueuedMessage> Pending = [];
         public CancellationTokenSource? Cts;
+
+        /// <summary>"지금 끝내기" — 메인 답 뒤 백그라운드 작업을 기다리는 실행을 끝낸다 (Cts와 같은 수명). 기다리는 수 · 정리 시각은 snapshot용.</summary>
+        public CancellationTokenSource? WrapUpCts;
+        public int BackgroundCount;
+        public DateTimeOffset? BackgroundUntil;
         public string? Current;
         public readonly System.Text.StringBuilder Partial = new();
         public ToolUse? Tool;
@@ -132,6 +144,9 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             Risky = Request.Risky,
             Plan = Request.IsPlan,
             FromAgent = Request.FromAgent,
+            // 서브에이전트가 낸 요청이면 그 서브에이전트를 기다리는 상한(30분)까지 돈다 (/self-review 6f64f4b039 C5)
+            BackgroundMinutes = !Request.Background ? null
+                : Request.FromAgent ? ClaudeRunner.BackgroundAgentMinutes : ClaudeRunner.BackgroundBashMinutes,
         };
     }
 
@@ -384,6 +399,20 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         Pending = [.. live.Pending.Select(p => p.Text)],
         PendingItems = [.. live.Pending],
     };
+
+    /// <summary>
+    /// 지금 끝내기: 메인 답이 끝나고 백그라운드 작업(서버 등)을 기다리는 실행을 정리한다 — 큐 · 다음 말은 그대로 (중지와 다름).
+    /// 답 전이면 러너가 무시한다.
+    /// </summary>
+    public void WrapUp(string roomId)
+    {
+        if (!_rooms.TryGetValue(roomId, out var live)) return;
+        lock (live.Gate)
+        {
+            // 기다림이 시작된 뒤(정리 시각이 있음)면 — 작업이 다 끝나 지휘자가 이어 답하는 중이어도 받는다 (/self-review 6f64f4b039 C3)
+            if (live.BackgroundUntil is not null) live.WrapUpCts?.Cancel();
+        }
+    }
 
     /// <summary>중지: 큐를 비우고 진행 중 실행을 끝낸다. 기다리던 승인은 거절로 돌려준다.</summary>
     public void Stop(string roomId)
@@ -735,6 +764,8 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 Prompt = live.Current,
                 Steps = live.Steps,
                 Status = room?.Status,
+                BackgroundCount = live.Busy && live.BackgroundUntil is not null ? live.BackgroundCount : null,
+                BackgroundUntil = live.Busy ? live.BackgroundUntil : null,
             });
             if (live.Busy && live.Tool is { } tool) ch.Writer.TryWrite(new LiveEvent("tool") { Text = tool.Name, Detail = tool.Detail });
             if (live.Notice is { } notice) ch.Writer.TryWrite(new LiveEvent("notice") { Text = notice });
@@ -765,7 +796,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         while (true)
         {
             string text;
-            CancellationTokenSource cts;
+            CancellationTokenSource cts, wrapUp;
             lock (live.Gate)
             {
                 if (live.Generation != generation || live.Pending.Count == 0 || _disposed)
@@ -773,6 +804,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                     live.Busy = false;
                     live.Current = null;
                     live.Cts = null;
+                    live.WrapUpCts = null;
                     live.Tool = null;
                     live.Partial.Clear();
                     // 중지로 끝난 경우 새 세대에서 이미 받은 말이 있으면 이어서 돈다.
@@ -793,6 +825,9 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 // 지난 턴의 "앱 밖에서 바뀜" 경고는 지운다 — 이번 턴에도 그렇다면 RunRoomAsync가 다시 낸다 (0a3b1d5155 C7). 화면은 start에서 숨긴다.
                 live.Notice = null;
                 cts = live.Cts = new CancellationTokenSource();
+                wrapUp = live.WrapUpCts = new CancellationTokenSource();
+                live.BackgroundCount = 0;
+                live.BackgroundUntil = null;
                 Broadcast(live, QueueEvent("start", live) with { Prompt = text });
                 SetFace(live, Face.Thinking);
             }
@@ -800,7 +835,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             RunResult result;
             try
             {
-                result = await RunOneAsync(roomId, live, text, generation, cts.Token);
+                result = await RunOneAsync(roomId, live, text, generation, cts.Token, wrapUp.Token);
             }
             catch (Exception ex)
             {
@@ -814,6 +849,9 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             lock (live.Gate)
             {
                 live.Cts = null;
+                live.WrapUpCts = null;
+                live.BackgroundCount = 0;
+                live.BackgroundUntil = null;
                 EndApprovals(live, "실행 끝남");
                 live.LastEnd = result.Ok ? Face.Done : result.Cancelled ? Face.Stopped : Face.Failed;
                 live.LastEndAt = DateTimeOffset.Now;
@@ -828,17 +866,18 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 });
             }
             cts.Dispose();
+            wrapUp.Dispose();
         }
     }
 
-    private async Task<RunResult> RunOneAsync(string roomId, Live live, string text, int generation, CancellationToken ct)
+    private async Task<RunResult> RunOneAsync(string roomId, Live live, string text, int generation, CancellationToken ct, CancellationToken wrapUp = default)
     {
         if (store.Get(roomId) is not { } room) return new RunResult(false, false, "없는 방입니다.", null, null, null, 0, 0, null);
         var before = transcripts.Size(room.SessionId);
         RunResult result;
         try
         {
-            result = await RunRoomAsync(room, live, text, generation, ct);
+            result = await RunRoomAsync(room, live, text, generation, ct, wrapUp);
         }
         catch (Exception ex)
         {
@@ -852,7 +891,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             : result;
     }
 
-    private async Task<RunResult> RunRoomAsync(Room room, Live live, string text, int generation, CancellationToken ct)
+    private async Task<RunResult> RunRoomAsync(Room room, Live live, string text, int generation, CancellationToken ct, CancellationToken wrapUp)
     {
         var o = options.Value;
         // claude를 띄우기 전에 막힌 실패는 NotStarted — 화면이 그 말을 남기고 입력칸에 돌려준다 (4차 C2: 막힌 말이 사라졌음)
@@ -967,12 +1006,13 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                     DeniedEvent d => new LiveEvent("denied") { Text = $"{d.Tool}: {d.Reason}" },
                     RetryEvent r => new LiveEvent("retry") { Text = $"API 재시도 {r.Attempt}회 ({r.Error})" },
                     StatusEvent s => new LiveEvent("status") { Status = new RoomStatus(s.Category, s.Detail, s.NeedsAction) },
-                    TaskEvent t => new LiveEvent("agent") { Task = t }, // 서브에이전트 진행 줄 (Claude 앱 기능 D)
+                    TaskEvent t => new LiveEvent("agent") { Task = t }, // 서브에이전트 · 백그라운드 명령 진행 줄 (Claude 앱 기능 D)
+                    BackgroundWaitEvent b => Background(live, b), // 메인 답 뒤 기다림 — "지금 끝내기" 줄
                     _ => null,
                 };
                 if (shown is not null) Broadcast(live, shown);
             }
-        }, (ask, aborted) => DecideToolAsync(room, live, generation, ask, aborted), stopOnMismatch.Token);
+        }, (ask, aborted) => DecideToolAsync(room, live, generation, ask, aborted), stopOnMismatch.Token, wrapUp);
 
         // 턴 끝에 한 번 더 — 마지막 변경이 출력 뒤에 써졌거나 중지된 경우 (실제 확인). 중지는 세대를 올리므로 세대 · 간격 검사 없이 (ea28ba9185 C2).
         if (RefreshSteps(room, live, generation, turnEnd: true) is { } last)
@@ -981,6 +1021,17 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
 
         if (mismatch is not null) result = result with { Ok = false, Cancelled = false, Error = mismatch };
         return Record(room, result, forked: spec.ForkFrom is not null && result.Ok);
+    }
+
+    /// <summary>
+    /// 기다림 상태를 기억하고(snapshot) 알림을 만든다. 정리 시각은 처음 알린 값을 실행 끝까지 지킨다 — 작업 수만 바뀐 알림은 Until이 없고,
+    /// 수가 0이어도 두 번째 답을 기다리는 동안은 기다림 상태다 (/self-review 6f64f4b039 C3). 실행이 끝나면 LoopAsync가 지운다. 잠금 안에서 부른다.
+    /// </summary>
+    private static LiveEvent Background(Live live, BackgroundWaitEvent b)
+    {
+        live.BackgroundCount = b.Count;
+        if (b.Until is { } until) live.BackgroundUntil = until;
+        return new LiveEvent("background") { BackgroundCount = b.Count, BackgroundUntil = live.BackgroundUntil };
     }
 
     private int? ForkReadUpTo(string sessionId) => RoomList.ReadUpToBeforeLastUser(transcripts.Read(sessionId));
@@ -1115,7 +1166,9 @@ public static class RoomRules
         "이 대화는 HB_Chat 채팅 앱의 방이다. 사용자는 브라우저 채팅 화면으로 읽고 말한다. " +
         $"이 방의 권한: {Describe(level)}. " +
         (level == PermissionLevel.Command
-            ? "명령을 실행하면 사용자가 그 자리에서 카드로 허용 · 거절한다. 거절되면 같은 명령을 다시 시도하지 말고, 거절 이유를 보고 다른 방법을 묻는다."
+            ? "명령을 실행하면 사용자가 그 자리에서 카드로 허용 · 거절한다. 거절되면 같은 명령을 다시 시도하지 말고, 거절 이유를 보고 다른 방법을 묻는다." +
+              // 백그라운드 명령 (계획서 2026-10-29_HB_Chat-백그라운드-명령)
+              $" 백그라운드 실행(run_in_background)은 그 턴에서만 산다 — 끝나는 작업(테스트 · 빌드)은 끝나면 이어서 결과를 알려 주고, 서버처럼 안 끝나는 것은 필요한 확인을 마치고 답을 끝내면 앱이 최대 {ClaudeRunner.BackgroundBashMinutes}분 뒤(또는 사용자가 '지금 끝내기'를 누르면) 정리한다."
             : "승인을 물을 곳이 없어서 허용되지 않은 도구 호출은 자동으로 거절된다 — 거절되면 다시 시도하지 말고, 무엇이 필요한지 사용자에게 말한다.") +
         // 질문 카드 (3차 a): 대화 단계는 도구가 없다
         (level == PermissionLevel.Chat ? "" :

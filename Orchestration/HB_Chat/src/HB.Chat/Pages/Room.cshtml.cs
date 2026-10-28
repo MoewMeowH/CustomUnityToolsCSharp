@@ -350,6 +350,14 @@ public sealed class RoomModel(
         return new JsonResult(new { ok = true });
     }
 
+    /// <summary>지금 끝내기: 답이 끝난 뒤 기다리는 백그라운드 작업(서버 등)을 정리한다 (계획서 2026-10-29_HB_Chat-백그라운드-명령).</summary>
+    public IActionResult OnPostWrapUp(string id)
+    {
+        if (!RoomStore.IsRoomId(id)) return NotFound();
+        hub.WrapUp(id);
+        return new JsonResult(new { ok = true });
+    }
+
     /// <summary>승인 카드 단추: choice = allow · always · deny, reason은 거절 이유 (선택).</summary>
     public IActionResult OnPostApprove(string id, string? approval, string? choice, string? reason)
     {

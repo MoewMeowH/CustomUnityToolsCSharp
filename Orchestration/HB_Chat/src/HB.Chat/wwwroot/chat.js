@@ -1061,6 +1061,9 @@
             if (a.description) card.append(el("div", "desc", "Claude 설명: " + a.description));
             // 명령 밖의 입력도 허용하면 같이 실행된다 — 본 것 = 허용되는 것 (/self-review 5e747ff851 C1)
             if (a.extra) card.append(el("div", "cmd", "추가 입력: " + a.extra));
+            // 백그라운드 실행 명령 — 답이 끝난 뒤에도 돈다 (계획서 2026-10-29_HB_Chat-백그라운드-명령, 결정 "넣음")
+            if (a.backgroundMinutes) card.append(el("div", "warn-line",
+                `백그라운드: 답이 끝난 뒤에도 최대 ${a.backgroundMinutes}분 계속 돕니다 — 대화 아래 '지금 끝내기'로 먼저 정리할 수 있습니다.`));
             const denyOnly = a.truncated || a.risky;
             if (a.risky) card.append(el("div", "warn-line", "위험한 입력(dangerously · bypass)이 있어 거절만 할 수 있습니다."));
             else if (a.truncated) card.append(el("div", "warn-line", "명령이나 입력이 너무 길어 끝까지 보이지 않습니다 — 거절만 할 수 있습니다."));
@@ -1099,19 +1102,49 @@
         function showAgent(t) {
             if (!t || !t.taskId) return;
             let line = agentLines.get(t.taskId);
+            // 시작을 못 본 작업의 끝 알림(지난 실행에서 정리된 백그라운드 작업 — 세션을 이어 갈 때 CLI가 먼저 냄)은 줄을 만들지 않는다
+            if ((!line || !line.isConnected) && t.phase === "done") return;
             if (!line || !line.isConnected) {
                 line = el("div", "live-line agent-line");
                 line.dataset.agent = t.agent || "";
+                line.dataset.kind = t.kind || ""; // 끝 알림에는 종류가 없을 수 있어 처음 것을 기억한다
                 agentLines.set(t.taskId, line);
                 live.append(line);
             }
             const name = line.dataset.agent || t.agent || "서브에이전트";
             if (t.agent) line.dataset.agent = t.agent;
+            if (t.kind) line.dataset.kind = t.kind;
             if (t.description) line.dataset.desc = t.description;
+            const bash = line.dataset.kind === "local_bash"; // 지휘자의 백그라운드 명령 (계획서 2026-10-29_HB_Chat-백그라운드-명령)
             const state = t.phase === "done" ? (t.status === "completed" ? "끝" : "끝남(" + (t.status || "?") + ")")
-                : "진행 중" + (t.toolUses ? " · 도구 " + t.toolUses : "");
-            line.textContent = "서브에이전트 " + name + (line.dataset.desc ? ": " + line.dataset.desc : "") + " — " + state;
+                : (bash ? "실행 중" : "진행 중" + (t.toolUses ? " · 도구 " + t.toolUses : ""));
+            line.textContent = (bash ? "백그라운드 명령" : "서브에이전트 " + name) + (line.dataset.desc ? ": " + line.dataset.desc : "") + " — " + state;
             line.classList.toggle("denied", t.phase === "done" && t.status !== "completed");
+            if (atBottom()) toBottom();
+        }
+
+        // 메인 답 뒤 백그라운드 작업 기다림 줄: 몇 개 · 언제 정리 · "지금 끝내기" (계획서 2026-10-29_HB_Chat-백그라운드-명령).
+        // 기다림은 정리 시각(until)이 있는 동안 — 작업 수가 0이어도 지휘자가 이어 답하는 중이라 줄과 단추를 둔다 (/self-review 6f64f4b039 C3). 끝 · 중지에서 지운다.
+        let bgLine = null;
+        function clearBackground() { bgLine?.remove(); bgLine = null; }
+        function showBackground(count, until) {
+            if (!until) { clearBackground(); return; }
+            if (!bgLine || !bgLine.isConnected) {
+                bgLine = el("div", "live-line bg-wait");
+                bgLine.append(el("span"));
+                const go = el("button", "btn", "지금 끝내기");
+                go.type = "button";
+                // 서버가 못 받았으면(요청 실패) 다시 누를 수 있게 (6f64f4b039 C7)
+                go.addEventListener("click", async () => { go.disabled = true; if (!await post("WrapUp", new FormData(), true)) go.disabled = false; });
+                bgLine.append(go);
+                bgLine.button = go;
+                live.append(bgLine);
+            }
+            bgLine.button.disabled = false; // 새 기다림 알림이 오면 다시 켠다
+            const at = new Date(until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+            bgLine.firstChild.textContent = (count
+                ? `답은 끝났고 백그라운드 작업 ${count}개를 기다립니다`
+                : "백그라운드 작업이 끝나 지휘자가 이어 답하는 중입니다") + ` — ${at}까지 안 끝나면 정리합니다 `;
             if (atBottom()) toBottom();
         }
 
@@ -1327,7 +1360,11 @@
                     if (ev.face) setFace(ev.face);
                     renderSteps(ev.steps);
                     if (ev.status) showStatus(ev.status);
+                    if (ev.busy && ev.backgroundUntil) showBackground(ev.backgroundCount || 0, ev.backgroundUntil); else clearBackground();
                     loadSide(); // 끊긴 사이 끝난 턴은 end가 오지 않는다 — 비용 · 외부 실행을 새로 (C3)
+                    break;
+                case "background":
+                    showBackground(ev.backgroundCount, ev.backgroundUntil);
                     break;
                 case "face":
                     setFace(ev.face, ev.face === "Tool" && ev.text ? shortTool(ev.text) : null);
@@ -1396,6 +1433,7 @@
                     if (refreshed) live.querySelectorAll(":scope > .msg:not(.failed)" + (ev.ok ? ", :scope > .q-done" : "")).forEach(m => m.remove());
                     else live.prepend(el("div", "live-line denied", "말풍선을 다시 받지 못했습니다 — 새로고침하면 보입니다."));
                     stream = null; chips = null;
+                    clearBackground();
                     if (!ev.ok && ev.text) live.prepend(el("div", "live-line denied", ev.text));
                     // claude를 띄우기 전에 막힌 말 (4차 C2): 세션 기록에 없어 말풍선이 사라지므로 '보내지 못함'으로 남기고
                     // 입력칸이 비었으면 글을 돌려준다 (끝의 [첨부] 줄은 빼고 — 파일은 다시 붙인다)

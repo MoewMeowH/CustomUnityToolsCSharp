@@ -152,6 +152,43 @@ switch ($mode) {
         Emit '{"type":"system","subtype":"task_progress","task_id":"t_late","description":"late line","subagent_type":"general-purpose"}'
         Emit '{"type":"result","subtype":"success","is_error":false,"result":"misc","total_cost_usd":0.001,"permission_denials":[]}'
     }
+    'bgbash' {
+        # background Bash (real check 2026-10-29): approval input has run_in_background=true, task_started task_type local_bash,
+        # main result first, then task_notification (no task_type) and a second result. The app must keep stdin open for the second answer.
+        $d = Ask 'req_bgb' '{"subtype":"can_use_tool","tool_name":"Bash","display_name":"Bash","input":{"command":"python job.py","description":"Run job","run_in_background":true},"tool_use_id":"toolu_fake8"}'
+        if (-not $d -or $d.behavior -ne 'allow') { Finish $d 'Bash' 'no'; break }
+        Emit '{"type":"system","subtype":"task_started","task_id":"b_job","tool_use_id":"toolu_fake8","description":"Run job","is_backgrounded":true,"task_type":"local_bash"}'
+        Emit '{"type":"result","subtype":"success","is_error":false,"result":"started","total_cost_usd":0.001,"permission_denials":[]}'
+        Start-Sleep -Milliseconds 1500
+        Emit '{"type":"system","subtype":"task_notification","task_id":"b_job","status":"completed","output_file":"C:\\tmp\\b_job.output"}'
+        Emit '{"type":"result","subtype":"success","is_error":false,"result":"job finished","total_cost_usd":0.002,"permission_denials":[]}'
+    }
+    'ghost' {
+        # resumed session whose background task died with the previous CLI (real check 2026-10-29): before the user turn the CLI emits
+        # task_notification status stopped, init and an EMPTY result. The app must not take that result as the turn end (stdin stays open).
+        Emit '{"type":"system","subtype":"task_notification","task_id":"b_old","status":"stopped","output_file":"","summary":"Background shell command did not finish before the previous session ended"}'
+        Emit '{"type":"result","subtype":"success","is_error":false,"result":"","total_cost_usd":0,"permission_denials":[]}'
+        Emit '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tg","name":"Bash","input":{"command":"git status"}}]}}'
+        $d = Ask 'req_ghost' '{"subtype":"can_use_tool","tool_name":"Bash","display_name":"Bash","input":{"command":"git status","description":"Show status"},"tool_use_id":"tg"}'
+        Finish $d 'Bash' 'after ghost'
+    }
+    'ghostfail' {
+        # unknown task notification, then an error result WITHOUT a result field (self-review 6f64f4b039 C1): must end the turn, not be swallowed
+        Emit '{"type":"system","subtype":"task_notification","task_id":"b_old2","status":"stopped","output_file":""}'
+        Emit '{"type":"result","subtype":"error_during_execution","is_error":true,"total_cost_usd":0,"permission_denials":[]}'
+    }
+    'bgfromagent' {
+        # a subagent asks to run a background command (C5): the card must show the subagent wait cap (30 min)
+        $d = Ask 'req_bga' '{"subtype":"can_use_tool","tool_name":"Bash","display_name":"Bash","input":{"command":"python serve.py","description":"Serve","run_in_background":true},"agent_id":"a9","tool_use_id":"toolu_fake10"}'
+        Finish $d 'Bash' 'ok'
+    }
+    'bgserver' {
+        # background server that never ends: after stdin closes the real CLI keeps running (real check), so the app must kill it after a grace
+        Emit '{"type":"system","subtype":"task_started","task_id":"b_srv","tool_use_id":"toolu_fake9","description":"Serve","is_backgrounded":true,"task_type":"local_bash"}'
+        Emit '{"type":"result","subtype":"success","is_error":false,"result":"server up","total_cost_usd":0.001,"permission_denials":[]}'
+        Start-Sleep -Seconds 120
+        exit 0
+    }
     'write' {
         # 앱이 카드로 받지 않는 승인 요청 (작업 폴더 밖 쓰기) — 카드 없이 거절돼야 한다
         $d = Ask 'req_write' '{"subtype":"can_use_tool","tool_name":"Write","display_name":"Write","input":{"file_path":"C:\\outside\\x.txt","content":"x"},"tool_use_id":"toolu_fake3"}'

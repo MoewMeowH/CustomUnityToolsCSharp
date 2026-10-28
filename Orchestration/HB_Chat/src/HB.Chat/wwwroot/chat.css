@@ -299,6 +299,9 @@ input.rename { font-size: 15px; font-weight: 600; min-width: 200px; }
 #live .stream { white-space: pre-wrap; }
 .live-line { text-align: center; font-size: 12.5px; color: var(--muted); }
 .live-line.denied { color: var(--warn); }
+/* 메인 답 뒤 백그라운드 작업 기다림 줄 + 지금 끝내기 (2026-10-29) */
+.live-line.bg-wait { display: flex; justify-content: center; align-items: center; gap: 8px; flex-wrap: wrap; }
+.live-line.bg-wait .btn { font-size: 12px; padding: 1px 10px; }
 .composer { border-top: 1px solid var(--line); background: var(--bg); padding: 8px 16px 8px; }
 .composer form { max-width: 920px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end; }
 /* 계획 먼저 토글 · 계획 카드 (Claude 앱 기능 C) */

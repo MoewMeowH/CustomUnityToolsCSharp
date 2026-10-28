@@ -47,6 +47,18 @@ public sealed class CommandCatalogTests : IDisposable
     }
 
     [Fact]
+    public void TaskEvents_BackgroundBash_KindAndOutputFile()
+    {
+        // 백그라운드 명령 (2026-10-29 실측 모양): task_started의 task_type, task_notification의 output_file
+        var started = Assert.IsType<TaskEvent>(StreamParser.Parse("""{"type":"system","subtype":"task_started","task_id":"b1","description":"Serve","is_backgrounded":true,"task_type":"local_bash"}"""));
+        Assert.Equal(TaskEvent.BashKind, started.Kind);
+        Assert.Null(started.Agent);
+        var done = Assert.IsType<TaskEvent>(StreamParser.Parse("""{"type":"system","subtype":"task_notification","task_id":"b1","status":"completed","output_file":"C:\\t\\b1.output"}"""));
+        Assert.Equal("done", done.Phase);
+        Assert.Equal("C:\\t\\b1.output", done.OutputFile);
+    }
+
+    [Fact]
     public void TaskEvents_LongTextCapped()
     {
         // /self-review security 42f9d47dc4 C3: 에이전트 정의 · 지휘자가 정하는 글은 상한까지만 화면 · 기록으로 간다
