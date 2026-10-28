@@ -8,7 +8,7 @@
     <partial name="_Sidebar" model="Model.Sidebar" />
     <section class="pane" id="pane">
         <div class="welcome settings">
-            <p class="mobile-only" style="margin:0 0 8px"><a class="back" href="/">← 방 목록</a></p>
+            <p class="mobile-only" style="margin:0 0 8px"><a class="back" href="/">@Icons.Svg("back") 방 목록</a></p>
             <h2 style="margin:0 0 12px;font-size:18px">설정</h2>
             @if (Model.DoneText is { } done)
             {
@@ -57,7 +57,7 @@
                                         <form method="post" asp-page-handler="RemoveWorkspace" onsubmit="return confirm('목록에서 뺄까요? 폴더 · 파일은 지우지 않습니다.')">
                                             <input type="hidden" name="name" value="@w.Entry.Name" />
                                             <button class="btn" type="submit" @(w.Rooms > 0 ? "disabled" : null)
-                                                    title="@(w.Rooms > 0 ? "이 폴더를 쓰는 방(휴지통 포함)이 있어 뺄 수 없습니다" : "목록에서 빼기")">빼기</button>
+                                                    title="@(w.Rooms > 0 ? "이 폴더를 쓰는 방(휴지통 포함)이 있어 뺄 수 없습니다" : "목록에서 빼기")">@Icons.Svg("minus") 빼기</button>
                                         </form>
                                     }
                                 </td>
@@ -69,7 +69,7 @@
                     <input type="text" name="name" placeholder="이름 (예: MyProject)" maxlength="40" required value="@Model.NewName" />
                     <input type="text" name="path" placeholder="절대 경로 (예: F:/AI/MyProject)" maxlength="400" required value="@Model.NewPath" class="mono" />
                     <label class="muted"><input type="checkbox" name="confirm" value="true" /> 이 폴더에서 지휘자가 편집 · 명령 실행을 하고, 그 폴더의 MCP 서버 명령 · 프로젝트 훅이 돈다는 것을 압니다</label>
-                    <button class="btn primary" type="submit">더하기</button>
+                    <button class="btn primary" type="submit">@Icons.Svg("plus") 더하기</button>
                 </form>
                 <p class="muted" style="margin:6px 0 0;font-size:12px">
                     드라이브 문자 경로만 받습니다. 드라이브 루트 · Windows · Program Files · 사용자 홈 전체 · 이 앱과 그 저장소 · 데이터 폴더 · Claude 설정 폴더(.claude)를
@@ -90,8 +90,8 @@
                                     <form method="post" asp-page-handler="Rename" class="settings-rename">
                                         <input type="hidden" name="id" value="@room.Id" />
                                         <input type="text" name="title" value="@(room.Title ?? "")" placeholder="@title" maxlength="200" aria-label="@title 방 제목" />
-                                        <button class="btn" type="submit">바꾸기</button>
-                                        <a href="/Room/@room.Id" class="muted" title="방 열기">열기</a>
+                                        <button class="btn" type="submit">@Icons.Svg("check") 바꾸기</button>
+                                        <a href="/Room/@room.Id" class="icon-link" title="방 열기">@Icons.Svg("open") 열기</a>
                                     </form>
                                 </td>
                                 <td>@room.Workspace</td>
@@ -131,7 +131,7 @@
                         {
                             <label class="muted"><input type="checkbox" name="clearImage" value="true" /> 그림 지우기</label>
                         }
-                        <button class="btn" type="submit">저장</button>
+                        <button class="btn" type="submit">@Icons.Svg("check") 저장</button>
                     </form>
                 }
             </section>
@@ -171,7 +171,7 @@
                             }
                         </tbody>
                     </table>
-                    <button class="btn primary" type="submit" style="margin-top:8px">표정 저장</button>
+                    <button class="btn primary" type="submit" style="margin-top:8px">@Icons.Svg("check") 표정 저장</button>
                 </form>
             </section>
         </div>

@@ -8,7 +8,7 @@
     <partial name="_Sidebar" model="Model.Sidebar" />
     <section class="pane" id="pane">
         <div class="welcome">
-            <p class="mobile-only" style="margin:0 0 8px"><a class="back" href="/">← 방 목록</a></p>
+            <p class="mobile-only" style="margin:0 0 8px"><a class="back" href="/">@Icons.Svg("back") 방 목록</a></p>
             @if (Model.LoadError is not null)
             {
                 <div class="panel" style="padding:10px 14px;border-color:var(--err);margin-bottom:12px">방 색인을 읽지 못했습니다 (덮어쓰지 않음): @Model.LoadError</div>
@@ -37,7 +37,7 @@
                             {
                                 <input type="hidden" name="ids" value="@r.Id" />
                             }
-                            <button class="btn" type="submit">휴지통 비우기 (@Model.TrashRooms.Count)</button>
+                            <button class="btn" type="submit">@Icons.Svg("trash") 휴지통 비우기 (@Model.TrashRooms.Count)</button>
                         </form>
                     }
                     @foreach (var r in Model.TrashRooms)
@@ -46,9 +46,9 @@
                             <input type="hidden" name="id" value="@r.Id" />
                             <a href="/Room/@r.Id">@Model.TitleOf(r)</a>
                             <span class="muted">@r.DeletedAt?.ToLocalTime().ToString("MM-dd HH:mm") · @Trash.DaysLeft(r, DateTimeOffset.Now)일 남음</span>
-                            <button class="btn" type="submit">되살리기</button>
+                            <button class="btn" type="submit">@Icons.Svg("restore") 되살리기</button>
                             <button class="btn" type="submit" asp-page-handler="DeleteTrash"
-                                    onclick="return confirm('이 방을 지금 지울까요? 방 목록 · 첨부가 지워지고 되돌릴 수 없습니다 (세션 기록은 남습니다).')">지금 지우기</button>
+                                    onclick="return confirm('이 방을 지금 지울까요? 방 목록 · 첨부가 지워지고 되돌릴 수 없습니다 (세션 기록은 남습니다).')">@Icons.Svg("trash") 지금 지우기</button>
                         </form>
                     }
                 </section>
@@ -82,7 +82,7 @@
                         </select>
                     </label>
                     <input type="text" name="title" placeholder="제목 (비우면 첫 말)" maxlength="200" style="flex:1;min-width:160px" />
-                    <button class="btn primary" type="submit">만들기</button>
+                    <button class="btn primary" type="submit">@Icons.Svg("plus") 만들기</button>
                 </form>
                 <p class="muted" style="margin:6px 0 0;font-size:12.5px">작업 폴더는 <a href="/Settings">설정</a>에서 더할 수 있습니다.</p>
                 <p class="muted" style="margin:8px 0 0;font-size:12.5px">

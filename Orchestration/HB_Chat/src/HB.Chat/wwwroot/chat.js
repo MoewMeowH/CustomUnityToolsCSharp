@@ -9,6 +9,17 @@
     const app = document.querySelector(".app");
     if (!app) return;
     const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+    // 아이콘 (4차 D3): 서버 Icons.cs와 같은 모음 (_Layout body data-icons). 꾸밈이라 aria-hidden — 이름은 단추의 글 · aria-label
+    const iconPaths = (() => { try { return JSON.parse(document.body.dataset.icons || "{}"); } catch { return {}; } })();
+    function icon(name) {
+        const ns = "http://www.w3.org/2000/svg";
+        const svg = document.createElementNS(ns, "svg");
+        svg.setAttribute("class", "icon icon-" + name); svg.setAttribute("viewBox", "0 0 24 24");
+        svg.setAttribute("aria-hidden", "true"); svg.setAttribute("focusable", "false");
+        const path = document.createElementNS(ns, "path"); path.setAttribute("d", iconPaths[name] || "");
+        svg.append(path);
+        return svg;
+    }
     const pane = document.getElementById("pane");
 
     // ---- 방 목록 ----
@@ -551,7 +562,7 @@
                     const data = new FormData(); data.append("queued", item.id);
                     if (!await post("SendNow", data)) now.disabled = false;
                 });
-                const x = el("button", "queue-x", "×");
+                const x = el("button", "queue-x"); x.append(icon("x"));
                 x.type = "button"; x.title = "이 말 취소"; x.setAttribute("aria-label", "이 말 취소");
                 x.addEventListener("click", async () => {
                     x.disabled = true;
@@ -883,7 +894,8 @@
             // 서버 말풍선과 같게 시각 · 답장 단추 (e8091295fe C2 — 턴이 끝날 때까지도 인용할 수 있게)
             const now = new Date(), p2 = n => String(n).padStart(2, "0");
             const when = `${p2(now.getMonth() + 1)}-${p2(now.getDate())} ${p2(now.getHours())}:${p2(now.getMinutes())}:${p2(now.getSeconds())}`;
-            const reply = el("button", "reply", "답장"); reply.type = "button"; reply.title = "이 답에 답장 (인용)";
+            const reply = el("button", "reply"); reply.append(icon("reply"));
+            reply.type = "button"; reply.title = "이 답에 답장 (인용)"; reply.setAttribute("aria-label", "답장");
             w.append(el("b", null, profiles.user?.name || "나"), " ", el("span", "detail", "질문에 답함"), " ", el("span", "when", when), " ", reply);
             const body = el("div", "body");
             for (const item of q.questions) {
@@ -911,7 +923,8 @@
         const ticker = setInterval(tickApprovals, 1000);
         // 이 방의 "항상 허용" 목록: 처음엔 서버가 그리고, 바뀌면 rules 알림으로 다시 그린다 (/self-review 36e4e20e04 C9).
         function removeButton(rule) {
-            const b = el("button", "btn rule-remove", "지우기");
+            const b = el("button", "btn rule-remove");
+            b.append(icon("x"), "지우기");
             b.type = "button";
             b.addEventListener("click", async () => {
                 if (!confirm("이 규칙을 지울까요? 다음 실행부터 다시 묻습니다.\n" + rule)) return;
@@ -1105,8 +1118,8 @@
                 const chip = el("span", "chip attach-chip");
                 if (a.image) { const img = el("img"); img.src = a.url; img.alt = ""; chip.append(img); }
                 chip.append(el("span", "t", a.name)); // 글은 줄임표, ×는 줄지 않게 (C1)
-                const x = el("button", "queue-x", "×");
-                x.type = "button"; x.title = "첨부 빼기 (올린 파일은 방 첨부 폴더에 남음)";
+                const x = el("button", "queue-x"); x.append(icon("x"));
+                x.type = "button"; x.title = "첨부 빼기 (올린 파일은 방 첨부 폴더에 남음)"; x.setAttribute("aria-label", "첨부 빼기");
                 x.addEventListener("click", () => { attached = attached.filter(b => b !== a); renderAttached(); });
                 chip.append(x);
                 attachBox.append(chip);

@@ -20,8 +20,27 @@ table { width: 100%; border-collapse: collapse; }
 th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 button, select, input, textarea { font: inherit; color: var(--text); }
 .btn { font-size: 13px; padding: 5px 12px; border-radius: 6px; border: 1px solid var(--line);
-       background: var(--panel); cursor: pointer; text-decoration: none; color: var(--text); display: inline-block; }
+       background: var(--panel); cursor: pointer; text-decoration: none; color: var(--text); }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+/* 아이콘 (4차 D3 — Icons.cs): 선 그림 SVG + 짧은 글, 좁은 곳은 아이콘만(.icon-only — 이름은 aria-label · title) */
+.icon { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.icon-more { stroke-width: 3.5; }
+.btn { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; } /* 좁은 표 칸에서 글이 한 자씩 꺾이지 않게 */
+.btn.icon-only { padding: 5px 7px; }
+.icon-link { display: inline-flex; align-items: center; gap: 5px; text-decoration: none; color: var(--muted); }
+.icon-link:hover, .icon-link:focus-visible { color: var(--accent); }
+.icon-btn { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 2px; display: inline-flex; align-items: center; border-radius: 4px; }
+.icon-btn:hover, .icon-btn:focus-visible { color: var(--accent); }
+.count { min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--code); border: 1px solid var(--line); font-size: 11px; line-height: 16px; text-align: center; }
+/* 회사 모드 토글 스위치 (체크 상자 대신) */
+.switch { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; color: var(--muted); position: relative; }
+.switch input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
+.switch .track { width: 28px; height: 16px; border-radius: 8px; background: var(--line); position: relative; transition: background .15s; flex: none; }
+.switch .track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff;
+                        box-shadow: 0 1px 2px rgba(0, 0, 0, .25); transition: transform .15s; }
+.switch input:checked + .track { background: var(--accent); }
+.switch input:checked + .track::after { transform: translateX(12px); }
+.switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
 .btn:disabled { opacity: .5; cursor: default; }
 select, input[type=text], textarea { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
 
@@ -139,7 +158,9 @@ select, input[type=text], textarea { background: var(--panel); border: 1px solid
         border: 1px solid var(--line); background: var(--panel); color: var(--muted); cursor: pointer; }
 .copy::after { content: "복사"; } .copy.copied::after { content: "복사됨"; }
 .who .reply { margin-left: 6px; font-size: 11.5px; border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0;
-              opacity: 0; }
+              opacity: 0; display: inline-flex; vertical-align: middle; }
+.who .reply .icon, .who .icon-link .icon { width: 14px; height: 14px; }
+.who .reply:hover { color: var(--accent); }
 .msg:hover .reply, .reply:focus { opacity: 1; }
 @media (hover: none) { .who .reply { opacity: 1; } }
 .older { display: block; margin: 0 auto; font-size: 12px; border: 0; background: none; cursor: pointer; color: var(--muted); }
@@ -214,6 +235,10 @@ details.long > .body { margin-top: 6px; }
 .menu-items > button, .menu-items > a { text-align: left; border: 0; background: none; padding: 6px 10px; border-radius: 6px; cursor: pointer;
                                         color: var(--text); text-decoration: none; font-size: 13px; }
 .menu-items > button:hover, .menu-items > a:hover { background: var(--code); }
+.menu-items > button, .menu-items > a { display: flex; align-items: center; gap: 8px; } /* 아이콘 + 글 (4차 D3) */
+.side-tabs .side-x { display: inline-flex; align-items: center; justify-content: center; }
+.queue-x { display: inline-flex; align-items: center; }
+.queue-x .icon { width: 13px; height: 13px; }
 .menu-session { font-size: 11px; padding: 4px 10px; overflow-wrap: anywhere; }
 #room-title { cursor: text; }
 input.rename { font-size: 15px; font-weight: 600; min-width: 200px; }
@@ -286,7 +311,7 @@ input.rename { font-size: 15px; font-weight: 600; min-width: 200px; }
     .app { grid-template-columns: minmax(0, 1fr); }
     .app.in-room .sidebar { display: none; }
     .app:not(.in-room) .pane { display: none; }
-    .back { display: inline; }
+    .back { display: inline-flex; align-items: center; }
     .mobile-only { display: block; }
     .room-head .head-session { display: none; }
     .scroll, .room-head, .composer { padding-left: 10px; padding-right: 10px; }

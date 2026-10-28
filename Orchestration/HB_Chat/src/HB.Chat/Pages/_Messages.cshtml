@@ -24,7 +24,7 @@
                     <span class="when">@b.At.ToLocalTime().ToString("HH:mm") · @b.Detail</span>
                     @if (link is not null)
                     {
-                        <a href="@link" target="_blank" rel="noopener">호출 상세</a>
+                        <a href="@link" target="_blank" rel="noopener" class="icon-link">@Icons.Svg("external") 호출 상세</a>
                     }
                 </div>
                 continue;
@@ -40,7 +40,7 @@
                         <span class="when">@b.At.ToLocalTime().ToString("MM-dd HH:mm:ss")</span>
                         @if (link is not null)
                         {
-                            <a href="@link" target="_blank" rel="noopener">호출 상세</a>
+                            <a href="@link" target="_blank" rel="noopener" class="icon-link" title="호출 상세 (대시보드)" aria-label="호출 상세">@Icons.Svg("external")</a>
                         }
                     </div>
                     @if (b.Markdown.Length > RoomModel.RunFoldChars)
@@ -100,7 +100,7 @@
                         <b>@Profiles.UserName</b>
                         <span class="detail">질문에 답함</span>
                         <span class="when">@a.Timestamp?.ToLocalTime().ToString("MM-dd HH:mm:ss")</span>
-                        <button class="reply" type="button" title="이 답에 답장 (인용)">답장</button>
+                        <button class="reply" type="button" title="이 답에 답장 (인용)" aria-label="답장">@Icons.Svg("reply")</button>
                     </div>
                     <div class="body">
                         @foreach (var item in a.Items)
@@ -155,7 +155,7 @@
                 <div class="who">
                     <b>@who</b>
                     <span class="when">@e.Timestamp?.ToLocalTime().ToString("MM-dd HH:mm:ss")</span>
-                    <button class="reply" type="button" title="이 말에 답장 (인용)">답장</button>
+                    <button class="reply" type="button" title="이 말에 답장 (인용)" aria-label="답장">@Icons.Svg("reply")</button>
                 </div>
                 @if (chipsInBubble && e.ToolsBefore > 0)
                 {

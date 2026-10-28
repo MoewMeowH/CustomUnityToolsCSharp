@@ -17,7 +17,7 @@
     <form class="side-rename" id="side-rename">
         <label class="muted" for="side-title">제목</label>
         <input type="text" id="side-title" maxlength="200" value="@(room.Title ?? "")" placeholder="비우면 첫 말 (@Model.Title)" />
-        <button class="btn" type="submit">바꾸기</button>
+        <button class="btn" type="submit">@Icons.Svg("check") 바꾸기</button>
     </form>
     <dl class="side-info">
         <dt>권한</dt><dd><span class="badge">@RoomRules.LevelName(room.Level)</span> <span class="muted">@RoomRules.Describe(room.Level)</span></dd>

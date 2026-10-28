@@ -24,7 +24,8 @@
     <link rel="stylesheet" href="~/chat.css" asp-append-version="true" />
     @await RenderSectionAsync("Head", required: false)
 </head>
-<body>
+@* data-icons: 화면 스크립트가 그리는 단추(답장 등)도 같은 아이콘 모음을 쓴다 (4차 D3, Icons.cs) *@
+<body data-icons="@Icons.Json()">
 @RenderBody()
 <script src="~/chat.js" asp-append-version="true"></script>
 </body>
