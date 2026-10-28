@@ -198,6 +198,17 @@ select, input[type=text], textarea { background: var(--panel); border: 1px solid
 .widget-frame.chart-frame { height: 336px; }
 .widget.chart .widget-code > summary::after { content: "데이터 보기"; }
 .widget-run.chart-draw::after { content: "▶ 그리기"; }
+.widget-run.chart-print::after { content: "인쇄 · PDF"; }
+.widget-frame[hidden] { display: none; } /* .widget-frame의 display:block이 hidden 기본 숨김을 이긴다 */
+/* 차트 하나만 인쇄 (2026-10-29): print-one이면 그 상자의 밝은 인쇄용 틀만 보인다. 틀 폭은 화면 그대로 (폭이 바뀌면 틀 안 다시 그리기가 인쇄보다 늦을 수 있어서) */
+@media print {
+    html.print-one, html.print-one body { background: #fff !important; }
+    html.print-one body * { visibility: hidden !important; }
+    html.print-one .widget.chart.print-target, html.print-one .widget.chart.print-target iframe.chart-print-frame { visibility: visible !important; }
+    html.print-one .widget.chart.print-target { position: fixed; left: 0; top: 0; margin: 0; }
+    html.print-one .widget.chart.print-target > :not(iframe.chart-print-frame) { display: none !important; }
+    html.print-one iframe.chart-print-frame { border: 0 !important; border-radius: 0 !important; }
+}
 .widget-note { font-size: 12px; margin-bottom: 4px; }
 .widget-note::before { content: attr(data-note); }
 

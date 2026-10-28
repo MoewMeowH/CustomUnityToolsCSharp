@@ -311,8 +311,41 @@
             "new Chart(document.querySelector(\"canvas\"),c);}" +
             "catch(e){const p=document.createElement(\"div\");p.className=\"err\";p.textContent=\"차트를 그리지 못했습니다: \"+e.message;" +
             "document.querySelector(\".box\").replaceWith(p);}" +
-            "const s=()=>parent.postMessage({hbWidgetHeight:Math.ceil(document.body.getBoundingClientRect().height)},\"*\");" +
+            // 0은 보내지 않는다 — 숨긴 틀 · 배치 전 틀이 0을 보내면 부모가 최소 높이로 줄이고, 그 뒤 실제 높이가 안 오면 잘린 채 남았다 (실제 확인)
+            "const s=()=>{const h=Math.ceil(document.body.getBoundingClientRect().height);if(h>0)parent.postMessage({hbWidgetHeight:h},\"*\");};" +
             "s();new ResizeObserver(s).observe(document.body);})()<\/script></body></html>";
+    }
+    // ---- 차트 하나만 인쇄 · PDF (계획서 Orchestration/HB_Chat/docs/plans/2026-10-29_HB_Chat-차트-PDF.md) ----
+    // 인쇄할 때만 밝은 색으로 그린 틀을 화면 틀 자리에 잠깐 바꿔 넣고(화면 틀은 숨김), 다 그려지면 window.print().
+    // 인쇄 창에서 "PDF로 저장"을 고른다 — 데스크톱 껍데기의 페이지 → 호스트 통로는 그대로 닫혀 있다. afterprint에서 되돌린다.
+    const ChartPrintTheme = { text: "#1d2330", line: "#d0d4dc", panel: "#ffffff" };
+    function chartFrame(lib, config, theme, cls) {
+        const frame = el("iframe", "widget-frame running chart-frame" + (cls ? " " + cls : ""));
+        frame.setAttribute("sandbox", "allow-scripts");
+        frame.setAttribute("referrerpolicy", "no-referrer");
+        frame.title = "차트";
+        frame.srcdoc = chartDoc(lib, config, theme);
+        return frame;
+    }
+    function clearChartPrint() {
+        document.documentElement.classList.remove("print-one");
+        document.querySelectorAll(".widget.chart.print-target").forEach(box => {
+            box.classList.remove("print-target");
+            box.querySelectorAll("iframe.chart-print-frame").forEach(f => f.remove());
+            box.querySelectorAll("iframe.chart-frame[hidden]").forEach(f => { f.hidden = false; });
+        });
+    }
+    window.addEventListener("afterprint", clearChartPrint);
+    function printChart(box, lib, config) {
+        clearChartPrint(); // 앞 인쇄의 표시가 남았으면 (afterprint가 안 온 환경)
+        const screen = box.querySelector("iframe.chart-frame");
+        if (!screen) return;
+        const frame = chartFrame(lib, config, ChartPrintTheme, "chart-print-frame");
+        frame.addEventListener("load", () => setTimeout(() => window.print(), 50), { once: true });
+        screen.after(frame);
+        screen.hidden = true;
+        box.classList.add("print-target");
+        document.documentElement.classList.add("print-one");
     }
     function charts(container) {
         container.querySelectorAll(".msg.conductor .body pre > code.language-chart").forEach(code => {
@@ -328,13 +361,14 @@
             const bar = el("div", "widget-bar");
             box.append(bar, details);
             const draw = () => loadChartLib().then(lib => {
-                const frame = el("iframe", "widget-frame running chart-frame");
-                frame.setAttribute("sandbox", "allow-scripts");
-                frame.setAttribute("referrerpolicy", "no-referrer");
+                const frame = chartFrame(lib, parsed.config, chartTheme());
                 frame.setAttribute("loading", "lazy");
-                frame.title = "차트";
-                frame.srcdoc = chartDoc(lib, parsed.config, chartTheme());
                 details.before(frame);
+                const print = el("button", "widget-run chart-print");
+                print.type = "button";
+                print.setAttribute("aria-label", "차트 인쇄 · PDF로 저장");
+                print.addEventListener("click", () => printChart(box, lib, parsed.config));
+                bar.append(print);
             }, () => details.before(note("차트 라이브러리를 불러오지 못해 데이터로만 보입니다.")));
             // 이 말풍선에서 몇 번째 차트인지 (그릴 수 있는 것만 센다)
             const msg = box.closest(".msg");
