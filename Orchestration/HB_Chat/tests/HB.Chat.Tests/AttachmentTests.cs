@@ -26,6 +26,24 @@ public sealed class AttachmentTests : IDisposable
     public void SafeName_KeepsOnlySafeLastPart(string input, string expected) => Assert.Equal(expected, Attachments.SafeName(input));
 
     [Fact]
+    public void List_NewestFirst_SkipsPartsHiddenAndFolders()
+    {
+        // 곁칸 "첨부" 탭 (3차 c): 쓰는 중 임시 파일(.part) · 숨김 · 하위 폴더는 빼고 최근 것부터
+        var folder = Path.Combine(_dir, "room");
+        Directory.CreateDirectory(Path.Combine(folder, "sub"));
+        File.WriteAllText(Path.Combine(folder, "old.txt"), "aa");
+        File.WriteAllText(Path.Combine(folder, "new.png"), "bbbb");
+        File.WriteAllText(Path.Combine(folder, ".0123.part"), "x");
+        File.WriteAllText(Path.Combine(folder, "my..file.txt"), "x"); // 보기 요청이 거절하는 이름 — 목록에도 넣지 않는다 (c216951e79 C4)
+        File.SetLastWriteTimeUtc(Path.Combine(folder, "old.txt"), DateTime.UtcNow.AddHours(-2));
+        var list = Attachments.List(folder);
+        Assert.Equal(["new.png", "old.txt"], list.Select(f => f.Name));
+        Assert.Null(Attachments.Resolve(folder, "my..file.txt"));
+        Assert.Equal(4, list[0].Bytes);
+        Assert.Empty(Attachments.List(Path.Combine(_dir, "nope")));
+    }
+
+    [Fact]
     public void SafeName_LongKeepsExtension()
     {
         // 이름이 프롬프트에 실리므로 40자로 (/self-review 0c3b7e3514 C1)

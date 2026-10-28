@@ -80,6 +80,39 @@ public sealed class RoomModel(
         _ => "external",
     };
 
+    /// <summary>곁칸 "방 정보": 작업 폴더 경로 (허용 목록에서 빠졌으면 null).</summary>
+    public string? WorkspacePath => options.Value.WorkspacePath(Room.Workspace);
+
+    /// <summary>곁칸 "첨부": 그 방 첨부 파일 (최근 것부터).</summary>
+    public IReadOnlyList<(string Name, long Bytes, DateTimeOffset At)> AttachmentFiles =>
+        Attachments.List(Attachments.Folder(options.Value.DataFolder, Room.Id));
+
+    /// <summary>곁칸 "외부 실행" 한 줄: 실행 하나 (모드 · 시작 시각 · 응답 수 · 실패 수 · 대시보드 링크).</summary>
+    public sealed record SideRun(string RunId, string Mode, DateTimeOffset At, int Replies, int Errors, string? Link);
+
+    /// <summary>곁칸 "외부 실행": 이 방에서 부른 run_mode 실행 (최근 것부터, 말풍선과 같은 자료 — 확정 연결만).</summary>
+    public IReadOnlyList<SideRun> SideRuns =>
+    [
+        .. Runs.All.Where(b => b.RunId.Length > 0).GroupBy(b => b.RunId).Select(g =>
+        {
+            var start = g.FirstOrDefault(b => b.Kind == RunBubbleKind.Start);
+            var replies = g.Where(b => b.Kind != RunBubbleKind.Start).ToList();
+            var mode = start?.Detail?.Split(" · ")[0] ?? replies.FirstOrDefault()?.Detail ?? "?";
+            var link = options.Value.DashboardUrl is { Length: > 0 } url ? $"{url.TrimEnd('/')}/Room/Run/{Uri.EscapeDataString(g.Key)}" : null;
+            return new SideRun(g.Key, mode, (start ?? replies[0]).At, replies.Count, replies.Count(r => r.IsError), link);
+        }).OrderByDescending(r => r.At),
+    ];
+
+    /// <summary>
+    /// 곁칸 (3차 c): 방 정보 · 외부 실행 · 첨부. 열 때와 턴이 끝날 때 화면이 다시 받는다 (방 칸을 그릴 때는 만들지 않음 — 열지 않으면 계산하지 않게).
+    /// </summary>
+    public IActionResult OnGetSide(string id)
+    {
+        Response.Headers.CacheControl = "no-store";
+        if (!Load(id)) return NotFound();
+        return Partial("_RoomSide", this);
+    }
+
     /// <summary>명령 방: 작업 폴더 · 사용자 설정이 이미 미리 허용한 명령 (카드 없이 실행됨).</summary>
     public IReadOnlyList<(string Source, string Rule)> InheritedRules =>
         Room.Level == PermissionLevel.Command ? hub.InheritedCommandRules(Room) : [];

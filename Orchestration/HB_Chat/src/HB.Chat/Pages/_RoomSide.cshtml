@@ -1,0 +1,87 @@
+@model RoomModel
+@*
+    곁칸의 방 정보 · 외부 실행 · 첨부 탭 (3차 c). 화면이 곁칸을 열 때 · 턴이 끝날 때 ?handler=Side로 받아 #side-data를 바꾼다.
+    단계 탭은 _RoomPane에 있고 steps 알림으로 그린다. 글은 모두 Razor 인코딩.
+*@
+@{
+    var room = Model.Room;
+    static string Size(long bytes) => bytes switch
+    {
+        < 1024 => $"{bytes}B",
+        < 1024 * 1024 => $"{bytes / 1024.0:0.#}KB",
+        _ => $"{bytes / 1024.0 / 1024.0:0.#}MB",
+    };
+}
+<section class="side-sec" data-tab="info" id="side-sec-info" role="tabpanel" aria-labelledby="side-tab-info">
+    @* 제목 바꾸기 — 방 머리 · ⋯ 메뉴와 같은 Rename (결정: "방의 제목도 변경이 가능했음 좋긴행") *@
+    <form class="side-rename" id="side-rename">
+        <label class="muted" for="side-title">제목</label>
+        <input type="text" id="side-title" maxlength="200" value="@(room.Title ?? "")" placeholder="비우면 첫 말 (@Model.Title)" />
+        <button class="btn" type="submit">바꾸기</button>
+    </form>
+    <dl class="side-info">
+        <dt>권한</dt><dd><span class="badge">@RoomRules.LevelName(room.Level)</span> <span class="muted">@RoomRules.Describe(room.Level)</span></dd>
+        <dt>모델</dt><dd class="mono">@room.Model</dd>
+        <dt>작업 폴더</dt><dd>@room.Workspace <span class="mono muted">@(Model.WorkspacePath ?? "(허용 목록에 없음)")</span></dd>
+        <dt>세션</dt><dd class="mono" title="이 앱 전용 세션 — Claude 앱 · CLI에서 이어 쓰지 마세요">@room.SessionId</dd>
+        <dt>컨텍스트</dt><dd>@(room.ContextTokens is { } t ? RoomModel.Tokens(t) + (room.ContextWindow is > 0 and var w ? " / " + RoomModel.Tokens(w) : "") : "—")</dd>
+        <dt>비용</dt><dd title="claude가 알려 준 세션 누적 비용 (클라이언트 추정)">@(room.TotalCostUsd is { } cost ? "≈$" + cost.ToString("0.000") : "—")</dd>
+        <dt>만든 때</dt><dd>@room.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</dd>
+        <dt>마지막 실행</dt><dd>@(room.LastRunAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "—")</dd>
+        @if (room.Level == PermissionLevel.Command)
+        {
+            <dt>항상 허용</dt><dd>이 방 @(room.AllowRules.Count)개 <span class="muted">(목록은 대화 위 접힌 칸)</span></dd>
+        }
+        @if (Model.DashboardLink is { } dash)
+        {
+            <dt>대시보드</dt><dd><a href="@dash" target="_blank" rel="noopener">채팅방 열기</a></dd>
+        }
+    </dl>
+</section>
+<section class="side-sec" data-tab="runs" id="side-sec-runs" role="tabpanel" aria-labelledby="side-tab-runs">
+    @{ var runs = Model.SideRuns; }
+    @if (runs.Count == 0)
+    {
+        <p class="muted">이 방에서 부른 외부 에이전트 실행(run_mode)이 없습니다.</p>
+    }
+    <ul class="side-list">
+        @foreach (var r in runs)
+        {
+            <li>
+                <span class="mono">@r.Mode</span>
+                <span class="muted">@r.At.ToLocalTime().ToString("MM-dd HH:mm") · 응답 @r.Replies@(r.Errors > 0 ? " · " : "")</span>@if (r.Errors > 0)
+                {
+                    <span class="err">실패 @r.Errors</span>
+                }
+                @if (r.Link is { } link)
+                {
+                    <a href="@link" target="_blank" rel="noopener" title="대시보드 실행 화면">@r.RunId</a>
+                }
+                else
+                {
+                    <span class="mono muted">@r.RunId</span>
+                }
+            </li>
+        }
+    </ul>
+</section>
+<section class="side-sec" data-tab="files" id="side-sec-files" role="tabpanel" aria-labelledby="side-tab-files">
+    @{ var files = Model.AttachmentFiles; }
+    @if (files.Count == 0)
+    {
+        <p class="muted">이 방에 올린 첨부가 없습니다.</p>
+    }
+    <ul class="side-list">
+        @foreach (var f in files.Take(Attachments.MaxListed))
+        {
+            <li>
+                <a href="/Room/@room.Id?handler=Attachment&amp;name=@Uri.EscapeDataString(f.Name)" target="_blank" rel="noopener">@f.Name</a>
+                <span class="muted">@Size(f.Bytes) · @f.At.ToLocalTime().ToString("MM-dd HH:mm")</span>
+            </li>
+        }
+    </ul>
+    @if (files.Count > Attachments.MaxListed)
+    {
+        <p class="muted">최근 @(Attachments.MaxListed)개만 보입니다.</p>
+    }
+</section>

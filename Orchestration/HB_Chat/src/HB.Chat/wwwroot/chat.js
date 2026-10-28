@@ -308,7 +308,8 @@
                 done = true;
                 if (save && input.value.trim() !== h2.textContent) {
                     const data = new FormData(); data.append("title", input.value);
-                    if (await post("Rename", data)) await refreshMessages(); // 제목(비우면 첫 말)은 새 말 받기의 data-title로 바뀐다
+                    // 제목(비우면 첫 말)은 새 말 받기의 data-title로 바뀐다. 새 말 받기는 알림 줄(chain)에 세운다 — end · snapshot의 받기와 겹치면 말이 두 번 붙었다 (/self-review c216951e79 C2)
+                    if (await post("Rename", data)) { chain = chain.then(() => disposed ? null : refreshMessages()).catch(() => { }); loadSide(); }
                 }
                 input.remove();
                 h2.hidden = false;
@@ -533,9 +534,14 @@
             }
         }
         function setBusy(busy) { stopBtn.disabled = !busy; interruptBtn.disabled = !busy; }
-        // 진행 단계 (3차 b): 지휘자 할 일 목록. 요약 줄은 "단계 끝난 수/전체 · 지금: 하는 단계" — 펼치면 목록.
+        // 진행 단계 (3차 b): 지휘자 할 일 목록. 요약 줄은 "단계 끝난 수/전체 · 지금: 하는 단계" — 펼치면 목록. 곁칸 단계 탭에도 같은 목록 (3차 c).
         const stepsBox = $("#steps");
         function renderSteps(steps) {
+            const sideSteps = $("#side-steps");
+            if (sideSteps) {
+                sideSteps.replaceChildren(...(steps || []).map(s => el("li", s.status, s.subject)));
+                $("#side-steps-empty").hidden = !!(steps && steps.length);
+            }
             if (!stepsBox) return;
             if (!steps || steps.length === 0) { stepsBox.hidden = true; return; }
             const done = steps.filter(s => s.status === "completed").length;
@@ -638,6 +644,70 @@
             if (!title) return;
             $("#room-title").textContent = title;
             document.title = "HB Chat · " + title;
+        }
+
+        // ---- 오른쪽 곁칸 (3차 c): 단계 · 방 정보 · 외부 실행 · 첨부. 열림 · 탭은 브라우저 저장(편의만 — 못 읽으면 닫힌 채 · 단계 탭) ----
+        const side = $("#side"), sideToggle = $("#side-toggle");
+        const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch { } } };
+        const sideTabs = ["steps", "info", "runs", "files"];
+        // 저장값이 모르는 탭이면 단계 탭 — 모든 칸이 숨던 문제 (c216951e79 C7)
+        let sideTab = sideTabs.includes(store.get("hbchat.sideTab")) ? store.get("hbchat.sideTab") : "steps";
+        let sideLoading = false, sideAgain = false;
+        // 넓은 폭(셋째 칸)인지 — 좁으면 곁칸이 방을 덮는다 (chat.css의 1199px 규칙과 같은 값)
+        const wide = () => window.matchMedia("(min-width: 1200px)").matches;
+        function showTab(tab) {
+            sideTab = tab;
+            store.set("hbchat.sideTab", tab);
+            side.querySelectorAll(".side-tabs [data-tab]").forEach(b => b.setAttribute("aria-selected", String(b.dataset.tab === tab)));
+            side.querySelectorAll(".side-sec").forEach(s => { s.hidden = s.dataset.tab !== tab; });
+        }
+        function sidePlaceholder(text) {
+            // 받는 중 · 실패 글은 탭과 상관없이 보인다 (c216951e79 C6 · 지휘자 K3) — 단계 탭은 화면이 그리므로 그 탭에만 가린다
+            const p = el("p", "muted side-sec side-wait", text);
+            p.hidden = sideTab === "steps";
+            $("#side-data").replaceChildren(p);
+        }
+        // 방 정보 · 외부 실행 · 첨부는 열 때 · 턴 끝 · 제목 · 규칙 · 첨부가 바뀔 때 서버에서 다시 받는다 (방 칸을 그릴 때는 계산하지 않음).
+        // 받는 중에 또 부르면 끝난 뒤 한 번 더 — 버리면 바뀌기 전 값이 남았다 (c216951e79 C1 · 지휘자 K1)
+        async function loadSide() {
+            if (!side || side.hidden || disposed) return;
+            if (sideLoading) { sideAgain = true; return; }
+            sideLoading = true;
+            try {
+                const res = await fetch(self + "?handler=Side", { cache: "no-store" });
+                if (disposed) return;
+                if (!res.ok) { sidePlaceholder("곁칸을 불러오지 못했습니다 (" + res.status + ") — 닫았다 다시 열어 보세요."); return; }
+                const doc = new DOMParser().parseFromString("<div>" + await res.text() + "</div>", "text/html");
+                $("#side-data").replaceChildren(...doc.body.firstElementChild.children);
+                const rename = $("#side-rename");
+                rename?.addEventListener("submit", async (e) => {
+                    e.preventDefault();
+                    const data = new FormData(); data.append("title", $("#side-title").value);
+                    // 제목(비우면 첫 말)은 새 말 받기가 바꾼다 — 알림 줄에 세운다 (C2)
+                    if (await post("Rename", data)) { chain = chain.then(() => disposed ? null : refreshMessages()).catch(() => { }); loadSide(); }
+                });
+                showTab(sideTab);
+            } catch {
+                if (!disposed) sidePlaceholder("곁칸을 불러오지 못했습니다 — 닫았다 다시 열어 보세요.");
+            } finally {
+                sideLoading = false;
+                if (sideAgain && !disposed) { sideAgain = false; loadSide(); }
+            }
+        }
+        function setSide(open) {
+            side.hidden = !open;
+            sideToggle.setAttribute("aria-expanded", String(open));
+            store.set("hbchat.side", open ? "1" : "0");
+            if (open) { showTab(sideTab); sidePlaceholder("불러오는 중…"); loadSide(); }
+        }
+        if (side && sideToggle) {
+            sideToggle.addEventListener("click", () => setSide(side.hidden));
+            side.querySelector(".side-x").addEventListener("click", () => setSide(false));
+            side.querySelectorAll(".side-tabs [data-tab]").forEach(b => b.addEventListener("click", () => showTab(b.dataset.tab)));
+            // Esc로 닫기 — 좁은 폭에서는 곁칸이 "정보" 단추를 덮는다 (지휘자 K2)
+            side.addEventListener("keydown", (e) => { if (e.key === "Escape") { setSide(false); sideToggle.focus(); } });
+            // 저장된 "열림"은 넓은 폭에서만 되살린다 — 좁으면 방을 열 때마다 대화를 덮었다 (c216951e79 C5). 미니 창은 숨김.
+            if (store.get("hbchat.side") === "1" && wide() && !root.closest(".mini")) setSide(true);
         }
 
         // 승인 카드 (명령 단계): 서버가 답을 기다리는 동안 대화 흐름 안(live)에 보인다 (2-2 b). 남은 시간은 1초마다 다시 쓴다.
@@ -836,6 +906,7 @@
                     if (ev.face) setFace(ev.face);
                     renderSteps(ev.steps);
                     if (ev.status) showStatus(ev.status);
+                    loadSide(); // 끊긴 사이 끝난 턴은 end가 오지 않는다 — 비용 · 외부 실행을 새로 (C3)
                     break;
                 case "face":
                     setFace(ev.face, ev.face === "Tool" && ev.text ? shortTool(ev.text) : null);
@@ -854,6 +925,7 @@
                     break;
                 case "rules":
                     renderRules(ev.rules || []);
+                    loadSide(); // 곁칸의 항상 허용 수 (c216951e79 C3)
                     break;
                 case "start":
                     $("#last-error")?.remove();
@@ -901,6 +973,7 @@
                     if (ev.costUsd != null) { const c = $("#cost"); if (c) c.textContent = "≈$" + ev.costUsd.toFixed(3); }
                     showContext(ev.contextTokens, ev.contextWindow);
                     if (ev.face) setFace(ev.face);
+                    loadSide(); // 곁칸이 열려 있으면 비용 · 컨텍스트 · 외부 실행 · 첨부를 새로 (3차 c)
                     break;
                 }
                 case "idle":
@@ -978,7 +1051,7 @@
                 uploading++; renderAttached();
                 try {
                     const res = await post("Attach", data, false, true);
-                    if (res?.path && !disposed) attached = [...attached, res];
+                    if (res?.path && !disposed) { attached = [...attached, res]; loadSide(); } // 곁칸 첨부 탭 (C3)
                 } finally {
                     uploading--;
                     if (!disposed) renderAttached();

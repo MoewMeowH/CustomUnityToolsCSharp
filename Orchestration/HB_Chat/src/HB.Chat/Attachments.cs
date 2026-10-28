@@ -107,6 +107,30 @@ public static partial class Attachments
         return IsReparse(root) || IsReparse(full) ? null : full;
     }
 
+    /// <summary>곁칸 "첨부" 탭에 보일 파일 상한.</summary>
+    public const int MaxListed = 200;
+
+    /// <summary>
+    /// 그 방 첨부 파일 목록 (곁칸 "첨부" 탭, 3차 c): 최근 것부터 <see cref="MaxListed"/>개 + 넘쳤는지 볼 하나 더 (화면은 MaxListed개만 그린다).
+    /// 쓰는 중인 임시 파일(.part) · 숨김(. 시작) · 하위 폴더는 빼고, 보기 요청 <see cref="Resolve"/>가 거절하는 이름(가운데 .. 등 · 재분석 지점)도 뺀다 —
+    /// 목록에 보이는데 열면 404였다 (/self-review c216951e79 C4). 읽지 못하면 빈 목록.
+    /// </summary>
+    public static IReadOnlyList<(string Name, long Bytes, DateTimeOffset At)> List(string folder)
+    {
+        try
+        {
+            if (!Directory.Exists(folder) || IsReparse(folder)) return [];
+            return [.. new DirectoryInfo(folder).EnumerateFiles()
+                .Where(f => !f.Name.StartsWith('.') && Resolve(folder, f.Name) is not null)
+                .OrderByDescending(f => f.LastWriteTimeUtc).Take(MaxListed + 1)
+                .Select(f => (f.Name, f.Length, new DateTimeOffset(f.LastWriteTimeUtc, TimeSpan.Zero)))];
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return [];
+        }
+    }
+
     /// <summary>
     /// --add-dir로 열어도 되는 첨부 폴더인지: 있고, 재분석 지점이 아니고, .claude가 없다 —
     /// 추가 폴더의 .claude/skills를 CLI가 불러오므로 (0c3b7e3514 C2 실측). 이유(null이면 열어도 됨).

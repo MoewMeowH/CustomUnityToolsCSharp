@@ -9,6 +9,8 @@
 }
 <div class="room" data-room="@room.Id" data-title="@Model.Title" data-read-up-to="@(room.ReadUpTo ?? -1)"
      data-faces="@Model.Faces.Json()" data-face="@face" data-face-left="@Model.EndFaceLeftMs" data-end-face-ms="@RoomModel.EndFaceMs">
+    @* 가운데(머리 · 말 · 입력칸) + 오른쪽 곁칸 (3차 c) *@
+    <div class="room-main">
     <section class="room-head">
         <a class="back" href="/" title="방 목록">←</a>
         @* 지휘자 표정 (계획서 2-2 b): 상태마다 스티커 그림, 그림이 없으면 글자 아바타 *@
@@ -38,6 +40,8 @@
         {
             <a href="@dash" target="_blank" rel="noopener" title="대시보드 채팅방 (run_mode 실행 · 판정 엮임)">대시보드</a>
         }
+        @* 곁칸 열고 닫기 (3차 c) — 열림 · 고른 탭은 브라우저 저장 *@
+        <button type="button" class="btn" id="side-toggle" title="오른쪽 곁칸: 단계 · 방 정보 · 외부 실행 · 첨부" aria-controls="side" aria-expanded="false">정보</button>
         @* 방 메뉴 (계획서 2-2 c) *@
         <details class="menu">
             <summary class="btn" title="방 메뉴">⋯</summary>
@@ -141,4 +145,23 @@
         @* 단계 설명은 접어 둔다 — 좁은 폭에서 입력칸 아래를 다 차지했다 (2-2 b 실제 확인) *@
         <details class="hint"><summary>권한: @RoomRules.LevelName(room.Level)</summary>@RoomRules.Describe(room.Level)</details>
     </div>
+    </div>
+    @* 오른쪽 곁칸 (3차 c, Claude 앱처럼): 단계는 화면이 steps 알림으로 그리고, 나머지 탭은 열 때 · 턴이 끝날 때 ?handler=Side로 받는다 *@
+    <aside class="side" id="side" hidden aria-label="곁칸">
+        @* 탭 ↔ 칸은 aria-controls · aria-labelledby로 잇고, 닫기는 tablist 밖 (/self-review c216951e79 C8) *@
+        <div class="side-tabs">
+            <div class="side-tablist" role="tablist" aria-label="곁칸 탭">
+                <button type="button" role="tab" data-tab="steps" id="side-tab-steps" aria-controls="side-sec-steps">단계</button>
+                <button type="button" role="tab" data-tab="info" id="side-tab-info" aria-controls="side-sec-info">방 정보</button>
+                <button type="button" role="tab" data-tab="runs" id="side-tab-runs" aria-controls="side-sec-runs">외부 실행</button>
+                <button type="button" role="tab" data-tab="files" id="side-tab-files" aria-controls="side-sec-files">첨부</button>
+            </div>
+            <button type="button" class="side-x" title="곁칸 닫기 (Esc)" aria-label="곁칸 닫기">×</button>
+        </div>
+        <section class="side-sec" data-tab="steps" id="side-sec-steps" role="tabpanel" aria-labelledby="side-tab-steps">
+            <p class="muted" id="side-steps-empty">지휘자가 할 일 도구로 단계를 만들면 여기에 보입니다.</p>
+            <ol class="side-steps" id="side-steps"></ol>
+        </section>
+        <div id="side-data"></div>
+    </aside>
 </div>
