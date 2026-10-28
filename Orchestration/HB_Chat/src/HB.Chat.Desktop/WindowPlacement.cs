@@ -8,12 +8,14 @@ public sealed record WindowPlacement(int X, int Y, int Width, int Height, bool M
 {
     public static readonly Size MinSize = new(640, 480);
 
+    [System.Text.Json.Serialization.JsonIgnore]
     public Rectangle Bounds => new(X, Y, Width, Height);
 
-    /// <summary>보이는 화면과 충분히(가로 · 세로 120px 이상) 겹치면 그대로, 아니면 null (기본 위치).</summary>
-    public WindowPlacement? FitTo(IEnumerable<Rectangle> screens)
+    /// <summary>보이는 화면과 충분히(가로 · 세로 120px 이상) 겹치면 그대로, 아니면 null (기본 위치). min: 이 창의 최소 크기 (기본 큰 창).</summary>
+    public WindowPlacement? FitTo(IEnumerable<Rectangle> screens, Size? min = null)
     {
-        if (Width < MinSize.Width || Height < MinSize.Height) return null;
+        var least = min ?? MinSize;
+        if (Width < least.Width || Height < least.Height) return null;
         foreach (var s in screens)
         {
             var overlap = Rectangle.Intersect(s, Bounds);

@@ -26,6 +26,9 @@ public sealed record DesktopSettings
 
     public string DataFolder { get; init; } = DefaultDataFolder;
 
+    /// <summary>미니 창 보이기 · 숨기기 전역 단축키 (예: "Ctrl+Alt+Space", "Ctrl+Shift+H"). 비우면 단축키 없음.</summary>
+    public string? Hotkey { get; init; } = "Ctrl+Alt+Space";
+
     /// <summary>WebView2 원격 디버깅 포트 (시험용, 인자 --debug-port=로만). 없으면 열지 않는다.</summary>
     public int? DebugPort { get; init; }
 

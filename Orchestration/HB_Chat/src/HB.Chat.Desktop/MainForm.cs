@@ -61,6 +61,14 @@ public sealed class MainForm : Form
     private string? _balloonRoom;
     private bool _exiting, _hintShown, _confirming;
 
+    // 미니 창 · 단축키 (2-3 c)
+    private CoreWebView2Environment? _env;
+    private MiniForm? _mini;
+    private Task? _miniReady;
+    private IReadOnlyList<RoomState> _roomList = [];
+    private bool _hotkeyRegistered;
+    private const int HotkeyId = 0x4842, WmHotkey = 0x0312;
+
     public MainForm(DesktopSettings settings, string? startWarning, EventWaitHandle show, EventWaitHandle exit)
     {
         _settings = settings;
@@ -95,6 +103,7 @@ public sealed class MainForm : Form
 
         // 트레이 (2-3 b): 닫기(X)는 여기로 숨김, 메뉴 열기 · 끝내기, 두 번 누르면 열기, 풍선을 누르면 그 방
         _trayMenu.Items.Add("열기", null, (_, _) => BringUp());
+        _trayMenu.Items.Add("미니 창", null, (_, _) => ToggleMini());
         _trayMenu.Items.Add(new ToolStripSeparator());
         _trayMenu.Items.Add("끝내기", null, (_, _) => Exit());
         _tray = new NotifyIcon { Icon = _trayIcons[TrayLevel.Idle], Text = "HB Chat", ContextMenuStrip = _trayMenu, Visible = true };
@@ -109,7 +118,11 @@ public sealed class MainForm : Form
         base.OnLoad(e);
         _showWait = ThreadPool.RegisterWaitForSingleObject(_show, (_, _) => OnShowSignal(BringUp), null, -1, false);
         _exitWait = ThreadPool.RegisterWaitForSingleObject(_exitSignal, (_, _) => OnShowSignal(Exit), null, -1, false);
-        if (_startWarning is not null) SetStatus(_startWarning);
+        if (_startWarning is not null)
+        {
+            _warnings.Add(_startWarning); // 서버 상태가 써져도 남게 (C6)
+            SetStatus("");
+        }
         try
         {
             await StartAsync();
@@ -146,14 +159,14 @@ public sealed class MainForm : Form
             publish is null ? [] : ["--Dashboard:McpConfigDir=" + publish], Path.Combine(_settings.LogFolder, "desktop-dashboard-server.log"));
 
         var arguments = BrowserArguments + (_settings.DebugPort is { } port ? $" --remote-debugging-port={port}" : "");
-        var env = await CoreWebView2Environment.CreateAsync(null, _settings.WebViewFolder, new CoreWebView2EnvironmentOptions(arguments));
+        var env = _env = await CoreWebView2Environment.CreateAsync(null, _settings.WebViewFolder, new CoreWebView2EnvironmentOptions(arguments));
         await ConfigureAsync(_chatView, AppTab.Chat, env);
         await ConfigureAsync(_dashView, AppTab.Dashboard, env);
 
         // 서버마다 따로 기다린다 — 한쪽이 늦거나 실패해도 다른 탭은 준비되는 대로 연다 (26d478170f C3 · C4)
         var progress = new Progress<string>(SetStatus);
         await Task.WhenAll(BringUpAsync(_chatServer, progress), BringUpAsync(_dashServer, progress));
-        if (!_closing) SetStatus(string.Join(" · ", new[] { Describe(_chatServer, _chatError), Describe(_dashServer, _dashError) }));
+        if (!_closing) SetStatus(string.Join(" · ", Describe(_chatServer, _chatError), Describe(_dashServer, _dashError)));
     }
 
     private async Task BringUpAsync(LocalServer server, IProgress<string> progress)
@@ -256,6 +269,8 @@ public sealed class MainForm : Form
         {
             case NavAction.Switch:
                 ShowTab(d.Tab, d.Url);
+                // 미니 창에서 누른 링크도 큰 창에 — 숨김 · 최소화뿐 아니라 다른 창 뒤에 있어도 앞으로 (C3)
+                if (!Visible || WindowState == FormWindowState.Minimized || ActiveForm != this) BringUp();
                 break;
             case NavAction.External when d.Url is { } url:
                 try
@@ -295,7 +310,9 @@ public sealed class MainForm : Form
         _dashView.Visible = _tab == AppTab.Dashboard && error is null;
     }
 
-    private void SetStatus(string text) => _status.Text = text;
+    /// <summary>상태 줄: 이번 글 + 계속 남는 경고(시작 설정 · 단축키). 다른 글이 경고를 덮지 않게 한 곳에서 붙인다 (bde22e2224 C6).</summary>
+    private void SetStatus(string text) =>
+        _status.Text = string.Join(" · ", new[] { text }.Concat(_warnings).Where(s => !string.IsNullOrEmpty(s)));
 
     /// <summary>두 번째 실행 신호(앞으로 · --exit) (스레드 풀). 창이 닫히는 중이거나 핸들이 없으면 버린다 (26d478170f C7).</summary>
     private void OnShowSignal(Action action)
@@ -328,6 +345,8 @@ public sealed class MainForm : Form
         var viewing = ViewingRoom();
         var notices = Notices.Diff(_rooms, rooms, viewing);
         _rooms = rooms.ToDictionary(r => r.Id);
+        _roomList = rooms;
+        _mini?.UpdateRooms(rooms);
         _unseenFailures.Update(notices, rooms, viewing);
         UpdateTray();
         if (notices.Count == 0) return;
@@ -368,11 +387,118 @@ public sealed class MainForm : Form
 
     private TrayLevel _trayLevel = TrayLevel.Idle;
 
-    /// <summary>사용자가 지금 보고 있는 채팅 방 (창이 앞에 있고 채팅 탭이 그 방일 때만). 아니면 null — 그 방도 알린다.</summary>
-    private string? ViewingRoom() =>
-        Visible && WindowState != FormWindowState.Minimized && ActiveForm == this && _tab == AppTab.Chat && _chatView.CoreWebView2 is { } core
+    /// <summary>
+    /// 사용자가 지금 보고 있는 채팅 방: 미니 창이 앞이면 그 방, 큰 창이 앞이고 채팅 탭이면 그 방. 아니면 null — 그 방도 알린다.
+    /// </summary>
+    private string? ViewingRoom()
+    {
+        if (_mini is { Visible: true } mini && ActiveForm == mini && mini.WindowState != FormWindowState.Minimized) return mini.Current;
+        return Visible && WindowState != FormWindowState.Minimized && ActiveForm == this && _tab == AppTab.Chat && _chatView.CoreWebView2 is { } core
             ? RoomIdOf(core.Source, _chatUrl)
             : null;
+    }
+
+    // ---- 미니 창 · 전역 단축키 (2-3 c) ----
+
+    /// <summary>미니 창 보이기 · 숨기기 (트레이 메뉴 · 단축키). 처음 부를 때 만든다 — 채팅 서버가 준비된 뒤에만.</summary>
+    private async void ToggleMini()
+    {
+        if (_closing) return;
+        if (_chatError is not null || _env is null)
+        {
+            SetStatus("채팅 서버가 준비되면 미니 창을 열 수 있습니다");
+            return;
+        }
+        // 만드는 중에 또 부르면(트레이 · 단축키가 겹침) 무시 — 둘 다 Toggle하면 보였다 바로 숨는다 (/self-review bde22e2224 C5)
+        if (_miniReady is { IsCompleted: false }) return;
+        try
+        {
+            await (_miniReady ??= CreateMiniAsync(_env));
+        }
+        catch (Exception ex)
+        {
+            // async void라 여기서 다 받는다 — 다음에 다시 만든다
+            _miniReady = null;
+            if (!_closing) SetStatus("미니 창을 만들지 못했습니다: " + ex.Message);
+            return;
+        }
+        if (_closing || _mini is null) return;
+        _mini.Toggle();
+        Trace($"미니 창 {(_mini.Visible ? "보임" : "숨김")} {_mini.Current}");
+    }
+
+    private async Task CreateMiniAsync(CoreWebView2Environment env)
+    {
+        var mini = new MiniForm(_chatUrl, Path.Combine(_settings.DataFolder, "desktop-mini.json"));
+        try
+        {
+            mini.OpenInMain += OpenRoom;
+            mini.Activated += (_, _) => UpdateTray();
+            mini.CreateControl();
+            await ConfigureAsync(mini.View, AppTab.Chat, env); // 큰 창과 같은 규칙 (다른 탭 · 밖 주소는 큰 창 · 브라우저로)
+            mini.Attach();
+        }
+        catch
+        {
+            mini.Dispose(); // 실패한 창은 남기지 않는다 (C5)
+            throw;
+        }
+        if (_closing)
+        {
+            mini.Dispose(); // 만드는 사이 앱이 닫힘 — 끝날 때 정리에서 빠지지 않게
+            return;
+        }
+        _mini = mini;
+        mini.UpdateRooms(_roomList);
+    }
+
+    /// <summary>
+    /// 설정 Hotkey를 등록한다. 형식이 틀리거나 다른 프로그램이 쓰고 있으면 상태 줄에 남기고(서버 상태 뒤에 계속) 기록한다 —
+    /// 실제 확인에서 Ctrl+Alt+Space가 이미 다른 프로그램 것이라 등록이 조용히 실패했다.
+    /// </summary>
+    private void RegisterHotkey()
+    {
+        if (string.IsNullOrWhiteSpace(_settings.Hotkey)) return; // 비우면 단축키 없음 (C9)
+        var text = _settings.Hotkey.Trim();
+        string? problem = null;
+        if (Hotkey.Parse(text) is not { } key) problem = $"단축키 형식이 맞지 않습니다: {text} (예: Ctrl+Alt+Space)";
+        else if (!(_hotkeyRegistered = RegisterHotKey(Handle, HotkeyId, key.Modifiers | Hotkey.NoRepeat, (uint)key.Key)))
+            problem = Marshal.GetLastWin32Error() == ErrorHotkeyAlreadyRegistered
+                ? $"단축키 {text}를 다른 프로그램이 쓰고 있습니다 — 트레이 메뉴의 미니 창을 쓰거나 desktop.json의 Hotkey를 바꾸세요"
+                : $"단축키 {text}를 등록하지 못했습니다 (오류 {Marshal.GetLastWin32Error()})";
+        Trace(problem ?? $"단축키 {text} 등록");
+        if (problem is null) return;
+        _warnings.Add(problem);
+        SetStatus("");
+    }
+
+    private const int ErrorHotkeyAlreadyRegistered = 1409;
+
+    /// <summary>핸들이 (다시) 만들어질 때마다 단축키를 등록한다 (C10).</summary>
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        RegisterHotkey();
+    }
+
+    /// <summary>상태 줄에 서버 상태 뒤로 계속 보일 경고 (단축키 등).</summary>
+    private readonly List<string> _warnings = [];
+
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg == WmHotkey && m.WParam == HotkeyId)
+        {
+            ToggleMini();
+            return;
+        }
+        base.WndProc(ref m);
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint modifiers, uint key);
+
+    [DllImport("user32.dll")]
+    private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
     /// <summary>채팅 주소의 `/Room/{12자리 16진}`이면 방 ID.</summary>
     internal static string? RoomIdOf(string? url, Uri chatUrl)
@@ -470,6 +596,7 @@ public sealed class MainForm : Form
             }
         }
         _closing = true;
+        _mini?.CloseForExit(); // 미니 창 위치를 남기고 진짜 닫는다
         var bounds = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
         new WindowPlacement(bounds.X, bounds.Y, bounds.Width, bounds.Height, WindowState == FormWindowState.Maximized).Save(_placementPath);
         base.OnFormClosing(e);
@@ -488,10 +615,18 @@ public sealed class MainForm : Form
         }
     }
 
+    protected override void OnHandleDestroyed(EventArgs e)
+    {
+        if (_hotkeyRegistered) UnregisterHotKey(Handle, HotkeyId);
+        _hotkeyRegistered = false;
+        base.OnHandleDestroyed(e);
+    }
+
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
+            _mini?.Dispose();
             _closing = true;
             _showWait?.Unregister(null);
             _exitWait?.Unregister(null);

@@ -18,6 +18,9 @@ public sealed class RoomModel(
     : PageModel
 {
     public Room Room { get; private set; } = null!;
+
+    /// <summary>데스크톱 미니 창 배치 (계획서 2-3 c, `?view=mini`). 서버 동작은 같고 CSS만 다르다.</summary>
+    public bool Mini => string.Equals(Request.Query["view"], "mini", StringComparison.OrdinalIgnoreCase);
     public ChatTranscript? Transcript { get; private set; }
     public string Title => RoomList.TitleOf(Room, Transcript);
 

@@ -197,6 +197,14 @@ input.rename { font-size: 15px; font-weight: 600; min-width: 200px; }
 .rules { max-width: 920px; margin: 0 auto 12px; font-size: 12.5px; }
 .rules li { display: flex; gap: 8px; align-items: center; }
 
+/* 미니 창 (2-3 c, ?view=mini): 폭이 좁아 아래 좁은 폭 규칙(목록 숨김 · 입력칸 접기)이 같이 걸린다.
+   여기서는 부가 정보(뒤로 · 배지 · 모델 · 컨텍스트 · 비용 · 대시보드 링크 · 방 메뉴 · 명령 규칙 · 입력 도움말)만 더 숨긴다 */
+.app.mini { grid-template-columns: minmax(0, 1fr); }
+.app.mini .sidebar, .app.mini .back, .app.mini .room-head .badge, .app.mini .room-head > .mono, .app.mini .ctx, .app.mini #cost,
+.app.mini .room-head > a, .app.mini .menu, .app.mini .rules, .app.mini .composer .hint { display: none !important; }
+.app.mini .scroll, .app.mini .room-head, .app.mini .composer { padding-left: 8px; padding-right: 8px; }
+.app.mini .room-head { padding-top: 4px; padding-bottom: 4px; }
+
 /* 좁은 폭: 목록 ↔ 방 두 화면 (in-room이면 방, 아니면 목록) */
 @media (max-width: 767px) {
     .app { grid-template-columns: minmax(0, 1fr); }

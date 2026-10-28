@@ -3,8 +3,9 @@
 @{
     ViewData["Title"] = $"HB Chat · {Model.Title}";
 }
-@* 두 칸 화면 (계획서 2-2 a): 왼쪽 방 목록 + 오른쪽 이 방. 다른 방을 고르면 chat.js가 오른쪽 칸만 바꾼다. *@
-<div class="app in-room">
+@* 두 칸 화면 (계획서 2-2 a): 왼쪽 방 목록 + 오른쪽 이 방. 다른 방을 고르면 chat.js가 오른쪽 칸만 바꾼다.
+   ?view=mini (2-3 c 데스크톱 미니 창): 같은 화면을 작은 배치로 — 목록 · 방 메뉴 · 부가 정보는 CSS로 숨긴다 (동작은 그대로). *@
+<div class="app in-room@(Model.Mini ? " mini" : "")">
     <partial name="_Sidebar" model="Model.Sidebar" />
     <section class="pane" id="pane">
         <partial name="_RoomPane" model="Model" />
