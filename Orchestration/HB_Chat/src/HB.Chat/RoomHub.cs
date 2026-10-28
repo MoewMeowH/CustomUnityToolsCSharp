@@ -137,6 +137,16 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     }
 
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Live> _rooms = new();
+
+    /// <summary>방마다 마지막 실행의 init (명령 · 스킬 · 플러그인 목록 — Claude 앱 기능 A). 메모리만.</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, InitEvent> _commandSets = new();
+
+    /// <summary>그 방 마지막 실행이 알려 준 명령 목록. 이 앱을 켠 뒤 그 방이 아직 돌지 않았으면 null.</summary>
+    public InitEvent? Commands(string roomId) => _commandSets.TryGetValue(roomId, out var init) ? init : null;
+
+    /// <summary>기억한 명령 목록을 버린다 — 방을 휴지통 · 지우기 · 설정(단계)을 바꿀 때 (/self-review db1b130ff2 C7). 다음 실행이 다시 알려 준다.</summary>
+    public void ForgetCommands(string roomId) => _commandSets.TryRemove(roomId, out _);
+
     private bool _disposed;
 
     /// <summary>앱 전체 구독 (방 목록 화면 · 2-3 알림): 목록 줄이 바뀌었을 수 있는 방 ID를 받는다.</summary>
@@ -876,6 +886,8 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 stopOnMismatch.Cancel();
                 return;
             }
+            // 입력칸 '/' 자동 완성 (Claude 앱 기능 A): 이 방 실행이 알려 준 명령 · 스킬 · 플러그인을 기억한다 (앱을 다시 켜면 첫 실행 전에는 없음)
+            if (ev is InitEvent commands) _commandSets[room.Id] = commands;
             // 할 일 도구를 쓴 뒤의 출력이면 그 사이 도구가 돌아 파일이 바뀌었을 수 있다 — 잠금 밖에서 읽는다 (3차 b).
             // 잦은 stream_event(글 · 도구 입력 · 생각 조각)에서는 읽지 않고, 300ms 안에 다시 읽지 않는다 — 마지막 상태는 턴 끝 읽기가 맞춘다 (/self-review ea28ba9185 C1).
             var fragment = ev is DeltaEvent || (ev is OtherEvent other && other.Type.StartsWith("stream_event", StringComparison.Ordinal));

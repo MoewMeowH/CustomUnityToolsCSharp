@@ -6,7 +6,17 @@ namespace HB.Chat;
 public abstract record StreamEvent;
 
 /// <summary>system/init: 실제로 쓰는 세션 ID · CLI 버전 · 붙은 MCP 서버 (이름, 상태).</summary>
-public sealed record InitEvent(string? SessionId, string? Version, IReadOnlyList<(string Name, string Status)> McpServers) : StreamEvent;
+public sealed record InitEvent(string? SessionId, string? Version, IReadOnlyList<(string Name, string Status)> McpServers) : StreamEvent
+{
+    /// <summary>
+    /// 그 세션에서 쓸 수 있는 '/' 명령 이름들 (사용자 명령 · 스킬 · 플러그인 스킬 · 기본 명령이 섞임 — 설명은 없다), 그중 스킬,
+    /// 터미널 전용 명령, 켜진 플러그인 (이름, 경로). 입력칸 '/' 자동 완성 (Claude 앱 기능 A — 2.1.312 실측).
+    /// </summary>
+    public IReadOnlyList<string> SlashCommands { get; init; } = [];
+    public IReadOnlyList<string> Skills { get; init; } = [];
+    public IReadOnlyList<string> TerminalCommands { get; init; } = [];
+    public IReadOnlyList<(string Name, string Path)> Plugins { get; init; } = [];
+}
 
 /// <summary>흘림 글 조각 (stream_event content_block_delta / text_delta).</summary>
 public sealed record DeltaEvent(string Text) : StreamEvent;
@@ -99,7 +109,13 @@ public static class StreamParser
                 "control_request" when Str(e, "request_id") is { Length: > 0 } id && e.TryGetProperty("request", out var req) && req.ValueKind == JsonValueKind.Object
                     => new ControlRequestEvent(id, Str(req, "subtype") ?? "", req.GetRawText()),
                 "control_cancel_request" when Str(e, "request_id") is { Length: > 0 } cancelId => new ControlCancelEvent(cancelId),
-                "system" when subtype == "init" => new InitEvent(Str(e, "session_id"), Str(e, "claude_code_version"), McpServers(e)),
+                "system" when subtype == "init" => new InitEvent(Str(e, "session_id"), Str(e, "claude_code_version"), McpServers(e))
+                {
+                    SlashCommands = Strs(e, "slash_commands"),
+                    Skills = Strs(e, "skills"),
+                    TerminalCommands = Strs(e, "terminal_slash_commands"),
+                    Plugins = Plugins(e),
+                },
                 "system" when subtype == "permission_denied" => new DeniedEvent(Str(e, "tool_name"), Str(e, "decision_reason")),
                 "system" when subtype == "api_retry" => new RetryEvent(Int(e, "attempt") ?? 0, Str(e, "error")),
                 "system" when subtype == "post_turn_summary" =>
@@ -187,6 +203,21 @@ public static class StreamParser
         return list.EnumerateArray()
             .Where(s => s.ValueKind == JsonValueKind.Object)
             .Select(s => (Str(s, "name") ?? "?", Str(s, "status") ?? "?"))
+            .ToList();
+    }
+
+    /// <summary>글자 배열 (글자가 아닌 칸은 건너뜀). 없으면 빈 목록.</summary>
+    private static IReadOnlyList<string> Strs(JsonElement e, string name) =>
+        e.TryGetProperty(name, out var list) && list.ValueKind == JsonValueKind.Array
+            ? [.. list.EnumerateArray().Where(v => v.ValueKind == JsonValueKind.String).Select(v => v.GetString()!)]
+            : [];
+
+    private static IReadOnlyList<(string, string)> Plugins(JsonElement e)
+    {
+        if (!e.TryGetProperty("plugins", out var list) || list.ValueKind != JsonValueKind.Array) return [];
+        return list.EnumerateArray()
+            .Where(p => p.ValueKind == JsonValueKind.Object && Str(p, "name") is not null && Str(p, "path") is not null)
+            .Select(p => (Str(p, "name")!, Str(p, "path")!))
             .ToList();
     }
 

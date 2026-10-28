@@ -74,7 +74,11 @@ public sealed class IndexModel(RoomStore store, RoomHub hub, RoomList list, Chat
         if (targets.Length == 0 || !targets.All(RoomStore.IsRoomId)) return NotFound();
         try
         {
-            foreach (var removed in Trash.DeleteNow(store, options.Value.DataFolder, targets)) hub.Touch(removed);
+            foreach (var removed in Trash.DeleteNow(store, options.Value.DataFolder, targets))
+            {
+                hub.ForgetCommands(removed);
+                hub.Touch(removed);
+            }
         }
         catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
         {

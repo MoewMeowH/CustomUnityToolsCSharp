@@ -1053,6 +1053,7 @@
                     notice.textContent = ev.text; notice.hidden = false;
                     break;
                 case "end": {
+                    loadCommands(); // 이번 실행의 init이 명령 목록을 새로 알려 줬을 수 있다 (Claude 앱 기능 A)
                     // 이 턴의 말은 세션 기록으로 다시 그린다. 다시 받지 못하면 진행 중 말풍선을 남겨 둔다 (지휘자 검토 R7).
                     // 실패 · 중지면 이유를 한 줄 남긴다.
                     const refreshed = await refreshMessages();
@@ -1222,12 +1223,76 @@
             if (disposed) { if (!drafts.get(roomId)?.text) drafts.set(roomId, { text, quote: q, attached: files }); }
             else if (!textBox.value) textBox.value = text;
         }
+        // ---- 입력칸 '/' 명령 · 스킬 목록 (Claude 앱 기능 A): 글이 '/'로 시작하고 아직 띄어쓰기가 없을 때만. 고르면 "/이름 "을 넣는다(보내지 않음) ----
+        // 목록은 서버가 그 방 마지막 실행의 init + 파일 설명으로 만든다. 설명은 파일 내용이라 글로만 그린다.
+        const cmdBox = el("div", "cmd-list");
+        cmdBox.hidden = true;
+        cmdBox.setAttribute("role", "listbox");
+        form.before(cmdBox);
+        const cmdKinds = { command: "명령", skill: "스킬", builtin: "기본", terminal: "터미널" };
+        let commands = [], cmdChatOnly = false, cmdShown = [], cmdIndex = 0;
+        async function loadCommands() {
+            try {
+                const res = await fetch(self + "?handler=Commands", { cache: "no-store" });
+                if (!res.ok || disposed) return;
+                const data = await res.json();
+                commands = Array.isArray(data.commands) ? data.commands : [];
+                cmdChatOnly = !!data.chat;
+                updateCmd();
+            } catch { /* 목록이 없어도 보내기는 그대로 */ }
+        }
+        // '/' 뒤가 이름에 쓰는 글자뿐일 때만 — 경로("/c/Users…")처럼 다른 글자가 있으면 열지 않는다 (포함 일치로 일반 글이 바뀌지 않게, db1b130ff2 C4)
+        function cmdQuery() { return /^\/[A-Za-z0-9:._-]*$/.test(textBox.value) ? textBox.value.slice(1).toLowerCase() : null; }
+        function updateCmd() {
+            const q = cmdQuery();
+            const name = (c) => String(c.name).toLowerCase();
+            cmdShown = q === null ? [] : [...commands.filter(c => name(c).startsWith(q)), ...commands.filter(c => !name(c).startsWith(q) && name(c).includes(q))].slice(0, 8);
+            if (cmdShown.length === 0) { cmdBox.hidden = true; return; }
+            cmdIndex = Math.min(cmdIndex, cmdShown.length - 1);
+            const rows = cmdShown.map((c, i) => {
+                const row = el("div", "cmd-item" + (i === cmdIndex ? " on" : ""));
+                row.setAttribute("role", "option");
+                row.append(el("span", "cmd-name", "/" + c.name + (c.hint ? " " + c.hint : "")), el("span", "cmd-kind", cmdKinds[c.kind] || c.kind),
+                    el("span", "cmd-desc", c.description || ""));
+                row.addEventListener("mousedown", (e) => { e.preventDefault(); pickCmd(i); }); // 입력칸 blur보다 먼저
+                return row;
+            });
+            cmdBox.replaceChildren(...(cmdChatOnly ? [el("div", "cmd-note", "대화 단계 방은 도구가 없어 파일 · 명령이 필요한 명령은 제대로 돌지 않습니다")] : []), ...rows);
+            cmdBox.hidden = false;
+        }
+        function pickCmd(i) {
+            const c = cmdShown[i];
+            if (!c) return;
+            textBox.value = "/" + c.name + " ";
+            cmdBox.hidden = true;
+            textBox.focus();
+            textBox.setSelectionRange(textBox.value.length, textBox.value.length);
+            textBox.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+        textBox.addEventListener("input", () => { cmdIndex = 0; updateCmd(); });
+        textBox.addEventListener("blur", () => { cmdBox.hidden = true; });
+        loadCommands();
+
         form.addEventListener("submit", (e) => { e.preventDefault(); sendNow("Send"); });
         interruptBtn.addEventListener("click", () => {
             if (!textBox.value.trim() && attached.length === 0) { textBox.focus(); return; }
             sendNow("Interrupt");
         });
         textBox.addEventListener("keydown", (e) => {
+            // '/' 목록이 열려 있으면 ↑↓ 고르기 · Enter · Tab 넣기 · Esc 닫기 (한글 조합 중에는 건드리지 않음)
+            if (!cmdBox.hidden && !e.isComposing && cmdShown.length > 0) {
+                if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                    e.preventDefault();
+                    cmdIndex = (cmdIndex + (e.key === "ArrowDown" ? 1 : cmdShown.length - 1)) % cmdShown.length;
+                    updateCmd();
+                    return;
+                }
+                // 이름을 다 쳤으면 Enter는 보내기 (인자 없는 /compact 등 — 두 번 누르지 않게, db1b130ff2 C4). Tab은 늘 완성
+                const exact = e.key === "Enter" && textBox.value === "/" + cmdShown[cmdIndex].name;
+                if (!exact && ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab")) { e.preventDefault(); pickCmd(cmdIndex); return; }
+                if (exact) cmdBox.hidden = true; // 아래에서 보낸다
+                if (e.key === "Escape") { e.preventDefault(); cmdBox.hidden = true; return; }
+            }
             // 한글 조합 중 Enter는 글자 확정이다 — 보내지 않는다.
             if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); form.requestSubmit(); }
         });

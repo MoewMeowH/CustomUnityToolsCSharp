@@ -126,6 +126,20 @@ public sealed class RoomModel(
         return Partial("_RoomSide", this);
     }
 
+    /// <summary>
+    /// 입력칸 '/' 목록 (Claude 앱 기능 A): 그 방 마지막 실행의 init 이름 + 작업 폴더 · 사용자 · 플러그인 파일 설명 (<see cref="CommandCatalog"/>).
+    /// 화면이 방을 열 때 · 턴이 끝날 때 받는다.
+    /// </summary>
+    public IActionResult OnGetCommands(string id)
+    {
+        Response.Headers.CacheControl = "no-store";
+        // 방 정보만 — Load는 세션 기록 전체를 읽는다 (방을 열 때 · 턴 끝마다 부르므로, 지휘자 검토 R1)
+        if (!RoomStore.IsRoomId(id) || store.Get(id) is not { } room) return NotFound();
+        var user = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude");
+        var workspace = options.Value.WorkspacePath(room.Workspace);
+        return new JsonResult(new { chat = room.Level == PermissionLevel.Chat, commands = CommandCatalog.Build(hub.Commands(id), workspace, user) });
+    }
+
     /// <summary>명령 방: 작업 폴더 · 사용자 설정이 이미 미리 허용한 명령 (카드 없이 실행됨).</summary>
     public IReadOnlyList<(string Source, string Rule)> InheritedRules =>
         Room.Level == PermissionLevel.Command ? hub.InheritedCommandRules(Room) : [];
@@ -237,6 +251,7 @@ public sealed class RoomModel(
         }
         if (stale) return new ConflictObjectResult("다른 곳에서 이 방 권한이 바뀌었습니다 — 곁칸을 닫았다 다시 열어 지금 값을 본 뒤 바꾸세요.");
         hub.Touch(id);
+        hub.ForgetCommands(id); // 단계 · 모델이 바뀌면 다음 실행의 init이 새 목록 (db1b130ff2 C7)
         result = new JsonResult(new { ok = true });
         if (result is JsonResult) hub.ProfilesChanged([id]);
         return result;
@@ -247,6 +262,7 @@ public sealed class RoomModel(
     {
         if (!RoomStore.IsRoomId(id)) return NotFound();
         if (hub.IsBusy(id)) return BadRequest("실행 중인 방입니다 — 중지한 뒤 휴지통에 넣으세요.");
+        hub.ForgetCommands(id);
         return Change(id, r => r with { DeletedAt = DateTimeOffset.Now }, "휴지통에 넣지 못했습니다");
     }
 
