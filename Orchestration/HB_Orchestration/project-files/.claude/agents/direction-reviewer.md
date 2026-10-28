@@ -3,6 +3,7 @@ name: direction-reviewer
 description: 사용자 요청 원문과 계획서(설계안)만 보고 방향이 맞는지 독립 검토한다. 계획서를 쓴 뒤 승인 전에 /self-review direction으로 지휘자가 부른다. subagent_in/<실행>/ 에 복사된 요청 원문·계획서(·필요하면 관련 자료)만 받는다.
 tools: Read, Grep, Glob
 model: opus
+effort: high
 maxTurns: 30
 omitClaudeMd: true
 hooks:
