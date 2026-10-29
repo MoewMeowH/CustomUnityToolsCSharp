@@ -285,6 +285,124 @@ public sealed class GroupTests : IDisposable
         Assert.True(first.Line < allLine);
     }
 
+    /// <summary>단톡방 전체가 쉴 때까지 (이어 부르기 포함) — 잠깐 쉰 뒤 다시 도는 이어 부르기를 놓치지 않게 0.5초 동안 계속 쉬어야 끝.</summary>
+    private async Task WaitAllIdleAsync(Room group)
+    {
+        var sw = Stopwatch.StartNew();
+        var quietSince = TimeSpan.Zero;
+        while (sw.Elapsed < Wait)
+        {
+            var busy = group.Members.Any(m => _hub.IsBusy(m.RoomId) || _groups.Waiting(m.RoomId));
+            if (busy) quietSince = sw.Elapsed;
+            else if (sw.Elapsed - quietSince > TimeSpan.FromMilliseconds(500)) return;
+            await Task.Delay(50);
+        }
+        throw new TimeoutException("단톡방이 쉬지 않음");
+    }
+
+    /// <summary>④ 이어 부르기: A의 답 속 @B → B가 A의 답을 받아 이어 답함(ReplyTo = A 답) · A 답 줄의 To · B의 답 속 @A는 더 잇지 않음(깊이 1).</summary>
+    [Fact]
+    public async Task Chain_AnswerMentionCallsOther_DepthOne()
+    {
+        var group = NewGroup();
+        var a = group.Members.First(m => m.Name == "A");
+        var b = group.Members.First(m => m.Name == "B");
+        Assert.Null(_groups.Send(group.Id, "call @A 그럼 #B 어때")); // 사용자 말은 A만 부름, A의 답은 "@B"
+        await WaitAllIdleAsync(group);
+        var log = _log.Read(group.Id);
+        var fromA = log.Single(e => e.Kind == GroupEntryKind.Member && e.MemberId == a.Id);
+        Assert.Equal("call @A 그럼 @B 어때", fromA.Text);
+        Assert.Equal([b.Id], fromA.To);
+        var fromB = log.Single(e => e.Kind == GroupEntryKind.Member && e.MemberId == b.Id);
+        Assert.Equal(fromA.Line, fromB.ReplyTo);
+        Assert.Contains("A가 답에서 너를 불렀다", fromB.Text);
+        Assert.Contains("A: call @A 그럼 @B 어때", fromB.Text); // 부른 답을 본 뒤 대화로 받음
+        lock (_specs) Assert.Equal(2, _specs.Count); // B의 답에 @A가 들어 있어도 더 잇지 않음
+        Assert.Null(_groups.Send(group.Id, "@A 다음 말")); // 판이 끝나 다음 말을 받는다
+    }
+
+    /// <summary>④ 한도: 구성원 4명 @All에서 모두 서로를 부르면 — 판마다 실행 6번 · 한 구성원은 한 번만 이어 불림 · 답 속 @All은 잇지 않음 안내 · 같은 말에 답하는 중이면 끝난 뒤.</summary>
+    [Fact]
+    public async Task Chain_LimitSixRuns_OncePerMember_AllInAnswerNotChained()
+    {
+        var (group, _) = _groups.Create("ws", PermissionLevel.Chat, "opus", null, "넷", [("A", ""), ("B", ""), ("C", ""), ("D", "")]);
+        Assert.Null(_groups.Send(group!.Id, "call @All #All #A #B #C #D"));
+        await WaitAllIdleAsync(group);
+        lock (_specs) Assert.Equal(GroupChat.MaxRunsPerMessage, _specs.Count);
+        var log = _log.Read(group.Id);
+        var user = log.Single(e => e.Kind == GroupEntryKind.User).Line;
+        var answers = log.Where(e => e.Kind == GroupEntryKind.Member).ToList();
+        Assert.Equal(4, answers.Count(e => e.ReplyTo == user));
+        var chained = answers.Where(e => e.ReplyTo != user).ToList();
+        Assert.Equal(2, chained.Count);
+        Assert.Equal(2, chained.Select(e => e.MemberId).Distinct().Count()); // 한 구성원은 한 번만
+        Assert.All(chained, e => Assert.Contains(answers, x => x.Line == e.ReplyTo && x.To.Contains(e.MemberId!)));
+        Assert.Equal(4, log.Count(e => e.Kind == GroupEntryKind.Note && e.Text.Contains("@All은 잇지 않았습니다")));
+        Assert.Contains(log, e => e.Kind == GroupEntryKind.Note && e.Text.Contains("한도"));
+    }
+
+    /// <summary>
+    /// ④ 중지: B가 같은 말에 답하는 중이라 미뤄 둔 이어 부르기를 중지가 "(중지됨 — 이어 부르지 않음)"으로 닫는다 (4단계 리뷰 sub_self C5).
+    /// 가짜 claude는 앞 대화에 SLOW가 있으면 3초 늦게 답한다 — A는 자기 답(SLOW)을 빼고 받아 빠르고, B는 그 줄을 받아 느리다.
+    /// </summary>
+    [Fact]
+    public async Task Chain_Stop_ClosesDeferredCall()
+    {
+        var group = NewGroup();
+        var a = group.Members.First(m => m.Name == "A");
+        var b = group.Members.First(m => m.Name == "B");
+        Assert.Null(_groups.Send(group.Id, "call @A SLOW"));
+        await WaitAllIdleAsync(group);
+        Assert.Null(_groups.Send(group.Id, "call @All #B"));
+        var sw = Stopwatch.StartNew();
+        GroupEntry? fromA = null;
+        while (sw.Elapsed < Wait && (fromA = _log.Read(group.Id).LastOrDefault(e => e.MemberId == a.Id && e.To.Count > 0)) is null) await Task.Delay(50);
+        Assert.NotNull(fromA);
+        Assert.Equal([b.Id], fromA.To);
+        Assert.True(_hub.IsBusy(b.RoomId)); // B는 아직 처음 답을 하는 중 — 이어 부르기는 미뤄져 있다
+        _groups.Stop(group.Id);
+        await WaitAllIdleAsync(group);
+        var closed = _log.Read(group.Id).Single(e => e.MemberId == b.Id && e.ReplyTo == fromA.Line);
+        Assert.Equal("(중지됨 — 이어 부르지 않음)", closed.Text);
+        lock (_specs) Assert.Equal(3, _specs.Count); // A 둘 · B 하나 — 이어 부르기는 돌지 않음
+    }
+
+    /// <summary>④ 이어 부르기를 보내지 못하면(대상 방이 휴지통) 그 자리에 실패 답 줄 · 단톡방은 막히지 않는다 (4단계 리뷰 sub_self C5).</summary>
+    [Fact]
+    public async Task Chain_SendFails_PostsFailureForTarget()
+    {
+        var group = NewGroup();
+        var a = group.Members.First(m => m.Name == "A");
+        var b = group.Members.First(m => m.Name == "B");
+        _store.Update(b.RoomId, r => r with { DeletedAt = DateTimeOffset.Now });
+        Assert.Null(_groups.Send(group.Id, "call @A #B"));
+        await WaitAllIdleAsync(group);
+        var log = _log.Read(group.Id);
+        var fromA = log.Single(e => e.MemberId == a.Id);
+        var failed = log.Single(e => e.MemberId == b.Id);
+        Assert.Equal(fromA.Line, failed.ReplyTo);
+        Assert.StartsWith("(이어 부르지 못함:", failed.Text);
+        Assert.False(_groups.Waiting(b.RoomId));
+        Assert.Null(_groups.Send(group.Id, "@A 다음"));
+    }
+
+    /// <summary>~~~ 코드 블록 속 @이름은 부름이 아니다 (4단계 Codex 리뷰). 이어 부르기의 부른 답 줄은 길이 상한에도 남는다 (1-F3).</summary>
+    [Fact]
+    public void Mentions_IgnoreTildeFence_Delta_KeepsCalledLine()
+    {
+        Assert.Empty(Mentions.Parse("~~~\n@B\n~~~ 끝", ["A", "B"]).Names);
+        Assert.Equal(["B"], Mentions.Parse("~~~\n코드\n~~~\n@B 봐", ["A", "B"]).Names);
+
+        var group = NewGroup();
+        var entries = Enumerable.Range(0, 400)
+            .Select(i => new GroupEntry(i, DateTimeOffset.Now, GroupEntryKind.User, null, (i == 3 ? "KEEP-ME " : "") + new string('가', 100)))
+            .ToList();
+        Assert.DoesNotContain("KEEP-ME", GroupChat.Delta(group, entries));
+        var kept = GroupChat.Delta(group, entries, keep: 3);
+        Assert.Contains("KEEP-ME", kept);
+        Assert.True(kept.Length < GroupChat.DeltaMaxChars + 500);
+    }
+
     /// <summary>구성원 4명 @All — 넷 다 돌고 넷 다 그 말에 답한다 (③ 리뷰 sub_self C4).</summary>
     [Fact]
     public async Task Send_All_FourMembers()

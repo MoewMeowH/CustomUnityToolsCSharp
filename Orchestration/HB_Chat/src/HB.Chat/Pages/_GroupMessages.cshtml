@@ -50,6 +50,11 @@
                     {
                         <span class="detail" title="@member.Role">@(member.Role.Length > 30 ? member.Role[..30] + "…" : member.Role)</span>
                     }
+                    @* 이어 부르기 (④ 결정 3): 이 답이 부른 구성원 *@
+                    @if (e.To.Count > 0)
+                    {
+                        <span class="detail chain">→ @string.Join(", ", e.To.Select(Model.MemberOf).Where(m => m is not null).Select(m => "@" + m!.Name))</span>
+                    }
                     <span class="when">@e.At.ToLocalTime().ToString("MM-dd HH:mm:ss")</span>
                     @if (member is not null)
                     {
@@ -59,6 +64,14 @@
                 <div class="body">@Model.RenderGroup(e)</div>
             </div>
         </div>
+        @* 이어 불린 구성원이 답하지 않았고 기다리지도 않으면 (앱을 다시 켬 등) — 사용자 말과 같은 안내 *@
+        foreach (var called in e.To.Select(Model.MemberOf))
+        {
+            if (called is not null && !Model.Answered(e, called.Id) && !Model.Waiting(called))
+            {
+                <div class="system note denied" data-line="@e.Line"><span class="body">@(called.Name)의 이어 답이 없습니다 (실행이 끊김).</span></div>
+            }
+        }
     }
     @if (!Model.GroupFragment && Model.GroupEntries.Count == 0)
     {

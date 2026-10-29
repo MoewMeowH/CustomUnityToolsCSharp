@@ -20,8 +20,8 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         break
     }
 }
-# app may prepend a rules-changed note wrapped in system-reminder: strip it to read the mode, keep the full prompt for 'echo'
-$body = [regex]::Replace($prompt, '(?s)^<system-reminder>.*?</system-reminder>\s*', '')
+# app may prepend system-reminder blocks (rules-changed note, group chat delta - one or more): strip them to read the mode, keep the full prompt for 'echo'
+$body = [regex]::Replace($prompt, '(?s)^(?:<system-reminder>.*?</system-reminder>\s*)+', '')
 $mode = ($body.Trim() -split '\s+')[0]
 
 # 승인 요청을 내고 같은 request_id의 답을 기다린다. 답(response 객체) 또는 입력이 끝나면 $null.
@@ -53,6 +53,17 @@ switch ($mode) {
         # returns the whole received prompt as an error result so the test can read it from the end event
         if ($Transcript) { New-Item -ItemType Directory -Force (Split-Path $Transcript) | Out-Null; Add-Content -Path $Transcript -Value '{"type":"user"}' }
         Emit ('{"type":"result","subtype":"error_during_execution","is_error":true,"result":' + (ConvertTo-Json $prompt -Compress) + ',"total_cost_usd":0.001,"permission_denials":[]}')
+    }
+    'call' {
+        # group chain tests (GroupTests, stage 4): success answer = the message with '#Name' turned into '@Name' (the user message itself calls nobody else)
+        # SLOW anywhere in the prepended blocks (an earlier line of the group chat) -> wait 3s first, so members called together can differ in speed
+        if ($prompt.Substring(0, $prompt.Length - $body.Length) -match 'SLOW') { Start-Sleep -Seconds 3 }
+        Emit ('{"type":"result","subtype":"success","is_error":false,"result":' + (ConvertTo-Json ($body.Trim() -replace '#', '@') -Compress) + ',"total_cost_usd":0.001,"permission_denials":[]}')
+    }
+    { $_.StartsWith('(') } {
+        # a chained call (the app's note starts with '('): success answer = the whole prompt, so the test sees what was sent and that
+        # mentions inside it (the caller's answer) do not chain again
+        Emit ('{"type":"result","subtype":"success","is_error":false,"result":' + (ConvertTo-Json $prompt -Compress) + ',"total_cost_usd":0.001,"permission_denials":[]}')
     }
     { $_ -in 'say', 'shrink' } {
         # screen tests (ChatScriptTests): 'say N' appends the user line + N conductor lines (say-1..say-N) to the transcript like the real CLI;
