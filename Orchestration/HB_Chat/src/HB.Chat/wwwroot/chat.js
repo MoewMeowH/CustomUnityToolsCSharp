@@ -122,6 +122,20 @@
             if (list) list.hidden = true;
         } catch { /* 다음 입력 때 다시 */ }
     }
+    // ---- 단톡방 만들기: Codex 구성원은 읽기만 — 엔진 칸에서 Codex를 고르면 단계 칸을 읽기로 맞추고 다른 값을 막는다 (2026-10-29_단톡방-보류-나머지 A1) ----
+    function lockCodexLevel(engine) {
+        const level = engine?.closest(".group-member-row")?.querySelector("select[name=levels]");
+        if (!level) return;
+        const codex = engine.value === "codex";
+        if (codex && level.dataset.before == null) { level.dataset.before = level.value; level.value = "Read"; }
+        else if (!codex && level.dataset.before != null) { level.value = level.dataset.before; delete level.dataset.before; } // Claude로 돌리면 고르던 값으로 (9c54e0c54a C6)
+        for (const o of level.options) o.disabled = codex && o.value !== "Read";
+    }
+    document.addEventListener("change", (e) => {
+        if (e.target instanceof Element && e.target.matches("form.group-create select[name=engines]")) lockCodexLevel(e.target);
+    });
+    // 뒤로 가기 · 양식 복원으로 엔진 칸이 Codex로 돌아와도 잠그게 (C6)
+    window.addEventListener("pageshow", () => document.querySelectorAll("form.group-create select[name=engines]").forEach(lockCodexLevel));
     searchBox?.addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(runSearch, 250); });
     searchBox?.addEventListener("keydown", (e) => { if (e.key === "Escape") { searchBox.value = ""; searchSeq++; showList(); } });
 
@@ -755,7 +769,10 @@
             const data = new FormData();
             data.append("question", q.id);
             if (answers) data.append("answers", JSON.stringify(answers)); else data.append("skip", "true");
-            if (!await opts.post(q, "Answer", data)) controls.forEach(b => b.disabled = false);
+            const r = await opts.post(q, "Answer", data);
+            // 다른 화면에서 이미 답함 — 오류 창 없이, 실제 답(끝남 알림)을 기다렸다가 닫는다. 알림이 안 오면 잠시 뒤 닫기만 (A3 · 9c54e0c54a C2)
+            if (r === "gone") setTimeout(() => { if (cards.get(q.id) === card) doneQuestion(q, "", false); }, 3000);
+            else if (!r) controls.forEach(b => b.disabled = false);
         }
         function doneQuestion(q, text, answered, answers) {
             const card = cards.get(q.id);
@@ -772,7 +789,9 @@
             const data = new FormData();
             data.append("approval", a.id); data.append("choice", choice);
             if (reason) data.append("reason", reason);
-            if (!await opts.post(a, "Approve", data)) buttons.forEach(b => b.disabled = false);
+            const r = await opts.post(a, "Approve", data);
+            if (r === "gone") setTimeout(() => { if (cards.get(a.id) === card) doneApproval(a, null); }, 3000); // 위 질문과 같음 (A3 · C2)
+            else if (!r) buttons.forEach(b => b.disabled = false);
         }
         function tick() {
             for (const card of cards.values()) {
@@ -1120,6 +1139,9 @@
                 const panel = $("#codex-log");
                 if (seq !== codexSeq || disposed || !panel) return;
                 const fresh = new DOMParser().parseFromString(html, "text/html").getElementById("codex-log");
+                // 펼쳐 둔 안내 블록은 펼친 채로 (D11) — 끝 300단계만 오므로 차례 대신 서버가 단 키로 맞춘다 (9c54e0c54a C3)
+                const opened = new Set([...panel.querySelectorAll("details.codex-guide[open]")].map(d => d.dataset.key));
+                fresh?.querySelectorAll("details.codex-guide").forEach(d => { if (opened.has(d.dataset.key)) d.open = true; });
                 // 같은 내용이면 두어 선택 · 말풍선 자리가 흔들리지 않게 (지휘자 K5)
                 if (fresh && fresh.innerHTML !== panel.innerHTML) panel.replaceWith(fresh);
             } catch { } // 다음 주기 · 턴 끝에 다시 받는다
@@ -1828,6 +1850,7 @@
             data.append("__RequestVerificationToken", token);
             try {
                 const res = await fetch(self + "?handler=" + handler, { method: "POST", body: data });
+                if (res.status === 409 && (handler === "Approve" || handler === "Answer")) return "gone"; // 이미 끝난 카드 (A3 · 9c54e0c54a C4)
                 if (!res.ok) { if (!quiet) alert(await res.text() || ("요청 실패 " + res.status)); return json ? null : false; }
                 return json ? await res.json() : true;
             } catch (e) {
@@ -2129,6 +2152,7 @@
                 data.append("__RequestVerificationToken", token);
                 try {
                     const res = await fetch("/Room/" + encodeURIComponent(child) + "?handler=" + handler, { method: "POST", body: data });
+                    if (res.status === 409) return "gone"; // 과정 보기에서 이미 답함 (A3)
                     if (!res.ok) { alert(await res.text() || ("요청 실패 " + res.status)); return false; }
                     return true;
                 } catch (e) { alert("요청 실패: " + e); return false; }

@@ -132,6 +132,16 @@ public sealed class StoreAndGuardTests : IDisposable
         Assert.False(HB.Chat.Pages.RoomModel.IsStoppedTurn(new(1, null, HB.Orchestration.Shared.ChatSpeaker.Conductor, "No response requested. 하지만", 0)));
     }
 
+    [Fact]
+    public void SplitGuide_SeparatesLeadingReminderBlocks()   // 2026-10-29_단톡방-보류-나머지 D11
+    {
+        var (guide, text) = HB.Chat.Pages.RoomModel.SplitGuide("<system-reminder>\n규칙 바뀜\n</system-reminder>\n<system-reminder>\n단톡방 안내\n</system-reminder>\n@X 안녕");
+        Assert.Equal("@X 안녕", text);
+        Assert.StartsWith("<system-reminder>", guide);
+        Assert.Contains("단톡방 안내", guide);
+        Assert.Equal(("", "그냥 말 <system-reminder>x</system-reminder>"), HB.Chat.Pages.RoomModel.SplitGuide("그냥 말 <system-reminder>x</system-reminder>")); // 앞에 있을 때만
+    }
+
     [Theory]
     [InlineData("GET", null, null, true)]
     [InlineData("POST", "http://localhost:5290", null, true)]

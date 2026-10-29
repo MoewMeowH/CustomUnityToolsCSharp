@@ -29,6 +29,14 @@ public sealed class ChatOptions
     /// </summary>
     public string? CodexPath { get; set; }
 
+    /// <summary>Codex 홈 폴더 (세션 기록 sessions/ 가 있는 곳). 비우면 CODEX_HOME, 그다음 ~/.codex. 스레드 유실 확인에 쓴다 (2026-10-29_단톡방-보류-나머지 A4).</summary>
+    public string? CodexHome { get; set; }
+
+    public string CodexHomeDir() =>
+        !string.IsNullOrWhiteSpace(CodexHome) ? CodexHome.Trim()
+        : Environment.GetEnvironmentVariable("CODEX_HOME") is { Length: > 0 } env ? env
+        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex");
+
     public string? ResolveCodex()
     {
         if (!string.IsNullOrWhiteSpace(CodexPath)) return CodexPath.Trim();

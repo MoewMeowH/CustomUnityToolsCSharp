@@ -29,7 +29,7 @@
                   @(stLine is null ? "hidden" : null)>@stText</span>
         </div>
         <span class="badge" title="@RoomRules.Describe(room.Level)">@RoomRules.LevelName(room.Level)</span>
-        <span class="mono muted" title="모델 · 추론 강도 (곁칸 방 정보에서 바꿈)">@room.Model@(room.Effort is { } effort ? " · " + effort : "")</span>
+        <span class="mono muted" title="모델 · 추론 강도 (곁칸 방 정보에서 바꿈)">@Model.ModelLabel@(room.Effort is { } effort ? " · " + effort : "")</span>
         <span class="ctx" id="ctx" title="마지막 턴이 끝날 때의 컨텍스트 크기 / 모델 컨텍스트 창 (토큰, claude stream-json usage)"
               data-window="@(room.ContextWindow ?? 0)" @(room.ContextTokens is null ? "hidden" : null)>
             <span class="ctx-bar"><span id="ctx-fill" style="width:@(room.ContextTokens is { } t && room.ContextWindow is > 0 and var w ? Math.Min(100, t * 100.0 / w).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) : "0")%"></span></span>

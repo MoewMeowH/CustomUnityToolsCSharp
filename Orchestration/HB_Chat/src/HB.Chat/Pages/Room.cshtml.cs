@@ -12,7 +12,7 @@ namespace HB.Chat.Pages;
 /// ?handler=Messages: 말풍선 한 쪽 — 맨 끝 50개, before=줄이면 그 앞 50개(위로 불러오기), after=줄이면 그 뒤 전부(턴이 끝난 뒤 새 말, 계획서 2-2 b).
 /// ?handler=Pane: 방 전환 때 오른쪽 칸만 (2-2 a). Send · Stop · MarkRead는 POST (antiforgery + 같은 출처).
 /// </summary>
-public sealed class RoomModel(
+public sealed partial class RoomModel(
     RoomStore store, RoomHub hub, RoomList list, ChatTranscripts transcripts, StickerPacks packs, FaceCatalog faces, RoomRuns runs,
     RoomNotes notes, Terminals terminals, AgentBrowser browser, McpProbe probe, IOptions<ChatOptions> options, GroupChat groups)
     : PageModel
@@ -658,6 +658,24 @@ public sealed class RoomModel(
     /// <summary>Codex 구성원 과정 (앱이 남긴 이벤트 기록 — 보낸 말 · 답 · 실행한 명령 · 오류 · 토큰). Claude 방이면 빈 목록.</summary>
     public IReadOnlyList<CodexLog.Step> CodexSteps => Room.Engine == RoomEngines.Codex ? new CodexLog(() => options.Value.DataFolder).Read(Room.Id) : [];
 
+    /// <summary>
+    /// 보낸 말 앞의 안내 블록(&lt;system-reminder&gt; … &lt;/system-reminder&gt;, 하나 이상 — 규칙 바뀜 안내 · 단톡방 안내)과 나머지 사용자 말로 나눈다.
+    /// 블록 안의 표식은 보낼 때 바꿔 두므로 첫 닫는 표식이 그 블록의 끝이다 (GroupChat.Delta). 안내가 없으면 Guide는 빈 글.
+    /// </summary>
+    public static (string Guide, string Text) SplitGuide(string text)
+    {
+        var m = LeadingGuide().Match(text);
+        return m.Success && m.Length > 0 ? (m.Value.Trim(), text[m.Length..].TrimStart()) : ("", text);
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"\A(?:\s*<system-reminder>.*?</system-reminder>)+\s*", System.Text.RegularExpressions.RegexOptions.Singleline)]
+    private static partial System.Text.RegularExpressions.Regex LeadingGuide();
+
+    /// <summary>방 머리 · 곁칸의 모델 글: Codex 방(단톡방 구성원 과정 보기)이면 "Codex · 모델"(빈 모델 = 기본 모델 — ② K4), 그 밖은 모델 이름.</summary>
+    public string ModelLabel => Room.Engine == RoomEngines.Codex
+        ? "Codex · " + (Room.Model.Length > 0 ? Room.Model : "기본 모델")
+        : Room.Model;
+
     /// <summary>단톡방 칩의 엔진 표시: Codex면 "Codex · 모델"(빈 모델 = 기본), Claude면 null.</summary>
     public string? EngineLabel(GroupMember m) =>
         store.Get(m.RoomId) is { Engine: RoomEngines.Codex } child ? "Codex" + (child.Model.Length > 0 ? " · " + child.Model : "") + (child.Effort is { } e ? " · " + e : "") : null;
@@ -774,8 +792,17 @@ public sealed class RoomModel(
         };
         if (parsed is null) return BadRequest("알 수 없는 선택입니다.");
         if (reason is { Length: > 500 }) reason = reason[..500];
-        return hub.Decide(id, approval, parsed.Value, reason) is { } error ? BadRequest(error) : new JsonResult(new { ok = true });
+        return hub.Decide(id, approval, parsed.Value, reason) is { } error ? CardError(error) : new JsonResult(new { ok = true });
     }
+
+    /// <summary>
+    /// 카드 답 실패: 이미 끝난 카드면 409 — 단톡방 화면과 과정 보기가 같은 카드를 보여 한쪽에서 답한 뒤 다른 쪽을 누른 경우라 화면이 오류 창 없이 카드만 닫는다
+    /// (2026-10-29_단톡방-보류-나머지 A3, ⑤ K3). 그 밖의 실패는 지금처럼 400(오류 창).
+    /// </summary>
+    private IActionResult CardError(string error) =>
+        error is RoomHub.QuestionDone or RoomHub.ApprovalDone
+            ? new ContentResult { StatusCode = StatusCodes.Status409Conflict, Content = error, ContentType = "text/plain; charset=utf-8" }
+            : BadRequest(error);
 
     /// <summary>기다리는 말 하나를 지금 보내기 (3차 b): 큐 맨 앞으로 옮기고 지금 턴을 끊는다.</summary>
     public IActionResult OnPostSendNow(string id, string? queued)
@@ -802,7 +829,7 @@ public sealed class RoomModel(
             }
             if (parsed is null) return BadRequest("답을 읽지 못했습니다.");
         }
-        return hub.Answer(id, question, parsed) is { } error ? BadRequest(error) : new JsonResult(new { ok = true });
+        return hub.Answer(id, question, parsed) is { } error ? CardError(error) : new JsonResult(new { ok = true });
     }
 
     /// <summary>"이 방에서 항상 허용" 규칙 지우기.</summary>

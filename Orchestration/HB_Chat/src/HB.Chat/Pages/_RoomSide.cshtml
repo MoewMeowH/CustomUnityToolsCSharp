@@ -29,7 +29,11 @@
                 {
                     <option value="@m" selected="@(m == room.Model)">@m</option>
                 }
-                @if (!Model.Models.Contains(room.Model))
+                @if (room.Engine == RoomEngines.Codex)
+                {
+                    <option value="@room.Model" selected disabled>@Model.ModelLabel</option>
+                }
+                else if (!Model.Models.Contains(room.Model))
                 {
                     <option value="@room.Model" selected disabled>@room.Model (허용 목록에 없음)</option>
                 }

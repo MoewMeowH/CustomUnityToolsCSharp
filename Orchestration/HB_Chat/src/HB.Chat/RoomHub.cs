@@ -798,6 +798,10 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         return (answers, label);
     }
 
+    /// <summary>이미 끝난 카드에 답했을 때의 문구 — 처리기가 이 값이면 409로 답해 화면이 오류 창 없이 카드를 닫는다 (2026-10-29_단톡방-보류-나머지 A3 · 9c54e0c54a C8).</summary>
+    public const string QuestionDone = "이미 끝난 질문입니다.";
+    public const string ApprovalDone = "이미 끝난 승인 요청입니다.";
+
     /// <summary>
     /// 질문 카드의 답 (화면). answers가 null이면 "답하지 않기". 오류 문구(null이면 받음).
     /// </summary>
@@ -807,9 +811,9 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         lock (live.Gate)
         {
             if (!live.Questions.TryGetValue(questionId, out var pending) || pending.Answer.Task.IsCompleted)
-                return "이미 끝난 질문입니다.";
+                return QuestionDone;
             if (answers is not null && pending.Request.Validate(answers) is { } error) return error;
-            if (!pending.Answer.TrySetResult(answers)) return "이미 끝난 질문입니다.";
+            if (!pending.Answer.TrySetResult(answers)) return QuestionDone;
             if (answers is null) pending.Label = "답하지 않음";
         }
         return null;
@@ -827,7 +831,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         lock (live.Gate)
         {
             if (!live.Approvals.TryGetValue(approvalId, out var pending) || pending.Answer.Task.IsCompleted)
-                return "이미 끝난 승인 요청입니다.";
+                return ApprovalDone;
             // 카드가 뜬 뒤 곁칸에서 권한을 내렸으면 허용 · 항상 허용을 받지 않는다 (/self-review security 8ccecae84d C1) —
             // 명령 카드는 명령 단계가 아니면, 계획 카드는 편집 · 명령 단계가 아니면. 단계는 이 잠금 안에서 읽는다 (d3dd55b237 C2)
             var level = store.Get(roomId)?.Level;
@@ -844,7 +848,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             var label = choice switch { ApprovalChoice.Allow => "허용", ApprovalChoice.AlwaysAllow => "항상 허용", _ => "거절" };
             var message = string.IsNullOrWhiteSpace(reason) ? "사용자가 거절했습니다." : $"사용자가 거절했습니다: {reason.Trim()}";
             if (!pending.Answer.TrySetResult(new ApprovalAnswer(choice != ApprovalChoice.Deny, choice == ApprovalChoice.Deny ? message : null)))
-                return "이미 끝난 승인 요청입니다.";
+                return ApprovalDone;
             pending.Label = label;
         }
         if (rule is null) return null;
@@ -1161,9 +1165,12 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         var delivered = thread is null && outcome.Thread is not null || noted && outcome.Result.Ok;
         // 이어 가던 스레드를 Codex가 찾지 못함(세션 기록이 지워짐 · 계정 바뀜 — 실측: 이벤트 없이 "no rollout found", 종료 코드 1):
         // 스레드를 잊고 다음 말부터 새로 시작한다 — 안 그러면 이 구성원은 계속 실패했다 (59063d4106 C3).
-        // 그 문구일 때만 — 시작 실패 · 설정 오류 · 시간 초과까지 잊으면 멀쩡한 대화를 버렸다 (sol 리뷰 ②-P2). 새 대화의 첫 말에는
-        // 단톡방 대화를 처음부터 다시 붙인다 (GroupChat.SendLocked — 스레드 없는 Codex 구성원)
-        var lost = thread is not null && outcome.ThreadMissing && !outcome.Result.Ok && !outcome.Result.Cancelled;
+        // 그 문구이거나, 문구가 없어도(판이 바뀜) 이어 가기가 thread.started 없이 실패했고 그 스레드의 세션 기록이 Codex 홈에 정말 없을 때만 —
+        // 시작 실패 · 설정 오류 · 시간 초과까지 잊으면 멀쩡한 대화를 버렸다 (sol 리뷰 ②-P2 · 2026-10-29_단톡방-보류-나머지 A4 · 9c54e0c54a C1).
+        // 새 대화의 첫 말에는 단톡방 대화를 처음부터 다시 붙인다 (GroupChat.SendLocked — 스레드 없는 Codex 구성원)
+        var failed = thread is not null && !outcome.Result.Ok && !outcome.Result.Cancelled;
+        var lost = failed && (outcome.ThreadMissing
+            || outcome.Ran && outcome.Thread is null && CodexRunner.RolloutExists(o.CodexHomeDir(), thread!) == false);
         var result = lost ? outcome.Result with { Error = outcome.Result.Error + " — 이어 가던 Codex 대화를 찾지 못해 다음 말부터 새 대화로 시작합니다." } : outcome.Result;
         try
         {

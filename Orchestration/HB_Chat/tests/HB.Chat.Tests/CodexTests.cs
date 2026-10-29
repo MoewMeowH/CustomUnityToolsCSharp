@@ -29,6 +29,7 @@ public sealed class CodexTests : IDisposable
             DataDir = Path.Combine(_dir, "data"),
             ClaudeProjectsDir = Path.Combine(_dir, "projects"),
             Workspaces = new(StringComparer.OrdinalIgnoreCase) { ["ws"] = Path.Combine(_dir, "ws"), ["other"] = Path.Combine(_dir, "ws") },
+            CodexHome = Path.Combine(_dir, "codexhome"), // 세션 기록 폴더 — 없으면 유실 확인을 "알 수 없음"으로 (실제 ~/.codex를 보지 않게)
         };
         _store = new RoomStore(Path.Combine(_dir, "data", "rooms.json"));
         var codex = Path.Combine(AppContext.BaseDirectory, "TestData", "fake-codex.ps1");
@@ -287,6 +288,40 @@ public sealed class CodexTests : IDisposable
         var next = await AnswerAsync(group.Id, "X", crashed.Line);
         Assert.Contains("resume=True", next.Text);
         Assert.Contains("delta=1 ", next.Text); // 실패한 말(crash) — 자기 답 · 실패 줄은 빠짐 (③)
+
+        // 문구("no rollout found")가 없어도: 이어 가기가 thread.started 없이 실패했고 그 스레드의 세션 기록이 Codex 홈에 정말 없으면 잊는다.
+        // 기록이 있으면 설정 오류가 몇 번 나도 잊지 않는다 (2026-10-29_단톡방-보류-나머지 A4 · 9c54e0c54a C1)
+        var day = Directory.CreateDirectory(Path.Combine(_dir, "codexhome", "sessions", "2026", "10", "29")).FullName;
+        var rollout = Path.Combine(day, $"rollout-2026-10-29T10-00-00-{thread}.jsonl");
+        File.WriteAllText(rollout, "{}\n");
+        var after = next.Line;
+        for (var i = 0; i < 2; i++)
+        {
+            Assert.Null(_groups.Send(group.Id, "@X crash"));
+            after = (await AnswerAsync(group.Id, "X", after)).Line;
+            Assert.Equal(thread, _store.Get(x.RoomId)!.CodexThread);
+        }
+        File.Delete(rollout);
+        Assert.Null(_groups.Send(group.Id, "@X crash"));
+        var gone = await AnswerAsync(group.Id, "X", after);
+        Assert.Contains("새 대화로 시작", gone.Text);
+        Assert.Null(_store.Get(x.RoomId)!.CodexThread);
+    }
+
+    [Theory]
+    [InlineData("01a1872c-63ab-74e1-a6c9-d572c3ed738d", true, true)]
+    [InlineData("01a1872c-0000-0000-0000-000000000000", true, false)]
+    [InlineData("../x", true, null)]
+    [InlineData("01a1872c-63ab-74e1-a6c9-d572c3ed738d", false, null)]
+    public void RolloutExists_FindsThreadFileUnderSessions(string thread, bool withSessions, bool? expected)
+    {
+        var home = Path.Combine(_dir, "home-" + Guid.NewGuid().ToString("N")[..6]);
+        if (withSessions)
+        {
+            var day = Directory.CreateDirectory(Path.Combine(home, "sessions", "2026", "10", "29")).FullName;
+            File.WriteAllText(Path.Combine(day, "rollout-2026-10-29T18-40-33-01a1872c-63ab-74e1-a6c9-d572c3ed738d.jsonl"), "{}\n");
+        }
+        Assert.Equal(expected, CodexRunner.RolloutExists(home, thread));
     }
 
     /// <summary>

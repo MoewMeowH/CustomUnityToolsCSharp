@@ -83,9 +83,36 @@ public static class CodexRunner
     {
         /// <summary>
         /// resume할 스레드를 Codex가 찾지 못했다 (실측: JSON 이벤트 없이 stderr "no rollout found for thread id …", 종료 코드 1).
-        /// 이때만 스레드를 잊는다 — 시작 실패 · 설정 오류 · 시간 초과까지 잊으면 멀쩡한 대화를 버렸다 (sol 리뷰 ②-P2).
+        /// 이것이나 세션 기록이 정말 없을 때(<see cref="RolloutExists"/>)만 스레드를 잊는다 — 시작 실패 · 설정 오류 · 시간 초과까지 잊으면
+        /// 멀쩡한 대화를 버렸다 (sol 리뷰 ②-P2).
         /// </summary>
         public bool ThreadMissing { get; init; }
+
+        /// <summary>프로세스가 떠서 끝까지 돌고 실패했다 (실행 파일을 못 띄운 실패 · 중지 · 시간 초과가 아님) — 스레드 유실 판정 보강용 (2026-10-29_단톡방-보류-나머지 A4).</summary>
+        public bool Ran { get; init; }
+    }
+
+    /// <summary>
+    /// 그 스레드의 세션 기록(rollout-*-&lt;thread&gt;.jsonl)이 Codex 홈에 있는지 — 문구("no rollout found")가 바뀌어도 유실을 알아보려고
+    /// (2026-10-29_단톡방-보류-나머지 A4, /self-review 9c54e0c54a C1: "연달아 실패"로 보면 계속 나는 설정 오류에도 멀쩡한 대화를 버렸다).
+    /// true 있음 · false 세션 폴더는 있는데 없음 · null 알 수 없음(폴더 없음 · 못 읽음 · 이상한 스레드 ID).
+    /// </summary>
+    public static bool? RolloutExists(string codexHome, string thread)
+    {
+        if (thread.Length is 0 or > 100 || thread.Any(c => !(char.IsAsciiLetterOrDigit(c) || c == '-'))) return null;
+        try
+        {
+            var found = false;
+            foreach (var dir in new[] { "sessions", "archived_sessions" })
+            {
+                var path = Path.Combine(codexHome, dir);
+                if (!Directory.Exists(path)) continue;
+                found = true;
+                if (Directory.EnumerateFiles(path, "rollout-*" + thread + ".jsonl", SearchOption.AllDirectories).Any()) return true;
+            }
+            return found ? false : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException) { return null; }
     }
 
     /// <summary>스레드를 찾지 못했다는 Codex 문구 (0.165.0 실측).</summary>
@@ -203,6 +230,7 @@ public static class CodexRunner
         return new Outcome(new RunResult(false, false, why, null, null, thread, 0, 0, tail) { NotStarted = thread is null }, thread, commands, input, output)
         {
             ThreadMissing = thread is null && (error + "\n" + tail).Contains(ThreadMissingText, StringComparison.OrdinalIgnoreCase),
+            Ran = true,
         };
     }
 
