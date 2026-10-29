@@ -79,6 +79,12 @@ public sealed class StepDefinition
     public string Role { get; set; } = "";
     public string Agent { get; set; } = "";
 
+    /// <summary>
+    /// 이 단계 에이전트가 Quota(구독 한도 · 크레딧 소진)로 실패하거나 최근 Quota 기록으로 쉬는 중이면 같은 입력으로 대신 부를 에이전트.
+    /// 비우면 대체 없이 실패한다. run_mode agents로 바꾼 실행에는 쓰지 않는다 (계획서 2026-10-29_Codex-외부-리뷰어 결정).
+    /// </summary>
+    public string? FallbackAgent { get; set; }
+
     /// <summary>Sequential에서 이 단계가 볼 내용. Concurrent에서는 항상 Input.</summary>
     public StepSees Sees { get; set; } = StepSees.InputAndPrevious;
 

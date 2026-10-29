@@ -25,14 +25,23 @@ public static class ReviewWorkFolder
         Path.Combine(Path.GetDirectoryName(Path.GetFullPath(callLogPath))!, "review_in");
 
     /// <summary>
-    /// 폴더를 만들고 파일을 복사한다. Focus = 프롬프트의 첨부 절 대신 넣을 "파일 목록 + 주목할 범위".
+    /// 저장소 사본 상한 (codex-cli). 넘으면 사본을 만들지 않고 context 파일만 둔다 — 큰 Unity 저장소에서 복사가 리뷰보다 오래 걸리지 않게.
+    /// </summary>
+    public const int MaxTrackedFiles = 20_000;
+    public const long MaxTrackedBytes = 64_000_000;
+
+    /// <summary>작업 폴더 모양: claude-cli는 context 파일만 · Read 안내, codex-cli는 저장소 추적 파일 사본 + diff 본문 첨부 · 셸 명령 안내.</summary>
+    public enum Style { ClaudeRead, Codex }
+
+    /// <summary>
+    /// 폴더를 만들고 파일을 복사한다. Focus = 프롬프트의 첨부 절 대신 넣을 "파일 목록 + 주목할 범위" (Codex는 + diff 본문).
     /// 실패하면(예상 밖 예외 포함) 만든 폴더를 지우고 오류 문구를 돌려준다. 취소는 폴더를 지운 뒤 그대로 던진다.
     /// </summary>
     public static (string? Folder, string? Focus, string? Error) Create(
-        string baseDir, IReadOnlyList<ContextRange>? ranges, ContextOptions options, string rootDir, CancellationToken ct = default)
+        string baseDir, IReadOnlyList<ContextRange>? ranges, ContextOptions options, string rootDir, CancellationToken ct = default, Style style = Style.ClaudeRead)
     {
         if (ranges is null || ranges.Count == 0)
-            return (null, null, "claude-cli 단계는 context가 필요합니다 — 검토할 파일과 판단용 파일(정의 · 호출부)을 넘기세요.");
+            return (null, null, "작업 폴더를 쓰는 단계(claude-cli · codex-cli)는 context가 필요합니다 — 검토할 파일(변경이면 diff 파일 먼저)과 판단용 파일을 넘기세요.");
         if (options.MaxRanges > 0 && ranges.Count > options.MaxRanges)
             return (null, null, $"범위가 {ranges.Count}개 / 상한 {options.MaxRanges}개. 필요한 범위만 남기세요.");
 
@@ -40,7 +49,7 @@ public static class ReviewWorkFolder
         var folder = Path.Combine(baseDir, Guid.NewGuid().ToString("N")[..12]);
         try
         {
-            return Fill(folder, ranges, options, rootDir, ct);
+            return Fill(folder, ranges, options, rootDir, ct, style);
         }
         catch (OperationCanceledException)
         {
@@ -54,10 +63,14 @@ public static class ReviewWorkFolder
     }
 
     private static (string? Folder, string? Focus, string? Error) Fill(
-        string folder, IReadOnlyList<ContextRange> ranges, ContextOptions options, string rootDir, CancellationToken ct)
+        string folder, IReadOnlyList<ContextRange> ranges, ContextOptions options, string rootDir, CancellationToken ct, Style style)
     {
         Directory.CreateDirectory(folder);
         var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootDir));
+        // Codex: 저장소 추적 파일을 먼저 깔고 context 파일을 위에 덮는다 (작업 트리 상태라 내용은 같고, 비추적 diff 파일 · 추가 루트 파일이 여기서 들어간다).
+        var tracked = style == Style.Codex ? CopyTracked(root, folder, options, ct) : default;
+        var diffs = new List<(string Inside, string Dest)>();
+        var instructionSkipped = new List<string>();
         var copied = new Dictionary<string, (string Inside, string Sha, int? Lines)>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
         var copyOrder = new List<string>();   // 지휘자가 넘긴 순서 (색인 예산을 이 순서로 쓴다)
         var focus = new List<string>();
@@ -88,6 +101,12 @@ public static class ReviewWorkFolder
 
             // 폴더 안 자리: 루트 기준 정규화한 상대 경로 (a/../b 같은 표기가 폴더 밖으로 나가지 않게 다시 확인).
             var inside = prefix + Path.GetRelativePath(rangeRoot, full!).Replace('\\', '/');
+            // Codex: 지휘자가 넘겼어도 Codex가 지시 · 설정으로 읽는 파일은 작업 폴더에 두지 않는다 (diff 본문에는 남는다 — b476ab3099 1-N1).
+            if (style == Style.Codex && IsCodexInstructionPath(inside))
+            {
+                instructionSkipped.Add(inside);
+                continue;
+            }
             var dest = Path.GetFullPath(Path.Combine(folder, inside));
             if (!dest.StartsWith(Path.TrimEndingDirectorySeparator(folder) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                 return Fail(folder, $"'{range.Path}': 작업 폴더 밖으로 나가는 경로입니다.");
@@ -103,7 +122,7 @@ public static class ReviewWorkFolder
                     if (total > MaxTotalBytes)
                         return Fail(folder, $"복사할 파일이 합계 {total:N0}바이트 / 상한 {MaxTotalBytes:N0}바이트. 판단에 필요한 파일만 남기세요.");
                     Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
-                    using var target = new FileStream(dest, FileMode.CreateNew, FileAccess.Write);
+                    using var target = new FileStream(dest, FileMode.Create, FileAccess.Write);
                     using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
                     var buffer = new byte[81920];
                     int read, lines = 0;
@@ -122,6 +141,7 @@ public static class ReviewWorkFolder
                     if (last != (byte)'\n') lines++;   // 마지막 줄에 줄바꿈이 없으면 그 줄도 센다 (빈 파일은 0)
                     copied[dest] = (inside, Convert.ToHexStringLower(sha.GetHashAndReset())[..12], utf16 ? null : lines);
                     copyOrder.Add(dest);
+                    if (style == Style.Codex && IsDiff(inside)) diffs.Add((inside, dest));
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
@@ -132,17 +152,33 @@ public static class ReviewWorkFolder
         }
 
         var text = new StringBuilder();
-        text.AppendLine().AppendLine("## 작업 폴더 (서버가 복사함)")
-            .AppendLine("지금 작업 폴더에 지휘자가 고른 파일이 파일 전체로, 아래 경로 그대로 복사돼 있다. 폴더에 있는 파일은 아래 목록이 전부다.")
-            .AppendLine("Read로 연다 (검색 도구가 없을 수 있다). 판단에 필요하면 목록의 다른 파일 · 다른 부분도 읽는다. 폴더 밖은 읽지 않는다.")
-            .AppendLine("'정의' 줄은 서버가 정규식으로 뽑은 대략의 위치(이름 줄번호)다. 큰 파일은 필요한 범위만 Read(offset · limit)로 열고, 판단 전에 그 줄을 직접 확인한다.")
-            .AppendLine().AppendLine("### 파일 (경로 · SHA-256 앞 12자 · 줄 수)");
+        if (style == Style.Codex)
+        {
+            var skipped = tracked.Skipped > 0 ? $", 뺀 파일 {tracked.Skipped:N0}개" : "";
+            var why = tracked.Note is { } note ? $" ({note})" : "";
+            text.AppendLine().AppendLine("## 작업 폴더 (서버가 복사함)")
+                .AppendLine(tracked.Files > 0
+                    ? $"지금 작업 폴더는 저장소 사본이다 — git 추적 파일 {tracked.Files:N0}개를 지금 작업 트리 상태 그대로 같은 상대 경로로 복사했다 (비추적 · 금지 패턴 · 이진 · 큰 파일 · Codex 지시 · 설정 파일은 사본에 넣지 않았다{skipped}). 아래 '중심' 목록에서 시작하고, 판단에 필요한 정의 · 호출부 · 시험은 rg · Get-Content로 직접 찾아 읽는다."
+                    : $"지금 작업 폴더에는 지휘자가 고른 파일만 아래 경로 그대로 복사돼 있다{why}. 판단에 필요하면 목록의 다른 파일 · 다른 부분도 읽는다.")
+                .AppendLine("작업 폴더 밖은 읽지 않는다. 파일을 만들거나 고치지 않는다. 명령은 읽기 · 검색만 쓴다.")
+                .AppendLine("확인할 수 없는 것은 추측하지 말고 자료 요청(needsInfo)으로 남긴다.")
+                .AppendLine().AppendLine("### 지휘자가 넘긴 파일 (경로 · SHA-256 앞 12자 · 줄 수)");
+        }
+        else
+        {
+            text.AppendLine().AppendLine("## 작업 폴더 (서버가 복사함)")
+                .AppendLine("지금 작업 폴더에 지휘자가 고른 파일이 파일 전체로, 아래 경로 그대로 복사돼 있다. 폴더에 있는 파일은 아래 목록이 전부다.")
+                .AppendLine("Read로 연다 (검색 도구가 없을 수 있다). 판단에 필요하면 목록의 다른 파일 · 다른 부분도 읽는다. 폴더 밖은 읽지 않는다.")
+                .AppendLine("'정의' 줄은 서버가 정규식으로 뽑은 대략의 위치(이름 줄번호)다. 큰 파일은 필요한 범위만 Read(offset · limit)로 열고, 판단 전에 그 줄을 직접 확인한다.")
+                .AppendLine().AppendLine("### 파일 (경로 · SHA-256 앞 12자 · 줄 수)");
+        }
         // 정의 색인 (계획서 2026-10-27_작업폴더-정의-색인): 예산은 지휘자가 넘긴 순서(보통 중심 파일이 앞)로 쓰고,
         // 상한에 걸린 파일은 건너뛰고 다음 파일을 본다. 목록은 경로 순 (sub_self 535ca00022 C3).
         var indexes = new Dictionary<string, string>(copied.Comparer);
         var overBudget = new List<string>();
         var indexChars = 0;
-        foreach (var dest in copyOrder)
+        // Codex는 rg로 직접 찾으므로 정의 색인을 넣지 않는다.
+        foreach (var dest in style == Style.Codex ? [] : copyOrder)
         {
             ct.ThrowIfCancellationRequested();
             if (DefinitionIndex.ReadText(dest) is not { } body) continue;
@@ -158,9 +194,170 @@ public static class ReviewWorkFolder
         }
         if (overBudget.Count > 0)
             text.AppendLine($"(정의 색인 상한 {DefinitionIndex.MaxTotalChars:N0}자를 넘어 색인을 뺀 파일: {string.Join(", ", overBudget.Order(StringComparer.Ordinal))})");
+        if (instructionSkipped.Count > 0)
+            text.AppendLine($"(Codex가 지시 · 설정으로 읽는 파일이라 작업 폴더에 두지 않음: {string.Join(", ", instructionSkipped.Distinct())})");
         text.AppendLine().AppendLine("### 이번 검토의 중심 (경로:줄)");
         foreach (var line in focus) text.AppendLine(line);
+        // Codex: 변경 diff는 본문을 붙인다 — 실험에서 'diff 첨부 + 나머지는 직접 찾기'가 시간 · 발견 균형이 가장 좋았다 (계획서 2026-10-29_Codex-외부-리뷰어).
+        foreach (var (inside, dest) in diffs)
+        {
+            var body = File.ReadAllText(dest);
+            var fence = new string('`', Math.Max(3, LongestBacktickRun(body) + 1));
+            text.AppendLine().AppendLine($"## 변경 diff ({inside})").AppendLine(fence + "diff").AppendLine(body.TrimEnd('\r', '\n')).AppendLine(fence);
+        }
         return (folder, text.ToString(), null);
+    }
+
+    private static bool IsDiff(string path) =>
+        path.EndsWith(".diff", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".patch", StringComparison.OrdinalIgnoreCase);
+
+    private static int LongestBacktickRun(string text)
+    {
+        int longest = 0, run = 0;
+        foreach (var c in text)
+        {
+            run = c == '`' ? run + 1 : 0;
+            if (run > longest) longest = run;
+        }
+        return longest;
+    }
+
+    /// <summary>
+    /// 루트의 git 추적 파일(<c>git ls-files</c> — intent-to-add 포함, 비추적 제외)을 지금 작업 트리 상태로 복사한다.
+    /// 금지 패턴(비밀 파일 · .git) · AGENTS.md(Codex가 지시로 읽음) · 링크 · 파일 크기 상한 · 이진(앞 8KB에 NUL) · 지워진 파일은 건너뛴다.
+    /// git이 없거나 저장소가 아니거나 상한(<see cref="MaxTrackedFiles"/> · <see cref="MaxTrackedBytes"/>)을 넘으면 복사하지 않고 Note에 이유를 남긴다
+    /// (그때는 context 파일만으로 돈다). 반쯤 복사한 파일은 지운다.
+    /// </summary>
+    internal static (int Files, int Skipped, string? Note) CopyTracked(string root, string folder, ContextOptions options, CancellationToken ct)
+    {
+        var (paths, gitError) = GitTrackedFiles(root, ct);
+        if (gitError is not null) return (0, 0, gitError);
+        if (paths!.Count == 0) return (0, 0, "git 추적 파일 없음");
+        if (paths.Count > MaxTrackedFiles) return (0, 0, $"추적 파일 {paths.Count:N0}개 / 사본 상한 {MaxTrackedFiles:N0}개라 저장소 사본을 만들지 않음");
+
+        // git이 돌려준 경로는 실제 이름이라 SafePath.Resolve(구성 요소마다 디렉터리 열거 · 파일마다 패턴 컴파일)보다 가벼운 검사로 본다:
+        // 대체 데이터 스트림 · 장치 이름 · 루트 밖 · 금지 패턴(한 번 컴파일) · 링크(폴더마다 한 번) (/cross-review 90978dee2f C2).
+        var denied = SafePath.DenyMatcher(options.AllDenyPatterns);
+        var rootPrefix = root + Path.DirectorySeparatorChar;
+        var linkFree = new Dictionary<string, bool>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        int files = 0, skipped = 0;
+        long total = 0;
+        var buffer = new byte[8192];
+        foreach (var relative in paths)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (IsCodexInstructionPath(relative) || relative.Contains(':') || SafePath.WindowsNameProblem(relative) is not null || denied(relative) is not null) { skipped++; continue; }
+            try
+            {
+                var full = Path.GetFullPath(Path.Combine(root, relative));
+                if (!full.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase)) { skipped++; continue; }
+                var info = new FileInfo(full);
+                if (!info.Exists || info.Attributes.HasFlag(FileAttributes.ReparsePoint) || !NoLinkBetween(root, info.DirectoryName!, linkFree)) { skipped++; continue; }
+                if (options.MaxFileBytes > 0 && info.Length > options.MaxFileBytes) { skipped++; continue; }
+                using (var source = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                {
+                    var head = source.Read(buffer, 0, buffer.Length);
+                    if (buffer.AsSpan(0, head).Contains((byte)0)) { skipped++; continue; }
+                }
+                total += info.Length;
+                if (total > MaxTrackedBytes)
+                {
+                    DeleteChildren(folder);
+                    return (0, 0, $"추적 파일 합계가 사본 상한 {MaxTrackedBytes / 1_000_000:N0}MB를 넘어 저장소 사본을 만들지 않음");
+                }
+                var dest = Path.GetFullPath(Path.Combine(folder, Path.GetRelativePath(root, full)));
+                if (!dest.StartsWith(Path.TrimEndingDirectorySeparator(folder) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) { skipped++; continue; }
+                Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+                File.Copy(full, dest, overwrite: true);
+                files++;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { skipped++; }
+        }
+        return (files, skipped, null);
+    }
+
+    /// <summary>
+    /// Codex가 작업 폴더에서 지시 · 설정으로 읽는 자리: AGENTS.md · AGENTS.override.md · .codex/ (프로젝트 설정) · .agents/ (스킬).
+    /// 신뢰하지 않는 리뷰 대상 저장소의 글이 지시나 설정이 되지 않게 사본에서 뺀다 — 2026-10-29 실측으로는 작업 폴더의
+    /// .codex/config.toml · .agents/skills가 적용되지 않았지만(신뢰하지 않은 폴더), 판이 바뀌어도 막히게 둔다 (지휘자 K1 · e37c6e41c9 C3).
+    /// </summary>
+    internal static bool IsCodexInstructionPath(string relative)
+    {
+        var parts = relative.Split('/', '\\');
+        var name = parts[^1];
+        return name.Equals("AGENTS.md", StringComparison.OrdinalIgnoreCase) || name.Equals("AGENTS.override.md", StringComparison.OrdinalIgnoreCase)
+            || parts[..^1].Any(p => p.Equals(".codex", StringComparison.OrdinalIgnoreCase) || p.Equals(".agents", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>루트(제외)부터 dir까지 링크 · junction이 없는지. 폴더마다 한 번만 본다.</summary>
+    private static bool NoLinkBetween(string root, string dir, Dictionary<string, bool> cache)
+    {
+        if (string.Equals(Path.TrimEndingDirectorySeparator(dir), root, StringComparison.OrdinalIgnoreCase)) return true;
+        if (cache.TryGetValue(dir, out var known)) return known;
+        var parent = Path.GetDirectoryName(dir);
+        var ok = new DirectoryInfo(dir).LinkTarget is null && parent is not null && NoLinkBetween(root, parent, cache);
+        cache[dir] = ok;
+        return ok;
+    }
+
+    private static void DeleteChildren(string folder)
+    {
+        foreach (var dir in Directory.EnumerateDirectories(folder)) TryDelete(dir);
+        foreach (var file in Directory.EnumerateFiles(folder))
+            try { File.Delete(file); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }
+
+    /// <summary>
+    /// <c>git ls-files -z</c> (루트 기준 상대 경로). git은 PATH의 절대 경로 폴더에서만 찾는다 — 서버의 현재 폴더(프로젝트 루트)의 git.exe가 실행되지 않게.
+    /// </summary>
+    private static (List<string>? Paths, string? Error) GitTrackedFiles(string root, CancellationToken ct)
+    {
+        var name = OperatingSystem.IsWindows() ? "git.exe" : "git";
+        var git = (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Select(d => d.Trim().Trim('"')).Where(Path.IsPathFullyQualified)
+            .Select(d => Path.Combine(d, name)).FirstOrDefault(File.Exists);
+        if (git is null) return (null, "git을 찾지 못함");
+
+        var psi = new System.Diagnostics.ProcessStartInfo(git)
+        {
+            WorkingDirectory = root,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardOutputEncoding = new UTF8Encoding(false),
+            CreateNoWindow = true,
+        };
+        // fsmonitor 끔: 리뷰 대상 .git/config의 core.fsmonitor 명령이 실행되지 않게. 환경도 Codex 자식과 같이 정리 (/cross-review e37c6e41c9 C4).
+        foreach (var a in new[] { "-c", "core.fsmonitor=false", "-c", "core.quotepath=off", "ls-files", "-z" }) psi.ArgumentList.Add(a);
+        foreach (var (k, v) in Providers.CodexCliChatClient.ChildEnvironment(npmMarker: false))
+            if (v is null) psi.Environment.Remove(k);
+        try
+        {
+            using var p = System.Diagnostics.Process.Start(psi);
+            if (p is null) return (null, "git을 실행하지 못함");
+            using var wait = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            wait.CancelAfter(TimeSpan.FromSeconds(30));
+            _ = p.StandardError.ReadToEndAsync(wait.Token); // 읽어 두지 않으면 stderr 파이프가 차서 git이 멈출 수 있다
+            string output;
+            try
+            {
+                output = p.StandardOutput.ReadToEndAsync(wait.Token).GetAwaiter().GetResult();
+                p.WaitForExitAsync(wait.Token).GetAwaiter().GetResult();
+            }
+            catch (OperationCanceledException)
+            {
+                try { p.Kill(entireProcessTree: true); } catch (Exception) { }
+                ct.ThrowIfCancellationRequested();
+                return (null, "git ls-files가 30초 안에 끝나지 않음");
+            }
+            return p.ExitCode == 0
+                ? ([.. output.Split('\0', StringSplitOptions.RemoveEmptyEntries)], null)
+                : (null, "git 저장소가 아님");
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or InvalidOperationException)
+        {
+            return (null, $"git 실행 실패 ({ex.Message})");
+        }
     }
 
     /// <summary>실패해도 무시한다 (남은 폴더는 다음 Create가 StaleAfter 뒤 지운다).</summary>

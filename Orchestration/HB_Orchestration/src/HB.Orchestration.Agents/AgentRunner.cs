@@ -255,7 +255,11 @@ public sealed class AgentRunner
             var chatOptions = call.Reasoning is { } effort ? new ChatOptions { Reasoning = new ReasoningOptions { Effort = effort } } : null;
             // claude-cli는 작업 폴더가 있어야 돈다 (ModeRunner가 만든 폴더를 실행 옵션으로 넘긴다).
             if (call.Meta.WorkFolder is { } workFolder)
-                (chatOptions ??= new ChatOptions()).AdditionalProperties = new() { [Providers.ClaudeCliChatClient.WorkFolderKey] = workFolder };
+                ((chatOptions ??= new ChatOptions()).AdditionalProperties ??= [])[Providers.ClaudeCliChatClient.WorkFolderKey] = workFolder;
+            // codex-cli: 구조화 출력 스키마는 OpenAI 요청 옵션(StructuredRequest)으로는 닿지 않는다 → 원문 스키마를 넘겨 --output-schema로.
+            if (call.Output is { } cliFormat && call.OutputMode == StructuredOutputMode.Schema
+                && string.Equals(call.Agent.ProviderOptions?.Type, Providers.CodexCliProvider.TypeName, StringComparison.OrdinalIgnoreCase))
+                ((chatOptions ??= new ChatOptions()).AdditionalProperties ??= [])[Providers.CodexCliChatClient.OutputSchemaKey] = cliFormat.Schema().GetRawText();
             var runOptions = chatOptions is null ? null : new ChatClientAgentRunOptions(chatOptions);
             marker = InflightLog.Begin(NewRecord(), LogPath, out var markerError);
             if (markerError is not null)

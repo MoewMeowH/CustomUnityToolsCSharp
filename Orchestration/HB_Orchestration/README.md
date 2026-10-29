@@ -79,7 +79,7 @@ dotnet test tests/HB.Orchestration.Tests
 | `deepseek_main_flash` | fireworks | `accounts/fireworks/models/deepseek-v4p1-flash-1017` | review_high · perf_high의 두 번째 시선 (`Vision: false`) |
 | `local` | local (Ollama) | `ollama list`의 모델 | 꺼 둠 (`Enabled: false`) |
 
-제공사는 `openai` · `openai-web` · `gemini` · `fireworks` · `local` · `anthropic-cli` 여섯이다 (Type은 `openai-web`만 `openai-responses`, `anthropic-cli`는 `claude-cli`, 나머지는 `openai-compatible`). 실제 쓰는 값은 publish 폴더의 appsettings.json이고, `list_modes` 마지막의 `에이전트:` 줄에 보인다.
+제공사는 `openai` · `openai-web` · `gemini` · `fireworks` · `local` · `anthropic-cli` · `codex` 일곱이다 (Type은 `openai-web`만 `openai-responses`, `anthropic-cli`는 `claude-cli`, `codex`는 `codex-cli`, 나머지는 `openai-compatible`). 실제 쓰는 값은 publish 폴더의 appsettings.json이고, `list_modes` 마지막의 `에이전트:` 줄에 보인다.
 
 - `MaxOutputTokens`: 응답 상한. **추론 모델은 생각 토큰도 포함**되므로 낮게 잡으면 답변 없이 끝난다 (서버가 `[빈 응답]` 실패로 기록). 폭주 방지용으로 넉넉하게 (1만 이상 권장).
 - 키가 없거나 설정이 틀린 에이전트는 그것만 건너뛰고 서버는 정상 시작. `list_modes`에 `(사용불가)`로 표시.
@@ -93,8 +93,8 @@ dotnet test tests/HB.Orchestration.Tests
 | `ModesPath` | modes.json 위치를 직접 지정 (비우면 3절의 찾는 순서) |
 | `GuidelinesPath` | 리뷰 지침 파일 (비우면 `REVIEW_GUIDELINES_PATH` 환경 변수 → Unity 프로젝트 루트의 `REVIEW_GUIDELINES.md`). 직접 지정한 경로(이 설정 또는 환경 변수)에 파일이 없으면 다음 후보로 넘어가지 않고 run_mode가 `[리뷰 지침 경로 없음]`으로 거절한다 (2026-10-22, modes.json 지정 경로와 같은 규칙) |
 | `PromptsPath` | 모델별 덧붙임(외부 에이전트 실수 목록) 폴더. 원본은 `project-files/prompts`, 상대 경로는 서버 폴더 기준. 비우면 modes.json 옆 `prompts/`. 지정했는데 폴더가 없으면 `[모델별 덧붙임 폴더 오류]`으로 거절한다 ("모델별 덧붙임") |
-| `Providers.<이름>.Type` | `openai-compatible`(Chat Completions — OpenAI · Gemini · Fireworks · Ollama · LM Studio) · `openai-responses`(OpenAI Responses API, 웹검색 단계용) · `claude-cli`(아래 "claude-cli 제공사") |
-| `Providers.<이름>.ExecutablePath` | `claude-cli` 전용: Claude Code 실행 파일. 비우면 PATH의 `claude` |
+| `Providers.<이름>.Type` | `openai-compatible`(Chat Completions — OpenAI · Gemini · Fireworks · Ollama · LM Studio) · `openai-responses`(OpenAI Responses API, 웹검색 단계용) · `claude-cli`(아래 "claude-cli 제공사") · `codex-cli`(아래 "codex-cli 제공사") |
+| `Providers.<이름>.ExecutablePath` | `claude-cli` · `codex-cli` 전용: 실행 파일 절대 경로. 비우면 `claude`는 PATH, `codex`는 npm 전역 설치 → PATH |
 | `Providers.<이름>.Endpoint` | API 주소. OpenAI는 비움, Gemini `https://generativelanguage.googleapis.com/v1beta/openai/`, Fireworks `https://api.fireworks.ai/inference/v1`, Ollama `http://localhost:11434/v1`, LM Studio `http://localhost:1234/v1` |
 | `Providers.<이름>.ApiKeyEnv` | API 키를 담은 **환경 변수 이름** (`OPENAI_API_KEY` · `GEMINI_API_KEY` · `FIREWORKS_API_KEY`). 로컬처럼 키가 필요 없으면 생략. 키 값은 서버 프로세스가 시작될 때 물려받은 값만 보인다 |
 | `Providers.<이름>.TimeoutSeconds` | 요청 하나의 네트워크 타임아웃(초). 에이전트에 값이 없을 때 적용 (생략 = SDK 기본 100초) |
@@ -144,6 +144,19 @@ dotnet test tests/HB.Orchestration.Tests
 - **크레딧 소진 대체**: claude-cli 단계는 그 제공사의 최근 판정 가능한 기록(성공 또는 Quota)이 1시간 안의 Quota면 호출 없이 `[실패] Quota (최근) …`를 돌려준다 (지휘자는 서브에이전트로 대신한다). 1시간 뒤에는 한 번 시도한다 — 계속 막으면 성공 기록이 생기지 않아 크레딧을 채워도 풀리지 않는다 (크레딧이 없을 때 실패 호출은 비용 0, 충전 뒤 최대 1시간이면 풀린다). 대시보드 첫 화면에 `API 리뷰(sub_*) 이번 달 N회 · $X`(claude-cli 제공사 기준, 단가 없는 기록은 건수로)와, 마지막 판정 가능한 기록이 Quota면 `크레딧 소진 — 서브에이전트로 대체 중`(1시간이 지났으면 `다음 호출에서 다시 시도`). 시범 1호(2026-10-27, 이 기능 자체 리뷰): 17턴 · 274초 · $1.26, self-reviewer 서브에이전트와 지적 9건 겹침. 절차는 `/self-review` 명령 파일 "API 리뷰".
 - **ownReview로 쓸 때** (`/cross-review` 2단계 · `perf_*`): 응답 본문(`## 지적`부터)만 넣고 reason 태그는 `[ownReview:sub_self]` · `[ownReview:sub_perf]` · `[ownReview:sub_self+sub_security]`. H4 훅이 읽은 파일을 작업 폴더 기준 상대 경로로 검사한다.
 - **정의 색인** (계획서 `docs/plans/2026-10-27_작업폴더-정의-색인.md`): 이 PC의 claude -p는 Read만 주므로, 작업 폴더 절의 파일 목록에 줄 수와 `정의: class X 12 · Run() 40 · …`(C# · Python · Markdown · JSON 얕은 키 · PowerShell, 줄 단위 정규식 — 대략의 위치)를 붙인다. 파일당 80개 · 전체 2만 자 · 1MB 이하 UTF-8 파일만 (`DefinitionIndex`).
+
+### codex-cli 제공사 (`review_main` — 계획서 `docs/plans/2026-10-29_Codex-외부-리뷰어.md`)
+
+외부 리뷰(`review_main`)를 OpenAI API 대신 **Codex CLI + ChatGPT 구독 로그인**으로 돌린다. 리뷰어가 저장소 사본에서 정의 · 호출부를 직접 찾아 읽는다 (지휘자가 고른 첨부에 갇히지 않게).
+- 실행: `codex exec --json --ephemeral --ignore-user-config -c windows.sandbox="unelevated" -c web_search="disabled" -c forced_login_method="chatgpt" -s read-only --skip-git-repo-check -C <작업 폴더> -m <Model> --disable apps · plugins · remote_plugin · browser_use · browser_use_external · computer_use · in_app_browser · multi_agent · image_generation -c model_reasoning_effort=… -c developer_instructions=<시스템 프롬프트> [--output-schema <구조화 출력 스키마>] -`, 사용자 프롬프트는 stdin. 한 턴만 (followUp · 토론은 거절).
+  - `--ignore-user-config`: `~/.codex/config.toml`의 MCP 서버 · 훅이 붙지 않게. 그래서 샌드박스도 인자로 고른다 (MXC는 git이 작업 폴더로 chdir 하지 못함). `--ephemeral`: `~/.codex/sessions`에 명령 출력(소스 사본)이 든 기록을 남기지 않는다. 시스템 프롬프트는 명령줄로 가서 2.4만 자를 넘으면 실패.
+  - 실행 파일: `ExecutablePath`(절대 경로) → npm 전역 설치의 네이티브 `codex.exe`(`%APPDATA%\npm\node_modules\@openai\codex\…\vendor\<triple>\bin`) → PATH의 절대 경로 항목. `codex.cmd`는 쓰지 않는다.
+- **과금 · 키**: `ApiKeyEnv`를 두면 설정 오류. `forced_login_method="chatgpt"`로 저장된 인증이 API 키여도 쓰지 않는다. 자식 환경은 **허용 목록**(`CodexCliChatClient.KeptEnvironment` — PATH · SystemRoot · TEMP · USERPROFILE · APPDATA · CODEX_HOME · 프록시 등)만 남기고 모두 지운다 — API 과금으로 넘어가거나 셸 명령(`Get-ChildItem Env:`)으로 비밀이 모델 문맥에 들어가지 않게 (git ls-files · `--version`도 같은 환경). 인증은 `CODEX_HOME`(`~/.codex/auth.json`). 제공사 `codex`는 `Budget.FreeProviders`에 있어 비용 0 · 사용량 집계에서 빠진다 — 대신 구독 한도(5시간 · 주간)를 쓴다 (`exec --json`에는 한도 %가 없어 기록하지 않음).
+- **작업 폴더** (`ReviewWorkFolder` Codex 모양): 루트가 git이면 `git ls-files`(intent-to-add 포함)의 파일을 작업 트리 상태로 복사 — 비추적 파일 · 금지 패턴 · Codex 지시 · 설정 자리(`AGENTS.md` · `AGENTS.override.md` · `.codex/` · `.agents/` — context로 넘겨도 뺀다) · 링크 · 이진 · `MaxFileBytes` 초과는 뺀다. 파일 검사는 금지 패턴을 한 번만 컴파일하고 링크는 폴더마다 한 번 본다, git은 `core.fsmonitor=false`. 사본 만들기는 `Task.Run`에서. 2만 파일 · 64MB를 넘거나 git이 아니면(골든 사례 폴더 등) context 파일만. context 파일은 위에 덮어 복사(비추적 diff 포함). 프롬프트에는 context의 `.diff` · `.patch` **본문**과 나머지 context의 "중심 (경로:줄)" 목록 — 정의 색인은 넣지 않는다(rg로 찾음). 작업 폴더가 없는 호출(골든 고정 프롬프트)은 빈 임시 폴더에서 돈다. **주의**: 읽기 전용 샌드박스는 쓰기만 막는다 — 디스크 전체를 읽을 수 있다 (셸 명령의 네트워크는 막힘 실측, 2026-10-29). 작업 폴더의 `.codex/config.toml` · `.agents/skills`는 0.165.0에서 적용되지 않음을 실측했지만 사본에서도 뺀다.
+- **결과**: 마지막 `agent_message`가 응답, `turn.completed` usage → 토큰(입력 = 캐시 포함, 추론 따로). usageRaw = usage · thread_id · 명령 수 · 명령 목록(명령 · 종료 코드, 60개 · 300자까지, 출력 전문 없음) · `codex --version`. `turn.failed` · 답 없음 · usage 없음은 실패. 문구로 분류: usage limit · usage_limit · credits_depleted → Quota, 429 · rate limit → RateLimit, not supported · invalid · 인자 오류 · 로그인 → Client.
+- 프로세스: Job 객체로 자손(셸 명령)까지 묶고, 부모가 끝나고 3초 뒤 남은 자손을 끝낸다 (파이프를 물고 남으면 읽기가 막힘). 시간 상한(`TimeoutSeconds`, 없으면 15분) · 취소면 모두 끝낸다.
+- **한도 소진 대체** (`StepDefinition.FallbackAgent`): `review_main` 단계는 `codex_cli_sol` + 대체 `gpt_main_sol`. Codex가 `[실패] Quota`면 같은 입력으로 대체 에이전트에 한 번 다시(이때 context는 지금처럼 첨부 본문), 최근 1시간 안 Quota 기록이면 Codex를 부르지 않고 바로 대체. 결과 끝에 이유 줄 · 에이전트 교체 줄이 붙고 실패한 호출도 기록에 남는다. `agents`로 바꾼 실행에는 대체하지 않는다.
+- 2026-10-29 골든 `rec-ffd7-configdrift`: Codex 37초 · 찾음 2/5 (API sol 기준점 3/5, 1회씩).
 
 ### 재시도
 
@@ -220,7 +233,7 @@ SDK 자동 재시도(기본 3회, 기록에 안 남음)는 끄고 서버가 직�
 | `calls.jsonl` | 호출 기록. 한 줄 = 시도 1회 (UTF-8, camelCase). 여러 서버 프로세스가 같이 덧붙인다 |
 | `blobs/<sha256>.txt` | 시스템 프롬프트 · 지침 · modes.json · (선택) 설정 원문, 그리고 **4,096바이트 이상인 프롬프트**. 큰 프롬프트는 기록에 앞 1,000자 + `promptSha256` · `promptBytes`만 남는다 — 원문은 대시보드 호출 상세가 blob에서 읽는다. `Records.BlobFolder`로 위치를 바꿀 수 있다 |
 | `inflight/<기록 Id>.json` | 호출 중 표시 (위 "끊긴 호출 비용 추정") |
-| `review_in/<임의 이름>/` | `claude-cli` 단계의 작업 폴더 (context 파일 전체 복사). 실행이 끝나면 지우고, 남은 것은 하루 뒤 다음 실행이 지운다 |
+| `review_in/<임의 이름>/` | `claude-cli` · `codex-cli` 단계의 작업 폴더 (context 파일 전체 복사, codex는 저장소 추적 파일 사본 + context). 실행이 끝나면 지우고, 남은 것은 하루 뒤 다음 실행이 지운다 |
 | `verdicts.jsonl` | `record_verdicts` 판정. 같은 키는 마지막 줄이 이긴다. `HB_ORCH_VERDICTS_PATH`로 따로 둘 수 있다 |
 | `sessions/<pid>.json` | 서버 프로세스별 모드 실행 횟수 |
 | `subagents/<agentId>_<호출 id>.json` | 검토형 서브에이전트(self · perf · security · direction-reviewer)가 지휘자에게 넘긴 결과 원문의 보관본 (7절 "서브에이전트 결과"). 한 번 쓰면 바꾸지 않는다. `_state/scanned.json` = 보관을 마친 검토형 기록 (경로 → 크기:수정 시각, 지워진 기록은 빠진다) |

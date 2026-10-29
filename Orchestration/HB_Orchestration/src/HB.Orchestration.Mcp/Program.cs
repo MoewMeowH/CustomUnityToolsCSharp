@@ -56,6 +56,7 @@ builder.Services.AddSingleton(new OrchestrationSource(
 builder.Services.AddSingleton<IChatClientProvider, OpenAICompatibleProvider>();
 builder.Services.AddSingleton<IChatClientProvider, OpenAIResponsesProvider>(); // 웹검색 단계 (Responses API)
 builder.Services.AddSingleton<IChatClientProvider, ClaudeCliProvider>(); // claude --bare -p 읽기 전용 검토 (sub_* 모드)
+builder.Services.AddSingleton<IChatClientProvider, CodexCliProvider>(); // codex exec 읽기 전용 리뷰, ChatGPT 구독 (review_main)
 
 builder.Services.AddSingleton<AgentCatalog>();
 builder.Services.AddSingleton<AgentRunner>();

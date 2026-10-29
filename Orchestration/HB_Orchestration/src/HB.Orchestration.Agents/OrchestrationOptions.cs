@@ -395,7 +395,7 @@ public sealed class ProviderOptions
     /// <summary>API 키를 담은 환경 변수 이름. 로컬 모델처럼 키가 필요 없으면 비운다.</summary>
     public string? ApiKeyEnv { get; set; }
 
-    /// <summary>claude-cli 전용: Claude Code 실행 파일. 비우면 PATH의 claude.</summary>
+    /// <summary>claude-cli · codex-cli 전용: 실행 파일 절대 경로. 비우면 claude는 PATH, codex는 npm 전역 설치 → PATH.</summary>
     public string? ExecutablePath { get; set; }
 
     /// <summary>요청 하나의 네트워크 타임아웃(초). 에이전트에 값이 없을 때 쓴다. 비우면 SDK 기본값 100초.</summary>

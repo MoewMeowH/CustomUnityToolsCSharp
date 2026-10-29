@@ -34,8 +34,9 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     public async Task<string> RunAsync(
         string modeName, string input, IReadOnlyList<string>? files, IReadOnlyList<string>? agentOverrides,
         IReadOnlyList<ContextRange>? context, IReadOnlyList<string>? images, string? reason, string? ownReview, CancellationToken ct,
-        IReadOnlyList<string>? reasoningOverrides = null, string? rootDir = null, string? tool = null)
+        IReadOnlyList<string>? reasoningOverrides = null, string? rootDir = null, string? tool = null, string? fallbackNote = null)
     {
+        // fallbackNote: 대체 에이전트로 다시 부른 실행이면 그 이유 (결과 끝에 붙고, 다시 대체하지 않는다).
         // rootDir: context · images 경로의 기준 (기본 = 현재 폴더). 골든 리플레이는 사례의 files/ 폴더를 준다 (계획서 2026-10-27_리플레이-골든).
         // tool: 호출 기록의 Tool (기본 run_mode). 골든은 GoldenCli.Tool로 남겨 대시보드 집계와 구분한다.
         var root = rootDir ?? Environment.CurrentDirectory;
@@ -67,7 +68,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         if (planError is not null) return planError;
         var (swap, plan) = (prepared!.Swap, prepared.Steps);
         // 제공사 Type은 AgentCatalog처럼 대소문자를 무시한다 (/self-review C4 · sub_self C6).
-        var cliSteps = plan.Count(p => string.Equals(p.Agent.ProviderOptions?.Type, Providers.ClaudeCliProvider.TypeName, StringComparison.OrdinalIgnoreCase));
+        var cliSteps = plan.Count(p => UsesWorkFolder(p.Agent.ProviderOptions?.Type));
 
         var (attached, contextError) = ContextLoader.Load(context, Options.Context, root, cliSteps > 0 ? 0 : maxChars, ct);
         if (contextError is not null) return $"[첨부 코드 오류] {contextError}";
@@ -95,29 +96,44 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         if (loadedImages!.Count > 0 && plan.Where(p => !p.Agent.Options.Vision).Select(p => p.Agent.Name).Distinct().ToList() is { Count: > 0 } blind)
             return $"[모드 '{modeName}'] 이미지를 받지 않는 에이전트(Vision=false): {string.Join(", ", blind)}. images 없이 호출하거나 agents로 바꾸세요.";
 
-        // claude-cli 단계: context 파일을 통째로 작업 폴더에 복사하고, 프롬프트의 첨부 본문 대신 "주목할 범위"만 넣는다.
-        // 한 실행의 단계가 같은 프롬프트 입력을 나눠 쓰므로 다른 제공사와 섞지 않는다.
+        // 작업 폴더 단계(claude-cli · codex-cli): context 파일을 통째로 작업 폴더에 복사하고, 프롬프트의 첨부 본문 대신 "주목할 범위"만 넣는다
+        // (codex-cli는 저장소 추적 파일 사본 + diff 본문). 한 실행의 단계가 같은 프롬프트 입력을 나눠 쓰므로 다른 제공사와 섞지 않는다.
         string? workFolder = null;
         if (cliSteps > 0)
         {
-            if (cliSteps != plan.Count)
-                return $"[모드 '{modeName}'] claude-cli 에이전트와 다른 제공사 에이전트를 한 모드에 섞을 수 없습니다.";
+            var cliType = plan[0].Agent.ProviderOptions?.Type ?? "";
+            if (cliSteps != plan.Count || plan.Any(p => !string.Equals(p.Agent.ProviderOptions?.Type, cliType, StringComparison.OrdinalIgnoreCase)))
+                return $"[모드 '{modeName}'] {cliType} 에이전트와 다른 제공사 에이전트를 한 모드에 섞을 수 없습니다.";
             if (loadedImages.Count > 0)
-                return $"[모드 '{modeName}'] claude-cli 단계는 images를 받지 않습니다.";
-            // 크레딧 소진 대체 규칙 (계획서 2026-10-27_검토형-서브에이전트-API-전환 "2차 설계" 2b): 직전 판정 가능한 기록이 가까운 Quota면 부르지 않는다.
-            // 지휘자는 이 실패를 보고 서브에이전트로 대신한다 (self-review.md).
+                return $"[모드 '{modeName}'] {cliType} 단계는 images를 받지 않습니다.";
+            // 크레딧 · 한도 소진 대체 규칙 (계획서 2026-10-27_검토형-서브에이전트-API-전환 "2차 설계" 2b): 직전 판정 가능한 기록이 가까운 Quota면 부르지 않는다.
+            // 단계에 대체 에이전트가 있으면 그 에이전트로 실행하고 (계획서 2026-10-29_Codex-외부-리뷰어 결정), 없으면 지휘자가 대신한다 (self-review.md).
             if (RecentQuota(plan.Select(p => p.Agent.Provider).Distinct(), runner.LogPath, ClaudeCliQuotaHold, DateTimeOffset.Now) is { } quotaAt)
-                return $"{AgentRunner.QuotaFailurePrefix} (최근) — claude-cli 크레딧 소진 기록 {quotaAt.ToLocalTime():MM-dd HH:mm}. " +
-                       $"{ClaudeCliQuotaHold.TotalHours:0}시간 동안은 호출하지 않는다 — 서브에이전트로 대신하라 (그 뒤 한 번 다시 시도).";
-            var (folder, focus, folderError) = ReviewWorkFolder.Create(ReviewWorkFolder.BaseFor(runner.LogPath), context, Options.Context, root, ct);
+            {
+                if (fallbackNote is null && FallbackOverrides(plan, agentOverrides) is { } fallback)
+                    return await RunFallbackAsync(fallback, reasoningOverrides,
+                        $"({cliType} 한도 소진 기록 {quotaAt.ToLocalTime():MM-dd HH:mm} — {ClaudeCliQuotaHold.TotalHours:0}시간 동안은 부르지 않고 대체 에이전트로 실행)");
+                return $"{AgentRunner.QuotaFailurePrefix} (최근) — {cliType} 크레딧 · 한도 소진 기록 {quotaAt.ToLocalTime():MM-dd HH:mm}. " +
+                       $"{ClaudeCliQuotaHold.TotalHours:0}시간 동안은 호출하지 않는다 — " +
+                       (string.Equals(cliType, ClaudeCliProvider.TypeName, StringComparison.OrdinalIgnoreCase) ? "서브에이전트로 대신하라" : "다른 에이전트로 대신하라") + " (그 뒤 한 번 다시 시도).";
+            }
+            var style = string.Equals(cliType, CodexCliProvider.TypeName, StringComparison.OrdinalIgnoreCase) ? ReviewWorkFolder.Style.Codex : ReviewWorkFolder.Style.ClaudeRead;
+            // 저장소 사본(git · 복사)은 동기 작업이라 스레드 풀 밖으로 (/cross-review 90978dee2f C2).
+            var (folder, focus, folderError) = await Task.Run(() => ReviewWorkFolder.Create(ReviewWorkFolder.BaseFor(runner.LogPath), context, Options.Context, root, ct, style), ct);
             if (folderError is not null) return $"[첨부 코드 오류] {folderError}";
+            // Codex는 diff 본문이 프롬프트에 들어간다 — 그 길이로 입력 상한을 다시 잰다.
+            if (style == ReviewWorkFolder.Style.Codex && maxChars > 0 && input.Length + focus!.Length > maxChars)
+            {
+                ReviewWorkFolder.TryDelete(folder);
+                return $"[입력이 너무 깁니다] input {input.Length:N0}자 + 작업 폴더 안내 · diff {focus.Length:N0}자 / 상한 {maxChars:N0}자. diff를 나눠 다시 호출하세요.";
+            }
             workFolder = folder;
             promptInput = promptInput with { Context = focus! };
             meta = meta with { WorkFolder = folder };
         }
 
-        // 세션별 실행 횟수 (대시보드 '세션' 화면 표시용, 한도 없음): 검증을 다 통과한 실행만 센다.
-        sessions.Count(modeName);
+        // 세션별 실행 횟수 (대시보드 '세션' 화면 표시용, 한도 없음): 검증을 다 통과한 실행만 센다. 대체로 다시 부른 실행은 한 번으로 (90978dee2f C5).
+        if (fallbackNote is null) sessions.Count(modeName);
 
         // ── 2. 실행 ──────────────────────────────────────────────────────────
         var runId = Guid.NewGuid().ToString("N")[..10];
@@ -148,6 +164,13 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             ReviewWorkFolder.TryDelete(workFolder);
         }
 
+        // 한도 소진으로 실패한 단계에 대체 에이전트가 있으면 같은 입력으로 한 번 다시 (실패한 호출은 기록에 남는다).
+        if (fallbackNote is null && mode.Flow != ModeFlow.Debate
+            && results.Any(r => !r.Success && r.Text.StartsWith(AgentRunner.QuotaFailurePrefix, StringComparison.Ordinal) && plan[r.Step - 1].Def.FallbackAgent is not null)
+            && FallbackOverrides(plan, agentOverrides) is { } retry)
+            return await RunFallbackAsync(retry, reasoningOverrides,
+                $"(runId {runId}: {plan[0].Agent.ProviderOptions?.Type} 한도 소진으로 실패 → 대체 에이전트로 다시 실행)");
+
         // ── 3. 반환: Last면 마지막 결과만 (Claude 쪽 토큰 절약) ─────────────────
         // 맨 위 runId와 단계 제목의 토큰·시간은 항상 붙인다 (save_result에 넘길 값, 서버 로그를 뒤지지 않도록).
         var returnAll = mode.Return == ModeReturn.All || mode.Flow == ModeFlow.Concurrent;
@@ -159,12 +182,24 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         }
         if (prepared.ReasoningNote is { } reasoningNote)
             note = note is null ? reasoningNote : $"{note}\n{reasoningNote}";
+        if (fallbackNote is not null)
+            note = note is null ? fallbackNote : $"{fallbackNote}\n{note}";
 
         // 겹침 후보: 서로 다른 단계가 같은 위치를 지적했으면 끝에 한 줄씩 (판단은 지휘자).
         if (FindingOverlap.Lines(results.SelectMany(r => r.Structured?.Findings ?? [])) is { Count: > 0 } overlaps)
             note = note is null ? string.Join("\n", overlaps) : $"{string.Join("\n", overlaps)}\n{note}";
 
         return ResultFormatter.Format(runId, results, returnAll, note, headroom);
+
+        // 대체 에이전트로 같은 입력을 다시 부른다. 추론 강도 덮어쓰기는 교체 뒤 이름으로 옮기고 (b476ab3099 1-F1 · 90978dee2f C1),
+        // 대체 실행이 실행 전 검증에서 걸리면 왜 대체했는지를 앞에 붙인다 — 지휘자가 요청하지 않은 교체 · 상한 오류만 보지 않게.
+        async Task<string> RunFallbackAsync(List<string> swaps, IReadOnlyList<string>? efforts, string why)
+        {
+            var map = swaps.Select(s => s.Split('=', 2)).ToDictionary(p => p[0], p => p[1], StringComparer.Ordinal);
+            var moved = efforts?.Select(e => e.Split('=', 2) is [var agent, var level] && map.TryGetValue(agent.Trim(), out var to) ? $"{to}={level}" : e).ToList();
+            var result = await RunAsync(modeName, input, files, swaps, context, images, reason, ownReview, ct, moved, rootDir, tool, why);
+            return result.StartsWith('[') ? $"{why}\n{result}" : result;
+        }
     }
 
     /// <summary>
@@ -173,6 +208,22 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     /// (12시간 → 1시간, 계획서 2026-10-27_검토형-서브에이전트-API-전환 '결정 (2차 리뷰 9ea51e562a 뒤)').
     /// </summary>
     public static readonly TimeSpan ClaudeCliQuotaHold = TimeSpan.FromHours(1);
+
+    /// <summary>작업 폴더를 쓰는 제공사 Type (claude-cli · codex-cli, 대소문자 무시 — /self-review C4 · sub_self C6).</summary>
+    public static bool UsesWorkFolder(string? type) =>
+        string.Equals(type, ClaudeCliProvider.TypeName, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(type, CodexCliProvider.TypeName, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 대체 에이전트로 바꾸는 이번 실행의 덮어쓰기 ("원래=대체"). 지휘자가 agents로 바꾼 실행이거나 대체가 있는 단계가 없으면 null.
+    /// </summary>
+    private static List<string>? FallbackOverrides(List<PlannedStep> plan, IReadOnlyList<string>? agentOverrides)
+    {
+        if (agentOverrides is { Count: > 0 }) return null;
+        var swaps = plan.Where(p => !string.IsNullOrWhiteSpace(p.Def.FallbackAgent))
+            .Select(p => $"{p.Def.Agent}={p.Def.FallbackAgent}").Distinct(StringComparer.Ordinal).ToList();
+        return swaps.Count == 0 ? null : swaps;
+    }
 
     /// <summary>
     /// providers 중 하나라도, hold 안에서 가장 최근의 판정 가능한 기록(성공 또는 Quota)이 Quota면 그 시각. 아니면 null.

@@ -153,6 +153,16 @@ public static class SafePath
     }
 
     /// <summary>
+    /// 금지 패턴을 한 번만 Regex로 바꿔 둔 검사기: 상대 경로('/' 구분) → 걸린 패턴, 없으면 null.
+    /// 많은 파일을 같은 규칙으로 볼 때 쓴다 (저장소 사본 — Resolve는 파일마다 패턴을 새로 컴파일한다, /cross-review 90978dee2f C2).
+    /// </summary>
+    internal static Func<string, string?> DenyMatcher(IEnumerable<string> patterns)
+    {
+        var compiled = patterns.Select(p => (Pattern: p, Regex: GlobToRegex(p))).ToList();
+        return relative => compiled.FirstOrDefault(c => c.Regex.IsMatch(relative)).Pattern;
+    }
+
+    /// <summary>
     /// 간단한 glob: '*'는 '/'를 넘지 않고 '**'는 넘는다. '/'가 없는 패턴은 어느 폴더의 파일 이름이든 매칭한다.
     /// </summary>
     private static Regex GlobToRegex(string pattern)

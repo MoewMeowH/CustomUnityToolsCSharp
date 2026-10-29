@@ -99,12 +99,13 @@
   "Modes": {
     "review_main": {
       "RequireOwnReview": true,
-      "Description": "코드/diff 교차 리뷰 (sol 단독)",
+      "Description": "코드/diff 교차 리뷰 (sol 단독 — Codex CLI 구독, 저장소 사본에서 직접 찾음. context = diff 파일 먼저 + 중심 파일. 한도 소진이면 API sol로 대체)",
       "Flow": "Sequential",
       "Steps": [
         {
           "Role": "Reviewer",
-          "Agent": "gpt_main_sol"
+          "Agent": "codex_cli_sol",
+          "FallbackAgent": "gpt_main_sol"
         }
       ]
     },

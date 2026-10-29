@@ -5,6 +5,7 @@ argument-hint: [main|high] [파일/커밋 범위, 비우면 현재 미커밋 변
 
 인자: $ARGUMENTS
 - 첫 단어가 `high`면 `review_high`(sol · DeepSeek 동시), `main`이거나 없으면 `review_main`. (예전 인자 `panel`은 `high`로 읽는다.)
+- `review_main`은 Codex CLI(ChatGPT 구독, gpt-6.1-sol)가 서버가 만든 저장소 사본에서 직접 찾아 읽는다 — context의 diff 본문만 프롬프트에 붙고 나머지 context는 "중심" 목록이 된다. 구독 한도 소진이면 서버가 같은 입력으로 API sol(`gpt_main_sol`)에 다시 보내고 결과 끝에 그 줄을 붙인다 — 지휘자가 따로 할 일은 없고, 판정은 결과 맨 위 runId에 단다.
 - 나머지가 대상. 비어 있으면 `git diff HEAD`의 미커밋 변경.
 
 1. diff가 있으면 대상 diff와 변경 의도를 파악한다. 의도가 불분명하면 커밋 메시지·주변 코드로 추론하고, 그래도 모르면 한 줄로 질문한다. / diff가 없으면(기존 코드 점검) 변경 의도 대신 "이 코드의 역할과 점검 목적"을 쓰고, 파일 전체가 아니라 핵심 클래스·메서드 위주로 추려서 넘긴다.
@@ -19,7 +20,7 @@ argument-hint: [main|high] [파일/커밋 범위, 비우면 현재 미커밋 변
    - 2-3. **self-reviewer 호출**: 위임 메시지에는 그 폴더 경로, 대상 파일·줄 범위, 변경 의도, 제약(사용자 결정 원문 포함)만 쓴다. 너의 의견·의심 지점·결론은 넣지 않는다 (`run_mode` input 규칙과 같다).
    - 2-4. 결과가 형식(`## 지적` · `## 자료 부족` · `## 읽은 파일`, `## 비고`는 선택)을 어겼거나, 중단됐거나, 비어 있거나, `## 읽은 파일`에 그 폴더 밖 경로가 있으면 **여기서 멈추고** 사용자에게 알린다. 다시 부르거나 네가 대신 쓸지는 사용자가 정한다.
    - 2-5. **보안 영역이면 security-reviewer도**: 변경이 훅 · 경로 · 비밀 값 · 외부 전송 · 권한 검사 · 게임 클라이언트 신뢰(재화 · 세이브 · 패킷)에 걸리면 사용자에게 "security-reviewer도 함께 돌릴지" 한 줄로 묻는다 (자동으로 돌리지 않는다). 함께 돌리면 같은 `subagent_in/` 폴더로 self-reviewer와 **각자 따로** 호출하고 2-4 검사를 둘 다 한다.
-3. `run_mode`를 호출한다. input: 변경 의도 · 제약(CLAUDE.md "독립성" — 검증 결과 · 결론 · 요청/계획서 원문은 넣지 않는다). context: diff 파일(CLAUDE.md "diff는 파일로")을 첫 항목으로 + 판단에 필요한 파일. 리뷰는 input에 넣지 않는다.
+3. `run_mode`를 호출한다. input: 변경 의도 · 제약(CLAUDE.md "독립성" — 검증 결과 · 결론 · 요청/계획서 원문은 넣지 않는다). context: diff 파일(CLAUDE.md "diff는 파일로")을 첫 항목으로 + 판단에 필요한 파일 (`review_main`은 바뀐 파일이면 된다 — 주변은 Codex가 찾고, 한도 소진 대체 때는 이 context가 API sol에 첨부 본문으로 간다). 리뷰는 input에 넣지 않는다.
    - `ownReview`: **서브에이전트 결과 원문만** 넣는다. 둘이면 self-reviewer 결과 뒤에 security-reviewer 결과를 그대로 이어 붙인다 (사이에 구분 줄 · 제목을 넣지 않는다 — H4가 '## 읽은 파일' 절의 '- ' 아닌 줄을 막는다).
    - `reason`: 맨 앞에 `[ownReview:self-reviewer]`(둘이면 `[ownReview:self-reviewer+security-reviewer]`)를 붙이고 부른 이유 한 줄.
    - 종합·판정에서 "Claude만 지적"은 두 서브에이전트가 찾고 외부가 놓친 것이다. 어느 서브에이전트의 지적인지 작업 로그에 적는다.
