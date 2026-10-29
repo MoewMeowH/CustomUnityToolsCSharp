@@ -873,7 +873,31 @@
                 queueBox.append(chip);
             }
         }
-        function setBusy(busy) { stopBtn.disabled = !busy; interruptBtn.disabled = !busy; }
+        function setBusy(busy) { stopBtn.disabled = !busy; interruptBtn.disabled = !busy; watchCodexLog(busy); }
+        // Codex 구성원 과정 창 (단톡방 ② · sol 리뷰 ①-P2): 말풍선 다시 받기에는 이 창이 없어 굳어 있었다 —
+        // 실행 중에는 몇 초마다, 턴이 끝나면 한 번 다시 받는다. Codex 방이 아니면(창이 없으면) 아무것도 하지 않는다.
+        let codexTimer = 0, codexSeq = 0;
+        function watchCodexLog(busy) {
+            if (!$("#codex-log")) return;
+            clearInterval(codexTimer);
+            codexTimer = busy ? setInterval(refreshCodexLog, 3000) : 0;
+            refreshCodexLog();
+        }
+        async function refreshCodexLog() {
+            if (!$("#codex-log") || disposed) return;
+            // 마지막으로 보낸 요청의 응답만 쓴다 — 주기 요청이 턴 끝 요청보다 늦게 오면 낡은 기록이 마지막 답을 덮었다 (3cc5ce85df C1 · Codex C2)
+            const seq = ++codexSeq;
+            try {
+                const res = await fetch(self + "?handler=CodexLog", { cache: "no-store" });
+                if (!res.ok || disposed) return;
+                const html = await res.text();
+                const panel = $("#codex-log");
+                if (seq !== codexSeq || disposed || !panel) return;
+                const fresh = new DOMParser().parseFromString(html, "text/html").getElementById("codex-log");
+                // 같은 내용이면 두어 선택 · 말풍선 자리가 흔들리지 않게 (지휘자 K5)
+                if (fresh && fresh.innerHTML !== panel.innerHTML) panel.replaceWith(fresh);
+            } catch { } // 다음 주기 · 턴 끝에 다시 받는다
+        }
         // 진행 단계 (3차 b): 지휘자 할 일 목록. 요약 줄은 "단계 끝난 수/전체 · 지금: 하는 단계" — 펼치면 목록. 곁칸 단계 탭에도 같은 목록 (3차 c).
         const stepsBox = $("#steps");
         function renderSteps(steps) {
@@ -1982,6 +2006,7 @@
                 for (const v of termViews.values()) v.term.dispose(); // 프로세스는 그대로 — 방을 다시 열면 버퍼로 다시 그린다
                 termViews.clear();
                 clearInterval(ticker);
+                clearInterval(codexTimer);
                 clearTimeout(readTimer);
                 clearTimeout(faceTimer);
                 document.removeEventListener("visibilitychange", markRead);

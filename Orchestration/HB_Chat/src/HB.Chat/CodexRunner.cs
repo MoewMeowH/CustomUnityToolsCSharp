@@ -27,12 +27,29 @@ public static class CodexRunner
     private const string UnstableWarning = "Under-development features enabled";
 
     /// <summary>
+    /// 구성원 실행에서 끄는 Codex 기능 — 셸 샌드박스(-s read-only) 밖에서 도는 도구 (sol 리뷰 ②-P1: 읽기 전용 약속을 우회할 수 있음).
+    /// apps = ChatGPT에 연결한 앱(커넥터, MCP로 붙음) · plugins · 브라우저 · 컴퓨터 조작.
+    /// </summary>
+    public static readonly IReadOnlyList<string> DisabledFeatures =
+        ["apps", "plugins", "remote_plugin", "browser_use", "browser_use_external", "computer_use", "in_app_browser"];
+
+    /// <summary>
     /// codex exec 인자. instructions(역할 · 규칙)는 새 스레드에만 developer_instructions로 — resume에서 바꾼 값은 먹지 않는다(0단계 실측 ②),
     /// 그때는 부르는 쪽이 프롬프트 앞에 "규칙 바뀜" 안내를 붙인다.
+    /// 사용자 설정(~/.codex/config.toml)은 읽지 않는다 — 그 안의 MCP 서버 · 훅이 붙지 않게 (-c mcp_servers={}로는 지워지지 않음, 실측).
+    /// 그래서 Windows 샌드박스도 여기서 고른다: unelevated (MXC는 git이 작업 폴더로 chdir 하지 못해 git status/diff가 실패 — 2026-10-29 실측).
+    /// 인증은 설정을 무시해도 CODEX_HOME에서 읽는다.
     /// </summary>
     public static IReadOnlyList<string> Args(string workspace, string? model, string? effort, string? instructions, string? thread)
     {
-        var args = new List<string> { "exec", "--json", "-s", "read-only", "--skip-git-repo-check", "-C", workspace };
+        var args = new List<string>
+        {
+            "exec", "--json", "--ignore-user-config", "-c", "windows.sandbox=\"unelevated\"",
+            // 서버 쪽 웹 검색도 끈다 — 기능 플래그가 아니라 --disable로는 꺼지지 않는다 (sub_security 9b151bf46c C2, 0.165.0에서 받아들임 실측)
+            "-c", "web_search=\"disabled\"",
+            "-s", "read-only", "--skip-git-repo-check", "-C", workspace,
+        };
+        foreach (var feature in DisabledFeatures) args.AddRange(["--disable", feature]);
         if (!string.IsNullOrWhiteSpace(model)) args.AddRange(["-m", model]);
         if (!string.IsNullOrWhiteSpace(effort)) args.AddRange(["-c", "model_reasoning_effort=" + TomlString(effort)]);
         if (thread is null && !string.IsNullOrWhiteSpace(instructions)) args.AddRange(["-c", "developer_instructions=" + TomlString(instructions)]);
@@ -62,7 +79,20 @@ public static class CodexRunner
     }
 
     /// <summary>한 턴 결과: 스레드 ID(이어 가기) · 마지막 답 · 실행한 명령 수 · 토큰.</summary>
-    public sealed record Outcome(RunResult Result, string? Thread, int Commands, long? InputTokens, long? OutputTokens);
+    public sealed record Outcome(RunResult Result, string? Thread, int Commands, long? InputTokens, long? OutputTokens)
+    {
+        /// <summary>
+        /// resume할 스레드를 Codex가 찾지 못했다 (실측: JSON 이벤트 없이 stderr "no rollout found for thread id …", 종료 코드 1).
+        /// 이때만 스레드를 잊는다 — 시작 실패 · 설정 오류 · 시간 초과까지 잊으면 멀쩡한 대화를 버렸다 (sol 리뷰 ②-P2).
+        /// </summary>
+        public bool ThreadMissing { get; init; }
+    }
+
+    /// <summary>스레드를 찾지 못했다는 Codex 문구 (0.165.0 실측).</summary>
+    private const string ThreadMissingText = "no rollout found";
+
+    /// <summary>부모 codex가 끝난 뒤 자손이 출력 파이프를 물고 남아 있을 때 기다리는 시간 — 넘으면 Job째 끝낸다 (sol 리뷰 ②-P2).</summary>
+    public static readonly TimeSpan ExitGrace = TimeSpan.FromSeconds(3);
 
     /// <summary>한 턴 실행. 이벤트 줄은 onLine으로 넘긴다(과정 보기 기록). ct 취소면 프로세스 트리를 끝내고 Cancelled.</summary>
     public static async Task<Outcome> RunAsync(ProcessSpec spec, string prompt, Action<string>? onLine, CancellationToken ct)
@@ -93,9 +123,14 @@ public static class CodexRunner
             return Failed($"Codex 실행 실패: {ex.Message}");
         }
 
+        // 이 턴의 자손까지 묶는다 — Kill(entireProcessTree)는 부모가 이미 끝났으면 자손을 찾지 못한다 (sol 리뷰 ②-P2).
+        // stdin을 쓰기 전에 넣는다: codex는 프롬프트를 다 받기 전에는 명령을 띄우지 않는다. 끝(Dispose)에 남은 자손을 모두 끝낸다.
+        using var job = ProcessJob.Turn.Attach(proc);
+        void KillAll() { Kill(proc); job?.Terminate(); }
         using var timeout = new CancellationTokenSource(TurnTimeout);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
-        using var kill = linked.Token.Register(() => Kill(proc));
+        using var kill = linked.Token.Register(KillAll);
+        _ = ReapAsync(proc, job);
         var stderr = ReadTail(proc.StandardError, 4000);
         try
         {
@@ -148,12 +183,12 @@ public static class CodexRunner
         }
         catch (OperationCanceledException) { }
         try { await proc.WaitForExitAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10)); }
-        catch (TimeoutException) { Kill(proc); }
+        catch (TimeoutException) { KillAll(); }
 
         // 자손이 stderr 파이프를 물고 남아도 방이 바쁨으로 굳지 않게 — 상한 뒤에는 기다리지 않는다 (59063d4106 C6)
         string tail;
         try { tail = await stderr.WaitAsync(TimeSpan.FromSeconds(5)); }
-        catch (TimeoutException) { tail = ""; Kill(proc); }
+        catch (TimeoutException) { tail = ""; KillAll(); }
         if (ct.IsCancellationRequested)
             return new Outcome(new RunResult(false, true, "중지됨", null, null, thread, 0, 0, tail), thread, commands, input, output);
         if (timeout.IsCancellationRequested)
@@ -163,7 +198,28 @@ public static class CodexRunner
         // stderr 끝 줄은 실패 이유가 있어도 붙인다 (예: resume할 스레드가 없음 — "no rollout found", JSON 이벤트 없이 끝남. 59063d4106 C9)
         var why = (error ?? (proc.HasExited ? $"Codex가 답 없이 끝났습니다 (종료 코드 {proc.ExitCode})" : "Codex가 답 없이 끝났습니다"))
                   + (string.IsNullOrWhiteSpace(tail) ? "" : ": " + LastLine(tail));
-        return new Outcome(new RunResult(false, false, why, null, null, thread, 0, 0, tail), thread, commands, input, output);
+        // thread.started 없이 끝남 = 프롬프트가 모델에 가지 않았다 → NotStarted: 단톡방이 본 줄 수를 되돌려 다음 말에 다시 붙인다
+        // (Codex sol 리뷰 C1 — 스레드를 유지하는 시작 전 실패에서 그 말에만 실린 대화가 영영 빠졌다)
+        return new Outcome(new RunResult(false, false, why, null, null, thread, 0, 0, tail) { NotStarted = thread is null }, thread, commands, input, output)
+        {
+            ThreadMissing = thread is null && (error + "\n" + tail).Contains(ThreadMissingText, StringComparison.OrdinalIgnoreCase),
+        };
+    }
+
+    /// <summary>
+    /// 부모 codex가 끝났는데 자손이 stdout을 물고 있으면 읽기가 턴 상한(10분)까지 막혔다 — 끝난 뒤 <see cref="ExitGrace"/>가 지나면 Job째 끝내
+    /// 파이프를 닫는다 (sol 리뷰 ②-P2). 정상 종료면 그 전에 읽기가 끝나 있어 남은 자손만 정리된다.
+    /// </summary>
+    private static async Task ReapAsync(Process proc, ProcessJob.Turn? job)
+    {
+        if (job is null) return;
+        try
+        {
+            await proc.WaitForExitAsync(CancellationToken.None);
+            await Task.Delay(ExitGrace);
+            job.Terminate();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException or Win32Exception) { } // 턴이 먼저 끝나 정리됨
     }
 
     private static Outcome Failed(string error) => new(new RunResult(false, false, error, null, null, null, 0, 0, null) { NotStarted = true }, null, 0, null, null);

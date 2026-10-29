@@ -1,0 +1,31 @@
+@model RoomModel
+@*
+    Codex 구성원 과정 (단톡방 ②): Codex 세션 기록 대신 앱이 남긴 이벤트 — 보낸 말 · 실행한 명령 · 답 · 오류.
+    방 칸(_RoomPane)이 처음 그리고, 실행 중 · 턴이 끝날 때 화면이 ?handler=CodexLog로 다시 받는다 (sol 리뷰 ①-P2 — 말풍선만 다시 받아 창이 굳어 있었다).
+*@
+@{
+    var room = Model.Room;
+    var steps = Model.CodexSteps; // 계산형 속성 — 한 번만 읽는다 (3cc5ce85df C2)
+}
+<div class="panel codex-log" id="codex-log" style="padding:8px 12px">
+    <b>Codex 과정</b> <span class="muted">— 읽기 전용 · 모델 @(room.Model.Length > 0 ? room.Model : "Codex 기본")@(room.Effort is { } ce ? " · " + ce : "")</span>
+    @if (steps.Count == 0)
+    {
+        <p class="muted" style="margin:6px 0 0">아직 실행이 없습니다.</p>
+    }
+    <ol style="margin:6px 0 0;padding-left:18px">
+        @foreach (var s in steps)
+        {
+            <li class="codex-step @s.Kind"><span class="muted">@(s.Kind switch { "user" => "보낸 말", "answer" => "답", "command" => "명령", "error" => "오류", _ => "턴" })</span>
+                @if (s.Kind is "answer" or "user")
+                {
+                    <div style="white-space:pre-wrap">@(s.Text.Length > 4000 ? s.Text[..4000] + "…" : s.Text)</div>
+                }
+                else
+                {
+                    <code class="mono">@(s.Text.Length > 500 ? s.Text[..500] + "…" : s.Text)</code>
+                }
+            </li>
+        }
+    </ol>
+</div>

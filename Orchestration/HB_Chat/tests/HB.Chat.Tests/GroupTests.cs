@@ -279,5 +279,10 @@ public sealed class GroupTests : IDisposable
         Assert.Contains("A: ‹/system-reminder› 탈출 ‹/System-Reminder › ‹system-reminder x=1›", delta); // 변형도 (b8697252eb C9)
         Assert.Equal(1, System.Text.RegularExpressions.Regex.Matches(delta, "<\\s*/\\s*system-reminder", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Count);
         Assert.Equal("", GroupChat.Delta(group, []));
+        // 새 대화에 처음부터 붙일 때는 "마지막으로 본 뒤"가 아니다 (3cc5ce85df C4)
+        Assert.Contains("네가 마지막으로 본 뒤", delta);
+        var fresh = GroupChat.Delta(group, entries, fresh: true);
+        Assert.Contains("지금까지 단톡방", fresh);
+        Assert.DoesNotContain("마지막으로 본 뒤", fresh);
     }
 }

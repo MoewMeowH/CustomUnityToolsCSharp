@@ -24,8 +24,24 @@ public static class ProcessJob
         if (!OperatingSystem.IsWindows()) return null;
         if (_job != IntPtr.Zero) return null;
 
+        var job = NewKillOnCloseJob(out var error);
+        if (job == IntPtr.Zero) return error;
+        if (!AssignProcessToJobObject(job, System.Diagnostics.Process.GetCurrentProcess().Handle))
+            return Fail(job, "AssignProcessToJobObject");
+        _job = job;
+        return null;
+    }
+
+    /// <summary>"핸들이 닫히면 모두 끝냄" Job을 만든다. 실패면 IntPtr.Zero와 이유.</summary>
+    private static IntPtr NewKillOnCloseJob(out string? error)
+    {
+        error = null;
         var job = CreateJobObject(IntPtr.Zero, null);
-        if (job == IntPtr.Zero) return $"CreateJobObject 실패: {new Win32Exception(Marshal.GetLastWin32Error()).Message}";
+        if (job == IntPtr.Zero)
+        {
+            error = $"CreateJobObject 실패: {new Win32Exception(Marshal.GetLastWin32Error()).Message}";
+            return IntPtr.Zero;
+        }
 
         var info = new JobObjectExtendedLimit { Basic = new JobObjectBasicLimit { LimitFlags = JobObjectLimitKillOnJobClose } };
         var size = Marshal.SizeOf<JobObjectExtendedLimit>();
@@ -34,17 +50,62 @@ public static class ProcessJob
         {
             Marshal.StructureToPtr(info, ptr, false);
             if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, ptr, (uint)size))
-                return Fail(job, "SetInformationJobObject");
+            {
+                error = Fail(job, "SetInformationJobObject");
+                return IntPtr.Zero;
+            }
         }
         finally
         {
             Marshal.FreeHGlobal(ptr);
         }
+        return job;
+    }
 
-        if (!AssignProcessToJobObject(job, System.Diagnostics.Process.GetCurrentProcess().Handle))
-            return Fail(job, "AssignProcessToJobObject");
-        _job = job;
-        return null;
+    /// <summary>
+    /// 실행 하나(Codex 구성원 한 턴)의 자손까지 끝내는 Job — 앱 Job 안의 중첩 Job이다 (sol 리뷰 ②-P2).
+    /// Kill(entireProcessTree)는 부모가 이미 끝났으면 자손을 찾지 못한다. 띄운 직후 넣고, <see cref="Terminate"/>나 Dispose(KILL_ON_JOB_CLOSE)로
+    /// 남은 프로세스를 모두 끝낸다. 넣지 못하면(Windows가 아님 · 실패) null — 그때는 트리 종료만 남는다.
+    /// </summary>
+    public sealed class Turn : IDisposable
+    {
+        private readonly Lock _gate = new();
+        private IntPtr _handle;
+
+        private Turn(IntPtr handle) => _handle = handle;
+
+        public static Turn? Attach(System.Diagnostics.Process process)
+        {
+            if (!OperatingSystem.IsWindows()) return null;
+            var job = NewKillOnCloseJob(out _);
+            if (job == IntPtr.Zero) return null;
+            try
+            {
+                if (AssignProcessToJobObject(job, process.Handle)) return new Turn(job);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or Win32Exception) { } // 이미 끝난 프로세스
+            CloseHandle(job);
+            return null;
+        }
+
+        /// <summary>Job 안의 프로세스를 모두 끝낸다 (부모가 먼저 끝났어도). 닫힌 뒤면 아무것도 하지 않는다.</summary>
+        public void Terminate()
+        {
+            lock (_gate)
+            {
+                if (_handle != IntPtr.Zero) TerminateJobObject(_handle, 1);
+            }
+        }
+
+        public void Dispose()
+        {
+            lock (_gate)
+            {
+                if (_handle == IntPtr.Zero) return;
+                CloseHandle(_handle);
+                _handle = IntPtr.Zero;
+            }
+        }
     }
 
     /// <summary>이 프로세스가 이 앱의 Job 안에 있는지 (테스트 · 확인용).</summary>
@@ -103,6 +164,9 @@ public static class ProcessJob
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool IsProcessInJob(IntPtr process, IntPtr job, out bool result);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool TerminateJobObject(IntPtr job, uint exitCode);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool CloseHandle(IntPtr handle);

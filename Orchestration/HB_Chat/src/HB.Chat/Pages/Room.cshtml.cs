@@ -351,6 +351,14 @@ public sealed class RoomModel(
         return Page();
     }
 
+    /// <summary>Codex 구성원 과정 창 (_CodexLog) — 화면이 실행 중 · 턴 끝에 다시 받는다 (sol 리뷰 ①-P2). Codex 방이 아니면 404.</summary>
+    public IActionResult OnGetCodexLog(string id)
+    {
+        Response.Headers.CacheControl = "no-store";
+        if (!Load(id) || Room.Engine != RoomEngines.Codex) return NotFound();
+        return Partial("_CodexLog", this);
+    }
+
     public IActionResult OnGetPane(string id)
     {
         Response.Headers.CacheControl = "no-store";

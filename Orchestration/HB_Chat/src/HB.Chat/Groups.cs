@@ -341,14 +341,18 @@ public sealed partial class GroupChat
 
         // 본 줄 수는 잠금 안에서 다시 읽는다 — 같은 순간의 답 게시가 올린 값을 놓치지 않게 (지휘자 K2)
         var member = (_store.Get(groupId) ?? group).Members.First(m => m.Name == parsed.Names[0]);
-        var prompt = Delta(group, [.. _log.Read(groupId).Where(e => e.Line >= member.SeenUpTo)]) + text;
+        // 스레드가 없는 Codex 구성원(첫 말 · 사라진 스레드를 잊은 뒤)은 새 대화라 앞서 본 것을 모른다 — 처음부터 붙인다(길면 Delta가 앞을 줄임).
+        // 안 그러면 스레드를 잊은 뒤 이전 단톡방 대화가 영영 빠졌다 (sol 리뷰 ②-P2)
+        var fresh = _store.Get(member.RoomId) is { Engine: RoomEngines.Codex, CodexThread: null };
+        var from = fresh ? 0 : member.SeenUpTo;
+        var prompt = Delta(group, [.. _log.Read(groupId).Where(e => e.Line >= from)], fresh) + text;
         // 붙인 대화까지 합친 길이로 미리 막는다 — 사용자 줄을 남긴 뒤 자식 방이 거절하면 같은 말이 계속 실패했다 (b8697252eb C2)
         if (prompt.Length > RoomHub.MaxPromptChars)
             return $"앞 대화를 붙이면 너무 깁니다 ({prompt.Length:N0}자, 상한 {RoomHub.MaxPromptChars:N0}자) — 말을 줄여 주세요.";
         // 기다림 표시를 줄을 쓰기 전에 — 그 사이 다른 탭이 새 말을 받아도 "답이 없음" 줄을 그리지 않게 (b8697252eb C10)
-        _pending[member.RoomId] = new Pending(-1, DateTimeOffset.UtcNow);
+        _pending[member.RoomId] = new Pending(-1, DateTimeOffset.UtcNow, member.SeenUpTo);
         var user = _log.Append(groupId, new GroupEntry(0, DateTimeOffset.Now, GroupEntryKind.User, null, text) { To = [member.Id] });
-        _pending[member.RoomId] = new Pending(user.Line, DateTimeOffset.UtcNow);
+        _pending[member.RoomId] = new Pending(user.Line, DateTimeOffset.UtcNow, member.SeenUpTo);
         if (_hub.Send(member.RoomId, prompt) is { } error)
         {
             _pending.TryRemove(member.RoomId, out _);
@@ -361,8 +365,11 @@ public sealed partial class GroupChat
         return null;
     }
 
-    /// <summary>단톡방에서 보낸 실행 — 그 사용자 말 줄(쓰기 전이면 -1)과 보낸 시각.</summary>
-    private sealed record Pending(int Line, DateTimeOffset At);
+    /// <summary>
+    /// 단톡방에서 보낸 실행 — 그 사용자 말 줄(쓰기 전이면 -1) · 보낸 시각 · 보내기 전 본 줄 수
+    /// (말이 구성원에게 가지 않고 끝나면 되돌린다 — Codex sol 리뷰 C1).
+    /// </summary>
+    private sealed record Pending(int Line, DateTimeOffset At, int SeenBefore);
 
     /// <summary>구성원 상태 (화면이 다시 붙을 때 칩을 맞춘다 — b8697252eb C4).</summary>
     public IReadOnlyList<(string MemberId, string? State)> States(Room group) =>
@@ -423,7 +430,8 @@ public sealed partial class GroupChat
     /// 구성원에게 보낼 "마지막으로 본 뒤의 대화" (system-reminder — 자식 방 화면 · 검색에는 걷혀 보이지 않음). 길면 앞쪽을 줄인다.
     /// 대화 글 속 system-reminder 표식은 바꿔 블록이 일찍 닫히지 않게 한다.
     /// </summary>
-    public static string Delta(Room group, IReadOnlyList<GroupEntry> entries)
+    /// <param name="fresh">새 대화(스레드 없는 Codex 구성원)에 처음부터 붙일 때 — 머리말을 "지금까지 오간 말"로 (sub_self 3cc5ce85df C4).</param>
+    public static string Delta(Room group, IReadOnlyList<GroupEntry> entries, bool fresh = false)
     {
         if (entries.Count == 0) return "";
         string Who(GroupEntry e) => e.Kind switch
@@ -437,7 +445,9 @@ public sealed partial class GroupChat
         while (lines.Count > 1 && lines.Sum(l => l.Length + 1) > DeltaMaxChars) { lines.RemoveAt(0); skipped++; }
         var body = string.Join('\n', lines);
         if (body.Length > DeltaMaxChars) body = "…" + body[^DeltaMaxChars..];
-        return "<system-reminder>\nHB_Chat 단톡방 안내 (사용자 글이 아님): 네가 마지막으로 본 뒤 단톡방 '" + Neutralize(group.Title ?? "") + "'에 오간 말이다" +
+        return "<system-reminder>\nHB_Chat 단톡방 안내 (사용자 글이 아님): " +
+               (fresh ? "지금까지 단톡방 '" + Neutralize(group.Title ?? "") + "'에 오간 말이다 (이 대화에서는 처음 받는다)"
+                      : "네가 마지막으로 본 뒤 단톡방 '" + Neutralize(group.Title ?? "") + "'에 오간 말이다") +
                (skipped > 0 ? $" (앞 말 {skipped}개 생략)" : "") + ". 사용자의 이번 말은 이 안내 뒤에 있다.\n" + body + "\n</system-reminder>\n";
     }
 
@@ -458,7 +468,10 @@ public sealed partial class GroupChat
         try
         {
             var posted = _log.Append(groupId, new GroupEntry(0, DateTimeOffset.Now, GroupEntryKind.Member, memberId, text) { ReplyTo = userLine, Failed = !result.Ok });
-            SetSeen(groupId, memberId, posted.Line + 1);
+            // 말이 구성원에게 가지 않았다(띄우기 전 막힘 · Codex 스레드 시작 전 실패): 보내기 전 본 줄 수로 되돌려 다음 말에 다시 붙인다.
+            // 안 그러면 이 말에만 실렸던 다른 구성원의 대화가 영영 빠졌다 (Codex sol 리뷰 C1)
+            if (result.NotStarted) RestoreSeen(groupId, memberId, pending.SeenBefore);
+            else SetSeen(groupId, memberId, posted.Line + 1);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException) { }
         Announce(groupId);
@@ -480,11 +493,11 @@ public sealed partial class GroupChat
                 {
                     try
                     {
-                        var posted = _log.Append(groupId, new GroupEntry(0, DateTimeOffset.Now, GroupEntryKind.Member, memberId, "(답 없이 끝남)")
+                        _log.Append(groupId, new GroupEntry(0, DateTimeOffset.Now, GroupEntryKind.Member, memberId, "(답 없이 끝남)")
                         {
                             ReplyTo = pending.Line < 0 ? null : pending.Line, Failed = true,
                         });
-                        SetSeen(groupId, memberId, posted.Line + 1);
+                        RestoreSeen(groupId, memberId, pending.SeenBefore); // 실행이 시작되지 않았다 — 말이 가지 않음 (Codex sol 리뷰 C1)
                     }
                     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException) { }
                     _hub.Announce(groupId, new LiveEvent("group"));
@@ -502,6 +515,16 @@ public sealed partial class GroupChat
             _store.Update(groupId, r => r with { Members = [.. r.Members.Select(m => m.Id == memberId && m.SeenUpTo < seen ? m with { SeenUpTo = seen } : m)] });
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException) { } // 다음 말에 조금 더 보낼 뿐
+    }
+
+    /// <summary>본 줄 수를 그 값으로 내린다 (보낸 말이 가지 않았을 때). 올리지는 않는다.</summary>
+    private void RestoreSeen(string groupId, string memberId, int seen)
+    {
+        try
+        {
+            _store.Update(groupId, r => r with { Members = [.. r.Members.Select(m => m.Id == memberId && m.SeenUpTo > seen ? m with { SeenUpTo = seen } : m)] });
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException) { } // 그 말 앞 대화가 빠질 뿐
     }
 
     private void Announce(string groupId)

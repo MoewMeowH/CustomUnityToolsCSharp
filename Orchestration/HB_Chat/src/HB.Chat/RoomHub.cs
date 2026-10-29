@@ -1157,8 +1157,10 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         // 규칙을 받은 때: 새 스레드가 시작됐거나(developer_instructions) 안내를 붙인 턴이 성공
         var delivered = thread is null && outcome.Thread is not null || noted && outcome.Result.Ok;
         // 이어 가던 스레드를 Codex가 찾지 못함(세션 기록이 지워짐 · 계정 바뀜 — 실측: 이벤트 없이 "no rollout found", 종료 코드 1):
-        // 스레드를 잊고 다음 말부터 새로 시작한다 — 안 그러면 이 구성원은 계속 실패했다 (59063d4106 C3)
-        var lost = thread is not null && outcome.Thread is null && !outcome.Result.Ok && !outcome.Result.Cancelled;
+        // 스레드를 잊고 다음 말부터 새로 시작한다 — 안 그러면 이 구성원은 계속 실패했다 (59063d4106 C3).
+        // 그 문구일 때만 — 시작 실패 · 설정 오류 · 시간 초과까지 잊으면 멀쩡한 대화를 버렸다 (sol 리뷰 ②-P2). 새 대화의 첫 말에는
+        // 단톡방 대화를 처음부터 다시 붙인다 (GroupChat.SendLocked — 스레드 없는 Codex 구성원)
+        var lost = thread is not null && outcome.ThreadMissing && !outcome.Result.Ok && !outcome.Result.Cancelled;
         var result = lost ? outcome.Result with { Error = outcome.Result.Error + " — 이어 가던 Codex 대화를 찾지 못해 다음 말부터 새 대화로 시작합니다." } : outcome.Result;
         try
         {

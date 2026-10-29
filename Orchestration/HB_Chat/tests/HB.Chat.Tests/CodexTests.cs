@@ -76,7 +76,12 @@ public sealed class CodexTests : IDisposable
     public void Args_ReadOnly_NewThreadHasInstructions_ResumeHasNot()
     {
         var first = CodexRunner.Args(@"C:\ws", "gpt-test", "high", "규칙 \"따옴표\"\n둘째 줄 \\ 끝", null);
-        Assert.Equal(["exec", "--json", "-s", "read-only", "--skip-git-repo-check", "-C", @"C:\ws"], first.Take(7));
+        // 사용자 설정(MCP 서버 · 훅)을 읽지 않고 샌드박스를 직접 고른다 · 셸 샌드박스 밖 도구는 끈다 (sol 리뷰 ②-P1)
+        Assert.Equal(["exec", "--json", "--ignore-user-config", "-c", "windows.sandbox=\"unelevated\"", "-c", "web_search=\"disabled\"",
+            "-s", "read-only", "--skip-git-repo-check", "-C", @"C:\ws"], first.Take(12));
+        Assert.Equal(7, CodexRunner.DisabledFeatures.Count);
+        foreach (var feature in CodexRunner.DisabledFeatures) // 목록 전부 (3cc5ce85df C3)
+            Assert.Contains(first.Select((a, i) => (a, i)), p => p.a == feature && first[p.i - 1] == "--disable");
         Assert.Contains("gpt-test", first);
         Assert.Contains("model_reasoning_effort=\"high\"", first);
         Assert.Contains("developer_instructions=\"규칙 \\\"따옴표\\\"\\n둘째 줄 \\\\ 끝\"", first);
@@ -85,6 +90,7 @@ public sealed class CodexTests : IDisposable
 
         var next = CodexRunner.Args(@"C:\ws", null, null, "규칙", "thread-1");
         Assert.Equal(["resume", "thread-1", "-"], next.TakeLast(3));
+        Assert.Contains("--ignore-user-config", next);
         Assert.DoesNotContain(next, a => a.StartsWith("developer_instructions", StringComparison.Ordinal)); // resume에서는 먹지 않음 (0단계 실측)
         Assert.DoesNotContain("-m", next);
         Assert.Equal("\"\\u0001\\t\"", CodexRunner.TomlString("\u0001\t"));
@@ -163,7 +169,7 @@ public sealed class CodexTests : IDisposable
         Assert.Null(_groups.Send(group!.Id, "@X 첫 말"));
         var first = await AnswerAsync(group.Id, "X", -1);
         Assert.False(first.Failed);
-        Assert.Contains("resume=False instr=True model=gpt-test effort=low reminders=0 last=@X 첫 말", first.Text);
+        Assert.Contains("resume=False instr=True model=gpt-test effort=low reminders=0 delta=0 last=@X 첫 말", first.Text);
         var thread = _store.Get(group.Members[1].RoomId)!.CodexThread;
         Assert.NotNull(thread);
 
@@ -243,5 +249,58 @@ public sealed class CodexTests : IDisposable
         Assert.Null(_groups.Send(group.Id, "@X 넷"));
         var fresh = await AnswerAsync(group.Id, "X", lost.Line);
         Assert.Contains("resume=False instr=True", fresh.Text);
+        // 새 대화라 앞서 본 단톡방 대화를 처음부터 다시 받는다 — 본 줄 수(SeenUpTo)는 이미 앞이었다 (sol 리뷰 ②-P2)
+        Assert.Contains("reminders=1", fresh.Text);
+        Assert.Contains($"delta={lost.Line + 1} ", fresh.Text); // 0 ~ lost.Line 줄 전부 (이번 말 '넷'은 안내 밖)
+    }
+
+    /// <summary>스레드가 시작되기 전 실패(설정 오류 등)는 이어 가던 스레드를 잊지 않는다 — "no rollout found"일 때만 (sol 리뷰 ②-P2).</summary>
+    [Fact]
+    public async Task CodexMember_CrashBeforeThread_KeepsThread()
+    {
+        _settings.Save(["ws"]);
+        var (group, _) = _groups.Create("ws", PermissionLevel.Read, "opus", null, "팀", [new GroupMemberSpec("A", ""), new GroupMemberSpec("X", "", RoomEngines.Codex)]);
+        var x = group!.Members[1];
+        Assert.Null(_groups.Send(group.Id, "@X 하나"));
+        var one = await AnswerAsync(group.Id, "X", -1);
+        var thread = _store.Get(x.RoomId)!.CodexThread;
+        Assert.NotNull(thread);
+
+        Assert.Null(_groups.Send(group.Id, "@X crash"));
+        var crashed = await AnswerAsync(group.Id, "X", one.Line);
+        Assert.True(crashed.Failed);
+        Assert.Contains("failed to load config", crashed.Text);
+        Assert.DoesNotContain("새 대화로 시작", crashed.Text);
+        Assert.Equal(thread, _store.Get(x.RoomId)!.CodexThread);
+
+        // 말이 가지 않았으니 본 줄 수를 되돌린다 — 다음 말에 그 말(crash)과 실패 줄을 다시 붙인다 (Codex sol 리뷰 C1)
+        Assert.Equal(one.Line + 1, _store.Get(group.Id)!.Members[1].SeenUpTo);
+        Assert.Null(_groups.Send(group.Id, "@X 셋"));
+        var next = await AnswerAsync(group.Id, "X", crashed.Line);
+        Assert.Contains("resume=True", next.Text);
+        Assert.Contains("delta=2 ", next.Text);
+    }
+
+    /// <summary>
+    /// codex가 끝난 뒤 자손이 출력 파이프를 물고 남으면 턴이 상한까지 막혔다 — 잠깐 뒤 Job째 끝내 바로 끝나고 자손도 남지 않는다 (sol 리뷰 ②-P2).
+    /// </summary>
+    [Fact]
+    public async Task CodexMember_ChildHoldingOutput_EndsTurnAndKillsChild()
+    {
+        _settings.Save(["ws"]);
+        var (group, _) = _groups.Create("ws", PermissionLevel.Read, "opus", null, "팀", [new GroupMemberSpec("A", ""), new GroupMemberSpec("X", "", RoomEngines.Codex)]);
+        var started = DateTime.Now;
+        var sw = Stopwatch.StartNew();
+        Assert.Null(_groups.Send(group!.Id, "@X orphan"));
+        var answer = await AnswerAsync(group.Id, "X", -1); // 30초 상한 — 자손(ping 40초)을 기다리면 넘는다
+        Assert.False(answer.Failed);
+        Assert.Contains("codex: resume=False", answer.Text);
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(20), $"턴이 {sw.Elapsed.TotalSeconds:0}초 걸림");
+        static bool Mine(Process p, DateTime since)
+        {
+            try { return !p.HasExited && p.StartTime >= since.AddSeconds(-1); }
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { return false; }
+        }
+        Assert.DoesNotContain(Process.GetProcessesByName("PING"), p => Mine(p, started));
     }
 }
