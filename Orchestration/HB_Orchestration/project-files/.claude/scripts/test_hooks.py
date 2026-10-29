@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import unicodedata
 
 sys.stdout.reconfigure(encoding='utf-8')
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -336,7 +337,34 @@ try:
     open(old, 'w', encoding='utf-8').write('x')
     os.utime(old, (0, 0))
     expect('H3 예전 계획서만', h3('review_main'), 2)
-    open(os.path.join(plans, f'{datetime.date.today().isoformat()}_오늘.md'), 'w', encoding='utf-8').write('x')
+    # 직접 코딩 흐름: [plan:파일] 태그면 날짜와 상관없이 그 파일이 있는지만 · 7일 안의 이름 · 고친 날
+    expect('H3 오래된 계획서 + [plan:태그]', h3('review_main', '[plan:2026-01-01_예전.md] 이유'), 0)
+    expect('H3 ownReview 태그 뒤의 [plan:태그]', h3('review_main', '이유 [PLAN:2026-01-01_예전.md]'), 0)
+    expect('H3 [plan:태그]의 파일이 없음', h3('review_main', '[plan:없는-계획.md] 이유'), 2, '[plan:')
+    expect('H3 [plan:태그]에 경로는 형식 오류', h3('review_main', '[plan:../x/2026-01-01_예전.md] 이유'), 2, '형식')
+    expect('H3 [plan:태그]에 .md 빠짐은 형식 오류', h3('review_main', '[plan:2026-01-01_예전] 이유'), 2, '형식')
+    expect('H3 [plan:태그] 뒤 공백은 형식 오류', h3('review_main', '[plan:2026-01-01_예전.md ] 이유'), 2, '형식')
+    nfd = unicodedata.normalize('NFD', '2026-01-01_예전.md')
+    expect('H3 [plan:태그] NFD로 써도 같은 계획서', h3('review_main', f'[plan:{nfd}] 이유'), 0)
+    today = datetime.date.today()
+
+    def dated(days: int, name: str, mtime_days: int | None = None) -> str:
+        path = os.path.join(plans, f'{(today - datetime.timedelta(days=days)).isoformat()}_{name}.md')
+        open(path, 'w', encoding='utf-8').write('x')
+        when = (datetime.datetime.now() - datetime.timedelta(days=mtime_days)).timestamp() if mtime_days is not None else 0
+        os.utime(path, (when, when))
+        return path
+
+    p = dated(6, '엿새')
+    expect('H3 6일 전 날짜 이름', h3('review_main'), 0)
+    os.remove(p)
+    p = dated(7, '이레')
+    expect('H3 7일 전 날짜 이름은 막음', h3('review_main'), 2, '[plan:')
+    os.remove(p)
+    p = dated(400, '고친지-사흘', mtime_days=3)
+    expect('H3 이름은 오래돼도 사흘 전에 고침', h3('review_main'), 0)
+    os.remove(p)
+    open(os.path.join(plans, f'{today.isoformat()}_오늘.md'), 'w', encoding='utf-8').write('x')
     expect('H3 오늘 계획서 (깊이 4)', h3('review_main'), 0)
     expect('H3 review_high', h3('review_high'), 0)
     expect('H3 예전 이름 review는 검사 안 함 (서버가 거절)', h3('review'), 0)
@@ -344,6 +372,9 @@ try:
     good = '## 지적\n- C1 [major] a.cs:1 — 문제\n## 자료 부족\n- 없음\n## 읽은 파일\n- subagent_in/2026-10-19_x/a.cs:1-10\n'
     tag = '[ownReview:self-reviewer] 이유'
     expect('H4 원문 형식 (한글, UTF-8)', h3('review_main', tag, good), 0)
+    # 실제 /cross-review 모양: [ownReview:…] 원문이 H4를 지난 뒤 H3가 [plan:] 태그로 본다 (오늘 계획서가 있어도 태그가 우선)
+    expect('H3+H4 ownReview 태그 + [plan:있는 파일]', h3('review_main', tag + ' [plan:2026-01-01_예전.md]', good), 0)
+    expect('H3+H4 ownReview 태그 + [plan:없는 파일]', h3('review_main', tag + ' [plan:없는.md]', good), 2, '[plan:없는.md]')
     expect('H4 키 이름 own_review', h3('review_main', tag, good, key='own_review'), 0)
     expect('H4 요약 (읽은 파일 없음)', h3('review_main', tag, '## 지적\n- C1 요약\n(상세는 첫 호출과 같다)'), 2, "'## 읽은 파일'")
     expect('H4 폴더 밖 읽음', h3('review_main', tag, good.replace('subagent_in/2026-10-19_x/a.cs', 'docs/worklog.md')), 2, 'subagent_in/ 밖')

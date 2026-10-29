@@ -13,6 +13,7 @@
 * 리뷰 (`/self-review` · `/cross-review`): 50줄 이상 변경, 스레딩/비동기/메모리 관련 변경, 사용자가 교차 리뷰를 요청했을 때 — **자동으로 부르지 않고 사용자에게 묻는다**.
   * 선택지: `/self-review`(지휘자 + API 리뷰어, 고른 파일만 · 싸고 빠름) · `/self-review sub`(서브에이전트가 저장소 추적 사본에서 직접 찾음 — 구독 사용량) · `/cross-review`(+ 외부 `review_main`, 중요한 변경은 `/cross-review high` = `review_high`) · 리뷰 없음. 변경 성격(단순 이동·이름 변경·문서·테스트만 / 비용 계산·보안·직렬화·스레딩 같은 위험 영역)을 한 줄로 보이고 추천을 붙인다.
   * 중요도에 따른 추천: 작은 · 한곳 변경은 `/self-review`, 여러 파일 · 프로젝트에 걸치거나 호출부 · 설정까지 따라가야 하는 변경(구조 · 상태 · 경로 · 설정 해석)은 `/self-review sub`, 위험 영역 · 되돌리기 어려운 변경은 `/cross-review`.
+  * 사용자가 직접 짠 코드(`/work-order human` 방향서 = `구현: 사용자` 계획서): 결함 리뷰는 위와 같이 고르고(지시서는 넣지 않음), 요구 사항 대조는 `/self-review trace <지시서>`로 따로 제안한다. 며칠 지난 작업의 `/cross-review`는 reason에 `[plan:<계획서 파일>]`.
   * 사용자가 명령을 직접 입력했으면 묻지 않는다. `review_*` 모드는 `/cross-review`로만 부른다.
 * `review_high`(sol · DeepSeek 동시): 사용자가 명시적으로 요청했거나 되돌리기 어려운 구조 변경일 때만
 * `design_lite` / `design_main` / `design_high`: 설계 결정, 두 가지 이상 방식 중 선택할 때. 가벼운 건 lite(비평), 중요한 건 main(반박 + 논리 검증), 되돌리기 어려운 건 high(다회차 토론 후 판정)

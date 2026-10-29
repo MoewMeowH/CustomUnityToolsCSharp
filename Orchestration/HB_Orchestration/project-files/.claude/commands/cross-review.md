@@ -23,6 +23,7 @@ argument-hint: [main|high] [파일/커밋 범위, 비우면 현재 미커밋 변
 3. `run_mode`를 호출한다. input: 변경 의도 · 제약(CLAUDE.md "독립성" — 검증 결과 · 결론 · 요청/계획서 원문은 넣지 않는다). context: diff 파일(CLAUDE.md "diff는 파일로")을 첫 항목으로 + 판단에 필요한 파일 (`review_main`은 바뀐 파일이면 된다 — 주변은 Codex가 찾고, 한도 소진 대체 때는 이 context가 API sol에 첨부 본문으로 간다). 리뷰는 input에 넣지 않는다.
    - `ownReview`: **서브에이전트 결과 원문만** 넣는다. 둘이면 self-reviewer 결과 뒤에 security-reviewer 결과를 그대로 이어 붙인다 (사이에 구분 줄 · 제목을 넣지 않는다 — H4가 '## 읽은 파일' 절의 '- ' 아닌 줄을 막는다).
    - `reason`: 맨 앞에 `[ownReview:self-reviewer]`(둘이면 `[ownReview:self-reviewer+security-reviewer]`)를 붙이고 부른 이유 한 줄.
+     - 그 작업의 계획서가 7일보다 오래됐으면(직접 짠 코드 등) 이유 뒤에 `[plan:<계획서 파일 이름>.md]`를 붙인다 — H3가 날짜 대신 그 파일이 docs/plans/에 있는지 본다. 형식이 틀리면(.md 빠짐 · 경로 · 공백) 막힌다.
    - 종합·판정에서 "Claude만 지적"은 두 서브에이전트가 찾고 외부가 놓친 것이다. 어느 서브에이전트의 지적인지 작업 로그에 적는다.
    - API 리뷰였으면 `ownReview`는 2단계의 응답 본문, `reason` 태그는 `[ownReview:sub_self]` · `[ownReview:sub_self+sub_security]`.
    - **`run_mode`가 실행되지 않았으면** (응답이 안전 필터에 막힘 · `[`로 시작하는 실패 · 사용자가 외부 없이 종합을 고름) API 리뷰였으면 2단계 규칙대로 `sub_*` runId에 판정을 단다. 서브에이전트였으면 그 결과가 ownReview로 남지 않는다. 종합 뒤 서브에이전트마다 `record_verdicts`를 `selfReview`(`agent`에 그 이름, `review`에 그 결과 원문)로 **따로** 부르고, `selfReview.reason` 맨 앞에 `[외부 미실행]`을 붙인다. 판정은 그 서브에이전트가 낸 지적만 그 실행에 단다 (`steps` [1]). 지휘자 추가는 self-reviewer 실행에 `steps` 없이. 원문이 막혀 못 넣으면 고쳐 쓰지 말고 멈추고 보고한다 — 대시보드 '서브에이전트 결과'에 원문이 "기록 없음"으로 남아 있다.

@@ -1,6 +1,8 @@
 """PreToolUse 훅 H3·H4 (mcp__hb-orchestration__run_mode)
 
-- H3: mode가 review_main · review_high인데 프로젝트 안 docs/plans/에 오늘 날짜 이름이거나 오늘 고친 계획서(.md)가 없으면 막는다.
+- H3: mode가 review_main · review_high인데 프로젝트 안 docs/plans/에 최근 7일 안의 날짜 이름이거나 7일 안에 고친 계획서(.md)가 없으면 막는다.
+  reason에 [plan:<계획서 파일 이름>]이 있으면 날짜 대신 그 파일이 docs/plans/에 있는지 본다 — 사용자가 며칠에 걸쳐 직접 짠 코드의
+  리뷰가 "오늘 계획서"에 막히던 것.
   CLAUDE.md "외부 에이전트 리뷰(review_* 모드)를 부르는 작업은 계획서. 없던 작업이면 리뷰 전에 만들고 '사후 작성' 표시".
   docs/plans/는 프로젝트 루트에서 깊이 4까지만 찾는다 (느려지지 않게).
 - H4: reason이 [ownReview:<서브에이전트>]로 시작하면 ownReview는 그 서브에이전트 결과 원문이어야 한다
@@ -24,6 +26,7 @@ import json
 import os
 import re
 import sys
+import unicodedata
 
 PLAN_MODES = {'review_main', 'review_high'}
 # ownReview를 쓸 수 있는 검토형 서브에이전트. 둘 이상이면 '+'로 잇고, 결과 원문도 이어 붙인다.
@@ -38,6 +41,11 @@ READ_HEAD = re.compile(r'(?m)^[ \t]{0,3}#{2,}[ \t]+읽은[ \t]*파일')
 ANY_HEAD = re.compile(r'^[ \t]{0,3}#{1,6}[ \t]')
 FINDINGS_HEAD = re.compile(r'(?m)^[ \t]{0,3}#{1,6}[ \t]+지적')  # '# 지적'도 (/self-review security ddb47044d1 C6)
 MAX_DEPTH = 4
+PLAN_DAYS = 7
+# reason 안 어디든 [plan:<파일 이름>.md] — 경로 구분자 · ':' · 앞뒤 공백은 받지 않는다 (docs/plans/ 안의 이름만)
+PLAN_TAG = re.compile(r'\[plan:([^\]\\/:\s][^\]\\/:]*?\.md)\]', re.IGNORECASE)
+# 형식이 틀린 태그(.md 빠짐 · 경로 · 공백)를 조용히 무시하면 날짜 검사로 통과해, 지정한 계획서가 확인된 줄 알게 된다 (40a070a849 C5)
+PLAN_TAG_START = re.compile(r'\[plan:', re.IGNORECASE)
 
 
 def deny(reason: str) -> None:
@@ -56,18 +64,35 @@ def plan_dirs(root: str):
             dirs[:] = []
 
 
-def has_today_plan(root: str, today: datetime.date) -> bool:
-    prefix = today.isoformat() + '_'
+def recent(day: datetime.date, today: datetime.date) -> bool:
+    return 0 <= (today - day).days < PLAN_DAYS
+
+
+def has_recent_plan(root: str, today: datetime.date) -> bool:
+    """docs/plans/에 이름 앞 날짜나 고친 날이 최근 PLAN_DAYS일 안인 계획서가 있는지."""
     for d in plan_dirs(root):
         for name in os.listdir(d):
             if not name.endswith('.md'):
                 continue
-            if name.startswith(prefix):
-                return True
-            mtime = datetime.date.fromtimestamp(os.path.getmtime(os.path.join(d, name)))
-            if mtime == today:
+            try:
+                if recent(datetime.date.fromisoformat(name[:10]), today):
+                    return True
+            except ValueError:
+                pass
+            if recent(datetime.date.fromtimestamp(os.path.getmtime(os.path.join(d, name))), today):
                 return True
     return False
+
+
+def norm(name: str) -> str:
+    """한글 이름은 NFC로 맞춰 비교한다 — 파일 시스템이 NFD로 주면 있는 계획서도 '없다'로 막혔다 (40a070a849 C7)."""
+    return unicodedata.normalize('NFC', name).lower()
+
+
+def has_named_plan(root: str, name: str) -> bool:
+    """[plan:이름] 태그의 계획서가 docs/plans/ 중 한 곳에 있는지 (대소문자 · NFC/NFD 무시)."""
+    want = norm(name)
+    return any(want in (norm(n) for n in os.listdir(d)) for d in plan_dirs(root))
 
 
 def inside_subagent_in(item: str) -> bool:
@@ -196,8 +221,15 @@ def check(data: dict, today: datetime.date | None = None) -> None:
 
     if mode in PLAN_MODES:
         root = os.environ.get('CLAUDE_PROJECT_DIR') or data.get('cwd') or os.getcwd()
-        if not has_today_plan(root, today or datetime.date.today()):
-            deny(f"'{mode}' 전에 계획서가 필요하다: 프로젝트 안 docs/plans/에 오늘 날짜 이름이거나 오늘 고친 계획서가 없다. "
+        plan = PLAN_TAG.search(reason)
+        if plan is None and PLAN_TAG_START.search(reason):
+            deny("reason의 [plan:…] 태그 형식이 틀렸다 — [plan:<계획서 파일 이름>.md] (docs/plans/ 안의 파일 이름만, 경로 · 앞뒤 공백 없이, .md 포함).")
+        if plan:
+            if not has_named_plan(root, plan.group(1)):
+                deny(f"reason의 [plan:{plan.group(1)}] 계획서가 프로젝트 안 docs/plans/에 없다 — 파일 이름(확장자 .md 포함)을 확인한다.")
+        elif not has_recent_plan(root, today or datetime.date.today()):
+            deny(f"'{mode}' 전에 계획서가 필요하다: 프로젝트 안 docs/plans/에 최근 {PLAN_DAYS}일 안의 날짜 이름이거나 {PLAN_DAYS}일 안에 고친 계획서가 없다. "
+                 "그보다 오래된 작업이면 reason에 [plan:<계획서 파일 이름>.md]를 붙인다. "
                  "CLAUDE.md '계획서와 작업 로그': 계획서 없이 진행하던 작업이면 리뷰 전에 만들고 맨 위에 '사후 작성'이라고 표시한다.")
 
 

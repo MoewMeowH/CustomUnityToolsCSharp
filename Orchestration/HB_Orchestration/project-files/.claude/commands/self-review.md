@@ -1,6 +1,6 @@
 ---
 description: Claude 지휘자와 검토형 리뷰어(기본 API 리뷰 sub_* — 코드 · perf · security · direction, 서브에이전트는 sub로 고르거나 크레딧 소진 때)가 독립적으로 리뷰한 뒤 결과를 종합한다 (다른 회사 외부 에이전트 없음)
-argument-hint: [sub] [perf|security|direction] [파일/커밋 범위 또는 계획서, 비우면 현재 미커밋 변경]
+argument-hint: [sub] [perf|security|direction|trace] [파일/커밋 범위 또는 계획서 · 지시서, 비우면 현재 미커밋 변경]
 ---
 
 인자: $ARGUMENTS
@@ -9,6 +9,7 @@ argument-hint: [sub] [perf|security|direction] [파일/커밋 범위 또는 계�
   - `perf` → `sub_perf` / **perf-reviewer** (실행 비용·할당·동기화·규모 증가만)
   - `security` → `sub_security` / **security-reviewer** (입력 검증·경로·비밀 값·외부 전송·검사 우회·fail-closed만)
   - `direction` → `sub_direction` / **direction-reviewer** (요청 원문과 계획서의 방향만 — 대상은 계획서, 아래 "direction일 때")
+  - `trace <지시서 경로>` → 서브에이전트 **evidence-collector**만 (API 모드 없음 — 요구마다 코드를 검색해야 함). 지시서 대조, 아래 "trace일 때"
 - **기본은 API 리뷰**(`sub_*` — claude --bare -p 읽기 전용 에이전트, HB_REVIEWER_API_KEY로 과금, 구독 사용량을 쓰지 않음): 아래 **"API 리뷰"** 절차. 첫 단어가 `sub`이면 서브에이전트(아래 1~5 본 절차).
 - 나머지가 대상. 비어 있으면 `git diff HEAD`의 미커밋 변경.
 - 아래 "self-reviewer"는 고른 리뷰어(API 리뷰면 `sub_*` 결과)로 읽는다.
@@ -21,6 +22,26 @@ argument-hint: [sub] [perf|security|direction] [파일/커밋 범위 또는 계�
 - 2-4: 결과 형식 검사는 같다. `## 읽은 파일`은 작업 폴더 기준 상대 경로다 (절대 경로 · `..`가 있으면 멈춤 — 작업 폴더는 실행 뒤 지워져 대조할 수 없다). `[경고] claude-cli 도구 사용 N건이 거절됨`이 붙으면 종합에서 알린다.
 - 4: `record_verdicts`에 `selfReview` 대신 run_mode 결과의 **runId** (지적은 `steps: [1]`). 나머지 규칙 같음.
 - 대시보드 첫 화면에 API 리뷰 이번 달 횟수 · 비용과 크레딧 소진 상태가 보인다.
+
+**trace일 때** (지시서 대조 — 사용자가 `/work-order human` 방향서대로 직접 짠 코드): 결함 리뷰와 따로, 요구 사항마다 코드에 있는지만 본다.
+- 대상: 인자의 지시서(`구현: 사용자` 계획서)와 그 작업의 변경(지시서 뒤를 비우면 `git diff HEAD`, 커밋 범위를 주면 그 범위 — 새 파일은 `git add -N` 뒤).
+  - 지시서 경로가 없거나, 그 파일에 `구현: 사용자` · `## 요구 사항` 절이 없으면 어느 지시서인지 한 줄로 묻고 멈춘다 (요구 목록 없이 대조하지 않는다).
+- 2-1 지휘자 검토 대신: 요구 사항(R1…)마다 네가 먼저 찾은 위치 · 상태(아래 수집기 상태 다섯 가지 어휘로)를 그 지시서의 짝 작업 로그(`docs/worklog/<지시서와 같은 이름>.md`, 없으면 만들고 첫 줄에 지시서 링크)에 다 쓴다 (결과를 본 뒤 고치지 않는다).
+- 2-2 입력: `subagent_in/<날짜>_<주제>/`에
+  - `requirements.md` = 지시서의 `## 요구 사항` 절 **그대로만** — 대조 기준.
+  - `spec.md` = 지시서의 `## 기획 요약` 절 그대로 — 요구 문장의 값 · 용어를 해석할 때만 쓰는 자료 (P4의 `request.md`와 같은 자리). 설계 제안 · 주의할 점 · 연결 위치 후보는 넣지 않는다 — "계획대로 짰나"로 쏠리지 않게.
+  - diff 파일, 저장소 사본 `repo/`(위 2-2와 같은 스크립트 · `[주의]`면 `target/`), `_SUBAGENT_MISTAKES.md`(evidence-collector 항목이 있으면). SHA-256 확인.
+- 2-3: evidence-collector를 부르고, 위임 메시지에는 폴더 경로와 "requirements.md의 R 번호마다 대조 · `repo/`에서 직접 찾기"만 쓴다.
+- 2-4: 출력이 표 형식(요구 번호 · 요약 · 근거 위치 · 상태 · 메모) + `## 읽은 파일` + `## 요약`을 어겼거나 읽은 파일이 폴더 밖이면 멈추고 알린다.
+- 3 종합: 요구마다 네 조사와 수집기 결과를 맞춰 정리한다. 수집기 상태 → 종합:
+  - `정적 확인` → **있음**
+  - `실행 확인 필요` → **있음 (실행 확인)** — 필요한 테스트를 할 일로
+  - `다름` → **일부** — 무엇이 다른지를 할 일로
+  - `못 찾음` → **없음** — 찾아본 곳과 함께 할 일로
+  - `자료 부족` → **모름** — 필요한 자료(씬 · 프리팹 · 설정 등)를 할 일로 (빠뜨리지 않는다)
+  - 네 조사와 수집기가 다르면 코드를 다시 보고 근거를 나란히 적는다. 기획 누락이 의심되면(요구는 있는데 기획에 근거가 없음 등) 따로 적는다.
+- 4 기록: record_verdicts에 남기지 않는다 (결함 지적이 아니라 대조표) — 작업 로그(그 지시서의 짝 로그)에만 표와 종합을 남긴다.
+- 끝나면 `subagent_in/<날짜>_<주제>/`를 지운다.
 
 **direction일 때**: 계획서를 쓴 뒤 사용자 승인 **전**에 지휘자가 제안하고, 사용자가 이 명령을 입력했을 때 돈다 (자동으로 부르지 않는다).
 - 2-2에서 `request.md`(이 작업에 대한 사용자 메시지 **원문 그대로**, 지휘자 요약 없이)와 계획서를 복사한다. 코드는 넣지 않는다 (필요하면 판단에 쓰인 자료만). API 리뷰(`sub_direction`)도 `request.md`는 `subagent_in/<날짜>_<주제>/`에 만든 뒤 그 파일과 계획서를 context(파일 전체 범위)로 넘긴다 — 요청 원문을 input에 다시 쓰지 않는다.
@@ -56,7 +77,7 @@ argument-hint: [sub] [perf|security|direction] [파일/커밋 범위 또는 계�
 * 정의: `.claude/agents/`
   * 검토형(Opus, `subagent_in/` 격리 · 같은 출력 형식): `self-reviewer`(코드 리뷰 — `/self-review` · `/cross-review` 2단계), `perf-reviewer`(성능 — `/mode` perf_* ownReview · `/self-review perf`), `security-reviewer`(보안 — `/self-review security` · 보안 영역 `/cross-review`는 사용자에게 묻고 self-reviewer와 함께), `direction-reviewer`(요청 원문 대 계획서 방향 — 계획서를 쓴 뒤 승인 전에 `/self-review direction`을 **제안만**).
   * 검토형은 기본이 API 리뷰(모드 `sub_self` · `sub_perf` · `sub_security` · `sub_direction`, 위 "API 리뷰"). 서브에이전트는 `/self-review sub …`로 고르거나 `[실패] Quota`(크레딧 소진) 때 대신 쓴다.
-  * 수집형: `web-searcher`(Sonnet, WebSearch · WebFetch만 — research 2단계 · crash 사전 조사 검색), `evidence-collector`(Opus, `/preflight` P4 근거 수집).
+  * 수집형: `web-searcher`(Sonnet, WebSearch · WebFetch만 — research 2단계 · crash 사전 조사 검색), `evidence-collector`(Opus, `/preflight` P4 근거 수집 · `/self-review trace` 지시서 대조).
   * 모델: 맥락 편향 없이 봐야 하는 자리는 `opus`, 지휘자 컨텍스트 보호·반복 작업(조사·수집·추출)은 `sonnet`.
   * 정의 파일에는 `tools` 허용 목록이 반드시 있어야 한다 (생략하면 MCP 도구까지 상속 → `run_mode`를 부를 수 있음). `python -I .claude/scripts/check_agents.py`로 검사한다. `permissionMode` bypass 계열 금지.
 * 입력: 대상 파일을 `subagent_in/<날짜>_<주제>/`에 **명령으로 복사**하고 SHA-256을 확인한 뒤 그 경로만 넘긴다. 리뷰 대상이 변경이면 diff 파일(CLAUDE.md "diff는 파일로")도 함께 복사한다. 리뷰 지침이 필요하면 `REVIEW_GUIDELINES.md`도 복사한다 (`omitClaudeMd`라 CLAUDE.md·지침이 자동으로 들어가지 않음).
