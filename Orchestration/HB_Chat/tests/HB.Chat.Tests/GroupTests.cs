@@ -165,6 +165,95 @@ public sealed class GroupTests : IDisposable
     }
 
     [Fact]
+    public void Log_CacheReadsNewLinesOnly_AndRereadsWhenFileChanges()   // 2026-10-29_단톡방-보류-성능-검색
+    {
+        var group = NewGroup();
+        GroupEntry Say(string text) => _log.Append(group.Id, new GroupEntry(0, DateTimeOffset.Now, GroupEntryKind.User, null, text));
+        Say("하나");
+        var first = _log.Read(group.Id);
+        Say("둘");
+        Assert.Equal(["하나"], first.Select(e => e.Text));                         // 돌려준 목록은 복사본 (뒤 덧붙이기에 안 바뀜)
+        Assert.Equal(["하나", "둘"], _log.Read(group.Id).Select(e => e.Text));
+        Assert.Equal(["하나", "둘"], new GroupLog(() => Path.Combine(_dir, "data")).Read(group.Id).Select(e => e.Text)); // 다른 인스턴스도 같은 파일 그대로
+
+        // 쓰는 중인 줄(줄바꿈 없음)은 세지 않다가, 덧붙이기가 줄을 닫으면 깨진 줄 하나로 센다
+        File.AppendAllText(_log.PathOf(group.Id), "{\"kind\":\"User\",\"te");
+        Assert.Equal(2, _log.Read(group.Id).Count);
+        Assert.Equal(3, Say("넷").Line);
+
+        // 바깥에서 파일을 다시 쓰면(짧아짐 · 앞부분 바뀜) 처음부터 다시 읽는다
+        var other = new GroupEntry(0, DateTimeOffset.Now, GroupEntryKind.User, null, "새 파일");
+        File.WriteAllText(_log.PathOf(group.Id), System.Text.Json.JsonSerializer.Serialize(other, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)
+            { Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() } }) + "\n");
+        Assert.Equal(["새 파일"], _log.Read(group.Id).Select(e => e.Text));
+        Assert.Equal(1, Say("다음").Line);
+        _log.Delete(group.Id);
+        Assert.Empty(_log.Read(group.Id));
+    }
+
+    [Fact]
+    public void Log_RereadsWhenFileRewritten_Bom_AndCapsCache()   // 0c7704170c C4 · C5 · C7 · C3
+    {
+        var group = NewGroup();
+        var path = _log.PathOf(group.Id);
+        _log.Append(group.Id, new GroupEntry(0, DateTimeOffset.Now, GroupEntryKind.User, null, "가가"));
+        _log.Append(group.Id, new GroupEntry(0, DateTimeOffset.Now, GroupEntryKind.User, null, "끝"));
+        Assert.Equal(2, _log.Read(group.Id).Count);
+
+        // 수정 시각이 거꾸로 가면 처음부터 다시 (길이가 같은 앞쪽 수정이어도)
+        var text = File.ReadAllText(path).Replace("가가", "나나");
+        File.WriteAllText(path, text.Replace("나나", "다다"));
+        File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddDays(-1));
+        Assert.Equal("다다", _log.Read(group.Id)[0].Text);
+        // 길이가 늘었는데 읽은 자리 앞 바이트가 바뀌면 처음부터 다시 (앞에 줄을 끼워 넣음)
+        var before = File.ReadAllText(path);
+        File.WriteAllText(path, before.Replace("\"다다\"", "\"다다다\""));
+        Assert.Equal("다다다", _log.Read(group.Id)[0].Text);
+
+        // BOM 있는 UTF-8로 손으로 저장해도 첫 줄을 잃지 않는다
+        File.WriteAllText(path, text.Replace("나나", "라라라라"), new System.Text.UTF8Encoding(true)); // 길이가 달라져 처음부터 다시 읽힘
+        Assert.Equal(["라라라라", "끝"], _log.Read(group.Id).Select(e => e.Text));
+        Assert.Equal(2, _log.Append(group.Id, new GroupEntry(0, DateTimeOffset.Now, GroupEntryKind.User, null, "셋")).Line);
+
+        // 캐시 상한: 단톡방을 상한보다 많이 읽어도 잘 읽힌다 (내보낸 것은 다시 읽음)
+        var ids = Enumerable.Range(0, GroupLog.MaxCached + 4).Select(_ => NewGroup().Id).ToList();
+        foreach (var id in ids) _log.Append(id, new GroupEntry(0, DateTimeOffset.Now, GroupEntryKind.User, null, id));
+        foreach (var id in ids) Assert.Equal(id, Assert.Single(_log.Read(id)).Text);
+        Assert.Equal(3, _log.Read(group.Id).Count);
+    }
+
+    [Fact]
+    public async Task Log_ParallelAppends_GetDistinctLines()
+    {
+        var group = NewGroup();
+        var lines = await Task.WhenAll(Enumerable.Range(0, 40).Select(i => Task.Run(() =>
+            _log.Append(group.Id, new GroupEntry(0, DateTimeOffset.Now, GroupEntryKind.User, null, $"말 {i}")).Line)));
+        Assert.Equal(Enumerable.Range(0, 40), lines.Order());
+        Assert.Equal(Enumerable.Range(0, 40), _log.Read(group.Id).Select(e => e.Line));
+    }
+
+    [Fact]
+    public void Search_FindsGroupUserAndMemberLines_NotNotes()   // 2026-10-29_단톡방-보류-성능-검색 (결정: 사용자 말 + 구성원 답)
+    {
+        var group = NewGroup();
+        var a = group.Members[0];
+        _log.Append(group.Id, new GroupEntry(0, DateTimeOffset.Now, GroupEntryKind.User, null, "사과 이야기 하자"));
+        _log.Append(group.Id, new GroupEntry(0, DateTimeOffset.Now, GroupEntryKind.Member, a.Id, "사과는 빨갛다"));
+        _log.Append(group.Id, new GroupEntry(0, DateTimeOffset.Now, GroupEntryKind.Note, null, "사과 안내 줄"));
+        _log.Append(group.Id, new GroupEntry(0, DateTimeOffset.Now, GroupEntryKind.Member, a.Id, "(실패: 사과)") { Failed = true }); // 중지 · 실패 답은 뺌
+        var list = new RoomList(_store, _hub, new ChatTranscripts(() => Path.Combine(_dir, "projects")), _log);
+
+        var hits = list.Search("사과");
+        Assert.Equal(2, hits.Count);
+        Assert.All(hits, h => Assert.Equal(group.Id, h.RoomId));
+        Assert.Contains(hits, h => h.Line == 0 && h.Speaker == HB.Orchestration.Shared.ChatSpeaker.User && h.Name is null);
+        Assert.Contains(hits, h => h.Line == 1 && h.Name == a.Name);
+
+        _store.Update(group.Id, r => r with { DeletedAt = DateTimeOffset.Now }); // 휴지통이면 안 찾음
+        Assert.Empty(list.Search("사과"));
+    }
+
+    [Fact]
     public void Create_MakesHiddenChildRooms()
     {
         var group = NewGroup();
@@ -178,7 +267,7 @@ public sealed class GroupTests : IDisposable
         var row = Assert.Single(list.All());
         Assert.Equal(group.Id, row.Id);
         Assert.Contains("A", row.Preview);
-        Assert.Empty(list.Search("팀"));
+        Assert.Equal(group.Id, Assert.Single(list.Search("팀")).RoomId); // 단톡방 이름은 찾되 숨은 자식 방은 나오지 않음 (2026-10-29_단톡방-보류-성능-검색)
         Assert.Single(RoomApi.Rows(list.All()));
     }
 

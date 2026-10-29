@@ -35,7 +35,11 @@ public sealed record MessagePage(IReadOnlyList<ChatEntry> Items, bool HasMore)
 }
 
 /// <summary>검색 결과 하나 (계획서 2-2 c). Line이 없으면 방 제목에서 찾은 것.</summary>
-public sealed record SearchHit(string RoomId, string Title, int? Line, ChatSpeaker? Speaker, DateTimeOffset? At, string Snippet);
+public sealed record SearchHit(string RoomId, string Title, int? Line, ChatSpeaker? Speaker, DateTimeOffset? At, string Snippet)
+{
+    /// <summary>말한 사람 이름 (단톡방 구성원 답 — 2026-10-29_단톡방-보류-성능-검색). 없으면 Speaker로 나 · 지휘자 이름.</summary>
+    public string? Name { get; init; }
+}
 
 /// <summary>왼쪽 방 목록 칸의 모델: 목록과 지금 연 방.</summary>
 public sealed record SidebarView(IReadOnlyList<RoomSummary> Rooms, string? CurrentId)
@@ -106,14 +110,43 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
     public const int SearchMax = 50, QueryMax = 100;
 
     /// <summary>휴지통 밖 모든 방에서 찾기 (제목 + 말 본문, 대소문자 무시). 최근 것부터 <see cref="SearchMax"/>개.</summary>
-    public IReadOnlyList<SearchHit> Search(string query) =>
-        Search(store.All().Where(r => r.DeletedAt is null && r.GroupId is null && !r.IsGroup).Select(r => (r, transcripts.Read(r.SessionId))), query);
+    public IReadOnlyList<SearchHit> Search(string query)
+    {
+        var all = store.All().Where(r => r.DeletedAt is null && r.GroupId is null).ToList();
+        return Search(all.Where(r => !r.IsGroup).Select(r => (r, transcripts.Read(r.SessionId))), query,
+            all.Where(r => r.IsGroup).Select(g => (g, GroupEntries(g.Id))));
+    }
 
-    public static IReadOnlyList<SearchHit> Search(IEnumerable<(Room Room, ChatTranscript? Transcript)> rooms, string query)
+    private IReadOnlyList<GroupEntry> GroupEntries(string groupId)
+    {
+        try { return groups?.Read(groupId) ?? []; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return []; }
+    }
+
+    /// <param name="groupRooms">단톡방과 그 대화 줄 — 사용자 말 · 구성원 답을 찾는다 (안내 줄은 뺌, 결정 2026-10-29_단톡방-보류-성능-검색).</param>
+    public static IReadOnlyList<SearchHit> Search(IEnumerable<(Room Room, ChatTranscript? Transcript)> rooms, string query,
+        IEnumerable<(Room Group, IReadOnlyList<GroupEntry> Entries)>? groupRooms = null)
     {
         var q = query.Trim();
         if (q.Length == 0 || q.Length > QueryMax) return [];
         var hits = new List<SearchHit>();
+        foreach (var (group, entries) in groupRooms ?? [])
+        {
+            var title = group.Title ?? "단톡방";
+            if (group.Title is { } named && named.Contains(q, StringComparison.OrdinalIgnoreCase))
+                hits.Add(new SearchHit(group.Id, title, null, null, entries.LastOrDefault()?.At ?? group.CreatedAt, named));
+            foreach (var e in entries)
+            {
+                if (e.Kind == GroupEntryKind.Note || e.Failed) continue; // 안내 줄 · 중지 · 실패 답은 뺌 (1:1 방의 중지된 턴과 같이 — 0c7704170c C8)
+                var at = e.Text.IndexOf(q, StringComparison.OrdinalIgnoreCase);
+                if (at < 0) continue;
+                var name = e.Kind == GroupEntryKind.Member ? group.Members.FirstOrDefault(m => m.Id == e.MemberId)?.Name ?? "구성원" : null;
+                hits.Add(new SearchHit(group.Id, title, e.Line, e.Kind == GroupEntryKind.User ? ChatSpeaker.User : ChatSpeaker.Conductor, e.At, Snippet(e.Text, at, q.Length))
+                {
+                    Name = name,
+                });
+            }
+        }
         foreach (var (room, transcript) in rooms)
         {
             var title = TitleOf(room, transcript);

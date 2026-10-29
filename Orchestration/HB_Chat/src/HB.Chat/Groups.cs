@@ -64,29 +64,114 @@ public sealed class GroupLog(Func<string> dataFolder)
     public string PathOf(string groupId) =>
         RoomStore.IsRoomId(groupId) ? Path.Combine(dataFolder(), "groups", groupId + ".jsonl") : throw new ArgumentException("방 ID 모양이 아닙니다.", nameof(groupId));
 
+    /// <summary>
+    /// 파일별 이어 읽기 캐시 (계획서 2026-10-29_단톡방-보류-성능-검색): 덧붙이기만 하는 파일이라 지난번 읽은 자리부터 새 줄만 읽는다.
+    /// Offset = 줄바꿈까지 읽은 바이트, Lines = 그 앞의 파일 줄 수, Tail = Offset 바로 앞 바이트(앞부분이 그대로인지 확인용).
+    /// 잠금은 <see cref="_gate"/> 하나 (모든 인스턴스 공용 — 같은 파일을 여러 인스턴스가 만져도 캐시가 하나).
+    /// </summary>
+    private sealed class Cached
+    {
+        public long Offset;
+        public int Lines;
+        public byte[] Tail = [];
+        public DateTime WriteUtc;
+        public long Used; // 마지막으로 쓴 차례 (오래 안 쓴 것부터 내보냄)
+        public readonly List<GroupEntry> Entries = [];
+    }
+
+    private static readonly Dictionary<string, Cached> _cache = new(StringComparer.OrdinalIgnoreCase);
+    private static long _use;
+
+    /// <summary>앞부분 확인에 쓰는 바이트 수.</summary>
+    private const int TailCheck = 64;
+
+    /// <summary>
+    /// 캐시에 둘 단톡방 수 — 넘으면 가장 오래 안 쓴 것부터 내보낸다 (/self-review 0c7704170c C3: 검색 한 번이 모든 단톡방을 끝까지 들고 있지 않게).
+    /// </summary>
+    public const int MaxCached = 16;
+
     public IReadOnlyList<GroupEntry> Read(string groupId)
     {
         var path = PathOf(groupId);
-        string[] lines;
-        lock (_gate)
-        {
-            if (!File.Exists(path)) return [];
-            lines = File.ReadAllLines(path, Encoding.UTF8);
-        }
-        var list = new List<GroupEntry>(lines.Length);
-        for (var i = 0; i < lines.Length; i++)
-        {
-            if (string.IsNullOrWhiteSpace(lines[i])) continue;
-            try
-            {
-                if (JsonSerializer.Deserialize<GroupEntry>(lines[i], Json) is { } e) list.Add(e with { Line = i, To = e.To ?? [], Merged = e.Merged ?? [] });
-            }
-            catch (JsonException) { } // 깨진 줄은 건너뜀 (다음 줄 번호는 그대로)
-        }
-        return list;
+        lock (_gate) return Refresh(path) is { } c ? [.. c.Entries] : []; // 복사본 — 부르는 쪽이 캐시를 바꾸지 못하게
     }
 
-    /// <summary>한 줄 덧붙이기 — 줄 번호는 지금 파일 줄 수로 정한다(잠금 안). 쓴 줄을 돌려준다.</summary>
+    /// <summary>
+    /// 캐시를 파일에 맞춘다 (잠금 안). 파일이 없으면 캐시를 지우고 null. 길이가 줄었거나 · 수정 시각이 거꾸로 가거나 · 읽은 자리 앞 바이트가 바뀌었으면
+    /// (휴지통 · 손으로 고침) 처음부터 다시. 줄바꿈으로 끝나지 않은 마지막 줄(쓰는 중)은 세지 않고 다음에 다시 읽는다.
+    /// </summary>
+    private static Cached? Refresh(string path)
+    {
+        var info = new FileInfo(path);
+        if (!info.Exists)
+        {
+            _cache.Remove(path);
+            return null;
+        }
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        if (!_cache.TryGetValue(path, out var c) || !Unchanged(c, fs, info))
+        {
+            _cache[path] = c = new Cached { Used = ++_use }; // 차례를 먼저 — 방금 넣은 것을 내보내지 않게
+            Evict();
+        }
+        c.Used = ++_use;
+        if (fs.Length == c.Offset)
+        {
+            c.WriteUtc = info.LastWriteTimeUtc;
+            return c;
+        }
+
+        fs.Seek(c.Offset, SeekOrigin.Begin);
+        var bytes = new byte[fs.Length - c.Offset];
+        fs.ReadExactly(bytes);
+        // 손으로 고쳐 BOM 있는 UTF-8로 저장한 파일 — 예전 ReadAllLines처럼 걷는다 (0c7704170c C4). Offset에는 그대로 센다
+        var start = c.Offset == 0 && bytes.AsSpan().StartsWith((ReadOnlySpan<byte>)[0xEF, 0xBB, 0xBF]) ? 3 : 0;
+        for (var i = 0; i < bytes.Length; i++)
+        {
+            if (bytes[i] != (byte)'\n') continue;
+            var text = Encoding.UTF8.GetString(bytes, start, i - start).TrimEnd('\r');
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                try
+                {
+                    if (JsonSerializer.Deserialize<GroupEntry>(text, Json) is { } e)
+                        c.Entries.Add(e with { Line = c.Lines, To = e.To ?? [], Merged = e.Merged ?? [] });
+                }
+                catch (JsonException) { } // 깨진 줄은 건너뜀 (다음 줄 번호는 그대로)
+            }
+            c.Lines++;
+            start = i + 1;
+        }
+        c.Offset += start;
+        c.Tail = start == 0 ? c.Tail : bytes[Math.Max(0, start - TailCheck)..start];
+        c.WriteUtc = info.LastWriteTimeUtc;
+        return c;
+    }
+
+    /// <summary>가장 오래 안 쓴 캐시를 <see cref="MaxCached"/>개까지 줄인다 (잠금 안).</summary>
+    private static void Evict()
+    {
+        while (_cache.Count > MaxCached)
+            _cache.Remove(_cache.MinBy(kv => kv.Value.Used).Key);
+    }
+
+    /// <summary>
+    /// 캐시가 아직 이 파일의 앞부분인지: 길이 · 수정 시각(거꾸로 가면) · 읽은 자리 바로 앞 바이트.
+    /// 한계: 길이가 같고 끝 64바이트가 같은 앞쪽 수정(손으로 오타 고침)은 알아채지 못한다 — 앱을 다시 켜면 처음부터 읽는다.
+    /// "시각이 다르면 다시"는 쓰지 않는다: 덧붙인 직후 읽은 수정 시각이 늦게 바뀌어 덧붙일 때마다 처음부터 다시 읽었다
+    /// (/self-review 0c7704170c C5 반영 시도 — 5,000줄 덧붙이기 3.8 → 50ms 실측, 되돌림).
+    /// </summary>
+    private static bool Unchanged(Cached c, FileStream fs, FileInfo info)
+    {
+        if (fs.Length < c.Offset || info.LastWriteTimeUtc < c.WriteUtc) return false;
+        if (c.Tail.Length == 0) return c.Offset == 0;
+        fs.Seek(c.Offset - c.Tail.Length, SeekOrigin.Begin);
+        var now = new byte[c.Tail.Length];
+        fs.ReadExactly(now);
+        return now.AsSpan().SequenceEqual(c.Tail);
+    }
+
+    /// <summary>한 줄 덧붙이기 — 줄 번호는 지금 파일 줄 수로 정한다(잠금 안, 캐시의 줄 수). 쓴 줄을 돌려준다.</summary>
     public GroupEntry Append(string groupId, GroupEntry entry)
     {
         var path = PathOf(groupId);
@@ -104,9 +189,13 @@ public sealed class GroupLog(Func<string> dataFolder)
                     File.AppendAllText(path, "\n", new UTF8Encoding(false));
                 }
             }
-            var line = File.Exists(path) ? File.ReadLines(path, Encoding.UTF8).Count() : 0;
+            var line = Refresh(path)?.Lines ?? 0; // 끝 줄을 닫은 뒤라 파일 줄 수 = 캐시 줄 수
             var written = entry with { Line = line };
             File.AppendAllText(path, JsonSerializer.Serialize(written, Json) + "\n", new UTF8Encoding(false));
+            // 쓴 줄을 캐시에 (새 줄만 읽음). 줄은 이미 파일에 들어갔으므로 여기서 실패해도 쓰기 실패로 돌리지 않는다 —
+            // 캐시만 버리고 다음 읽기가 처음부터 (0c7704170c C1: 다른 프로세스가 잠깐 잡고 있을 때 기록과 상태가 어긋났다)
+            try { Refresh(path); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { _cache.Remove(path); }
             return written;
         }
     }
@@ -116,7 +205,12 @@ public sealed class GroupLog(Func<string> dataFolder)
     {
         lock (_gate)
         {
-            try { File.Delete(PathOf(groupId)); }
+            try
+            {
+                var path = PathOf(groupId);
+                _cache.Remove(path);
+                File.Delete(path);
+            }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { }
         }
     }

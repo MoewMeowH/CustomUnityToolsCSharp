@@ -2081,9 +2081,10 @@
             } catch (e) { alert("요청 실패: " + e); return false; }
         }
         // 새 줄만 받아 붙인다 (대화 줄은 덧붙이기만 — 마지막 줄 번호가 줄었으면 전체를 다시 받는다)
+        let revealUntil = 0; // 검색 결과로 연 말을 보는 동안은 새 말 받기가 맨 아래로 끌어내리지 않는다 (0c7704170c C2)
         async function refresh() {
             const chat = $("#chat");
-            const follow = atBottom();
+            const follow = atBottom() && Date.now() > revealUntil;
             try {
                 const res = await fetch(self + "?handler=Messages&after=" + encodeURIComponent(chat.dataset.lastLine), { cache: "no-store" });
                 if (!res.ok || disposed) return;
@@ -2209,7 +2210,23 @@
 
         decorate(root);
         toBottom();
-        return { id: roomId, reveal() { }, dispose() { disposed = true; es.close(); kit.dispose(); } };
+        // 검색 결과로 열면 그 말로 (2026-10-29_단톡방-보류-성능-검색): 단톡방은 대화 전부를 그리므로 앞 쪽을 받을 일은 없다 —
+        // 화면이 처음 맨 아래로 내리는 것보다 뒤에 오도록 잠깐 기다렸다가, 아직 없으면(새 말 받기 중) 몇 번 다시 본다
+        function reveal(line) {
+            let tries = 0;
+            revealUntil = Date.now() + 5000;
+            const go = () => {
+                if (disposed) return;
+                const target = root.querySelector(`#chat .msg[data-line="${line}"], #chat .system[data-line="${line}"]`);
+                if (target) {
+                    target.scrollIntoView({ block: "center" });
+                    target.classList.add("hit");
+                    setTimeout(() => target.classList.remove("hit"), 2500);
+                } else if (++tries < 20) setTimeout(go, 150);
+            };
+            setTimeout(go, 50);
+        }
+        return { id: roomId, reveal, dispose() { disposed = true; es.close(); kit.dispose(); } };
     }
 
     // 설정 · 프로필 그림 (4차 B2): 고른 그림을 올리기 전에 브라우저에서 줄인다 (긴 변 256px, webp) — 아바타는 작게만 보이고

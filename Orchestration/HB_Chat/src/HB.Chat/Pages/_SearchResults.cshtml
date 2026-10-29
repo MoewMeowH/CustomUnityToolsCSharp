@@ -18,7 +18,7 @@
                 }
                 else
                 {
-                    <b>@(h.Speaker == ChatSpeaker.User ? Profiles.UserName : h.Speaker == ChatSpeaker.Conductor ? Profiles.ConductorName : "안내"):</b>
+                    <b>@(h.Name ?? (h.Speaker == ChatSpeaker.User ? Profiles.UserName : h.Speaker == ChatSpeaker.Conductor ? Profiles.ConductorName : "안내")):</b>
                 }
                 @h.Snippet
             </div>
