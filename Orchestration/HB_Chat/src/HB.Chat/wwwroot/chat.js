@@ -591,6 +591,44 @@
         return ok;
     }
 
+    // 모델 선택 줄 (계획서 2026-10-29_모델-선택창, 결정 "에이전트 + 강도"): 모드가 쓰는 에이전트마다 교체 · 추론 강도 고르기.
+    // rows: [{agent, roles, fallback, pick, effort}], agents: [{name, model, reasoning}]. read()는 {원래 에이전트: {agent, effort}} — run_mode 카드 · + 요청 창이 같이 쓴다.
+    function modeRows(rows, agents, efforts) {
+        const box = el("div", "mode-rows");
+        const reads = [];
+        for (const r of rows) {
+            const line = el("div", "mode-row");
+            const label = el("span", "mode-roles", (r.roles || []).filter(Boolean).join(" · ") || r.agent);
+            label.title = "원래 에이전트: " + r.agent;
+            const pick = el("select");
+            pick.setAttribute("aria-label", label.textContent + " 에이전트");
+            const names = agents.map(a => a.name);
+            if (!names.includes(r.pick)) names.unshift(r.pick); // 목록에 없는 이름(지휘자가 넣은 값)도 그대로 보인다 — 허가하면 서버가 다시 검사
+            for (const name of names) {
+                const info = agents.find(a => a.name === name);
+                const o = el("option", null, name + (info ? " — " + info.model : "") + (name === r.agent ? " (기본)" : ""));
+                o.value = name;
+                pick.append(o);
+            }
+            pick.value = r.pick;
+            const effort = el("select");
+            effort.setAttribute("aria-label", label.textContent + " 추론 강도");
+            const base = el("option"); base.value = "";
+            effort.append(base);
+            for (const e of efforts) { const o = el("option", null, "강도 " + e); o.value = e; effort.append(o); }
+            effort.value = r.effort || "";
+            // "설정값" 칸에 고른 에이전트의 설정 강도를 같이 보인다
+            const showBase = () => { const info = agents.find(a => a.name === pick.value); base.textContent = "강도 설정값" + (info?.reasoning ? " (" + info.reasoning + ")" : ""); };
+            pick.addEventListener("change", showBase);
+            showBase();
+            line.append(label, pick, effort);
+            if (r.fallback) line.append(el("span", "muted mode-fallback", "실패 시 " + r.fallback));
+            box.append(line);
+            reads.push(() => [r.agent, { agent: pick.value, effort: effort.value || null }]);
+        }
+        return { el: box, read: () => Object.fromEntries(reads.map(f => f())) };
+    }
+
     // ---- 방 하나 ----
     // 승인 · 질문 · 계획 카드 (방 화면 mountRoom · 단톡방 화면 mountGroup이 같이 쓴다 — 단톡방 ⑤). 서버가 답을 기다리는 동안 live 칸에 보인다 (2-2 b).
     // 남은 시간은 1초마다 다시 쓴다. opts: live · atBottom · toBottom · post(카드 알림, 처리기, FormData) — 답은 그 카드가 난 방으로,
@@ -602,6 +640,7 @@
         function showApproval(a) {
             if (cards.has(a.id)) return;
             if (a.plan) { showPlan(a); return; }
+            if (a.mode) { showModeCard(a); return; }
             const follow = atBottom();
             const card = el("div", "approval");
             const head = el("div", "head");
@@ -684,6 +723,49 @@
             place(a, card);
             if (follow) toBottom();
         }
+        // 모델 선택 카드 (계획서 2026-10-29_모델-선택창): 지휘자의 run_mode — 모드 · 이유 · 요청 글 · 보낼 파일을 보이고, 에이전트마다 교체 · 강도를 골라 허가 · 거절.
+        // 항상 허용은 없다. 모드 · 요청 글은 바꾸지 않는다 (지휘자가 준비한 입력과 어긋나지 않게).
+        function showModeCard(a) {
+            const m = a.mode;
+            const follow = atBottom();
+            const card = el("div", "approval mode-card");
+            const head = el("div", "head");
+            const left = el("span"); left.style.marginLeft = "auto";
+            head.append(el("span", null, who(a) + "외부 에이전트 요청 · " + m.mode), left);
+            card.append(head);
+            if (m.description) card.append(el("div", "desc", m.description));
+            if (m.reason) card.append(el("div", "desc", "Claude 이유: " + m.reason));
+            const body = el("details", "mode-input");
+            body.append(el("summary", "muted", "요청 글 " + m.inputChars.toLocaleString() + "자" + (m.inputCut ? " (앞 " + m.inputHeadLimit.toLocaleString() + "자만 보임)" : "")),
+                el("div", "cmd", m.inputHead));
+            card.append(body);
+            if (m.files?.length) card.append(el("div", "desc", "보낼 파일: " + m.files.slice(0, 12).join(", ") + (m.files.length > 12 ? " 외 " + (m.files.length - 12) + "개" : "")));
+            if (m.images) card.append(el("div", "desc", "그림 " + m.images + "장"));
+            if (m.followUp) card.append(el("div", "desc", "자료 보충 재질문 — 원래 단계의 에이전트 · 강도로 보냅니다."));
+            if (m.error) card.append(el("div", "warn-line", m.error));
+            if (m.prefilled) card.append(el("div", "desc", "요청 창에서 고른 값으로 채웠습니다."));
+            if (m.rows?.length) {
+                const editor = modeRows(m.rows, m.agents || [], m.efforts || []);
+                card.append(editor.el);
+                card.readPicks = editor.read;
+            }
+            const acts = el("div", "acts");
+            const ok = el("button", "btn primary", "허가");
+            ok.type = "button";
+            ok.addEventListener("click", () => decide(a, "allow", card));
+            const reasonBox = el("input", "reason");
+            reasonBox.type = "text"; reasonBox.maxLength = 500; reasonBox.placeholder = "거절 이유 (선택, 지휘자에게 전해짐)";
+            reasonBox.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); decide(a, "deny", card); } });
+            const no = el("button", "btn", "거절");
+            no.type = "button";
+            no.addEventListener("click", () => decide(a, "deny", card));
+            acts.append(ok, reasonBox, no);
+            card.append(acts);
+            card.dataset.expires = String(Date.parse(a.expiresAt));
+            card.left = left;
+            place(a, card);
+            if (follow) toBottom();
+        }
         // 끝난 카드는 한 줄로 바꾼다. 줄에도 구성원 ID를 달아 단톡방이 그 구성원 턴이 끝나면 지운다
         function line(a, cls, text) {
             const l = el("div", "live-line " + cls, text);
@@ -700,8 +782,10 @@
                 return;
             }
             // approval-line: 턴이 끝나 기록을 다시 그리면 지운다 — 같은 줄이 기록 속 제자리(방 기록 줄)에 있다
-            card.replaceWith(line(a, "approval-line" + (label === "허용" || label === "항상 허용" ? "" : " denied"),
-                who(a) + "승인 " + (label || "끝남") + " — " + a.tool + ": " + a.summary.slice(0, 120)));
+            // 모델 선택 카드의 허가는 "허용 (바꾼 줄)"로 온다
+            const allowed = label === "허용" || label === "항상 허용" || (a.mode && label?.startsWith("허용"));
+            card.replaceWith(line(a, "approval-line" + (allowed ? "" : " denied"),
+                who(a) + "승인 " + (label || "끝남") + " — " + (a.mode ? "외부 에이전트 " + a.mode.mode : a.tool + ": " + a.summary.slice(0, 120))));
         }
         // 질문 카드 (3차 a): 지휘자의 AskUserQuestion. 질문마다 선택지(하나 · 여러 개) + "기타" 직접 쓰기. 남은 시간은 승인 카드와 같이 다시 쓴다.
         function showQuestion(q) {
@@ -789,6 +873,7 @@
             const data = new FormData();
             data.append("approval", a.id); data.append("choice", choice);
             if (reason) data.append("reason", reason);
+            if (choice === "allow" && card.readPicks) data.append("picks", JSON.stringify(card.readPicks())); // 모델 선택 카드
             const r = await opts.post(a, "Approve", data);
             if (r === "gone") setTimeout(() => { if (cards.get(a.id) === card) doneApproval(a, null); }, 3000); // 위 질문과 같음 (A3 · C2)
             else if (!r) buttons.forEach(b => b.disabled = false);
@@ -1927,6 +2012,91 @@
             $("#attach-btn").addEventListener("click", () => input.click());
             input.addEventListener("change", () => { upload([...input.files]); input.value = ""; });
         }
+        // ---- + 메뉴 · 외부 에이전트 요청 (계획서 2026-10-29_모델-선택창 3번) ----
+        // 요청 창에서 모드 · 에이전트 · 강도를 정하면 입력칸 위 칩으로 남고, 보내기(끼어들기도)가 ModeRequest로 간다 — 서버가 머리 줄을 붙이고 다음 run_mode 카드에 미리 채운다.
+        const plusBtn = $("#plus-btn"), plusMenu = $("#plus-menu");
+        const setMenu = (open) => { if (!plusMenu) return; plusMenu.hidden = !open; plusBtn.setAttribute("aria-expanded", open ? "true" : "false"); };
+        plusBtn?.addEventListener("click", (e) => { e.stopPropagation(); setMenu(plusMenu.hidden); });
+        plusMenu?.addEventListener("click", () => setMenu(false));
+        const closePlus = (e) => { if (plusMenu && !plusMenu.hidden && !plusMenu.contains(e.target) && e.target !== plusBtn) setMenu(false); };
+        document.addEventListener("click", closePlus);
+        const askRunMode = $("#ask-run-mode");
+        askRunMode?.addEventListener("change", async () => {
+            const data = new FormData(); data.append("on", askRunMode.checked ? "true" : "false");
+            askRunMode.disabled = true;
+            if (!await post("AskRunMode", data)) askRunMode.checked = !askRunMode.checked;
+            askRunMode.disabled = false;
+        });
+        const modePick = $("#mode-pick"), modeChip = $("#mode-chip"), modeChipText = $("#mode-chip-text");
+        let modeReq = null; // { mode, picks, label }
+        function setModeReq(req) {
+            modeReq = req;
+            if (!modeChip) return;
+            modeChip.hidden = !req;
+            modeChipText.textContent = req ? "외부 요청: " + req.label + " — 이 말과 함께 보냅니다" : "";
+        }
+        $("#mode-chip-x")?.addEventListener("click", () => setModeReq(null));
+        $("#mode-btn")?.addEventListener("click", openModePick);
+        async function openModePick() {
+            if (!modePick) return;
+            modePick.replaceChildren(el("div", "muted", "모드 목록을 읽는 중…"));
+            modePick.hidden = false;
+            let list = null;
+            try {
+                const res = await fetch(self + "?handler=Modes", { cache: "no-store" });
+                if (res.ok) list = await res.json();
+            } catch { }
+            if (disposed) return;
+            const close = el("button", "btn", "닫기");
+            close.type = "button";
+            close.addEventListener("click", () => { modePick.hidden = true; textBox.focus(); });
+            if (!list?.modes?.length) {
+                modePick.replaceChildren(el("div", "warn-line", list?.error || "모드 목록을 읽지 못했습니다."), close);
+                return;
+            }
+            const select = el("select");
+            select.setAttribute("aria-label", "모드");
+            for (const m of list.modes) { const o = el("option", null, m.name); o.value = m.name; select.append(o); }
+            if (modeReq && list.modes.some(m => m.name === modeReq.mode)) select.value = modeReq.mode;
+            const desc = el("div", "desc");
+            const rowsBox = el("div");
+            let editor = null;
+            const render = () => {
+                const m = list.modes.find(x => x.name === select.value);
+                const arrow = m.flow === "Concurrent" ? " | " : m.flow === "Debate" ? " ⇄ " : " → ";
+                desc.textContent = (m.description || "") + "  [" + m.steps.map(s => s.role + "@" + s.agent).join(arrow) + "]" + (m.ownReview ? " · 지휘자 자체 검토 필수" : "");
+                // 에이전트별 줄 (카드와 같은 단위) — 지금 칩의 값이 같은 모드면 그 값으로
+                const rows = [];
+                for (const s of m.steps) {
+                    let r = rows.find(x => x.agent.toLowerCase() === s.agent.toLowerCase());
+                    if (!r) {
+                        const prev = modeReq?.mode === m.name ? modeReq.picks[s.agent] : null;
+                        rows.push(r = { agent: s.agent, roles: [], fallback: s.fallback, pick: prev?.agent || s.agent, effort: prev?.effort || null });
+                    }
+                    if (!r.roles.includes(s.role)) r.roles.push(s.role);
+                }
+                editor = modeRows(rows, list.agents, list.efforts);
+                rowsBox.replaceChildren(editor.el);
+            };
+            select.addEventListener("change", render);
+            render();
+            const ok = el("button", "btn primary", "정하기");
+            ok.type = "button";
+            ok.addEventListener("click", () => {
+                const picks = editor.read();
+                const changes = Object.entries(picks).filter(([from, p]) => p.agent !== from || p.effort)
+                    .map(([from, p]) => (p.agent !== from ? from + "→" + p.agent : from) + (p.effort ? " · " + p.effort : ""));
+                setModeReq({ mode: select.value, picks, label: select.value + (changes.length ? " (" + changes.join(", ") + ")" : "") });
+                modePick.hidden = true;
+                textBox.focus();
+            });
+            const acts = el("div", "acts");
+            acts.append(ok, close);
+            const head = el("div", "head");
+            head.append(el("b", null, "외부 에이전트 요청"), select);
+            modePick.replaceChildren(head, desc, rowsBox, el("div", "muted", "정한 뒤 입력칸에 요청을 쓰고 보내면, 지휘자가 이 모드로 외부 에이전트를 부르고 카드로 한 번 더 확인합니다."), acts);
+            select.focus();
+        }
         // 끌어 놓기: 방 칸 어디에 놓아도
         root.addEventListener("dragover", (e) => { if (e.dataTransfer?.types?.includes("Files")) { e.preventDefault(); root.classList.add("dropping"); } });
         root.addEventListener("dragleave", (e) => { if (e.target === root || !root.contains(e.relatedTarget)) root.classList.remove("dropping"); });
@@ -1958,11 +2128,19 @@
             let full = q ? quoteBlock(q) + "\n\n" + text : text;
             if (files.length) full = (full.trim() ? full.replace(/\s+$/, "") + "\n\n" : "") + files.map(a => "[첨부] " + a.path).join("\n");
             const data = new FormData(); data.append("text", full);
+            // + 요청 창에서 정한 외부 요청이 있으면 그 값과 함께 — 서버가 머리 줄을 붙이고 값을 그 말에 붙인다. 끼어들기면 끼어들기로
+            const req = modeReq;
+            if (req) {
+                if (handler === "Interrupt") data.append("interrupt", "true");
+                handler = "ModeRequest";
+                data.append("mode", req.mode); data.append("picks", JSON.stringify(req.picks));
+            }
             // 이 탭이 보낸 말 (막혀서 돌아오면 입력칸에 돌려줄지 판단 — bd52c6f0d1 C6). 오래된 것은 버린다
             sentTexts.push(full.replace(/\r\n/g, "\n"));
             if (sentTexts.length > 20) sentTexts.shift();
             if (await post(handler, data)) {
                 if (quote === q) setQuote(null);
+                if (req && modeReq === req && !disposed) setModeReq(null);
                 attached = attached.filter(a => !files.includes(a));
                 if (!disposed) renderAttached();
                 // 보내는 사이 방을 바꿨으면 dispose가 이 인용 · 첨부를 초안에 넣었다 — 이미 보냈으니 뺀다 (83b453653b C7)
@@ -2067,6 +2245,7 @@
                 if (browserFrameUrl) URL.revokeObjectURL(browserFrameUrl);
                 closeShot();
                 document.removeEventListener("keydown", shotKeys, true);
+                document.removeEventListener("click", closePlus); // + 메뉴 바깥 누르기
                 document.removeEventListener("click", closeTermMenu);
                 clearTimeout(termResizeTimer);
                 for (const v of termViews.values()) v.term.dispose(); // 프로세스는 그대로 — 방을 다시 열면 버퍼로 다시 그린다

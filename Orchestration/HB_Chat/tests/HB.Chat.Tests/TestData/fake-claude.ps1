@@ -197,6 +197,14 @@ switch ($mode) {
         }
         Finish $d 'ExitPlanMode' 'planned'
     }
+    'runmode' {
+        # model picker card (plan 2026-10-29_모델-선택창): run_mode asks the app (not pre-allowed). allow -> error result whose text is 'ALLOWED ' + updatedInput JSON
+        # (like echo: only error results carry their text to the end event) so the test reads what the app sent back
+        $d = Ask 'req_rm' '{"subtype":"can_use_tool","tool_name":"mcp__hb-orchestration__run_mode","display_name":"run_mode","input":{"mode":"design_main","input":"check this design","reason":"pick one","files":["a.cs"],"reasoning":["*=low"]},"tool_use_id":"toolu_rm1"}'
+        if ($d -and $d.behavior -eq 'allow') {
+            Emit ('{"type":"result","subtype":"error_during_execution","is_error":true,"result":' + (ConvertTo-Json ('ALLOWED ' + ($d.updatedInput | ConvertTo-Json -Compress -Depth 5)) -Compress) + ',"total_cost_usd":0.001,"permission_denials":[]}')
+        } else { Finish $d 'mcp__hb-orchestration__run_mode' 'ran' }
+    }
     'agent' {
         # subagent (feature D, 2.1.312 shape): task_started -> task_progress -> subagent Bash approval with agent_id -> task_notification
         Emit '{"type":"system","subtype":"task_started","task_id":"t_sub1","tool_use_id":"toolu_a","description":"Make dir","subagent_type":"general-purpose","is_backgrounded":false}'

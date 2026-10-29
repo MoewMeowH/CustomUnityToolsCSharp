@@ -119,6 +119,17 @@ public sealed class ClaudeArgsTests
     }
 
     [Fact]
+    public void AskRunMode_AllowsOtherServerToolsButNotRunMode()
+    {
+        // 외부 요청 전에 묻기 (계획서 2026-10-29_모델-선택창): 서버 전체 대신 도구 넷만 미리 허용 — run_mode는 앱에 물어 카드가 뜬다
+        var args = ClaudeArgs.Build(Spec(PermissionLevel.Read) with { AskRunMode = true }, Models);
+        Assert.Contains("--allowedTools | mcp__hb-orchestration__list_modes | mcp__hb-orchestration__save_result | mcp__hb-orchestration__record_verdicts | " +
+                        "mcp__hb-orchestration__server_info", Joined(args));
+        Assert.DoesNotContain("mcp__hb-orchestration", args);
+        Assert.DoesNotContain(args, a => a.Contains("run_mode", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Edit_AddsEditToolsAndAcceptEdits_ButNoBash()
     {
         var args = ClaudeArgs.Build(Spec(PermissionLevel.Edit), Models);

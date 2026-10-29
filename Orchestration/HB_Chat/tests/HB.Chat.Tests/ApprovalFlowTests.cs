@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using System.Threading.Channels;
 using HB.Chat;
 using Microsoft.Extensions.Options;
@@ -822,5 +823,139 @@ public sealed class ApprovalFlowTests : IDisposable
         Assert.True(end.Ok, end.Text);
         Assert.Contains("Unity 연결을 끊었거나 권한을 명령 아래로 내림", Log());
         Assert.DoesNotContain(_specs.Single().ExtraMcpServers, s => s != "unity");
+    }
+
+    /// <summary>가짜 claude의 runmode 허가 결과 ("ALLOWED " + 받은 updatedInput JSON — 오류 결과로 와야 끝 알림에 글이 실린다).</summary>
+    private static JsonObject Allowed(LiveEvent end)
+    {
+        var at = end.Text!.IndexOf("ALLOWED ", StringComparison.Ordinal); // 앞에 "실행 오류 (…): "가 붙는다
+        Assert.True(at >= 0, end.Text);
+        return JsonNode.Parse(end.Text[(at + "ALLOWED ".Length)..])!.AsObject();
+    }
+
+    /// <summary>모델 선택창: 가짜 MCP 서버 폴더를 만들고 작업 폴더 .mcp.json이 그 dll을 가리키게 한다.</summary>
+    private Room ModeRoom(PermissionLevel level = PermissionLevel.Read, bool ask = true)
+    {
+        ModeCardTests.WriteServer(Path.Combine(_dir, "srv"), ws: Path.Combine(_dir, "ws"));
+        var room = _store.Create("ws", level, "opus", null);
+        return _store.Update(room.Id, r => r with { AskRunMode = ask });
+    }
+
+    [Fact]
+    public async Task RunModeCard_AllowWithPicks_RewritesAgentsAndReasoning()
+    {
+        // 계획서 2026-10-29_모델-선택창 2번: 외부 요청 전에 묻기 → run_mode를 미리 허용하지 않음 → 모델 선택 카드 → 고른 값으로 agents · reasoning을 다시 써서 허가
+        var room = ModeRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "runmode");
+        var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        lock (_specs) Assert.True(_specs.Last().AskRunMode);
+        var mode = card.Mode!;
+        Assert.Equal("design_main", mode.Mode);
+        Assert.Equal("pick one", mode.Reason);
+        Assert.Equal(["gpt_main_sol", "gemini_main_flash"], mode.Rows.Select(r => r.Agent));
+        Assert.All(mode.Rows, r => Assert.Equal("low", r.Effort)); // 지휘자가 넣은 '*=low'가 처음 값
+        Assert.Null(card.Rule);
+        Assert.NotNull(_hub.Decide(room.Id, card.Id, ApprovalChoice.AlwaysAllow, null)); // 항상 허용 없음
+        Assert.NotNull(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null,
+            new Dictionary<string, ModeRowPick> { ["gpt_main_sol"] = new("off_agent", null) })); // 꺼진 에이전트는 받지 않는다
+
+        Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null, new Dictionary<string, ModeRowPick>
+        {
+            ["gpt_main_sol"] = new("codex_cli_sol", "high"),
+            ["gemini_main_flash"] = new("gemini_main_flash", null),
+        }));
+        var seen = await Until(ch, e => e.Kind == "idle");
+        Assert.Equal("허용 (gpt_main_sol→codex_cli_sol · high)", seen.Single(e => e.Kind == "approval-done").Text);
+        var end = seen.Single(e => e.Kind == "end");
+        var sent = Allowed(end); // 가짜 claude가 받은 updatedInput을 그대로 돌려준다
+        Assert.Equal("check this design", (string?)sent["input"]);
+        Assert.Equal(["gpt_main_sol=codex_cli_sol"], sent["agents"]!.AsArray().Select(n => (string)n!));
+        Assert.Equal(["codex_cli_sol=high"], sent["reasoning"]!.AsArray().Select(n => (string)n!));
+        Assert.Contains("design_main", Log());
+    }
+
+    [Fact]
+    public async Task RunModeCard_Deny_PassesReason_SwitchOffKeepsServerAllowed()
+    {
+        var room = ModeRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "runmode");
+        var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Deny, "지금은 외부 말고"));
+        var end = (await Until(ch, e => e.Kind == "idle")).Single(e => e.Kind == "end");
+        Assert.False(end.Ok);
+        Assert.Contains("지금은 외부 말고", end.Text);
+
+        _store.Update(room.Id, r => r with { AskRunMode = false });
+        _hub.Send(room.Id, "hello");
+        await Until(ch, e => e.Kind == "idle");
+        lock (_specs) Assert.False(_specs.Last().AskRunMode); // 끄면 다음 실행부터 서버 전체 미리 허용
+    }
+
+    [Fact]
+    public async Task ModePick_RidesItsOwnMessage_PrefillsOnce_EvenWithSwitchOff()
+    {
+        // 계획서 3번 + /self-review 785ebb5e97 C1: + 요청 창 값은 그 말에 붙는다 — 앞에 기다리던 보통 말의 실행은 카드 모드가 아니고,
+        // 그 말의 실행만 스위치가 꺼져 있어도 카드로 묻고 미리 채운다
+        var room = ModeRoom(ask: false);
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "runmode"); // 보통 말 — 가짜는 그래도 run_mode를 묻는다(미리 허용이면 진짜 CLI는 묻지 않음): 카드가 떠 있는 동안 실행 중
+        var first = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        Assert.False(first.Mode!.Prefilled);
+        _hub.Send(room.Id, "hello");
+        var pick = new ModePick("design_main", new Dictionary<string, ModeRowPick> { ["gemini_main_flash"] = new("gpt_main_sol", "xhigh") });
+        Assert.Null(_hub.Send(room.Id, "runmode", pick, interrupt: false));
+        Assert.Null(_hub.Decide(room.Id, first.Id, ApprovalChoice.Deny, null));
+
+        var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        lock (_specs)
+        {
+            Assert.Equal([false, false, true], _specs.Select(s => s.AskRunMode)); // 앞 두 실행은 값을 싣지 않았다
+        }
+        Assert.True(card.Mode!.Prefilled);
+        Assert.Equal(("gpt_main_sol", "xhigh"), (card.Mode.Rows[1].Pick, card.Mode.Rows[1].Effort));
+        // gpt_main_sol 줄은 '*=low', 교체로 gpt_main_sol이 된 줄은 xhigh — 서버는 이름마다 강도 하나라 맞추라고 돌려준다 (C4)
+        Assert.Contains("강도가 다릅니다", _hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null));
+        Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null, new Dictionary<string, ModeRowPick>
+        {
+            ["gpt_main_sol"] = new("gpt_main_sol", "xhigh"),
+            ["gemini_main_flash"] = new("gpt_main_sol", "xhigh"),
+        }));
+        var sent = Allowed((await Until(ch, e => e.Kind == "idle")).Single(e => e.Kind == "end"));
+        Assert.Equal(["gemini_main_flash=gpt_main_sol"], sent["agents"]!.AsArray().Select(n => (string)n!));
+        Assert.Equal(["gpt_main_sol=xhigh"], sent["reasoning"]!.AsArray().Select(n => (string)n!));
+
+        _hub.Send(room.Id, "hello");
+        await Until(ch, e => e.Kind == "idle");
+        lock (_specs) Assert.False(_specs.Last().AskRunMode); // 값은 그 말 하나에만
+    }
+
+    [Fact]
+    public async Task RunModeCard_UnchangedAllow_KeepsConductorInputAsIs()
+    {
+        // 785ebb5e97 C2 · C3: 아무것도 바꾸지 않고 허가하면(화면은 모든 줄을 보낸다) 지휘자 입력 그대로 — '*=low'도 그대로 간다
+        var room = ModeRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "runmode");
+        var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null,
+            card.Mode!.Rows.ToDictionary(r => r.Agent, r => new ModeRowPick(r.Pick, r.Effort))));
+        var sent = Allowed((await Until(ch, e => e.Kind == "idle")).Single(e => e.Kind == "end"));
+        Assert.False(sent.ContainsKey("agents"));
+        Assert.Equal(["*=low"], sent["reasoning"]!.AsArray().Select(n => (string)n!));
+    }
+
+    [Fact]
+    public async Task RunModeCard_LoweredToChat_CanOnlyBeDenied()
+    {
+        var room = ModeRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "runmode");
+        var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        _store.Update(room.Id, r => r with { Level = PermissionLevel.Chat });
+        Assert.NotNull(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null));
+        Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Deny, null));
+        Assert.False((await Until(ch, e => e.Kind == "idle")).Single(e => e.Kind == "end").Ok);
     }
 }

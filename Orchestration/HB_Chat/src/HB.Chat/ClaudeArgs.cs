@@ -35,6 +35,11 @@ public sealed record RunSpec(
     /// <summary>계획 모드로 시작 (Claude 앱 기능 C — "계획 먼저"). 편집 · 명령 단계만 (<see cref="ClaudeArgs.PlanMode"/>).</summary>
     public bool Plan { get; init; }
 
+    /// <summary>
+    /// 외부 요청 전에 묻기 (계획서 2026-10-29_모델-선택창): 기본 서버 도구 중 run_mode만 미리 허용하지 않는다 — CLI가 앱에 물어 모델 선택 카드가 뜬다.
+    /// </summary>
+    public bool AskRunMode { get; init; }
+
     /// <summary>앱 MCP(터미널 도구) 설정 파일 — 명령 단계에서만 쓴다 (<see cref="TerminalMcp"/>). null이면 터미널 도구 없이.</summary>
     public string? TerminalMcpConfigPath { get; init; }
 
@@ -239,6 +244,12 @@ public static partial class ClaudeArgs
     /// </summary>
     public const string AgentTool = "Agent";
 
+    /// <summary>모델 선택 카드 (<see cref="RunSpec.AskRunMode"/>)일 때 묻지 않는 기본 서버 도구. 서버에 도구가 늘면 목록에 없어 카드 없이 거절된다 (계획서 위험).</summary>
+    public static readonly IReadOnlyList<string> QuietOrchestrationTools = ["list_modes", "save_result", "record_verdicts", "server_info"];
+
+    /// <summary>모델 선택 카드로 묻는 도구 이름 (기본 서버의 run_mode).</summary>
+    public const string RunModeTool = "run_mode";
+
     private static void AddMcp(List<string> args, RunSpec spec)
     {
         if (string.IsNullOrWhiteSpace(spec.McpConfigPath))
@@ -247,7 +258,9 @@ public static partial class ClaudeArgs
         var terminal = spec.Level == PermissionLevel.Command && !string.IsNullOrWhiteSpace(spec.TerminalMcpConfigPath);
         args.AddRange(["--strict-mcp-config", "--mcp-config", spec.McpConfigPath]);
         if (terminal) args.Add(spec.TerminalMcpConfigPath!);
-        args.AddRange(["--allowedTools", $"mcp__{spec.McpServer}"]);
+        args.Add("--allowedTools");
+        if (spec.AskRunMode) args.AddRange(QuietOrchestrationTools.Select(t => $"mcp__{spec.McpServer}__{t}"));
+        else args.Add($"mcp__{spec.McpServer}");
         foreach (var extra in spec.ExtraMcpServers)
             if (!IsServerName(extra) || extra == TerminalMcp.Server) throw new ArgumentException($"MCP 서버 이름 형식이 올바르지 않다: {extra}");
         if (terminal) args.AddRange(TerminalMcp.QuietTools);

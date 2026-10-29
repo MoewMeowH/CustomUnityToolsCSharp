@@ -500,6 +500,53 @@ public sealed partial class RoomModel(
         return Change(id, r => r with { PlanNext = on }, "계획 먼저를 바꾸지 못했습니다");
     }
 
+    /// <summary>"외부 요청 전에 묻기" 켜기 · 끄기 (계획서 2026-10-29_모델-선택창): 다음 실행부터 run_mode를 모델 선택 카드로 묻는다.</summary>
+    public IActionResult OnPostAskRunMode(string id, bool on)
+    {
+        if (!RoomStore.IsRoomId(id) || store.Get(id) is not { } room) return NotFound();
+        if (GroupSettingsRefusal(room) is { } refusal) return BadRequest(refusal);
+        return Change(id, r => r with { AskRunMode = on }, "외부 요청 전에 묻기를 바꾸지 못했습니다");
+    }
+
+    /// <summary>+ 요청 창의 모드 · 에이전트 목록 (계획서 3번). 읽지 못하면 빈 목록과 error.</summary>
+    public IActionResult OnGetModes(string id)
+    {
+        Response.Headers.CacheControl = "no-store";
+        if (!RoomStore.IsRoomId(id) || store.Get(id) is not { } room) return NotFound();
+        var list = ModesFor(room);
+        return new JsonResult(new
+        {
+            modes = list.Modes.Select(m => new { name = m.Name, description = m.Description, flow = m.Flow, steps = m.Steps, ownReview = m.OwnReview }),
+            agents = list.Agents,
+            efforts = ModeCatalog.Efforts,
+            error = list.Error,
+        });
+    }
+
+    private ModeList ModesFor(Room room) =>
+        options.Value.WorkspacePath(room.Workspace) is { } ws ? ModeCatalog.Read(ws, options.Value.McpServer) : ModeList.Empty with { Error = "작업 폴더를 찾지 못했습니다." };
+
+    /// <summary>
+    /// + 요청 창 보내기 (계획서 3번): 머리 줄을 붙인 말을 지휘자에게 보내고, 고른 값은 그 말에 붙인다 — 그 말의 실행만 run_mode를 카드로 묻고 미리 채운다
+    /// (/self-review 785ebb5e97 C1). interrupt면 끼어들기로.
+    /// </summary>
+    public IActionResult OnPostModeRequest(string id, string? mode, string? picks, string? text, bool interrupt)
+    {
+        if (!RoomStore.IsRoomId(id) || store.Get(id) is not { } room) return NotFound();
+        if (room.IsGroup || room.GroupId is not null) return BadRequest("단톡방에서는 외부 에이전트 요청 창을 쓰지 않습니다.");
+        if (room.Level == PermissionLevel.Chat) return BadRequest("대화 단계 방은 외부 에이전트를 부를 도구가 없습니다.");
+        if (room.McpOff.Contains(options.Value.McpServer)) return BadRequest($"이 방은 {options.Value.McpServer} 연결을 꺼 두었습니다 — 곁칸에서 켜 주세요.");
+        if (string.IsNullOrWhiteSpace(text)) return BadRequest("요청 글을 써 주세요.");
+        var list = ModesFor(room);
+        if (list.Find(mode) is not { } info) return BadRequest(list.Error ?? $"모드 '{mode}'가 목록에 없습니다.");
+        if (ModeCard.ParsePicks(picks) is not { } rows) return BadRequest("고른 값을 읽지 못했습니다.");
+        if (ModeCard.CheckPick(info, list, rows) is { } bad) return BadRequest(bad);
+        if (TooManyAttachments(text)) return BadRequest($"첨부는 한 말에 {Attachments.MaxPerMessage}개까지입니다.");
+        return hub.Send(id, ModeCard.Header(info, rows) + "\n" + text, new ModePick(info.Name, rows), interrupt) is { } error
+            ? BadRequest(error)
+            : new JsonResult(new { ok = true });
+    }
+
     /// <summary>휴지통으로 (30일 뒤 완전히 지움). 실행 중인 방은 먼저 중지해야 한다 — 기다리는 승인 · 큐가 버려지지 않게.</summary>
     public IActionResult OnPostTrash(string id)
     {
@@ -671,6 +718,12 @@ public sealed partial class RoomModel(
     [System.Text.RegularExpressions.GeneratedRegex(@"\A(?:\s*<system-reminder>.*?</system-reminder>)+\s*", System.Text.RegularExpressions.RegexOptions.Singleline)]
     private static partial System.Text.RegularExpressions.Regex LeadingGuide();
 
+    /// <summary>
+    /// 입력칸 + 메뉴의 "외부 에이전트 요청" · "외부 요청 전에 묻기" 스위치를 보일지 (계획서 2026-10-29_모델-선택창): 읽기 이상 단계 · 기본 MCP 서버가 켜진 보통 방.
+    /// </summary>
+    public bool CanModeRequest => Room.Level != PermissionLevel.Chat && Room.DeletedAt is null && !Room.IsGroup && Room.GroupId is null
+                                  && Room.Engine is null && !Room.McpOff.Contains(options.Value.McpServer);
+
     /// <summary>방 머리 · 곁칸의 모델 글: Codex 방(단톡방 구성원 과정 보기)이면 "Codex · 모델"(빈 모델 = 기본 모델 — ② K4), 그 밖은 모델 이름.</summary>
     public string ModelLabel => Room.Engine == RoomEngines.Codex
         ? "Codex · " + (Room.Model.Length > 0 ? Room.Model : "기본 모델")
@@ -779,10 +832,11 @@ public sealed partial class RoomModel(
         return terminals.Remove(id, term) ? new JsonResult(new { ok = true }) : BadRequest("돌고 있는 터미널은 먼저 중지하세요.");
     }
 
-    /// <summary>승인 카드 단추: choice = allow · always · deny, reason은 거절 이유 (선택).</summary>
-    public IActionResult OnPostApprove(string id, string? approval, string? choice, string? reason)
+    /// <summary>승인 카드 단추: choice = allow · always · deny, reason은 거절 이유 (선택), picks는 모델 선택 카드에서 고른 값 (JSON, 선택).</summary>
+    public IActionResult OnPostApprove(string id, string? approval, string? choice, string? reason, string? picks)
     {
         if (!RoomStore.IsRoomId(id) || string.IsNullOrEmpty(approval)) return NotFound();
+        if (ModeCard.ParsePicks(picks) is not { } chosen) return BadRequest("고른 값을 읽지 못했습니다.");
         ApprovalChoice? parsed = choice switch
         {
             "allow" => ApprovalChoice.Allow,
@@ -792,7 +846,7 @@ public sealed partial class RoomModel(
         };
         if (parsed is null) return BadRequest("알 수 없는 선택입니다.");
         if (reason is { Length: > 500 }) reason = reason[..500];
-        return hub.Decide(id, approval, parsed.Value, reason) is { } error ? CardError(error) : new JsonResult(new { ok = true });
+        return hub.Decide(id, approval, parsed.Value, reason, chosen.Count == 0 ? null : chosen) is { } error ? CardError(error) : new JsonResult(new { ok = true });
     }
 
     /// <summary>

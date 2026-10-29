@@ -68,6 +68,11 @@ public sealed record Room
     public bool PlanNext { get; init; }
 
     /// <summary>
+    /// "외부 요청 전에 묻기" (계획서 2026-10-29_모델-선택창, 결정 "방 설정 스위치"): 켜면 다음 실행부터 run_mode를 미리 허용하지 않고 모델 선택 카드로 묻는다.
+    /// </summary>
+    public bool AskRunMode { get; init; }
+
+    /// <summary>
     /// 이 방에 더 붙일 작업 폴더 .mcp.json의 MCP 서버 이름 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결 — Notion E). 읽기 이상 단계에서만 붙는다.
     /// 기본 서버(hb-orchestration)는 여기 넣지 않는다 — 늘 붙고, 끄려면 <see cref="McpOff"/>.
     /// </summary>

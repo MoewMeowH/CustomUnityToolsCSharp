@@ -38,6 +38,9 @@ public sealed record ApprovalRequest(string Tool, string Summary, string? Descri
     /// <summary>백그라운드 실행 명령 (input의 run_in_background = true) — 답이 끝난 뒤에도 계속 돈다는 줄을 카드에 보인다 (계획서 2026-10-29_HB_Chat-백그라운드-명령).</summary>
     public bool Background { get; init; }
 
+    /// <summary>run_mode 모델 선택 카드 (계획서 2026-10-29_모델-선택창) — 허가하면 고른 교체 · 강도로 입력을 다시 쓴다. 아니면 null.</summary>
+    public ModeCard? Mode { get; init; }
+
     /// <summary>계획 모드에서 지휘자가 계획 승인을 묻는 도구.</summary>
     public const string PlanTool = "ExitPlanMode";
 
@@ -163,6 +166,9 @@ public enum ApprovalChoice
 /// <summary>승인 카드의 답. Message는 거절 때 Claude가 보는 문구.</summary>
 public sealed record ApprovalAnswer(bool Allow, string? Message)
 {
+    /// <summary>모델 선택 카드에서 고른 값 (원래 에이전트 → 고른 값). 다른 카드 · 고르지 않음은 null.</summary>
+    public IReadOnlyDictionary<string, ModeRowPick>? Picks { get; init; }
+
     /// <summary>호스트 답 JSON (<see cref="PermissionDecision"/>). 허용이면 입력을 그대로 돌려준다.</summary>
     public string ToDecisionJson(string inputJson) =>
         Allow ? PermissionDecision.Allow(inputJson) : PermissionDecision.Deny(Message ?? "사용자가 거절했습니다.");

@@ -87,6 +87,9 @@ public sealed record ApprovalView(string Id, string Tool, string Summary, string
 
     /// <summary>백그라운드 실행 명령이면 답이 끝난 뒤에도 계속 도는 최대 분 (카드 표시, 결정 "넣음"). 아니면 null.</summary>
     public int? BackgroundMinutes { get; init; }
+
+    /// <summary>run_mode 모델 선택 카드 (계획서 2026-10-29_모델-선택창). 아니면 null.</summary>
+    public ModeCard? Mode { get; init; }
 }
 
 /// <summary>
@@ -128,6 +131,13 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
 
         /// <summary>지금 실행을 끼어들기로 끝냈다 — end 알림 글을 "끼어들기로 멈춤"으로 (지휘자 검토 R5).</summary>
         public bool Interrupted;
+
+        /// <summary>
+        /// 지금 실행의 말에 붙은 + 요청 창 값 (계획서 2026-10-29_모델-선택창 3번, /self-review 785ebb5e97 C1 — 방이 아니라 말에 붙인다).
+        /// 같은 모드의 첫 run_mode 카드가 쓰고 <see cref="PickUsed"/>를 켠다. 말을 꺼낼 때 잠금 안에서 바꾼다.
+        /// </summary>
+        public ModePick? CurrentPick;
+        public bool PickUsed;
         public readonly Dictionary<string, PendingApproval> Approvals = [];
         public readonly Dictionary<string, PendingQuestion> Questions = [];
 
@@ -156,6 +166,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
 
         public ApprovalView View => new(Id, Request.Tool, Request.Summary, Request.Description, Request.Rule, ExpiresAt, Request.Truncated)
         {
+            Mode = Request.Mode,
             Extra = Request.Extra,
             Risky = Request.Risky,
             Plan = Request.IsPlan,
@@ -395,6 +406,9 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     /// <summary>말 보내기. 실행 중이면 큐에 넣는다. 오류 문구(null이면 받음).</summary>
     public string? Send(string roomId, string text) => Enqueue(roomId, text, interrupt: false);
 
+    /// <summary>+ 요청 창 말 (계획서 2026-10-29_모델-선택창 3번): 고른 값을 그 말에 붙여 큐에 넣는다 — 그 말의 실행만 run_mode를 카드로 묻고 미리 채운다.</summary>
+    public string? Send(string roomId, string text, ModePick pick, bool interrupt) => Enqueue(roomId, text, interrupt, pick);
+
     /// <summary>
     /// 끼어들기 (계획서 2-2 d): 이 말을 큐 맨 앞에 넣고 지금 실행만 끝낸다 — 세대는 올리지 않아 큐의 다른 말은 그대로 남는다.
     /// 기다리던 승인은 "끼어들기"로 거절. 끊긴 턴은 세션에 결과 없이 남고 다음 말(이 말)이 이어 간다 (1차 실제 확인).
@@ -441,7 +455,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         return null;
     }
 
-    private string? Enqueue(string roomId, string text, bool interrupt)
+    private string? Enqueue(string roomId, string text, bool interrupt, ModePick? pick = null)
     {
         if (string.IsNullOrWhiteSpace(text)) return "빈 글은 보내지 않습니다.";
         if (text.Length > MaxPromptChars) return $"글이 너무 깁니다 ({text.Length:N0}자, 상한 {MaxPromptChars:N0}자).";
@@ -452,7 +466,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         var live = _rooms.GetOrAdd(roomId, id => new Live(id));
         lock (live.Gate)
         {
-            var message = new QueuedMessage(Guid.NewGuid().ToString("N")[..10], text);
+            var message = new QueuedMessage(Guid.NewGuid().ToString("N")[..10], text) { Pick = pick };
             if (live.Busy)
             {
                 if (interrupt)
@@ -519,8 +533,9 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     /// </summary>
     /// <param name="attached">이 실행에 붙인 방별 서버 (더한 .mcp.json 서버 · unity) — 미리 허용하지 않고 여기서 받는다 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결 결정 4).</param>
     /// <param name="unity">이 실행에 붙인 Unity 프로젝트 이름.</param>
+    /// <param name="workspace">작업 폴더 — run_mode 모델 선택 카드가 모드 목록을 읽는다 (<see cref="ModeCatalog"/>).</param>
     private async Task<string> DecideToolAsync(Room room, Live live, int generation, ToolPermission ask, CancellationToken aborted,
-        IReadOnlyCollection<string>? attached = null, string? unity = null)
+        IReadOnlyCollection<string>? attached = null, string? unity = null, string? workspace = null)
     {
         if (attached is { Count: > 0 } && McpServerOf(ask.Tool) is { } server && attached.Contains(server))
             return await DecideRoomServerAsync(room, live, generation, ask, aborted, server, unity);
@@ -620,11 +635,33 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 ? PermissionDecision.Allow(question.WithAnswers(given))
                 : PermissionDecision.Deny($"사용자가 질문 카드에 답하지 않았습니다 ({answers.Label}). 필요하면 채팅 글로 다시 물어 주세요.");
         }
+        if (room.Level != PermissionLevel.Chat && workspace is not null && ask.Tool == $"mcp__{options.Value.McpServer}__{ClaudeArgs.RunModeTool}")
+            return await DecideRunModeAsync(room, live, generation, ask, aborted, workspace);
         // 호스트가 거절하면 CLI는 system/permission_denied를 내지 않는다 (3차 a 실제 확인) — 그 전처럼 "거절됨" 줄을 화면에 남긴다.
         var summary = ApprovalRequest.Parse(ask.RequestJson)?.Summary ?? "";
         var target = summary is { Length: > 0 } s ? $" {(s.Length > 120 ? s[..120] + "…" : s)}" : "";
         HostDenied(room, live, generation, ask.Tool, summary, "승인할 곳 없음", $"{ask.Tool}{target}: 승인할 곳이 없어 자동 거절");
         return PermissionDecision.Deny(ClaudeRunner.NoApprover);
+    }
+
+    /// <summary>
+    /// run_mode 모델 선택 카드 (계획서 2026-10-29_모델-선택창 2번): 외부 요청 전에 묻기를 켰거나 + 요청 창 값을 싣고 시작한 실행에서만 온다 (그 밖은 미리 허용).
+    /// 허가하면 고른 교체 · 강도를 agents · reasoning에 다시 써서 돌려준다. + 요청 창 값은 같은 모드의 첫 카드 한 번만 미리 채운다 (785ebb5e97 C6).
+    /// </summary>
+    private async Task<string> DecideRunModeAsync(Room room, Live live, int generation, ToolPermission ask, CancellationToken aborted, string workspace)
+    {
+        var list = ModeCatalog.Read(workspace, options.Value.McpServer);
+        ModePick? pick;
+        lock (live.Gate) pick = live.Generation == generation && !live.PickUsed ? live.CurrentPick : null;
+        if (ModeCard.Build(ask.InputJson, list, pick) is not { } card) return PermissionDecision.Deny("run_mode 입력을 읽지 못해 거절했습니다.");
+        if (card.Prefilled) lock (live.Gate) live.PickUsed = true;
+        // 기록(approvals.jsonl)에 모드 이름이 남게 요약 첫 줄로
+        var request = new ApprovalRequest(ask.Tool, $"{card.Mode}\n{card.InputHead}", card.Reason, null) { Mode = card };
+        var answer = await RequestApprovalAsync(room.Id, live, generation, request, aborted);
+        if (answer is not { Allow: true }) return (answer ?? new ApprovalAnswer(false, "실행이 이미 끝나 거절했습니다.")).ToDecisionJson(ask.InputJson);
+        if (store.Get(room.Id) is not { } now || now.Level == PermissionLevel.Chat)
+            return PermissionDecision.Deny("사용자가 이 방 권한을 대화 단계로 내렸습니다 — 외부 에이전트를 부르지 않습니다.");
+        return PermissionDecision.Allow(card.Apply(ask.InputJson, answer.Picks));
     }
 
     /// <summary>Unity 도구 중 명령 카드로 묻는 것 — C# 코드 실행 셋 (결정 4 "eval만 카드로"). 나머지 Unity 도구는 묻지 않는다.</summary>
@@ -824,7 +861,8 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     /// 항상 허용은 답이 정해진 뒤에만 규칙을 저장한다 — 같은 순간 시간 초과로 거절됐는데 규칙만 남는 일이 없게 (지휘자 검토 R3).
     /// 저장에 실패하면 이번 허용은 그대로 두고 오류를 알린다.
     /// </summary>
-    public string? Decide(string roomId, string approvalId, ApprovalChoice choice, string? reason)
+    /// <param name="picks">모델 선택 카드에서 고른 값 (원래 에이전트 → 고른 에이전트 · 강도). 다른 카드는 null.</param>
+    public string? Decide(string roomId, string approvalId, ApprovalChoice choice, string? reason, IReadOnlyDictionary<string, ModeRowPick>? picks = null)
     {
         if (!_rooms.TryGetValue(roomId, out var live)) return "없는 방입니다.";
         string? rule = null;
@@ -835,6 +873,8 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             // 카드가 뜬 뒤 곁칸에서 권한을 내렸으면 허용 · 항상 허용을 받지 않는다 (/self-review security 8ccecae84d C1) —
             // 명령 카드는 명령 단계가 아니면, 계획 카드는 편집 · 명령 단계가 아니면. 단계는 이 잠금 안에서 읽는다 (d3dd55b237 C2)
             var level = store.Get(roomId)?.Level;
+            if (pending.Request.Mode is { } card)
+                return DecideModeCard(pending, card, level, choice, reason, picks);
             if (choice != ApprovalChoice.Deny && (pending.Request.IsPlan ? level is not { } l || ClaudeArgs.PlanMode(l) is null : level != PermissionLevel.Command))
                 return pending.Request.IsPlan
                     ? "이 방 권한을 편집 단계 아래로 내려 계획을 진행할 수 없습니다 — 거절만 됩니다."
@@ -862,6 +902,34 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         {
             return $"이번은 허용했지만 규칙을 저장하지 못했습니다: {ex.Message}";
         }
+    }
+
+    /// <summary>모델 선택 카드의 답 (잠금 안에서 부른다). 항상 허용은 없다. 허용 기록에는 바꾼 줄을 적는다.</summary>
+    private static string? DecideModeCard(PendingApproval pending, ModeCard card, PermissionLevel? level, ApprovalChoice choice, string? reason,
+        IReadOnlyDictionary<string, ModeRowPick>? picks)
+    {
+        if (choice == ApprovalChoice.AlwaysAllow) return "이 요청에는 항상 허용할 규칙이 없습니다.";
+        if (choice == ApprovalChoice.Allow && level is null or PermissionLevel.Chat) return "이 방 권한을 대화 단계로 내려 허가할 수 없습니다 — 거절만 됩니다.";
+        if (choice == ApprovalChoice.Allow && card.Check(picks) is { } bad) return bad;
+        var message = string.IsNullOrWhiteSpace(reason) ? "사용자가 거절했습니다." : $"사용자가 거절했습니다: {reason.Trim()}";
+        if (!pending.Answer.TrySetResult(new ApprovalAnswer(choice == ApprovalChoice.Allow, choice == ApprovalChoice.Deny ? message : null) { Picks = picks }))
+            return ApprovalDone;
+        pending.Label = choice == ApprovalChoice.Deny ? "거절" : ModeLabel(card, picks);
+        return null;
+    }
+
+    /// <summary>허가 기록 문구: 바뀐 줄만 "허용 (원래→새것 · 강도)", 없으면 "허용".</summary>
+    public static string ModeLabel(ModeCard card, IReadOnlyDictionary<string, ModeRowPick>? picks)
+    {
+        var changes = new List<string>();
+        foreach (var row in card.Rows)
+        {
+            var pick = card.Final(row, picks);
+            var swapped = !string.Equals(pick.Agent, row.Agent, StringComparison.OrdinalIgnoreCase);
+            if (swapped || !string.IsNullOrEmpty(pick.Effort))
+                changes.Add((swapped ? $"{row.Agent}→{pick.Agent}" : row.Agent) + (string.IsNullOrEmpty(pick.Effort) ? "" : $" · {pick.Effort}"));
+        }
+        return changes.Count == 0 ? "허용" : $"허용 ({string.Join(", ", changes)})";
     }
 
     /// <summary>"항상 허용" 규칙 지우기. 오류 문구(null이면 지움).</summary>
@@ -1008,6 +1076,8 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                     return;
                 }
                 text = live.Pending[0].Text;
+                live.CurrentPick = live.Pending[0].Pick;
+                live.PickUsed = false;
                 live.Pending.RemoveAt(0);
                 live.Current = text;
                 live.Partial.Clear();
@@ -1372,7 +1442,9 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         }
 
         var rules = RoomRules.For(room.Level, terminal: terminalConfig is not null, unity: unityName,
-            extras: [.. extraServers.Where(s => s != McpConfigFile.UnityServer)])
+            extras: [.. extraServers.Where(s => s != McpConfigFile.UnityServer)],
+            // 모델 선택창 안내는 기본 서버가 붙고 요청 창 · 스위치가 있는 방에만 (785ebb5e97 C7)
+            modeCard: mcpConfig is not null && !room.McpOff.Contains(o.McpServer) && room.GroupId is null)
             + GroupRules.For(store, room); // 단톡방 구성원 방이면 역할 · 다른 구성원 (계획서 2026-10-29_HB_Chat-단톡방) — 바뀌면 지문이 바뀌어 다음 말에 다시 붙는다
         // 이어 쓰는 세션은 CLI가 압축 전까지 처음 시스템 프롬프트를 쓴다 (계획서 2026-10-29_HB_Chat-2-2-작은-한계-정리 0단계 실측: resume에 넣은 새 규칙은 안 보임).
         // 지휘자가 마지막으로 받은 규칙과 다르면 이번 말 앞에 새 규칙을 붙인다 — 갈래 첫 실행 · 이 칸 전에 만든 방도 한 번 받는다.
@@ -1393,6 +1465,8 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 NotStarted = true,
             });
         var sizeBefore = transcripts.Size(room.SessionId) ?? -1;
+        ModePick? runPick;
+        lock (live.Gate) runPick = live.CurrentPick;
         var spec = new RunSpec(room.Level, room.Model, room.SessionId, resume, mcpConfig, o.McpServer, rules, room.AllowRules)
         {
             ExtraMcpServers = extraServers, // 방이 더한 서버 · unity는 묻지 않고 (결정)
@@ -1402,6 +1476,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             InheritedAttachDirs = inheritedDirs, // 갈래 방: 원래 방들의 첨부 (계획서 2026-10-29_HB_Chat-2-2-작은-한계-정리)
             Effort = room.Effort, // 곁칸에서 바꾸면 다음 실행부터 (Claude 앱 기능 B)
             Plan = room.PlanNext && ClaudeArgs.PlanMode(room.Level) is not null, // "계획 먼저" (C) — 편집 · 명령 단계만
+            AskRunMode = room.AskRunMode || runPick is not null, // 외부 요청 전에 묻기 · + 요청 창 말 (계획서 2026-10-29_모델-선택창)
             TerminalMcpConfigPath = terminalConfig, // 명령 방: 앱 MCP(터미널 도구) — 계획서 2026-10-29_HB_Chat-터미널-곁칸
         };
         ProcessSpec process;
@@ -1466,7 +1541,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 };
                 if (shown is not null) Broadcast(live, shown);
             }
-        }, (ask, aborted) => DecideToolAsync(room, live, generation, ask, aborted, extraServers, unityName), stopOnMismatch.Token, wrapUp);
+        }, (ask, aborted) => DecideToolAsync(room, live, generation, ask, aborted, extraServers, unityName, workspace), stopOnMismatch.Token, wrapUp);
 
         // 턴 끝에 한 번 더 — 마지막 변경이 출력 뒤에 써졌거나 중지된 경우 (실제 확인). 중지는 세대를 올리므로 세대 · 간격 검사 없이 (ea28ba9185 C2).
         if (RefreshSteps(room, live, generation, turnEnd: true) is { } last)
@@ -1666,7 +1741,11 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
 }
 
 /// <summary>큐에서 기다리는 말 하나 (Id로 취소한다).</summary>
-public sealed record QueuedMessage(string Id, string Text);
+public sealed record QueuedMessage(string Id, string Text)
+{
+    /// <summary>+ 요청 창에서 고른 값 (계획서 2026-10-29_모델-선택창). 보통 말은 null.</summary>
+    public ModePick? Pick { get; init; }
+}
 
 /// <summary>방 목록에 보일 실행 상태.</summary>
 public enum RoomActivity
@@ -1683,7 +1762,8 @@ public static class RoomRules
     /// <summary>방 규칙. terminal = 이 실행에 앱 MCP(터미널 도구)를 붙였는지 — 못 붙였으면 안내를 넣지 않는다(없는 도구를 찾지 않게, 지휘자 검토 K3).</summary>
     /// <param name="unity">이 실행에 붙인 Unity 프로젝트 이름 (명령 방에서 연결했을 때, 계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결). null이면 안내 없음.</param>
     /// <param name="extras">이 실행에 더 붙인 작업 폴더 MCP 서버 (unity 빼고) — 단계와 상관없이 묻지 않는다는 안내 (결정 4).</param>
-    public static string For(PermissionLevel level, bool terminal = false, string? unity = null, IReadOnlyList<string>? extras = null) =>
+    /// <param name="modeCard">모델 선택창 안내(+ 요청 창 머리 줄 · run_mode 카드)를 넣을지 — 기본 서버가 붙은 보통 방 (계획서 2026-10-29_모델-선택창).</param>
+    public static string For(PermissionLevel level, bool terminal = false, string? unity = null, IReadOnlyList<string>? extras = null, bool modeCard = false) =>
         "이 대화는 HB_Chat 채팅 앱의 방이다. 사용자는 브라우저 채팅 화면으로 읽고 말한다. " +
         $"이 방의 권한: {Describe(level)}. " +
         (extras is { Count: > 0 }
@@ -1712,7 +1792,11 @@ public static class RoomRules
             : "승인을 물을 곳이 없어서 허용되지 않은 도구 호출은 자동으로 거절된다 — 거절되면 다시 시도하지 말고, 무엇이 필요한지 사용자에게 말한다.") +
         // 질문 카드 (3차 a): 대화 단계는 도구가 없다
         (level == PermissionLevel.Chat ? "" :
-            $" 사용자에게 선택지 중 하나를 고르게 할 때는 {ClaudeArgs.AskTool} 도구를 쓴다 — 화면에 질문 카드로 보인다. 답이 없다고 돌아오면 채팅 글로 다시 묻는다.") +
+            $" 사용자에게 선택지 중 하나를 고르게 할 때는 {ClaudeArgs.AskTool} 도구를 쓴다 — 화면에 질문 카드로 보인다. 답이 없다고 돌아오면 채팅 글로 다시 묻는다." +
+            // 모델 선택창 (계획서 2026-10-29_모델-선택창): + 요청 창 머리 줄과 run_mode 카드
+            (!modeCard ? "" : $" 사용자 말 첫 줄이 \"{ModeCard.HeaderMarker} mode=…\"이면 사용자가 화면의 요청 창에서 고른 외부 에이전트 요청이다 — 그 모드로 run_mode를 부르고 " +
+            "(input · context는 평소 규칙대로 꾸린다), 그 줄에 agents · reasoning이 있으면 그 값을 그대로 넣는다. " +
+            "run_mode는 사용자가 카드로 에이전트 · 추론 강도를 바꿔 허가하거나 거절할 수 있다 — 거절되면 다시 부르지 말고 거절 이유를 본다.")) +
         Widgets.Rule + // 위젯 형식 (2-2 f)
         // 첨부 (2-2 d): 말 끝의 [첨부] 줄 — 대화 단계는 도구가 없어 받지 않는다
         (level == PermissionLevel.Chat ? "" :
