@@ -476,7 +476,10 @@
             "if(k.title)add({title:k.title},true);k.slides.forEach(s=>add(s,false));" +
             "const o={embedded:true,width:960,height:540,margin:.06,controls:true,progress:true,slideNumber:\"c/t\",hash:false,history:false," +
             // postMessage API를 끈다 — 기본은 켜져 있고 보낸 창을 확인하지 않아, 실행 중인 위젯이 옆 슬라이드의 Reveal을 부를 수 있다 (607bd5ec77 C2)
-            "respondToHashChanges:false,keyboard:true,transition:\"none\",backgroundTransition:\"none\",center:false,help:false,postMessage:false,postMessageEvents:false,previewLinks:false};" +
+            "respondToHashChanges:false,keyboard:true,transition:\"none\",backgroundTransition:\"none\",center:false,help:false,postMessage:false,postMessageEvents:false,previewLinks:false," +
+            // 좁은 틀(약 462px 이하 — 미니 창 · 좁은 창)에서도 스크롤 보기로 바꾸지 않는다 — 바뀌면 화살표 · 쪽 번호 없는 세로 보기가 되고,
+            // sandbox 틀이라 sessionStorage에서 예외가 나 로딩 클래스가 남았다 (실측, /self-review 832f22f583 C1)
+            "scrollActivationWidth:null};" +
             "if(d.print)o.view=\"print\";" +
             "Reveal.initialize(o).then(()=>{try{" +
             // 슬라이드는 960×540을 줄여 보이므로 차트 글자를 키운다 (실제 확인: 기본 12px은 읽기 어려움)

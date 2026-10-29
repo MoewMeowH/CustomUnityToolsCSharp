@@ -63,7 +63,7 @@ public sealed class ChatBrowser : IAsyncLifetime
     }
 
     /// <summary>새 탭에서 주소를 열고 방 칸(#chat)이 그려질 때까지 기다린다.</summary>
-    public async Task<ChatPage> OpenAsync(Uri url)
+    public async Task<ChatPage> OpenAsync(Uri url, int width = 1280, int height = 800)
     {
         if (_root is null) throw new InvalidOperationException("브라우저가 없습니다.");
         var target = (string)(await _root.CallAsync("Target.createTarget", new JsonObject { ["url"] = "about:blank" }))["targetId"]!;
@@ -72,14 +72,14 @@ public sealed class ChatBrowser : IAsyncLifetime
         {
             await cdp.DisposeAsync();
             try { await _root.CallAsync("Target.closeTarget", new JsonObject { ["targetId"] = target }); } catch (Exception ex) when (ex is CdpException or InvalidOperationException or OperationCanceledException) { }
-        });
+        }, _port, target);
         try
         {
             await cdp.ConnectAsync(new Uri($"ws://127.0.0.1:{_port}/devtools/page/{target}"), default);
             await cdp.CallAsync("Runtime.enable");
             await cdp.CallAsync("Log.enable");
             await cdp.CallAsync("Page.enable");
-            await cdp.CallAsync("Emulation.setDeviceMetricsOverride", new JsonObject { ["width"] = 1280, ["height"] = 800, ["deviceScaleFactor"] = 1, ["mobile"] = false });
+            await page.ResizeAsync(width, height);
             await cdp.CallAsync("Page.navigate", new JsonObject { ["url"] = url.ToString() });
             await page.WaitForAsync("document.readyState === 'complete' && !!document.querySelector('#chat')", "방 화면");
             return page;
@@ -117,12 +117,16 @@ public sealed class ChatPage : IAsyncDisposable
     public static readonly TimeSpan TurnWait = TimeSpan.FromSeconds(30);
     private readonly CdpClient _cdp;
     private readonly Func<Task> _close;
+    private readonly int _port;
+    private readonly string _targetId;
     private readonly List<string> _errors = [];
 
-    internal ChatPage(CdpClient cdp, Func<Task> close)
+    internal ChatPage(CdpClient cdp, Func<Task> close, int port, string targetId)
     {
         _cdp = cdp;
         _close = close;
+        _port = port;
+        _targetId = targetId;
         cdp.Event += (method, p) =>
         {
             var error = method switch
@@ -185,6 +189,39 @@ public sealed class ChatPage : IAsyncDisposable
             }
             await Task.Delay(50);
         }
+    }
+
+    /// <summary>지금 화면을 PNG로 저장 (실패 조사용).</summary>
+    public async Task ScreenshotAsync(string path)
+    {
+        var shot = await _cdp.CallAsync("Page.captureScreenshot", new JsonObject { ["format"] = "png" });
+        await File.WriteAllBytesAsync(path, Convert.FromBase64String((string)shot["data"]!));
+    }
+
+    /// <summary>틀을 못 찾았을 때의 틀 목록 (실패 메시지용).</summary>
+    public string? LastFrameTree { get; private set; }
+
+    /// <summary>창 크기 바꾸기 (미니 창 · 좁은 창 흉내).</summary>
+    public Task ResizeAsync(int width, int height) =>
+        _cdp.CallAsync("Emulation.setDeviceMetricsOverride", new JsonObject { ["width"] = width, ["height"] = height, ["deviceScaleFactor"] = 1, ["mobile"] = false });
+
+    /// <summary>
+    /// 격리 틀(srcdoc, 다른 출처라 페이지 스크립트로는 안을 못 봄) 안에서 식을 실행한다. Chrome은 sandbox 틀을 따로 떨어진 대상(OOPIF)으로 띄워
+    /// 페이지의 틀 목록에 없다(실측) — 디버깅 목록에서 이 탭에 딸린 iframe 대상을 찾아 거기에 붙는다. 틀은 index번째 (srcdoc만 셈). 아직 없으면 null.
+    /// 틀 안 예외는 이 탭의 <see cref="Errors"/>에 잡히지 않는다 (다른 대상).
+    /// </summary>
+    public async Task<JsonNode?> EvalInFrameAsync(string expression, int index = 0)
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+        var targets = JsonNode.Parse(await http.GetStringAsync($"http://127.0.0.1:{_port}/json/list"))!.AsArray();
+        var frames = targets.Where(t => (string?)t?["type"] == "iframe" && (string?)t?["parentId"] == _targetId
+            && ((string?)t?["url"])?.StartsWith("about:srcdoc", StringComparison.Ordinal) == true).ToList();
+        if (index >= frames.Count) { LastFrameTree = targets.ToJsonString(); return null; }
+        await using var frame = new CdpClient();
+        await frame.ConnectAsync(new Uri((string)frames[index]!["webSocketDebuggerUrl"]!), default);
+        var r = await frame.CallAsync("Runtime.evaluate", new JsonObject { ["expression"] = expression, ["awaitPromise"] = true, ["returnByValue"] = true });
+        if (r["exceptionDetails"] is { } ex) throw new InvalidOperationException($"틀 안 스크립트 실패: {ex["exception"]?["description"] ?? ex["text"]}\n식: {expression}");
+        return r["result"]?["value"];
     }
 
     /// <summary>화면에서 보내기 (입력칸 + 보내기 — 화면 스크립트의 Send 길 그대로).</summary>

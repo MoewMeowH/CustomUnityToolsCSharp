@@ -18,6 +18,46 @@ public sealed class ChatScriptTests(ChatApp app, ChatBrowser browser) : IClassFi
 
     private static string Widget(string html) => "```widget\n" + html + "\n```";
 
+    /// <summary>
+    /// 좁은 창(미니 창 등)에서도 보통 슬라이드로 그려진다 (/self-review 832f22f583 C1). 고치기 전 실측(2026-10-29): 틀 406 · 306px에서 reveal이
+    /// 스크롤 보기로 바뀌어(scrollActivationWidth 기본 435) sessionStorage SecurityError, loading-scroll-mode 클래스가 남고 화살표 · 쪽 번호 없는
+    /// 세로 보기가 됐다(빈 틀은 아님) → scrollActivationWidth:null. 틀 안 예외는 다른 대상(OOPIF)이라 이 탭의 Errors에 잡히지 않아 틀 안 상태로 본다.
+    /// </summary>
+    [Theory]
+    [InlineData(1280)]
+    [InlineData(480)]
+    [InlineData(380)]
+    public async Task Slides_RenderAtWindowWidth(int width)
+    {
+        if (!browser.Available) return;
+        var room = app.Room("slides-" + width,
+            ChatApp.Conductor("```slides\n{\"title\":\"Deck\",\"slides\":[{\"title\":\"One\",\"body\":\"hello\"},{\"title\":\"Two\",\"body\":\"world\"}]}\n```", 0));
+        await using var page = await browser.OpenAsync(app.RoomUrl(room), width, 800);
+        await page.WaitForAsync("!!document.querySelector('iframe.slides-frame')", "슬라이드 틀");
+        await page.EvalAsync("document.querySelector('iframe.slides-frame').scrollIntoView()"); // loading=lazy
+        var frameWidth = await page.EvalAsync<double>("document.querySelector('iframe.slides-frame').getBoundingClientRect().width");
+
+        const string State = "JSON.stringify({ ready: !!document.querySelector('.reveal.ready'), html: document.documentElement.className, " +
+                             "reveal: document.querySelector('.reveal')?.className, w: innerWidth, " +
+                             "shown: document.querySelector('.reveal .slides section.present')?.textContent.trim() || null })";
+        string? state = null;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (sw.Elapsed < TimeSpan.FromSeconds(10))
+        {
+            state = (await page.EvalInFrameAsync(State))?.ToString();
+            if (state?.Contains("\"ready\":true") == true) break;
+            await Task.Delay(100);
+        }
+        var message = $"창 {width}px · 틀 {frameWidth}px: {state}\n오류: {string.Join(" | ", page.Errors)}\n틀: {page.LastFrameTree?[..Math.Min(1500, page.LastFrameTree.Length)]}";
+        Assert.True(state?.Contains("\"ready\":true") == true && state.Contains("Deck"), message);
+        // 보통 슬라이드 보기 — 스크롤 보기 · 로딩 클래스가 없고, 쪽 번호가 보인다
+        Assert.DoesNotContain("reveal-scroll", state);
+        Assert.DoesNotContain("loading-scroll-mode", state);
+        Assert.Equal("visible", (string?)await page.EvalInFrameAsync("getComputedStyle(document.querySelector('.reveal-viewport')).visibility"));
+        Assert.True((bool)(await page.EvalInFrameAsync("!!document.querySelector('.reveal .slide-number')?.offsetWidth"))!, message);
+        page.AssertNoErrors();
+    }
+
     [Fact]
     public async Task Widget_OnlyConductorBubbles_OversizeStaysCode()
     {
