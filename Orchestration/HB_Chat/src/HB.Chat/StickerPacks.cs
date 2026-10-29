@@ -60,6 +60,10 @@ public sealed partial class StickerPacks(StickerCatalog stickers, ProfileStore p
     /// </summary>
     public int Total() => stickers.Options.Files.Keys.Count(t => stickers.FileFor(t) is not null);
 
+    /// <summary>팩을 안 골랐을 때 보이는 이름: 기본 팩 설정(Dashboard:Stickers:DefaultPack)이 있으면 그 이름 (2026-10-29_스티커-GIF-지원).</summary>
+    public string DefaultName() =>
+        stickers.Options.DefaultPack?.Trim() is { Length: > 0 } pack ? $"기본 ({List().FirstOrDefault(p => p.Id == pack)?.Name ?? pack})" : "기본 (스티커 폴더 바로 아래)";
+
     /// <summary>팩 폴더는 만들 때 한 번만 확인한다 — Options를 읽을 때마다 폴더를 다시 보지 않게 (ef2c83416c C2).</summary>
     private StickerCatalog Catalog(string pack, string dir)
     {
@@ -67,7 +71,8 @@ public sealed partial class StickerPacks(StickerCatalog stickers, ProfileStore p
         return new StickerCatalog(() =>
         {
             var o = stickers.Options;
-            return new StickerOptions { Dir = dir, FallbackDir = o.Dir, SizePx = o.SizePx, Files = o.Files, Aliases = o.Aliases, Auto = o.Auto, UrlBase = url };
+            // 팩 → 스티커 폴더 → 기본 팩 차례 (기본 팩은 스티커 폴더 = FallbackDir 아래 — 2026-10-29_스티커-GIF-지원)
+            return new StickerOptions { Dir = dir, FallbackDir = o.Dir, DefaultPack = o.DefaultPack, SizePx = o.SizePx, Files = o.Files, Aliases = o.Aliases, Auto = o.Auto, UrlBase = url };
         });
     }
 

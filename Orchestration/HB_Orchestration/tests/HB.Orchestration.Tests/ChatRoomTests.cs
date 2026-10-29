@@ -309,6 +309,36 @@ public sealed class ChatRoomTests : IDisposable
     }
 
     [Fact]
+    public void Catalog_FindsOtherExtension_AndDefaultPack()
+    {
+        // HB_Chat 2026-10-29_스티커-GIF-지원: 설정은 .png 이름이어도 팩의 같은 이름 .gif를 찾고 형식은 찾은 파일대로,
+        // 스티커 폴더 바로 아래에 그림이 없으면 기본 팩 폴더에서
+        var root = Path.Combine(_dir, "stickers");
+        var animal = Path.Combine(root, "animal");
+        var gpt = Path.Combine(root, "gpt_chan");
+        Directory.CreateDirectory(animal);
+        Directory.CreateDirectory(gpt);
+        File.WriteAllBytes(Path.Combine(animal, "06-done.gif"), [0x47, 0x49]);
+        File.WriteAllBytes(Path.Combine(animal, "07-blocked.png"), [0x89, 0x50]);
+        File.WriteAllBytes(Path.Combine(animal, "07-blocked.gif"), [0x47, 0x49]);
+        File.WriteAllBytes(Path.Combine(gpt, "06-done.png"), [0x89, 0x50]);
+        File.WriteAllBytes(Path.Combine(gpt, "01-idle.png"), [0x89, 0x50]);
+        var files = new Dictionary<string, string>(StringComparer.Ordinal) { ["해냈다"] = "06-done.png", ["막힘"] = "07-blocked.png", ["대기"] = "01-idle.png" };
+
+        var basic = new StickerCatalog(() => new StickerOptions { Dir = root, DefaultPack = "gpt_chan", Files = files });
+        Assert.Equal((Path.Combine(gpt, "06-done.png"), "image/png"), basic.FileFor("해냈다"));       // 바로 아래 없음 → 기본 팩
+        Assert.Null(new StickerCatalog(() => new StickerOptions { Dir = root, Files = files }).FileFor("해냈다")); // 기본 팩 설정 없음
+
+        var pack = new StickerCatalog(() => new StickerOptions { Dir = animal, FallbackDir = root, DefaultPack = "gpt_chan", Files = files });
+        Assert.Equal((Path.Combine(animal, "06-done.gif"), "image/gif"), pack.FileFor("해냈다"));     // 확장자만 다른 같은 이름
+        Assert.Equal(Path.Combine(animal, "07-blocked.png"), pack.FileFor("막힘")!.Value.Path);      // 설정 이름 그대로가 먼저
+        Assert.Equal(Path.Combine(gpt, "01-idle.png"), pack.FileFor("대기")!.Value.Path);            // 팩 → 스티커 폴더 → 기본 팩
+
+        foreach (var bad in new[] { "..", "../stickers", "gpt_chan/..", "C:" })
+            Assert.Null(new StickerCatalog(() => new StickerOptions { Dir = root, DefaultPack = bad, Files = files }).FileFor("대기"));
+    }
+
+    [Fact]
     public void Catalog_WithoutFolder_RendersTextBadge()
     {
         var html = StickerRenderer.Html("해냈다", Catalog(withDir: false));

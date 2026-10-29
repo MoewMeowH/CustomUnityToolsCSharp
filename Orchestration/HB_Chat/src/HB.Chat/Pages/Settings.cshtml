@@ -373,7 +373,7 @@
                     var total = Model.Packs.Total();
                     <form method="post" asp-page-handler="StickerPack" class="settings-add">
                         <select name="pack" aria-label="전체 스티커 팩">
-                            <option value="" selected="@(current is null)">기본 (스티커 폴더 바로 아래)</option>
+                            <option value="" selected="@(current is null)">@Model.Packs.DefaultName()</option>
                             @foreach (var p in packList)
                             {
                                 <option value="@p.Id" selected="@(current == p.Id)">@p.Name (그림 @p.Files/@total)</option>

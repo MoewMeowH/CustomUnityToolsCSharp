@@ -38,6 +38,12 @@ public sealed class StickerOptions
 
     /// <summary>그림 주소 앞부분 (태그가 뒤에 붙음). 기본 /sticker/ — HB_Chat 팩은 /sticker-pack/{팩}/.</summary>
     public string UrlBase { get; set; } = "/sticker/";
+
+    /// <summary>
+    /// 기본 팩: 스티커 폴더(FallbackDir가 있으면 그것, 없으면 Dir) 아래 폴더 이름. 앞 폴더들에 그림이 없으면 여기서 찾는다
+    /// (스티커 폴더 바로 아래에 그림 없이 팩 폴더만 둘 때 — 계획서 HB_Chat 2026-10-29_스티커-GIF-지원). 폴더 이름만 받는다 (구분자 · '..' 없음).
+    /// </summary>
+    public string? DefaultPack { get; set; }
 }
 
 /// <summary>자동 스티커 상황 이름 (StickerOptions.Auto의 키).</summary>
@@ -82,17 +88,45 @@ public sealed class StickerCatalog(Func<StickerOptions> options)
     public string? ForSituation(string situation) =>
         Options.Auto.TryGetValue(situation, out var tag) && !string.IsNullOrWhiteSpace(tag) ? Resolve(tag.Trim()) : null;
 
+    /// <summary>설정 이름과 확장자만 다른 그림을 찾을 때의 차례 (움직이는 그림 먼저).</summary>
+    public static readonly IReadOnlyList<string> AlternateExtensions = [".gif", ".webp", ".png", ".jpg", ".jpeg"];
+
     /// <summary>
     /// 태그의 그림 파일 (폴더 안의 실제 파일, 허용 확장자). 폴더가 없거나 파일 이름이 폴더 밖을 가리키면 null.
-    /// Dir에 없으면 FallbackDir에서 찾는다 (HB_Chat 4차 D2).
+    /// Dir → FallbackDir(HB_Chat 4차 D2) → 기본 팩 차례로, 폴더마다 설정 이름 그대로 먼저, 없으면 확장자만 다른 같은 이름
+    /// (팩마다 png · gif가 섞여도 설정 목록 하나로 — 계획서 HB_Chat 2026-10-29_스티커-GIF-지원). 형식은 찾은 파일의 확장자로 정한다.
     /// </summary>
     public (string Path, string ContentType)? FileFor(string tag)
     {
         var o = Options;
         if (Resolve(tag) is not { } resolved) return null;
         var name = o.Files[resolved];
-        if (string.IsNullOrWhiteSpace(name) || !ContentTypes.TryGetValue(Path.GetExtension(name), out var type)) return null;
-        return (Find(o.Dir, name) ?? Find(o.FallbackDir, name)) is { } path ? (path, type) : null;
+        if (string.IsNullOrWhiteSpace(name) || !ContentTypes.ContainsKey(Path.GetExtension(name))) return null;
+        foreach (var folder in new[] { o.Dir, o.FallbackDir, DefaultPackDir(o) })
+            if (FindAnyExtension(folder, name) is { } path)
+                return (path, ContentTypes[Path.GetExtension(path)]);
+        return null;
+    }
+
+    /// <summary>기본 팩 폴더 (스티커 폴더 아래). 설정이 없거나 폴더 이름 모양이 아니면 null.</summary>
+    private static string? DefaultPackDir(StickerOptions o)
+    {
+        var pack = o.DefaultPack?.Trim();
+        var root = string.IsNullOrWhiteSpace(o.FallbackDir) ? o.Dir : o.FallbackDir;
+        if (string.IsNullOrEmpty(pack) || string.IsNullOrWhiteSpace(root) || pack is "." or ".."
+            || pack.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar, ':']) >= 0) return null;
+        return Path.Combine(root.Trim(), pack);
+    }
+
+    /// <summary>폴더 안의 그 이름 그대로, 없으면 확장자만 다른 같은 이름.</summary>
+    private static string? FindAnyExtension(string? folder, string name)
+    {
+        if (Find(folder, name) is { } exact) return exact;
+        var stem = Path.ChangeExtension(name, null);
+        var own = Path.GetExtension(name);
+        foreach (var ext in AlternateExtensions)
+            if (!ext.Equals(own, StringComparison.OrdinalIgnoreCase) && Find(folder, stem + ext) is { } other) return other;
+        return null;
     }
 
     /// <summary>폴더 안의 그 파일 (폴더 밖을 가리키거나 없으면 null).</summary>

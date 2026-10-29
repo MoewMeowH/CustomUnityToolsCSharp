@@ -81,7 +81,7 @@
         @if (packList.Count > 0 || room.StickerPack is not null)
         {
             var global = Model.Packs.Effective((string?)null);
-            var globalName = global is null ? "기본" : packList.FirstOrDefault(p => p.Id == global)?.Name ?? global;
+            var globalName = global is null ? Model.Packs.DefaultName() : packList.FirstOrDefault(p => p.Id == global)?.Name ?? global;
             <dt><label for="side-pack">스티커 팩</label></dt>
             <dd>
                 <select id="side-pack">

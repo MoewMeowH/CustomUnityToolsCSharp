@@ -73,6 +73,32 @@ public sealed class StickerPacksTests : IDisposable
         Assert.Null(packs.Effective(room)); // 전체 팩도 없으면 기본
     }
 
+    [Fact]
+    public void GifPack_IsCounted_AndDefaultPackFillsTheRest()
+    {
+        // 2026-10-29_스티커-GIF-지원: 설정 이름이 .png여도 팩의 .gif로 찾고 세며, 팩 · 스티커 폴더에 없으면 기본 팩
+        var root = Path.Combine(_dir, "packs-only");
+        Directory.CreateDirectory(Path.Combine(root, "animal"));
+        Directory.CreateDirectory(Path.Combine(root, "gpt_chan"));
+        File.WriteAllBytes(Path.Combine(root, "animal", "06-done.gif"), [0x47]);
+        File.WriteAllBytes(Path.Combine(root, "gpt_chan", "01-idle.png"), [0x89]);
+        File.WriteAllBytes(Path.Combine(root, "gpt_chan", "06-done.png"), [0x89]);
+        var options = new StickerOptions
+        {
+            Dir = root, DefaultPack = "gpt_chan",
+            Files = new(StringComparer.Ordinal) { ["대기"] = "01-idle.png", ["긍정"] = "06-done.png" },
+        };
+        var packs = new StickerPacks(new StickerCatalog(() => options), _profiles);
+
+        Assert.Equal(1, packs.List().Single(p => p.Id == "animal").Files);   // gif 1개를 팩 그림으로 셈
+        Assert.Equal(2, packs.Total());                                        // 기본(바로 아래 없음 → 기본 팩) 2개
+        var animal = packs.For("animal");
+        Assert.Equal(("image/gif", Path.Combine(root, "animal", "06-done.gif")), (animal.FileFor("긍정")!.Value.ContentType, animal.FileFor("긍정")!.Value.Path));
+        Assert.Equal(Path.Combine(root, "gpt_chan", "01-idle.png"), animal.FileFor("대기")!.Value.Path); // 팩에 없음 → 기본 팩
+        Assert.Equal("기본 (gpt_chan)", packs.DefaultName());                                         // 팩 안 골랐을 때 보이는 이름
+        Assert.Equal("기본 (스티커 폴더 바로 아래)", new StickerPacks(_stickers, _profiles).DefaultName()); // 기본 팩 설정 없음
+    }
+
     [Theory]
     [InlineData("cat", true)]
     [InlineData("고양이 팩", true)]
