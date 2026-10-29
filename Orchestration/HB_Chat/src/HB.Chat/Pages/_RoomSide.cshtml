@@ -153,7 +153,7 @@
     <ul class="mcp-list">
         @foreach (var c in Model.Connections)
         {
-            var kind = c.Kind switch { "base" => "기본", "app" => "앱", "unity" => "Unity", _ => "작업 폴더" };
+            var kind = c.Kind switch { "base" => "기본", "app" => "앱", "unity" => "Unity", "appserver" => "앱 서버", _ => "작업 폴더" };
             var probe = c.Probe;
             var tools = c.ShownTools;
             <li class="mcp-item @(c.On && c.Applies ? "" : "off")">
@@ -172,6 +172,15 @@
                 @if (c.Command is { } cmd)
                 {
                     <div class="mcp-cmd mono muted" title="@cmd">@cmd</div>
+                }
+                @* 앱 서버 (계획서 2026-10-29_HB_Chat-앱-MCP-서버-더하기): 이름 겹침 · OAuth 로그인 안내 *@
+                @if (c.Shadowed)
+                {
+                    <div class="muted side-settings-note">앱 서버 목록에도 같은 이름이 있습니다 — 이 작업 폴더 .mcp.json 것을 씁니다.</div>
+                }
+                @if (c.NeedsLogin)
+                {
+                    <div class="muted side-settings-note">OAuth로 로그인하는 서버(Notion 등)는 터미널 claude의 /mcp에서 한 번 로그인해 두면 이 방에서도 붙습니다.</div>
                 }
                 <div class="mcp-state">
                     @if (c.Note is { } note)

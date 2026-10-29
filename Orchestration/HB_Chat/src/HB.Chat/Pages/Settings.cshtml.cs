@@ -136,6 +136,9 @@ public sealed class SettingsModel(
         "pack" => "스티커 팩을 바꿨습니다.",
         "theme" => "화면 테마를 바꿨습니다.",
         "notify" => "데스크톱 알림 설정을 바꿨습니다.",
+        "mcp-added" => "MCP 서버를 더했습니다. 쓸 방의 곁칸 → 연결에서 켜세요.",
+        "mcp-secret" => "MCP 서버를 더했습니다 — 다만 확인할 점이 있습니다 (평문 토큰 · 원격 http · 원격으로 보내는 환경 변수 — 목록의 경고 줄). 토큰은 ${변수} 자리표시를 권합니다.",
+        "mcp-removed" => "MCP 서버를 목록에서 뺐고, 켜 두었던 방에서도 껐습니다.",
         _ => null,
     };
 
@@ -185,6 +188,107 @@ public sealed class SettingsModel(
         else Error = added.Add(name, path, store.All());
         if (Error is null) return RedirectToPage(new { done = "added" });
         (NewUnityName, NewUnityPath) = (name, path);
+        Fill();
+        return Page();
+    }
+
+    // ---- 앱에서 더한 MCP 서버 (계획서 2026-10-29_HB_Chat-앱-MCP-서버-더하기) ----
+
+    /// <summary>목록 줄: 이름 · 종류 · 명령/URL(env · headers 값은 안 보임) · 켠 방 수 · 평문 비밀 값으로 보이는 칸.</summary>
+    public sealed record McpRow(string Name, string Transport, string Command, int Rooms, IReadOnlyList<string> Secrets);
+
+    public IReadOnlyList<McpRow> McpRows { get; private set; } = [];
+    public string? McpLoadError => options.Value.AppMcp?.LoadError;
+    public IReadOnlyList<string> McpWarnings => options.Value.AppMcp?.LoadWarnings ?? [];
+
+    /// <summary>~/.claude.json에서 가져올 수 있는 서버 (user · local 범위).</summary>
+    public IReadOnlyList<ImportableMcp> McpImports { get; private set; } = [];
+    public string? NewMcpName { get; private set; }
+    public string? NewMcpType { get; private set; }
+    public string? NewMcpCommand { get; private set; }
+    public string? NewMcpUrl { get; private set; }
+    public string? NewMcpJson { get; private set; }
+
+    private const string McpConfirm = "켠 방에서 이 서버 명령이 승인 없이 돈다는 확인에 체크해 주세요.";
+
+    /// <summary>칸 채우기: 이름 · 종류(stdio · http · sse) · 명령 줄 또는 URL.</summary>
+    public IActionResult OnPostAddMcpFields(string? name, string? type, string? command, string? url, bool confirm)
+    {
+        (NewMcpName, NewMcpType, NewMcpCommand, NewMcpUrl) = (name, type, command, url);
+        return AddMcp([(name?.Trim() ?? "", AppMcpStore.FromFields(type, command, url))], confirm);
+    }
+
+    /// <summary>JSON 붙여넣기 — {"mcpServers": {...}} · {"이름": {...}} · 항목 하나(이름 칸과 함께).</summary>
+    public IActionResult OnPostAddMcpJson(string? name, string? json, bool confirm)
+    {
+        (NewMcpName, NewMcpJson) = (name, json);
+        var (items, error) = AppMcpStore.ParsePaste(json, name);
+        if (error is not null)
+        {
+            Error = error;
+            Fill();
+            return Page();
+        }
+        return AddMcp(items, confirm);
+    }
+
+    /// <summary>~/.claude.json에서 가져오기 — 그 범위 · 이름의 항목을 그대로 복사한다.</summary>
+    public IActionResult OnPostImportMcp(string? scope, string? name, bool confirm)
+    {
+        if (AppMcpStore.ReadClaudeJson(AppMcpStore.ClaudeJsonPath()).FirstOrDefault(i => i.Scope == scope && i.Name == name) is not { } item)
+        {
+            Error = "~/.claude.json에서 그 서버를 찾지 못했습니다 — 화면을 새로 고쳐 보세요.";
+            Fill();
+            return Page();
+        }
+        return AddMcp([(item.Name, item.Entry)], confirm);
+    }
+
+    /// <summary>
+    /// 빼기 — 그 이름을 켜 둔 방에서도 끈다(작업 폴더 .mcp.json에 같은 이름이 있는 방은 그 서버를 쓰고 있으니 그대로). 안 끄면 같은 이름으로 다른 서버를
+    /// 다시 더할 때 그 방들이 확인 없이 새 서버를 쓴다 (/self-review 779716239c C5).
+    /// </summary>
+    public IActionResult OnPostRemoveMcp(string? name)
+    {
+        var n = name?.Trim() ?? "";
+        Error = options.Value.AppMcp is { } servers ? servers.Remove(n) : "MCP 서버 저장소가 준비되지 않았습니다.";
+        if (Error is null)
+        {
+            foreach (var room in store.All().Where(r => r.McpExtra.Contains(n, StringComparer.OrdinalIgnoreCase) && !InWorkspace(r, n)))
+            {
+                try
+                {
+                    store.Update(room.Id, r => r with { McpExtra = [.. r.McpExtra.Where(x => !string.Equals(x, n, StringComparison.OrdinalIgnoreCase))] });
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+                {
+                    Error = $"목록에서는 뺐지만 일부 방에서 끄지 못했습니다: {ex.Message}";
+                }
+            }
+            if (Error is null) return RedirectToPage(new { done = "mcp-removed" });
+        }
+        Fill();
+        return Page();
+    }
+
+    /// <summary>그 방 작업 폴더 .mcp.json에 그 이름이 있는지 — 있으면 앱 서버가 아니라 그쪽을 쓴다 (결정 1).</summary>
+    private bool InWorkspace(Room room, string name) =>
+        options.Value.WorkspacePath(room.Workspace) is { } ws && McpConfigFile.ServerNames(ws).Contains(name);
+
+    /// <summary>여럿을 차례로 더한다 — 하나라도 실패하면 그 앞까지 더하고 오류를 보인다. 평문 비밀 값이 있으면 경고 문구로 돌아간다(결정 2 "경고만").</summary>
+    private IActionResult AddMcp(IReadOnlyList<(string Name, System.Text.Json.Nodes.JsonObject Entry)> items, bool confirm)
+    {
+        if (!confirm) Error = McpConfirm;
+        else if (options.Value.AppMcp is not { } servers) Error = "MCP 서버 저장소가 준비되지 않았습니다.";
+        else
+            foreach (var (name, entry) in items)
+                if (servers.Add(name, entry) is { } why)
+                {
+                    Error = items.Count > 1 ? $"{name}: {why}" : why;
+                    break;
+                }
+        if (Error is null)
+            return RedirectToPage(new { done = items.Any(i => AppMcpStore.SecretWarnings(i.Entry).Count > 0) ? "mcp-secret" : "mcp-added" });
         Fill();
         return Page();
     }
@@ -255,6 +359,14 @@ public sealed class SettingsModel(
                 all.Count(r => string.Equals(r.Workspace, w.Name, StringComparison.OrdinalIgnoreCase)),
                 w.FromConfig || !Directory.Exists(w.Path) ? null : options.Value.AppWorkspaces?.WhyUnsafe(w.Path))),
         ];
+        McpRows =
+        [
+            // 켠 방: 휴지통 밖, 작업 폴더에 같은 이름이 없어 이 앱 서버를 실제로 쓰는 방만 (779716239c C6)
+            .. (options.Value.AppMcp?.All() ?? []).Select(s => new McpRow(s.Name, AppMcpStore.TransportOf(s.Entry), AppMcpStore.Describe(s.Entry),
+                all.Count(r => r.DeletedAt is null && r.McpExtra.Contains(s.Name, StringComparer.OrdinalIgnoreCase) && !InWorkspace(r, s.Name)),
+                AppMcpStore.SecretWarnings(s.Entry))),
+        ];
+        McpImports = AppMcpStore.ReadClaudeJson(AppMcpStore.ClaudeJsonPath());
         UnityRows =
         [
             .. options.Value.AllUnityProjects.Select(u => new UnityRow(u, Directory.Exists(u.Path),

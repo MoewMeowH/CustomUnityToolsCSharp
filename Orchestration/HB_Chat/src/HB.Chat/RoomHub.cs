@@ -1164,11 +1164,12 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 {
                     var servers = room.McpExtra.Where(s => s != o.McpServer && ClaudeArgs.IsServerName(s)).ToList();
                     if (baseOn) servers.Insert(0, o.McpServer);
-                    var (path, missing) = McpConfigFile.WriteRoom(workspace, servers, unity, o.DataFolder, room.Id);
+                    // 작업 폴더 .mcp.json에 없는 이름은 앱에서 더한 서버에서 (계획서 2026-10-29_HB_Chat-앱-MCP-서버-더하기)
+                    var (path, missing) = McpConfigFile.WriteRoom(workspace, servers, unity, o.DataFolder, room.Id, o.AppMcp is { } app ? app.Get : null);
                     mcpConfig = roomConfig = path;
                     if (baseOn && missing.Contains(o.McpServer))
                         throw new InvalidOperationException($"{Path.Combine(workspace, ".mcp.json")}에 mcpServers.{o.McpServer} 항목이 없습니다.");
-                    if (missing.Count > 0) Notice(live, $"작업 폴더 .mcp.json에 없는 연결은 빼고 돕니다: {string.Join(", ", missing)}");
+                    if (missing.Count > 0) Notice(live, $"작업 폴더 .mcp.json에도 앱 서버 목록에도 없는 연결은 빼고 돕니다: {string.Join(", ", missing)}");
                     var allowed = servers.Where(s => s != o.McpServer && !missing.Contains(s)).ToList();
                     if (unity is not null) allowed.Add(McpConfigFile.UnityServer);
                     extraServers = allowed;

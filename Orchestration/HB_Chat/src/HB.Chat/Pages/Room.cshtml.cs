@@ -26,6 +26,12 @@ public sealed class RoomModel(
     public sealed record Connection(string Name, string Kind, string Transport, string? Command, bool On, bool Applies, string? Note,
         string? Init, ProbeResult? Probe, bool Probing, IReadOnlyList<(string Name, string? Description)>? StaticTools = null)
     {
+        /// <summary>작업 폴더 .mcp.json과 앱 서버 목록에 같은 이름이 있음 — 작업 폴더 것을 쓴다 (결정 1, 줄에 표시).</summary>
+        public bool Shadowed { get; init; }
+
+        /// <summary>http 앱 서버 — OAuth 로그인 서버면 터미널 claude의 /mcp에서 한 번 로그인해야 붙는다 (안내).</summary>
+        public bool NeedsLogin { get; init; }
+
         /// <summary>마지막 실행 init의 이 서버 도구 이름 (설명 없음) — 확인이 도구를 못 받았을 때(OAuth 서버 등) 대신 보인다.</summary>
         public IReadOnlyList<(string Name, string? Description)> InitTools { get; init; } = [];
 
@@ -65,14 +71,27 @@ public sealed class RoomModel(
                     Init(TerminalMcp.Server), null, false, McpProbe.AppTools()),
             };
             var names = ws is null ? [] : McpConfigFile.ServerNames(ws);
-            foreach (var name in names.Concat(room.McpExtra).Distinct(StringComparer.Ordinal)
+            // 앱에서 더한 서버 (계획서 2026-10-29_HB_Chat-앱-MCP-서버-더하기) — 같은 이름이 작업 폴더에 있으면 그쪽을 쓴다(결정 1)
+            var appServers = o.AppMcp?.All() ?? [];
+            foreach (var name in names.Concat(appServers.Select(a => a.Name)).Concat(room.McpExtra).Distinct(StringComparer.Ordinal)
                          .Where(n => n != o.McpServer && n != TerminalMcp.Server && n != McpConfigFile.UnityServer))
             {
-                var exists = names.Contains(name);
-                rows.Add(new(name, "extra", exists ? Transport(name) : "?", exists ? WorkspaceStore.McpCommand(ws!, name) : null,
-                    room.McpExtra.Contains(name), readUp && exists,
-                    !exists ? "작업 폴더 .mcp.json에 없어졌습니다 — 끄면 목록에서 빠집니다" : readUp ? null : "대화 방은 MCP를 붙이지 않습니다",
-                    Init(name), probe.Last(room.Id, name), probe.IsRunning(room.Id, name)) { InitTools = InitTools(name) });
+                var inWorkspace = names.Contains(name);
+                var app = appServers.FirstOrDefault(a => a.Name == name).Entry;
+                var exists = inWorkspace || app is not null;
+                var note = !exists ? "작업 폴더 .mcp.json에도 앱 서버 목록에도 없어졌습니다 — 끄면 목록에서 빠집니다"
+                    : !readUp ? "대화 방은 MCP를 붙이지 않습니다"
+                    : null;
+                rows.Add(new(name, inWorkspace || app is null ? "extra" : "appserver",
+                    inWorkspace ? Transport(name) : app is not null ? AppMcpStore.TransportOf(app) : "?",
+                    inWorkspace ? WorkspaceStore.McpCommand(ws!, name) : app is not null ? AppMcpStore.Describe(app) : null,
+                    room.McpExtra.Contains(name), readUp && exists, note,
+                    Init(name), probe.Last(room.Id, name), probe.IsRunning(room.Id, name))
+                {
+                    InitTools = InitTools(name),
+                    Shadowed = inWorkspace && app is not null, // 앱 서버에도 같은 이름 — 작업 폴더 것을 씀
+                    NeedsLogin = !inWorkspace && app is not null && app["url"] is not null, // http 앱 서버 — OAuth면 터미널 claude의 /mcp에서 한 번 로그인
+                });
             }
             if (room.UnityProject is { } unity)
             {
@@ -99,9 +118,14 @@ public sealed class RoomModel(
         if (string.IsNullOrWhiteSpace(name) || !ClaudeArgs.IsServerName(name) || name == McpConfigFile.UnityServer) return BadRequest("알 수 없는 연결입니다.");
         if (name == o.McpServer || name == TerminalMcp.Server)
             return Change(id, r => r with { McpOff = on ? [.. r.McpOff.Where(n => n != name)] : [.. r.McpOff.Where(n => n != name), name] }, "연결을 바꾸지 못했습니다");
-        // 켤 때는 작업 폴더 .mcp.json에 있는 이름만 (끄기는 없어진 이름도 받는다)
-        if (on && (o.WorkspacePath(room.Workspace) is not { } ws || !McpConfigFile.ServerNames(ws).Contains(name)))
-            return BadRequest("작업 폴더 .mcp.json에 없는 서버입니다.");
+        // 켤 때는 작업 폴더 .mcp.json이나 앱 서버 목록에 있는 이름만 (끄기는 없어진 이름도 받는다).
+        // 앱 서버면 저장된 정식 이름으로 — 대소문자만 다른 이름이 따로 남지 않게 (/self-review 779716239c C4)
+        var inWorkspace = o.WorkspacePath(room.Workspace) is { } ws && McpConfigFile.ServerNames(ws).Contains(name);
+        if (on && !inWorkspace)
+        {
+            if (o.AppMcp?.NameOf(name) is not { } canonical) return BadRequest("작업 폴더 .mcp.json에도 앱 서버 목록에도 없는 서버입니다.");
+            name = canonical;
+        }
         return Change(id, r => r with { McpExtra = on ? [.. r.McpExtra.Where(n => n != name), name] : [.. r.McpExtra.Where(n => n != name)] }, "연결을 바꾸지 못했습니다");
     }
 
@@ -136,8 +160,8 @@ public sealed class RoomModel(
             if (o.ResolveUnityCli() is not { } cli) return BadRequest("Unity CLI(unity.exe)를 찾지 못했습니다.");
             entry = McpConfigFile.UnityEntry(cli, path);
         }
-        else entry = McpConfigFile.Entry(ws, name);
-        if (entry is null) return BadRequest("작업 폴더 .mcp.json에 없는 서버입니다.");
+        else entry = McpConfigFile.Entry(ws, name) ?? o.AppMcp?.Get(name); // 작업 폴더 것 먼저 (결정 1)
+        if (entry is null) return BadRequest("작업 폴더 .mcp.json에도 앱 서버 목록에도 없는 서버입니다.");
         var result = await probe.ProbeAsync(id, name, entry, ws, HttpContext.RequestAborted);
         if (result is null) return BadRequest("이미 확인 중입니다.");
         return new JsonResult(new { ok = result.Ok, tools = result.Tools.Count, error = result.Error });

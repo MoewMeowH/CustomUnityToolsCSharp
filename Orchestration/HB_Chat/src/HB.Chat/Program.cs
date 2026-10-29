@@ -102,6 +102,12 @@ var app = builder.Build();
         usedBy: r => r.UnityProject,
         extraCheck: p => File.Exists(Path.Combine(p, "ProjectSettings", "ProjectVersion.txt")) ? null : "Unity 프로젝트 폴더가 아닙니다 (ProjectSettings/ProjectVersion.txt 없음).",
         noun: "Unity 프로젝트");
+    // 앱에서 더한 MCP 서버 (계획서 2026-10-29_HB_Chat-앱-MCP-서버-더하기) — 기본 서버 · 앱 MCP · unity 이름은 쓸 수 없다
+    chat.AppMcp = new AppMcpStore(Path.Combine(chat.DataFolder, "mcp-servers.json"), [chat.McpServer, TerminalMcp.Server, McpConfigFile.UnityServer]);
+    if (chat.AppMcp.LoadError is { } mcpError)
+        app.Logger.LogWarning("앱에서 더한 MCP 서버(mcp-servers.json)를 읽지 못했습니다: {Error}", mcpError);
+    foreach (var warning in chat.AppMcp.LoadWarnings)
+        app.Logger.LogWarning("앱에서 더한 MCP 서버를 쓰지 않습니다: {Warning}", warning);
     if (chat.AppUnityProjects.LoadError is { } unityError)
         app.Logger.LogWarning("앱에서 더한 Unity 프로젝트(unity-projects.json)를 읽지 못했습니다: {Error}", unityError);
     foreach (var warning in chat.AppUnityProjects.LoadWarnings)

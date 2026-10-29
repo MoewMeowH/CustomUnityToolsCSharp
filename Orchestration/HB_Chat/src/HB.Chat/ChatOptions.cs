@@ -112,6 +112,10 @@ public sealed class ChatOptions
     public IReadOnlyList<WorkspaceEntry> AllWorkspaces =>
         AppWorkspaces?.All() ?? [.. Workspaces.Where(p => !string.IsNullOrWhiteSpace(p.Value)).Select(p => new WorkspaceEntry(p.Key, p.Value.Trim(), true))];
 
+    /// <summary>앱에서 더한 MCP 서버 (데이터 폴더 mcp-servers.json, 계획서 2026-10-29_HB_Chat-앱-MCP-서버-더하기). 켤 때 Program이 채운다.</summary>
+    [Microsoft.Extensions.Configuration.ConfigurationKeyName("__app_mcp_not_bound__")]
+    public AppMcpStore? AppMcp { get; set; }
+
     // ---- Unity 프로젝트 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결) ----
 
     /// <summary>설정 파일의 Unity 프로젝트 이름 → 경로 (작업 폴더와 같은 모양). 앱에서 더한 것은 <see cref="AppUnityProjects"/>.</summary>

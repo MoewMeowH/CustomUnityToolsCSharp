@@ -73,7 +73,8 @@ public static partial class ClaudeArgs
     /// MCP 서버 이름: 영숫자로 시작, 영숫자 _ - 만 64자까지. 파일 이름 · <c>mcp__서버__도구</c> 도구 이름에 그대로 들어가므로 . : / 를 받지 않는다
     /// (/self-review security 00d712e2c7 C4 · 0bcf01451b C2 — CLI가 도구 이름에서 그 글자를 바꾸면 규칙과 어긋난다).
     /// </summary>
-    public static bool IsServerName(string? value) => value is not null && ServerName().IsMatch(value);
+    /// <remarks>`__`도 받지 않는다 — 도구 이름 <c>mcp__서버__도구</c>에서 서버 이름을 첫 `__`로 자르므로 (/self-review security ae543471a8 C6).</remarks>
+    public static bool IsServerName(string? value) => value is not null && ServerName().IsMatch(value) && !value.Contains("__", StringComparison.Ordinal);
 
     public static IReadOnlyList<string> Build(RunSpec spec, IReadOnlyCollection<string> allowedModels)
     {
