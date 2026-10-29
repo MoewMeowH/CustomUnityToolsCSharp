@@ -117,6 +117,13 @@ public sealed record Room
     /// <summary>Codex 구성원의 스레드 ID — 둘째 턴부터 resume으로 이어 간다.</summary>
     public string? CodexThread { get; init; }
 
+    /// <summary>
+    /// Codex 구성원이 쓴 토큰 누적 (턴마다 turn.completed usage를 더함 — 입력은 캐시 포함, OpenAI 뜻). 단톡방 머리 비용 합계용
+    /// (계획서 2026-10-29_사용량-한도-표시, /self-review b40d9efb00 C3 — 과정 기록을 다시 세지 않게).
+    /// </summary>
+    public long CodexInputTokens { get; init; }
+    public long CodexOutputTokens { get; init; }
+
     [JsonIgnore]
     public bool IsGroup => Members.Count > 0;
 }

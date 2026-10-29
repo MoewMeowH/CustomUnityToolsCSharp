@@ -224,6 +224,9 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     /// <summary>승인 기록 (없으면 남기지 않음).</summary>
     public ApprovalLog? Log { get; init; }
 
+    /// <summary>구독 한도 (실행이 알려 준 rate_limit_event를 남김 — 계획서 2026-10-29_사용량-한도-표시). 없으면 남기지 않음.</summary>
+    public UsageLimits? Limits { get; init; }
+
     /// <summary>
     /// 터미널 곁칸 (계획서 2026-10-29_HB_Chat-터미널-곁칸). 있으면 명령 방 실행에 앱 MCP(터미널 도구)를 붙이고, 출력 · 목록 변화를 방 알림으로 흘린다.
     /// 설정하면 이벤트를 구독한다 (앱에 하나).
@@ -1171,6 +1174,8 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 RunStartedAt = null,
                 CodexThread = lost ? null : outcome.Thread ?? r.CodexThread,
                 RulesHash = lost ? null : delivered ? hash : r.RulesHash,
+                CodexInputTokens = r.CodexInputTokens + (outcome.InputTokens ?? 0),
+                CodexOutputTokens = r.CodexOutputTokens + (outcome.OutputTokens ?? 0),
             });
         }
         catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException) { }
@@ -1424,6 +1429,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 KeepMcpStatus(room.Id, live, generation, commands);
             }
             if (unityName is not null) KeepUnityShots(room.Id, ev, captures);
+            if (ev is RateLimitEvent limits) Limits?.SaveClaude(limits); // 사이드바 한도 줄은 목록을 다시 그릴 때 읽는다
             // 할 일 도구를 쓴 뒤의 출력이면 그 사이 도구가 돌아 파일이 바뀌었을 수 있다 — 잠금 밖에서 읽는다 (3차 b).
             // 잦은 stream_event(글 · 도구 입력 · 생각 조각)에서는 읽지 않고, 300ms 안에 다시 읽지 않는다 — 마지막 상태는 턴 끝 읽기가 맞춘다 (/self-review ea28ba9185 C1).
             var fragment = ev is DeltaEvent || (ev is OtherEvent other && other.Type.StartsWith("stream_event", StringComparison.Ordinal));

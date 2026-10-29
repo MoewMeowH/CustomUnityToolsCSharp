@@ -24,9 +24,10 @@
 
     // ---- 방 목록 ----
     let room = null; // 지금 붙은 방: { id, dispose }
-    let listTimer = null, listSeq = 0;
+    let listTimer = null, listSeq = 0, limitsSeq = 0;
     async function refreshList() {
         const seq = ++listSeq;
+        refreshLimits(); // 목록 요청이 실패해도 한도 줄은 따로 (/self-review b40d9efb00 C6)
         try {
             const res = await fetch("/?handler=RoomList&current=" + encodeURIComponent(room?.id || ""), { cache: "no-store" });
             if (!res.ok || seq !== listSeq) return;
@@ -43,6 +44,21 @@
                 if (trash && fresh.dataset.trash != null) trash.textContent = fresh.dataset.trash;
                 // 요청을 보낸 뒤 방을 바꿨을 수 있다 — 서버가 그린 강조 대신 지금 방으로 (/self-review 5225b1ffaf C3)
                 markActive(room?.id ?? null);
+            }
+        } catch { /* 다음 알림 때 다시 */ }
+    }
+    // 사이드바 구독 한도 (계획서 2026-10-29_사용량-한도-표시): 목록을 다시 받을 때 같이 — 펼친 창은 펼친 채로, 늦게 온 옛 응답은 버림
+    async function refreshLimits() {
+        const seq = ++limitsSeq;
+        try {
+            const res = await fetch("/?handler=Limits", { cache: "no-store" });
+            if (!res.ok || seq !== limitsSeq) return;
+            const tmp = document.createElement("div");
+            tmp.innerHTML = await res.text(); // 서버가 Razor 인코딩으로 만든 같은 출처 HTML
+            const fresh = tmp.querySelector("#usage-limits"), old = document.getElementById("usage-limits");
+            if (fresh && old && seq === limitsSeq) {
+                fresh.open = old.open;
+                old.replaceWith(fresh);
             }
         } catch { /* 다음 알림 때 다시 */ }
     }
@@ -2134,6 +2150,12 @@
                 const res = await fetch(self + "?handler=GroupState", { cache: "no-store" });
                 if (!res.ok || disposed) return;
                 for (const s of await res.json()) setMember(s.member, s.state);
+            } catch { }
+            // 머리의 구성원 비용 합계 (계획서 2026-10-29_사용량-한도-표시) — 답이 오면 바뀐다
+            try {
+                const res = await fetch(self + "?handler=GroupCost", { cache: "no-store" });
+                const cost = $("#group-cost");
+                if (res.ok && !disposed && cost) cost.textContent = await res.text();
             } catch { }
         }
 

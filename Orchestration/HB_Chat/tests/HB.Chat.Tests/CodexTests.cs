@@ -185,6 +185,8 @@ public sealed class CodexTests : IDisposable
         Assert.Contains("resume=True instr=False", second.Text);
         Assert.Equal(thread, _store.Get(group.Members[1].RoomId)!.CodexThread);
         lock (_codexArgs) Assert.Equal(["resume", thread!, "-"], _codexArgs[^1].TakeLast(3));
+        // 단톡방 비용 합계용 토큰 누적 (가짜 codex는 턴마다 입력 100 · 출력 7 — 2026-10-29_사용량-한도-표시, b40d9efb00 C3)
+        Assert.Equal((200L, 14L), (_store.Get(group.Members[1].RoomId)!.CodexInputTokens, _store.Get(group.Members[1].RoomId)!.CodexOutputTokens));
 
         // 과정 기록: 보낸 말 · 명령 · 답 · 토큰 (개발 중 기능 경고는 빼고)
         var steps = new CodexLog(() => Path.Combine(_dir, "data")).Read(group.Members[1].RoomId);

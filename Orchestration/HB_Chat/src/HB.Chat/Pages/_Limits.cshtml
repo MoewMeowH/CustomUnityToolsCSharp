@@ -1,0 +1,82 @@
+@inject UsageLimits Limits
+@*
+    사이드바 아래 구독 한도 (계획서 2026-10-29_사용량-한도-표시 — 결정: 사이드바 아래 + 누르면 창, 색만).
+    Claude는 HB_Chat 실행 때 받은 마지막 값, Codex는 ~/.codex 세션 기록의 마지막 값. 목록을 다시 받을 때 화면이 ?handler=Limits로 다시 받는다.
+*@
+@{
+    var now = DateTimeOffset.Now;
+    var sources = new (string Name, LimitSnapshot? Value)[] { ("Claude", Limits.Claude()), ("Codex", Limits.Codex(now)) };
+}
+<details class="side-limits" id="usage-limits">
+    <summary title="구독 사용량 한도 — 누르면 자세히">
+        @foreach (var (name, s) in sources)
+        {
+            <span class="limit-line @(s?.IsStale(now) == true ? "stale" : null)">
+                <b>@name</b>
+                @if (s is null || s.Windows.Count == 0)
+                {
+                    <span class="muted">—</span>
+                }
+                else
+                {
+                    foreach (var w in s.Windows)
+                    {
+                        var shown = Shown(w, now);
+                        <span class="@Level(shown)">@w.Label @Percent(shown, w, now)</span>
+                    }
+                }
+            </span>
+        }
+    </summary>
+    <div class="limit-panel">
+        @foreach (var (name, s) in sources)
+        {
+            <div class="limit-source">
+                <div class="limit-head"><b>@name</b>@if (s?.Plan is { } plan) { <span class="muted"> · @plan</span> }@if (s?.UsingOverage == true) { <span class="lim-warn"> · 초과 사용 중</span> }</div>
+                @if (s is null || s.Windows.Count == 0)
+                {
+                    <div class="muted">@(name == "Claude" ? "아직 받은 값이 없습니다 — HB_Chat에서 Claude를 한 번 돌리면 보입니다." : "Codex 세션 기록에 한도 값이 없습니다.")</div>
+                }
+                else
+                {
+                    foreach (var w in s.Windows)
+                    {
+                        var shown = Shown(w, now);
+                        <div class="limit-row">
+                            <span class="label">@w.Label</span>
+                            <span class="bar"><span class="fill @Level(shown)" style="width:@(Math.Clamp(shown ?? 0, 0, 100).ToString("0", System.Globalization.CultureInfo.InvariantCulture))%"></span></span>
+                            <span class="@Level(shown)">@Percent(shown, w, now)</span>
+                            <span class="muted reset">@Reset(w.ResetsAt, now)</span>
+                        </div>
+                    }
+                    <div class="muted when">받은 시각 @s.At.ToLocalTime().ToString("MM-dd HH:mm")@(s.IsStale(now) ? " (지난 값)" : "")</div>
+                }
+            </div>
+        }
+        <div class="muted note">Claude는 HB_Chat에서 Claude를 돌릴 때마다, Codex는 Codex를 쓸 때마다 갱신됩니다 (추가 호출 없음).</div>
+    </div>
+</details>
+
+@functions {
+    /// <summary>
+    /// 보일 사용률: 반올림한 정수(표시 · 색이 같은 값을 쓰게 — /self-review b40d9efb00 C8). 그 창의 초기화 시각이 지났으면 null(예전 값을 보이지 않음 — C4).
+    /// </summary>
+    private static double? Shown(LimitWindow w, DateTimeOffset now) =>
+        w.ResetsAt is { } r && r <= now ? null : w.Percent is { } p ? Math.Round(p, MidpointRounding.AwayFromZero) : null;
+
+    /// <summary>색: 80% 이상 노랑 · 95% 이상 빨강 (결정 "색만").</summary>
+    private static string? Level(double? shown) => shown >= 95 ? "lim-err" : shown >= 80 ? "lim-warn" : null;
+
+    private static string Percent(double? shown, LimitWindow w, DateTimeOffset now) =>
+        shown is { } p ? $"{p:0}%" : w.ResetsAt is { } r && r <= now ? "초기화됨" : "?";
+
+    /// <summary>"초기화 14:30 (2시간 5분 뒤)" — 지났으면 "초기화됨".</summary>
+    private static string Reset(DateTimeOffset? at, DateTimeOffset now)
+    {
+        if (at is not { } r) return "";
+        if (r <= now) return "초기화됨";
+        var left = r - now;
+        var span = left.TotalDays >= 1 ? $"{(int)left.TotalDays}일 {left.Hours}시간" : left.TotalHours >= 1 ? $"{(int)left.TotalHours}시간 {left.Minutes}분" : $"{Math.Max(1, left.Minutes)}분";
+        return $"초기화 {r.ToLocalTime():MM-dd HH:mm} ({span} 뒤)";
+    }
+}

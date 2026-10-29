@@ -44,12 +44,15 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton(sp => new AgentBrowser(() => sp.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder,
     blockedPorts: () => TerminalMcp.BlockedPorts(sp.GetRequiredService<Microsoft.AspNetCore.Hosting.Server.IServer>(), sp.GetRequiredService<IOptions<ChatOptions>>().Value)));
 builder.Services.AddMcpServer().WithHttpTransport(o => o.Stateless = true).WithTools<TerminalTools>().WithTools<BrowserTools>();
+// 구독 한도 (계획서 2026-10-29_사용량-한도-표시): Claude는 실행 때 받은 값을 데이터 폴더에, Codex는 ~/.codex 세션 기록에서
+builder.Services.AddSingleton(sp => new UsageLimits(() => sp.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder));
 builder.Services.AddSingleton(sp =>
 {
     var options = sp.GetRequiredService<IOptions<ChatOptions>>();
     return new RoomHub(sp.GetRequiredService<RoomStore>(), sp.GetRequiredService<ChatTranscripts>(), options)
     {
         Log = new ApprovalLog(() => options.Value.DataFolder),
+        Limits = sp.GetRequiredService<UsageLimits>(),
         Terminals = sp.GetRequiredService<Terminals>(),
         Browser = sp.GetRequiredService<AgentBrowser>(),
         SelfUrl = () => TerminalMcp.LoopbackUrl(sp.GetRequiredService<Microsoft.AspNetCore.Hosting.Server.IServer>()),

@@ -316,6 +316,24 @@ details.long > .body { margin-top: 6px; }
 .search-hit .name { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .search-hit .time { font-size: 11.5px; color: var(--muted); }
 .search-hit .snippet { font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+/* 구독 한도 (계획서 2026-10-29_사용량-한도-표시): 접힌 두 줄 + 펼치면 창별 막대 */
+.side-limits { border-top: 1px solid var(--line); font-size: 12px; }
+.side-limits > summary { list-style: none; cursor: pointer; padding: 6px 12px; display: flex; flex-direction: column; gap: 2px; color: var(--muted); }
+.side-limits > summary::-webkit-details-marker { display: none; }
+.side-limits .limit-line { display: flex; gap: 8px; flex-wrap: wrap; }
+.side-limits .limit-line b { color: var(--text); min-width: 46px; font-weight: 600; }
+.side-limits .stale { opacity: .55; }
+.side-limits .lim-warn { color: var(--warn); }
+.side-limits .lim-err { color: var(--err); }
+.limit-panel { padding: 4px 12px 10px; display: flex; flex-direction: column; gap: 8px; }
+.limit-source { display: flex; flex-direction: column; gap: 3px; }
+.limit-row { display: grid; grid-template-columns: 36px 1fr 38px; gap: 6px; align-items: center; }
+.limit-row .reset { grid-column: 1 / -1; font-size: 11px; }
+.limit-row .bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.limit-row .bar .fill { display: block; height: 100%; background: var(--accent); }
+.limit-row .bar .fill.lim-warn { background: var(--warn); }
+.limit-row .bar .fill.lim-err { background: var(--err); }
+.limit-panel .when, .limit-panel .note { font-size: 11px; }
 .side-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 12px;
              border-top: 1px solid var(--line); font-size: 12.5px; }
 .side-foot label { display: flex; gap: 4px; align-items: center; color: var(--muted); cursor: pointer; }

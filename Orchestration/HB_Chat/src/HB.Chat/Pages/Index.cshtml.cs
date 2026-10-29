@@ -69,6 +69,13 @@ public sealed class IndexModel(RoomStore store, RoomHub hub, RoomList list, Chat
         if (ShowTrash) TrashRooms = [.. store.All().Where(r => r.DeletedAt is not null && r.GroupId is null).OrderByDescending(r => r.DeletedAt)];
     }
 
+    /// <summary>사이드바 구독 한도 줄 (계획서 2026-10-29_사용량-한도-표시) — 목록을 다시 받을 때 화면이 같이 받는다.</summary>
+    public IActionResult OnGetLimits()
+    {
+        Response.Headers.CacheControl = "no-store";
+        return Partial("_Limits");
+    }
+
     public IActionResult OnGetRoomList(string? current)
     {
         Response.Headers.CacheControl = "no-store";

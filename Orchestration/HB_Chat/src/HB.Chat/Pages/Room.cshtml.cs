@@ -619,6 +619,42 @@ public sealed class RoomModel(
         return new JsonResult(groups.States(group).Select(s => new { member = s.MemberId, state = s.State }));
     }
 
+    /// <summary>
+    /// 단톡방 머리의 구성원 비용 합계 (계획서 2026-10-29_사용량-한도-표시 — 결정 "구성원 누적 합계"):
+    /// Claude 구성원은 claude가 알려 준 세션 누적 비용(클라이언트 추정)의 합, Codex 구성원은 턴마다 더해 둔 토큰(Room.CodexInputTokens · CodexOutputTokens —
+    /// b40d9efb00 C3)의 합. 아무것도 없으면 null.
+    /// </summary>
+    public string? GroupCostLine(Room? group = null)
+    {
+        group ??= Room;
+        double usd = 0;
+        long input = 0, output = 0;
+        bool anyUsd = false;
+        foreach (var m in group.Members)
+        {
+            if (store.Get(m.RoomId) is not { } child) continue;
+            if (child.Engine == RoomEngines.Codex)
+                (input, output) = (input + child.CodexInputTokens, output + child.CodexOutputTokens);
+            else if (child.TotalCostUsd is { } cost)
+            {
+                usd += cost;
+                anyUsd = true;
+            }
+        }
+        var parts = new List<string>();
+        if (anyUsd) parts.Add($"Claude 구성원 ≈${usd:0.00} (추정)");
+        if (input + output > 0) parts.Add($"Codex 토큰 입력 {input:N0}(캐시 포함) · 출력 {output:N0}");
+        return parts.Count == 0 ? null : string.Join(" · ", parts);
+    }
+
+    /// <summary>단톡방 비용 합계 줄 (화면이 대화 줄을 받을 때 다시 받는다). 없으면 빈 글.</summary>
+    public IActionResult OnGetGroupCost(string id)
+    {
+        Response.Headers.CacheControl = "no-store";
+        if (!RoomStore.IsRoomId(id) || store.Get(id) is not { IsGroup: true } group) return NotFound();
+        return Content(GroupCostLine(group) ?? "", "text/plain; charset=utf-8");
+    }
+
     /// <summary>Codex 구성원 과정 (앱이 남긴 이벤트 기록 — 보낸 말 · 답 · 실행한 명령 · 오류 · 토큰). Claude 방이면 빈 목록.</summary>
     public IReadOnlyList<CodexLog.Step> CodexSteps => Room.Engine == RoomEngines.Codex ? new CodexLog(() => options.Value.DataFolder).Read(Room.Id) : [];
 

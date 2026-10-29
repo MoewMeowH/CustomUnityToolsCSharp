@@ -127,7 +127,13 @@ public sealed record ControlRequestEvent(string RequestId, string Subtype, strin
 /// </summary>
 public sealed record ControlCancelEvent(string RequestId) : StreamEvent;
 
-/// <summary>화면에 쓰지 않는 줄 (status · message_start · rate_limit_event · control_response · 모르는 종류 · 깨진 JSON).</summary>
+/// <summary>
+/// rate_limit_event: 구독 한도 창별 사용률 (2026-10-29 실측 — <c>rate_limit_info.unifiedWindows.{five_hour|seven_day}.{utilization 0~1, resetsAt 유닉스 초, status}</c>,
+/// 그 밖에 status · isUsingOverage). 계획서 2026-10-29_사용량-한도-표시.
+/// </summary>
+public sealed record RateLimitEvent(IReadOnlyList<LimitWindow> Windows, string? Status, bool? UsingOverage) : StreamEvent;
+
+/// <summary>화면에 쓰지 않는 줄 (status · message_start · control_response · 모르는 종류 · 깨진 JSON).</summary>
 public sealed record OtherEvent(string Type) : StreamEvent;
 
 public static class StreamParser
@@ -170,6 +176,7 @@ public static class StreamParser
                 "system" when subtype == "api_retry" => new RetryEvent(Int(e, "attempt") ?? 0, Str(e, "error")),
                 "system" when subtype == "post_turn_summary" =>
                     new StatusEvent(Cap(Str(e, "status_category"), 40), Cap(Str(e, "status_detail"), StatusChars), Cap(Str(e, "needs_action"), StatusChars)),
+                "rate_limit_event" => ParseRateLimit(e),
                 "assistant" => ParseUsage(e),
                 "user" => ParseToolImages(e),
                 "result" => new ResultEvent(
@@ -189,6 +196,28 @@ public static class StreamParser
             return new OtherEvent("invalid");
         }
     }
+
+    private static StreamEvent ParseRateLimit(JsonElement e)
+    {
+        if (!e.TryGetProperty("rate_limit_info", out var info) || info.ValueKind != JsonValueKind.Object) return new OtherEvent("rate_limit_event");
+        var windows = new List<LimitWindow>();
+        if (info.TryGetProperty("unifiedWindows", out var unified) && unified.ValueKind == JsonValueKind.Object)
+            foreach (var w in unified.EnumerateObject().Take(8))
+                if (w.Value.ValueKind == JsonValueKind.Object)
+                    windows.Add(new LimitWindow(Cap(w.Name, 40)!,
+                        w.Value.TryGetProperty("utilization", out var u) && u.ValueKind == JsonValueKind.Number ? Math.Round(u.GetDouble() * 100, 1) : null,
+                        UnixSeconds(Long(w.Value, "resetsAt")),
+                        Cap(Str(w.Value, "status"), 40)));
+        // 창별 값이 없는 모양(옛 판 — 위쪽 rateLimitType · resetsAt만)이면 사용률 없이 그 창 하나라도 (지휘자 K2)
+        if (windows.Count == 0 && Str(info, "rateLimitType") is { Length: > 0 } kind)
+            windows.Add(new LimitWindow(Cap(kind, 40)!, null, UnixSeconds(Long(info, "resetsAt")), Cap(Str(info, "status"), 40)));
+        return new RateLimitEvent(windows, Cap(Str(info, "status"), 40),
+            info.TryGetProperty("isUsingOverage", out var o) && o.ValueKind is JsonValueKind.True or JsonValueKind.False ? o.GetBoolean() : null);
+    }
+
+    /// <summary>유닉스 초 → 시각. 0 이하 · 범위 밖(밀리초로 온 값 등)이면 null — Parse는 예외를 던지지 않는다 (/self-review b40d9efb00 C1).</summary>
+    private static DateTimeOffset? UnixSeconds(long seconds) =>
+        seconds > 0 && seconds <= DateTimeOffset.MaxValue.ToUnixTimeSeconds() ? DateTimeOffset.FromUnixTimeSeconds(seconds) : null;
 
     private static StreamEvent ParseStream(JsonElement e)
     {

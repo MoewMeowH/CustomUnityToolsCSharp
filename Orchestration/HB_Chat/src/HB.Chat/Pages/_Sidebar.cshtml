@@ -13,6 +13,7 @@
     </div>
     <div id="search-results" hidden></div>
     <partial name="_RoomList" model="Model" />
+    <partial name="_Limits" />
     <div class="side-foot">
         @* 아이콘 + 짧은 글 (4차 D3), 회사 모드는 토글 스위치 (체크 상자 그대로 — 화면 스크립트 · 키보드 동작은 같음) *@
         <a href="/?trash=1" id="trash-link" class="icon-link" title="휴지통 (30일 뒤 지움)">@Icons.Svg("trash") 휴지통 <span class="count" id="trash-count">@Model.TrashCount</span></a>

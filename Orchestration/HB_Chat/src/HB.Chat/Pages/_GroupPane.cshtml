@@ -14,6 +14,7 @@
         <div class="head-title">
             <h2 id="room-title">@Model.Title</h2>
             <span class="muted">단톡방 · @RoomRules.LevelName(room.Level) · @room.Model</span>
+            <span class="muted group-cost" id="group-cost" title="Claude 구성원: claude가 알려 준 세션 누적 비용(구독이라 실제 청구 아님) · Codex 구성원: 과정 기록의 토큰">@Model.GroupCostLine()</span>
         </div>
         <div class="members" id="members">
             @foreach (var m in room.Members)
