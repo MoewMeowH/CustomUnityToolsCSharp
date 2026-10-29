@@ -129,7 +129,6 @@ public sealed class MainForm : Form
         // 트레이 (2-3 b): 닫기(X)는 여기로 숨김, 메뉴 열기 · 끝내기, 두 번 누르면 열기, 풍선을 누르면 그 방
         _trayMenu.Items.Add("열기", null, (_, _) => BringUp());
         _trayMenu.Items.Add("미니 창", null, (_, _) => ToggleMini());
-        _trayMenu.Items.Add("알림 시험", null, (_, _) => TestToast());
         _trayMenu.Items.Add(new ToolStripSeparator());
         _trayMenu.Items.Add("끝내기", null, (_, _) => Exit());
         _tray = new NotifyIcon { Icon = _trayIcons[TrayLevel.Idle], Text = "HB Chat", ContextMenuStrip = _trayMenu, Visible = true };
@@ -433,13 +432,6 @@ public sealed class MainForm : Form
             Trace("토스트 실패 — 풍선으로: " + ex.GetType().Name + " " + ex.Message);
             return false;
         }
-    }
-
-    /// <summary>트레이 메뉴 "알림 시험": 지금 설정 · 그림으로 토스트 하나 (누르면 큰 창).</summary>
-    private void TestToast()
-    {
-        if (!ShowToasts([new ToastSpec(null, "알림 시험", "HB Chat 알림이 이렇게 보입니다")]))
-            _tray.ShowBalloonTip(4000, "알림 시험", "토스트를 띄우지 못해 풍선으로 보입니다 — logs/desktop.log", ToolTipIcon.Warning);
     }
 
     /// <summary>토스트를 누름 (백그라운드 스레드). 방 인자가 맞으면 그 방, 아니면 큰 창만. 창 준비 전이면 미뤄 둔다.</summary>
