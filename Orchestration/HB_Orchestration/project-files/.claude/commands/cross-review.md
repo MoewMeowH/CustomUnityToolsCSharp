@@ -25,10 +25,10 @@ argument-hint: [main|high] [파일/커밋 범위, 비우면 현재 미커밋 변
    - 종합·판정에서 "Claude만 지적"은 두 서브에이전트가 찾고 외부가 놓친 것이다. 어느 서브에이전트의 지적인지 작업 로그에 적는다.
    - API 리뷰였으면 `ownReview`는 2단계의 응답 본문, `reason` 태그는 `[ownReview:sub_self]` · `[ownReview:sub_self+sub_security]`.
    - **`run_mode`가 실행되지 않았으면** (응답이 안전 필터에 막힘 · `[`로 시작하는 실패 · 사용자가 외부 없이 종합을 고름) API 리뷰였으면 2단계 규칙대로 `sub_*` runId에 판정을 단다. 서브에이전트였으면 그 결과가 ownReview로 남지 않는다. 종합 뒤 서브에이전트마다 `record_verdicts`를 `selfReview`(`agent`에 그 이름, `review`에 그 결과 원문)로 **따로** 부르고, `selfReview.reason` 맨 앞에 `[외부 미실행]`을 붙인다. 판정은 그 서브에이전트가 낸 지적만 그 실행에 단다 (`steps` [1]). 지휘자 추가는 self-reviewer 실행에 `steps` 없이. 원문이 막혀 못 넣으면 고쳐 쓰지 말고 멈추고 보고한다 — 대시보드 '서브에이전트 결과'에 원문이 "기록 없음"으로 남아 있다.
-4. CLAUDE.md의 "결과 종합" 형식으로 최종 리뷰를 출력한다.
+4. `/mode` "결과 종합" 형식으로 최종 리뷰를 출력한다.
    - "Claude만 지적"은 self-reviewer가 찾고 외부가 놓친 것이다. 너만 찾은 것은 **"지휘자 추가"**로 따로 묶는다.
    - `record_verdicts`의 `claudeAlsoFound`는 **self-reviewer 결과에 있었는지**로 정한다. 지휘자 추가 항목은 `steps` 없이 남기고 `reason` 맨 앞에 `[지휘자 추가]`를 붙인다.
    - 작업 로그에 남긴다: self-reviewer 지적 수 · 오탐(이미 정한 것을 문제로 지적) 수 · 대상 코드를 다시 전부 읽었는지 (시범 성공 기준).
    - 끝나면 `subagent_in/<날짜>_<주제>/`를 지운다.
-5. `record_verdicts`로 지적마다 판정을 남긴다 (CLAUDE.md "결과 종합" 5번).
+5. `record_verdicts`로 지적마다 판정을 남긴다 (`/mode` "결과 종합" 5번).
 6. 바로 고칠 수 있는 항목을 묻고, 승인하면 수정한다.

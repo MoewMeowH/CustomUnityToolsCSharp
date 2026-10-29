@@ -1,13 +1,12 @@
 # 프로젝트 지침
 
-리뷰 기준은 아래 파일을 따른다.
-@REVIEW_GUIDELINES.md
+리뷰할 때(지휘자 검토 · `/self-review` · `/cross-review`)는 `REVIEW_GUIDELINES.md`를 읽고 그 기준을 따른다.
 
 ## 외부 에이전트 (hb-orchestration MCP)
 
 너(Claude)는 지휘자다. 외부 에이전트(GPT·Gemini·로컬)는 `run_mode`로만 부른다.
-모드 구성은 `list_modes`로 볼 수 있다 (모드 이름을 모를 때만 호출).
-모드 이름은 `{종류}_{등급}`(lite · main · high — high는 비싸거나 두 회사 동시), 단계 모드는 `{종류}_{단계}`다.
+모드 이름은 `{종류}_{등급}`(lite · main · high — high는 비싸거나 두 회사 동시), 단계 모드는 `{종류}_{단계}`다. 모를 때만 `list_modes`를 부른다.
+**`run_mode`를 부르기 전에 `/mode` 명령 파일(`.claude/commands/mode.md`)의 "run_mode 공통 규칙"을 읽는다** — input 범위 · 루트 밖 코드 · 이미지 · 결과 종합 · `record_verdicts` · 자료 요청 · 결과 저장 · 반복 호출 · Quota. `design_high` · `research_main` · `crash_main`은 같은 파일 "모드별 절차"도, 모델 교체(사용자가 명시적으로 요청했을 때만)는 "에이전트(모델) 교체"도.
 
 ### 언제 부르나 — 기본은 부르지 않는다
 
@@ -20,105 +19,25 @@
 * `crash_main`: 사용자가 크래시 조사(원인·비슷한 사례·재현 스텝)를 요청했을 때. 마무리 평가는 `crash_check`
 * `parallel_main`: 사용자가 요청했을 때만
 * `perf_main`(sol): 핫패스·할당·동기화가 걸린 변경, 사용자가 성능 점검을 요청했을 때. 중요한 핫패스·다른 회사 시선은 `perf_high`(sol · DeepSeek 동시). 여러 파일·구조를 바꾸는 큰 작업은 `/preflight`를 제안한다 (`preflight_*` 모드는 그 명령으로만 쓴다)
-* `design_high` · `research_main` · `crash_main`은 부르기 전에 `/mode` 명령 파일(`.claude/commands/mode.md`)의 "모드별 절차"를 먼저 읽는다. `/mode`를 거치지 않고 `run_mode`를 바로 부를 때도 같다.
 * 사소한 변경, 단순 질문에는 쓰지 않는다.
 
-### input 작성 — 토큰 절약 규칙
+### input — 독립성
 
-* **독립성**: 너의 리뷰·결론·선호를 넣지 않는다. 목적, 의도, 제약, 자료만.
+외부 에이전트 · API 리뷰 · 서브에이전트에게 가는 글 모두에 적용한다.
+* 너의 리뷰·결론·선호를 넣지 않는다. 목적, 의도, 제약, 자료만.
   * 검증 결과도 결론이다 — "시험 N개 통과 · 실측했다 · 안전하다 · 문제없다 · ~라서 괜찮다"를 넣지 않는다. 리뷰어가 코드에서 확인할 수 있는 사실은 쓰지 않는다 (확인은 리뷰어 일이다 — 넣으면 그 부분을 덜 의심한다).
   * 코드로 알 수 없는 실측값(외부 도구 버전 · 측정 수치)은 값만 쓰고 결론 문장을 붙이지 않는다 (예: "codex 0.165.0" O, "그래서 격리됨" X).
   * 의도는 "무엇을 바꾸려는지"만 — 사용자 결정은 원문 인용, "왜 맞는지"는 쓰지 않는다.
   * 결함 리뷰(review_* · perf_* · sub_self · sub_perf · sub_security · 검토형 서브에이전트)에는 요청 · 계획서 원문을 넣지 않는다 — 넣으면 "계획대로인가"로 쏠린다. 원문 자료는 방향 리뷰(`/self-review direction`)에만. 한 리뷰어에 둘 다 줘야 하면 input 첫 줄에 "코드 결함 찾기가 먼저, 원문은 결함인가 의도인가를 가를 때만 참고"를 쓴다.
 * **diff는 파일로**: 리뷰 대상이 변경(diff)이면 `git diff`(새 파일 포함 — 미추적 파일은 `git add -N` 뒤)를 `review_tmp/<날짜>_<주제>.diff`로 만들어 `context` **첫 항목**(파일 전체 범위)으로 넘긴다. input에 diff 본문을 다시 쓰지 않는다. 리뷰가 끝나면 지운다.
-* **코드는 `context`로**: 디스크에 있는 코드는 input에 다시 쓰지 말고 `context`에 `{path, startLine, endLine}`(프로젝트 루트 기준, 끝 줄 포함)으로 넘긴다. 서버가 줄 번호와 함께 붙인다. input에는 목적·의도·제약과 디스크에 없는 자료(설계안, 요약)만 쓴다.
-* **범위**: 변경 부분 + 판단에 필요한 주변 코드. 문맥이 모자라 생기는 오판이 더 비싸므로, 지나치게 좁게 자르지 않는다. 빠지기 쉬운 것을 먼저 챙긴다:
-  ① 변경 코드가 쓰는 타입 · 레코드 · 인터페이스의 **정의** ② 바뀐 메서드의 **호출부**와 같은 클래스의 연관 메서드(초기화 · 해제 · 수명주기 · 이벤트 해제부 · 직렬화 필드 선언) ③ 동작을 정하는 **설정**(asmdef · appsettings 키 · modes.json 항목) ④ 바뀐 동작을 검사하는 **테스트**.
-  * 새 파일 · 짧은 파일(대략 300줄 이하)은 자르지 말고 파일 전체 (`endLine` = 실제 줄 수 — 넘으면 서버가 거절한다).
-  * 리뷰 입력은 보통 상한의 1/3 안팎이다 — 첨부를 아끼지 않되 **상한의 절반 안쪽**으로 둔다 (followUp은 원래 프롬프트 + 응답 + 보충이 같은 상한 안에 들어가야 한다). `run_mode` 결과 둘째 줄 `첨부 … / 상한 … (K%)`로 여유를 본다 (절반을 넘으면 `followUp 여유 적음`이 붙는다). `[입력이 너무 깁니다]`로 거절되면 범위를 줄여 1회 다시 부른다.
-* 큰 파일을 범위로 자를 때는 using 목록, 자동 생성 코드, 무관한 메서드를 뺀다.
 * 너의 리뷰는 결과를 보기 전에 먼저 완성한다.
-* **판단 근거는 기록 인자로**: `reason`에 이 모드를 부른 이유를 한 줄로 항상 넣는다. `list_modes`에 `[ownReview 필수]`가 붙은 모드에는 결과를 보기 전에 완성한 너의 리뷰 원문을 `ownReview`로 넣는다. 둘 다 에이전트에게 가지 않고 기록·대시보드에만 남으므로, input에는 여전히 넣지 않는다.
-* `files`에 대상 파일 경로(프로젝트 루트 기준, 가능하면 `path:line`)를 넣는다. 에이전트에게는 전달되지 않고 기록용이다.
-
-### 프로젝트 루트 밖의 코드를 리뷰할 때
-
-* `context`는 기본적으로 이 세션을 연 폴더(프로젝트 루트) 안의 파일만 읽는다.
-* 밖의 저장소가 서버 설정 `Context.ExtraRoots`에 등록돼 있으면 `@이름/상대경로`로 바로 넘긴다 (예: `{"path": "@orch/src/Foo.cs", "startLine": 1, "endLine": 80}`).
-  * 등록된 이름은 `list_modes` 마지막 줄 `추가 루트(context 읽기 전용):`에 보인다. 이름은 대소문자를 구분하지 않는다.
-  * 읽기 전용이다. `save_result`는 추가 루트에 쓰지 않는다.
-  * 에이전트에게는 `@이름/…`만 가고, 로컬 절대 경로는 가지 않는다.
-* 등록돼 있지 않으면 사용자에게 등록을 요청하거나, 그 코드가 있는 저장소에서 세션을 다시 연다.
-* ExtraRoots를 쓸 수 없을 때만 복사한다:
-  * Unity `Temp`는 쓰지 않는다 (에디터가 지운다). `Assets` 밖의 전용 폴더(예: `review_tmp/`)를 쓴다. 이 폴더는 프로젝트마다 `.gitignore`에 등록한다.
-  * 내용을 다시 쓰지 말고 명령으로 복사한다.
-  * 원본과 사본의 SHA-256이 같은지 확인한 뒤 `context`로 넘긴다.
-  * 리뷰가 끝나면 사본을 지운다.
-
-### 이미지 첨부 (기획서 시안 등)
-
-외부 에이전트에게도 이미지를 보여야 할 때만 `/image-prep` 절차(collect → 사용자 정리 → shrink → `images`)를 따른다. 사용자가 고른 이미지만 보낸다.
-* `docs/image/`는 프로젝트마다 `.gitignore`에 등록한다 (사내 시안).
-
-### 결과 종합
-
-1. **여럿이 공통 지적** — 신뢰도 높음, 우선 처리
-2. **한 에이전트만 지적** — 코드를 다시 확인하고 타당/부당 판정과 이유
-3. **Claude만 지적** — 그대로 유지
-4. **의견 충돌** — 양쪽 근거를 나란히 두고 사용자에게 판단 요청
-5. **판정 기록** — 종합을 마치면 `record_verdicts`로 지적마다 판정을 남긴다 (대시보드 판정 화면의 채택률·채택 1건당 비용 원본). `/self-review`는 runId 대신 `selfReview` (명령 파일 4단계).
-   * `verdict`: `adopted`(채택) · `partial`(부분 채택) · `rejected`(기각) · `deferred`(보류) · `duplicate`(중복). 채택이 아니면 `reason` 필수.
-   * `steps`: 그 지적을 낸 단계 번호들 (`### N.`). 여럿이 같이 지적했으면 모두 넣는다. **Claude만 지적한 것도 `steps` 없이 남긴다** (에이전트가 놓친 것).
-   * `claudeAlsoFound`: ownReview에도 있던 지적이면 true.
-   * 보류는 결론이 나면 같은 `findingKey`로 다시 쓴다. 사용자가 판정을 뒤집으면 같은 키로 다시 쓰고 `reason`에 "사용자 판정"을 적는다.
-   * 지적이 하나도 없었던 실행은 남길 것이 없다 (대시보드에 "판정 없는 실행"으로 보인다).
-   * 구조화된 결과(지적 ID `1-F2` 형식)면 `findingIds`를 쓴다. `findingKey`는 첫 ID, `summary`·`steps`·`file`·`severity`는 비워도 서버가 채운다.
-   * 결과 끝의 `겹침 후보`는 위치만 가까운 것이다. 같은 문제인지 확인해 같으면 한 판정에 `findingIds`로 묶고, 다르면 따로 남긴다.
-   * 결과에 `[경고] 구조화 출력 해석 실패`가 있으면 지금처럼 원문을 잘라 `steps`로 남긴다.
-6. **자료 요청 처리** — 결과의 `자료 요청 1-N1: …`은 빠뜨리지 않는다.
-   * 판단에 필요하면 로컬에서 찾아(Grep·Read) 보낼 범위를 고르고 `run_mode`의 `followUp`(`{runId, step, requests}`)으로 같은 에이전트에게 1회 다시 묻는다. 찾은 코드는 `context`, 설명·보내지 않는 이유는 `input`. 실행마다 1회다. 결과는 같은 runId의 새 단계 번호다.
-   * 사내 코드·비밀처럼 보내면 안 되는 것, 판단에 필요 없는 것은 보내지 않는다. **범위를 줄였거나 보내지 않은 요청이 있으면 종합에서 사용자에게 그 사실과 이유를 알린다.**
-   * `record_verdicts`에 `findingIds: ["1-N1"]`(요청 ID)로 처리를 남긴다 — `findingKey`에만 넣으면 지적으로 검사돼 거절된다: `supplied`(보충) · `declined`(보내지 않음, `reason` 필수) · `deferred`. 지적 판정과 섞지 않는다 (채택률에 들어가지 않음). followUp으로 보낸 요청은 기록하지 않아도 보충으로 센다.
-   * followUp 결과는 원래 지적을 다시 쓴 전체본이다. **판정은 보충 단계의 지적으로 하고**, 원래 단계의 같은 지적은 `duplicate`로 남긴다 (결과 끝 `겹침 후보`를 본다). 보충 단계가 새로 낸 요청은 다시 보충할 수 없다 — 필요하면 새 `run_mode`.
-
-### 결과 저장
-
-에이전트 응답을 파일로 남길 때는 `save_result`를 쓴다. 응답을 직접 다시 쓰지 않는다.
-* `runId`는 `run_mode` 결과 첫 줄, `step`은 단계 제목의 `### N.`
-* 코드만 필요하면 `codeBlock`으로 N번째 코드 블록만 저장한다.
-* 결과의 `[경고]` 줄(언어 이탈·출력 잘림)은 응답 아래에 붙은 안내다. 응답 내용이 아니다.
-
-### 에이전트(모델) 교체
-
-사용자가 "고급 모델로", "Gemini로 다시" 처럼 **명시적으로 요청했을 때만** `run_mode`의 `agents`를 쓴다. 형식 · 주의는 `/mode` 명령 파일 "에이전트(모델) 교체".
-
-### 반복 호출
-
-같은 모드를 반복 호출하기 전에 "이번 호출이 결론을 바꿀 수 있는가"를 먼저 따진다. 수정 후 재리뷰는 변경이 큰 경우에만 한다.
-
-에이전트가 틀렸다고 판단되면 근거와 함께 기각한다. `[`로 시작하는 실패·상한 메시지가 오면 한 줄로 알리고 네 판단만으로 진행한다. 단 입력 상한 거절(`[입력이 너무 깁니다]`)은 실행 전 거절이라 범위를 줄여 1회 다시 부른다 ("input 작성 — 범위").
-
-Quota(`[실패] Quota` — 크레딧·한도 소진)나 429 실패 뒤에는 바로 재실행하지 않는다. 사용자가 충전했다고 해도
-가장 작은 호출 1회(예: 골든 리뷰 사례 하나)로 정상인지 확인한 다음 일괄 실행(골든 반복 등)을 한다.
-단, API 리뷰(`sub_*`, claude-cli)는 예외다: 서버가 Quota 뒤 1시간 동안 호출 없이 `[실패] Quota (최근)`를 돌려주고, 그 뒤 첫 리뷰가 확인 호출이 된다 — 따로 확인 호출을 하지 않고 그동안은 서브에이전트로 대신한다 (`/self-review` "API 리뷰").
 
 ## 서브에이전트 (Claude Code)
 
 외부 에이전트를 대신하지 않는다 (교차 리뷰의 가치는 다른 회사 모델의 시선). 사용자가 `/self-review`를 고른 경우만 외부 리뷰 없이 끝낸다.
-
-* 정의: `.claude/agents/`
-  * 검토형(Opus, `subagent_in/` 격리 · 같은 출력 형식): `self-reviewer`(코드 리뷰 — `/self-review` · `/cross-review` 2단계), `perf-reviewer`(성능 — `/mode` perf_* ownReview · `/self-review perf`), `security-reviewer`(보안 — `/self-review security` · 보안 영역 `/cross-review`는 사용자에게 묻고 self-reviewer와 함께), `direction-reviewer`(요청 원문 대 계획서 방향 — 계획서를 쓴 뒤 승인 전에 `/self-review direction`을 **제안만**).
-  * **검토형은 기본이 API 리뷰**: 모드 `sub_self` · `sub_perf` · `sub_security` · `sub_direction`(claude --bare -p, 키 `HB_REVIEWER_API_KEY` — 구독 사용량을 쓰지 않음). 서브에이전트는 `/self-review sub …`로 고르거나 `[실패] Quota`(크레딧 소진) 때 대신 쓴다. 절차는 `/self-review` "API 리뷰".
-  * 수집형: `web-searcher`(Sonnet, WebSearch · WebFetch만 — research 2단계 · crash 사전 조사 검색), `evidence-collector`(Opus, `/preflight` P4 근거 수집).
-  * 모델: 맥락 편향 없이 봐야 하는 자리는 `opus`, 지휘자 컨텍스트 보호·반복 작업(조사·수집·추출)은 `sonnet`.
-  * 정의 파일에는 `tools` 허용 목록이 반드시 있어야 한다 (생략하면 MCP 도구까지 상속 → `run_mode`를 부를 수 있음). `python -I .claude/scripts/check_agents.py`로 검사한다. `permissionMode` bypass 계열 금지.
-* 입력: 대상 파일을 `subagent_in/<날짜>_<주제>/`에 **명령으로 복사**하고 SHA-256을 확인한 뒤 그 경로만 넘긴다. 리뷰 대상이 변경이면 diff 파일("diff는 파일로")도 함께 복사한다. 리뷰 지침이 필요하면 `REVIEW_GUIDELINES.md`도 복사한다 (`omitClaudeMd`라 CLAUDE.md·지침이 자동으로 들어가지 않음).
-  * 읽기 차단 훅(`.claude/scripts/subagent_read_guard.py`)이 `subagent_in/` 밖을 막는다. 이전 리뷰·작업 로그·호출 기록을 넣지 않는다.
-  * `CLAUDE.md`가 검토 대상이면 `CLAUDE.md.txt`처럼 이름을 바꿔 복사한다 (그대로 두면 지휘자 규칙이 서브에이전트에 자동으로 실린다 — H6이 막음). 링크가 아니라 내용을 복사한다. 부르기 전에 복사를 끝내고, 서브에이전트가 도는 동안에는 `subagent_in/`에 복사하지 않는다 (H6은 부르는 순간만 본다).
-  * 그 서브에이전트의 `.claude/mistakes/<이름>.md`에 항목(주석 밖 `- ` 줄)이 있으면 `_SUBAGENT_MISTAKES.md`로 함께 복사한다 (검토 대상인 프로젝트 `MISTAKES.md`와 겹치지 않는 이름). web-searcher는 파일을 못 읽으므로 주석 밖 `- ` 줄만 위임 메시지 끝 `## 자주 하는 실수` 절로 붙인다 ("실수 기록").
-  * 위임 메시지에는 대상·의도·제약만 쓴다. 너의 결론·의심 지점·검증 결과는 넣지 않는다 (`run_mode` input "독립성"과 같다).
-  * `subagent_in/`은 프로젝트마다 `.gitignore`에 등록한다. 끝나면 지운다.
-* 결과가 정해진 형식을 어겼거나, 중단됐거나, `## 읽은 파일`에 폴더 밖 경로가 있으면 그 단계에서 멈추고 사용자에게 알린다. 다시 부르거나 대신 쓸지는 사용자가 정한다. 서브에이전트 결과를 판정·승인으로 쓰지 않는다.
+* 검토형(self · perf · security · direction)은 기본이 API 리뷰(`sub_*`, 키 `HB_REVIEWER_API_KEY` — 구독 사용량을 쓰지 않음). 서브에이전트는 `/self-review sub …`로 고르거나 `[실패] Quota` 때 대신 쓴다.
+* **서브에이전트를 부르기 전에 `/self-review` 명령 파일의 "서브에이전트 공통 규칙"을 읽는다** — 정의 · `subagent_in/` 입력 복사 · 실수 목록 · 결과 형식 검사.
+* 서브에이전트 결과를 판정·승인으로 쓰지 않는다.
 
 ## 명령 실행
 
@@ -127,13 +46,13 @@ Quota(`[실패] Quota` — 크레딧·한도 소진)나 429 실패 뒤에는 바
 
 ## 훅이 막는 규칙 (`.claude/settings.json` PreToolUse)
 
-규칙을 어기면 훅이 이유와 함께 막는다. 메시지대로 고쳐 다시 한다. 우회하지 않는다 (사람이 직접 할 때는 `!` 명령). 검사 중 오류도 막는다.
-* H1 `cleanup_guard.py`: 재귀 삭제는 단독 명령 · 절대 경로 · 셸의 현재 폴더 밖 대상만 ("명령 실행").
-* H2 `push_guard.py`: `git push`는 단독 명령만. 올라갈 커밋에 비밀 값 모양이나 `docs/image/`·`GoldenSet/`·`subagent_in/`·`review_tmp/` 아래 파일이 있으면 막는다. 개인 값 패턴은 `.claude/push_guard.local.txt`(`.gitignore` 등록).
-* H3 `run_mode_guard.py`: `review_*` 전에 오늘 계획서가 없으면 ("계획서와 작업 로그").
-* H4 `run_mode_guard.py`: `reason`이 `[ownReview:<서브에이전트>]`(둘이면 `+`)면 ownReview는 그 결과 원문이어야 한다 (`## 읽은 파일`은 경로 줄만, 설명은 `## 비고`). `review_*`는 태그가 필수다. API 리뷰 결과는 `[ownReview:sub_self]` · `[ownReview:sub_perf]` · `[ownReview:sub_self+sub_security]`(응답 본문만, 읽은 파일은 작업 폴더 기준 상대 경로) — 서브에이전트 이름과 섞지 않는다.
-* H5 `share_guard.py`: `slackplan`으로 나가는 글에 비밀 값 · 개인 값 · 프로젝트 패턴(`.claude/share_guard.local.txt`, `.gitignore` 등록) · 위 폴더 언급 · 로컬 절대 경로가 있거나, `--allow-warnings` · 지우는 명령의 `--yes`면 막는다. 호출은 단독 명령만, heredoc 본문에 slackplan이 있으면 데이터 전용 명령(cat · git commit 등)에만.
-* H6 `subagent_input_guard.py`: 서브에이전트를 부르거나 이어 부를 때(`Agent` · `SendMessage`) 메시지에 `subagent_in`이 나오면 `subagent_in/` 전체를 훑어, `CLAUDE.md` · `CLAUDE.local.md` · `.claude`나 폴더 링크 · 정션이 있거나 경로가 이 프로젝트 `subagent_in/` 밖이면. 그 파일들은 서브에이전트가 폴더를 읽을 때 하네스가 자동으로 불러온다.
+훅이 막으면 메시지(이유 · 고칠 방법)대로 고쳐 다시 한다. 우회하지 않는다 (사람이 직접 할 때는 `!` 명령). 검사 중 오류도 막는다.
+* H1 `cleanup_guard.py` — 재귀 삭제 ("명령 실행")
+* H2 `push_guard.py` — `git push`는 단독 명령만, 비밀 값 모양 · `docs/image/` · `GoldenSet/` · `subagent_in/` · `review_tmp/` 파일이 든 커밋 (개인 값 패턴 `.claude/push_guard.local.txt`)
+* H3 `run_mode_guard.py` — `review_*` 전에 오늘 계획서 ("계획서와 작업 로그")
+* H4 `run_mode_guard.py` — `review_*`의 `reason` 태그 `[ownReview:…]`와 ownReview 원문 (형식은 `/cross-review`)
+* H5 `share_guard.py` — `slackplan`으로 나가는 글 (호출은 단독 명령, heredoc 본문에 slackplan이 있으면 데이터 전용 명령에만)
+* H6 `subagent_input_guard.py` — 서브에이전트를 부를 때 `subagent_in/` 속 `CLAUDE.md` · `.claude` · 링크
 * 훅 등록은 `python -I .claude/scripts/check_agents.py`, 동작은 `python -I .claude/scripts/test_hooks.py`로 검사한다. settings.json을 고치면 새 세션에서 반영된다.
 
 ## 계획서와 작업 로그
@@ -163,18 +82,9 @@ Quota(`[실패] Quota` — 크레딧·한도 소진)나 429 실패 뒤에는 바
 
 ## Unity 테스트 (Unity CLI)
 
-`unity test`를 돌릴 때는 `/unity-test` 명령 파일의 절차를 따른다 (배치 전용 프로젝트 `F:\AI\Unity_AITest\<버전>\ForAI`에 패키지를 넣고 → 에디터 확인 → 관련 테스트만 → 종료 코드 → 실패 항목만 → 되돌리기).
-
-### 테스트와 외부 에이전트
-
-* 테스트 실패 원인이 바로 보이면 직접 고친다. 외부 에이전트를 부르지 않는다.
-* 원인이 불분명할 때만 `review_main` 모드에 "실패한 테스트 메시지 + 관련 diff"를 넘긴다.
-* 고친 뒤에는 같은 `--filter`로 다시 돌려 확인한다. 전체 테스트는 마지막에 한 번만.
-
-### 라이브 에디터 조작
-
-씬·프리팹·에셋 수정이 필요하면 YAML 파일을 직접 고치지 말고, 에디터가 연결돼 있을 때 `unity command`로 조작한다
-(사용 가능한 명령은 `unity command`로 확인). 에디터가 없을 때만 파일을 직접 고치고, 그렇게 한다고 알린다.
+* `unity test`를 돌릴 때는 `/unity-test` 명령 파일의 절차를 따른다.
+* 테스트 실패 원인이 바로 보이면 직접 고친다. 원인이 불분명할 때만 `review_main`에 "실패한 테스트 메시지 + 관련 diff"를 넘긴다. 고친 뒤에는 같은 `--filter`로 다시 돌리고, 전체 테스트는 마지막에 한 번만.
+* 씬·프리팹·에셋 수정이 필요하면 YAML 파일을 직접 고치지 말고, 에디터가 연결돼 있을 때 `unity command`로 조작한다. 에디터가 없을 때만 파일을 직접 고치고, 그렇게 한다고 알린다.
 
 ## 실수 기록
 

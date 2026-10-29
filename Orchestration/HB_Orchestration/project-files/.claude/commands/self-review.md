@@ -45,3 +45,21 @@ argument-hint: [sub] [perf|security|direction] [파일/커밋 범위 또는 계�
    - `verdict`: adopted · partial · rejected · deferred · duplicate, 채택이 아니면 `reason` 필수. 하나라도 틀리면 실행 기록도 남지 않으니 고쳐 다시 부른다.
    - 보류·사용자 판정 뒤집기는 받은 runId로 같은 `findingKey`를 다시 쓴다 (`selfReview` 없이).
 5. 바로 고칠 수 있는 항목을 묻고, 승인하면 수정한다.
+
+## 서브에이전트 공통 규칙
+
+서브에이전트(Claude Code `Agent`)를 부르는 모든 경우(이 명령 · `/cross-review` · `/mode` perf_* · research · `/preflight`)에 적용한다.
+
+* 정의: `.claude/agents/`
+  * 검토형(Opus, `subagent_in/` 격리 · 같은 출력 형식): `self-reviewer`(코드 리뷰 — `/self-review` · `/cross-review` 2단계), `perf-reviewer`(성능 — `/mode` perf_* ownReview · `/self-review perf`), `security-reviewer`(보안 — `/self-review security` · 보안 영역 `/cross-review`는 사용자에게 묻고 self-reviewer와 함께), `direction-reviewer`(요청 원문 대 계획서 방향 — 계획서를 쓴 뒤 승인 전에 `/self-review direction`을 **제안만**).
+  * 검토형은 기본이 API 리뷰(모드 `sub_self` · `sub_perf` · `sub_security` · `sub_direction`, 위 "API 리뷰"). 서브에이전트는 `/self-review sub …`로 고르거나 `[실패] Quota`(크레딧 소진) 때 대신 쓴다.
+  * 수집형: `web-searcher`(Sonnet, WebSearch · WebFetch만 — research 2단계 · crash 사전 조사 검색), `evidence-collector`(Opus, `/preflight` P4 근거 수집).
+  * 모델: 맥락 편향 없이 봐야 하는 자리는 `opus`, 지휘자 컨텍스트 보호·반복 작업(조사·수집·추출)은 `sonnet`.
+  * 정의 파일에는 `tools` 허용 목록이 반드시 있어야 한다 (생략하면 MCP 도구까지 상속 → `run_mode`를 부를 수 있음). `python -I .claude/scripts/check_agents.py`로 검사한다. `permissionMode` bypass 계열 금지.
+* 입력: 대상 파일을 `subagent_in/<날짜>_<주제>/`에 **명령으로 복사**하고 SHA-256을 확인한 뒤 그 경로만 넘긴다. 리뷰 대상이 변경이면 diff 파일(CLAUDE.md "diff는 파일로")도 함께 복사한다. 리뷰 지침이 필요하면 `REVIEW_GUIDELINES.md`도 복사한다 (`omitClaudeMd`라 CLAUDE.md·지침이 자동으로 들어가지 않음).
+  * 읽기 차단 훅(`.claude/scripts/subagent_read_guard.py`)이 `subagent_in/` 밖을 막는다. 이전 리뷰·작업 로그·호출 기록을 넣지 않는다.
+  * `CLAUDE.md`가 검토 대상이면 `CLAUDE.md.txt`처럼 이름을 바꿔 복사한다 (그대로 두면 지휘자 규칙이 서브에이전트에 자동으로 실린다 — H6이 막음). 링크가 아니라 내용을 복사한다. 부르기 전에 복사를 끝내고, 서브에이전트가 도는 동안에는 `subagent_in/`에 복사하지 않는다 (H6은 부르는 순간만 본다).
+  * 그 서브에이전트의 `.claude/mistakes/<이름>.md`에 항목(주석 밖 `- ` 줄)이 있으면 `_SUBAGENT_MISTAKES.md`로 함께 복사한다 (검토 대상인 프로젝트 `MISTAKES.md`와 겹치지 않는 이름). web-searcher는 파일을 못 읽으므로 주석 밖 `- ` 줄만 위임 메시지 끝 `## 자주 하는 실수` 절로 붙인다 (CLAUDE.md "실수 기록").
+  * 위임 메시지에는 대상·의도·제약만 쓴다. 너의 결론·의심 지점·검증 결과는 넣지 않는다 (CLAUDE.md "input — 독립성").
+  * `subagent_in/`은 프로젝트마다 `.gitignore`에 등록한다. 끝나면 지운다.
+* 결과가 정해진 형식을 어겼거나, 중단됐거나, `## 읽은 파일`에 폴더 밖 경로가 있으면 그 단계에서 멈추고 사용자에게 알린다. 다시 부르거나 대신 쓸지는 사용자가 정한다.
