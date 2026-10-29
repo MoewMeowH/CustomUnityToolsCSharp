@@ -5,8 +5,10 @@ namespace HB.Chat;
 /// <summary>
 /// 방 상태 한 줄 (데스크톱 앱이 읽는 JSON). Activity · Face는 이름 그대로 (Idle · Busy · Approval / FaceCatalog 상태 이름).
 /// Preview는 방 목록 미리보기(80자)로, 설정 "알림에 답 앞부분 보이기"를 켰을 때만 싣는다 — 꺼져 있으면 null.
+/// Member는 단톡방의 구성원 이름 (승인 · 실행 · 답한 구성원, 계획서 2026-10-29_단톡방-차례-알림 — 설정과 상관없이 싣는다). 보통 방은 null.
 /// </summary>
-public sealed record RoomRow(string Id, string Title, string Activity, bool Failed, int Unread, string Face, DateTimeOffset LastAt, string? Preview = null);
+public sealed record RoomRow(string Id, string Title, string Activity, bool Failed, int Unread, string Face, DateTimeOffset LastAt, string? Preview = null,
+    string? Member = null);
 
 /// <summary>
 /// `GET /api/rooms` (계획서 2-3): 휴지통 밖 방 요약, 최근 활동 순. 데스크톱 앱이 서버가 HB Chat인지 확인하고
@@ -23,5 +25,5 @@ public static class RoomApi
 
     public static IReadOnlyList<RoomRow> Rows(IEnumerable<RoomSummary> rooms, bool withPreview = false) =>
         [.. rooms.Select(r => new RoomRow(r.Id, r.Title, r.Activity.ToString(), r.Failed, r.Unread, r.Face.ToString(), r.LastAt,
-            withPreview ? r.Preview : null))];
+            withPreview ? r.Preview : null, r.Member))];
 }

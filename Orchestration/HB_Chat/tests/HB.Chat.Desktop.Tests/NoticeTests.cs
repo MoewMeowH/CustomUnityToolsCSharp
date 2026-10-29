@@ -40,6 +40,19 @@ public sealed class NoticeTests
     }
 
     [Fact]
+    public void GroupMember_ShownInNoticesAndRoomName()
+    {
+        // 2026-10-29_단톡방-차례-알림 (결정 "늘 보이기"): 단톡방 줄의 member를 제목 뒤에 — 승인 · 질문은 기다리는 구성원, 답 끝은 답한 구성원들
+        var rooms = RoomStates.Parse("[{\"id\":\"g\",\"title\":\"단톡\",\"activity\":\"Approval\",\"failed\":false,\"unread\":0,\"face\":\"Question\",\"member\":\"A\"}]")!;
+        Assert.Equal("A", rooms[0].Member);
+        var asked = Notices.Diff(Map(R("g", "Busy", title: "단톡")), rooms, null);
+        Assert.Equal(("질문", "단톡 — A"), Notices.Balloon([asked[0]]));
+        var done = Notices.Diff(Map(R("g", "Busy", title: "단톡")), [new RoomState("g", "단톡", "Idle", false, 0, Member: "A, B")], null);
+        Assert.Equal(("답 끝", "단톡 — A, B"), Notices.Balloon([done[0]]));
+        Assert.Equal("단톡", R("g", "Idle", title: "단톡").Named); // 옛 서버 · 보통 방은 지금처럼
+    }
+
+    [Fact]
     public void Diff_FirstSnapshotIsSilent() => Assert.Empty(Notices.Diff(null, [R("a", "Approval")], null));
 
     [Fact]

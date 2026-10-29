@@ -572,9 +572,17 @@ public sealed partial class GroupChat
         try { StartQueued(groupId, memberId, userLine); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
-            FailRun(groupId, memberId, userLine, $"(보내지 못함: {ex.Message})"); // 실패 줄도 — 없으면 "답이 없습니다"로만 보였다 (⑤ 지휘자 K4)
+            FailRun(groupId, memberId, userLine, $"(보내지 못함: {ex.Message}{MergedEnded(groupId, memberId)})"); // 실패 줄도 — 없으면 "답이 없습니다"로만 보였다 (⑤ 지휘자 K4)
         }
     }
+
+    /// <summary>
+    /// 차례로 갈음한 부름(⑤ 결정 "B의 차례로 갈음")이 있으면 실패 줄에 붙일 한 마디 — 그 차례가 실패하면 부른 쪽 부름도 함께 끝난다 (⑤ K8). 없으면 빈 글.
+    /// </summary>
+    private string MergedEnded(string groupId, string memberId) =>
+        _rounds.TryGetValue(groupId, out var round) && round.CalledBy.TryGetValue(memberId, out var by) && by.Count > 0
+            ? $" — @{string.Join(", @", by.Distinct())}가 부른 것도 함께 끝남"
+            : "";
 
     /// <summary>
     /// 차례로 도는 말(⑤)의 다음 구성원: "본 뒤 대화"(이 사용자 말 앞까지) + 같은 말에 먼저 답한 구성원의 답(블록 끝에 따로) + 사용자 말.
@@ -601,7 +609,10 @@ public sealed partial class GroupChat
         if (error is not null)
         {
             _pending.TryRemove(member.RoomId, out _);
-            _log.Append(groupId, new GroupEntry(0, DateTimeOffset.Now, GroupEntryKind.Member, member.Id, $"(보내지 못함: {error})") { ReplyTo = userLine, Failed = true });
+            _log.Append(groupId, new GroupEntry(0, DateTimeOffset.Now, GroupEntryKind.Member, member.Id, $"(보내지 못함: {error}{MergedEnded(groupId, member.Id)})")
+            {
+                ReplyTo = userLine, Failed = true,
+            });
         }
     }
 
@@ -718,7 +729,10 @@ public sealed partial class GroupChat
                     try
                     {
                         _log.Append(groupId, new GroupEntry(0, DateTimeOffset.Now, GroupEntryKind.Member, call.MemberId,
-                            call.Caller is null ? "(중지됨 — 차례가 오기 전)" : "(중지됨 — 이어 부르지 않음)") { ReplyTo = call.Line, Failed = true });
+                            call.Caller is null ? $"(중지됨 — 차례가 오기 전{MergedEnded(groupId, call.MemberId)})" : "(중지됨 — 이어 부르지 않음)")
+                        {
+                            ReplyTo = call.Line, Failed = true,
+                        });
                     }
                     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException) { }
                 }
@@ -859,6 +873,9 @@ public sealed partial class GroupChat
         List<GroupMember> calls = [], merged = [];
         List<string> notes = [];
         _rounds.TryGetValue(groupId, out var round);
+        // 갈음한 차례(⑤)가 실패 · 중지로 끝나면 부른 쪽 부름도 함께 끝났다고 적는다 (⑤ K8, /self-review 175acbd35a C1)
+        if (!result.Ok && pending.Depth == 0 && round is not null && round.UserLine == pending.Line && MergedEnded(groupId, memberId) is { Length: > 0 } ended)
+            text = text[..^1] + ended + ")";
         if (pending.Depth == 0 && result.Ok && group is { IsGroup: true } && round is not null && round.UserLine == pending.Line && !round.Stopped)
             (calls, merged, notes) = PlanChain(group, round, memberId, text);
         // 이어 부른 대상이 쓰는 구성원이면 이 판은 그때부터 차례로 (⑤)
@@ -952,14 +969,23 @@ public sealed partial class GroupChat
         var me = group.Members.FirstOrDefault(m => m.Id == memberId);
         var parsed = Mentions.Parse(answer, [.. group.Members.Select(m => m.Name)]);
         List<GroupMember> calls = [], merged = [];
-        List<string> notes = [], limited = [];
+        List<string> notes = [], limited = [], already = [], turned = [];
         if (parsed.All) notes.Add($"{me?.Name ?? "구성원"}의 @All은 잇지 않았습니다 — 구성원 답에서는 @이름으로 부를 때만 이어 부릅니다.");
         foreach (var name in parsed.Names)
         {
-            if (group.Members.FirstOrDefault(m => m.Name == name) is not { } target || target.Id == memberId || !round.Chained.Add(target.Id)) continue;
+            if (group.Members.FirstOrDefault(m => m.Name == name) is not { } target || target.Id == memberId) continue;
+            // 차례를 기다리는 구성원은 두 번째로 불려도 갈음 — 차례 안내에 부른 이들이 다 적힌다 (2026-10-29_단톡방-차례-알림 결정)
             if (round.Queue.Any(q => q.MemberId == target.Id && q.Caller is null))
             {
+                round.Chained.Add(target.Id);
                 merged.Add(target);
+                continue;
+            }
+            // 이 판에서 이미 이어 불린 구성원은 다시 부르지 않는다 — 말없이 사라지지 않게 안내 줄 (⑤ K9, 결정 "안내 줄 남기기")
+            // 갈음으로 자기 차례에 답한 구성원은 이어 불린 적이 없다 — 문구를 가른다 (/self-review 175acbd35a C3)
+            if (!round.Chained.Add(target.Id))
+            {
+                (round.CalledBy.ContainsKey(target.Id) ? turned : already).Add(name);
                 continue;
             }
             if (round.Runs >= MaxRunsPerMessage)
@@ -971,6 +997,10 @@ public sealed partial class GroupChat
             round.Runs++;
             calls.Add(target);
         }
+        if (already.Count > 0)
+            notes.Add($"@{string.Join(", @", already)}는 이 말에서 이미 이어 불려 다시 부르지 않았습니다 — 구성원은 말 하나에 한 번만 이어 불립니다.");
+        if (turned.Count > 0)
+            notes.Add($"@{string.Join(", @", turned)}는 이 말에 자기 차례로 답했거나 답하는 중이라 다시 부르지 않았습니다.");
         if (limited.Count > 0)
             notes.Add($"이어 부르기 한도(말 하나에 구성원 실행 {MaxRunsPerMessage}번)에 걸려 부르지 않았습니다: @{string.Join(", @", limited)}");
         return (calls, merged, notes);
@@ -1034,7 +1064,8 @@ public sealed partial class GroupChat
                 {
                     try
                     {
-                        _log.Append(groupId, new GroupEntry(0, DateTimeOffset.Now, GroupEntryKind.Member, memberId, "(답 없이 끝남)")
+                        _log.Append(groupId, new GroupEntry(0, DateTimeOffset.Now, GroupEntryKind.Member, memberId,
+                            $"(답 없이 끝남{(pending.Depth == 0 ? MergedEnded(groupId, memberId) : "")})")
                         {
                             ReplyTo = pending.Line < 0 ? null : pending.Line, Failed = true,
                         });

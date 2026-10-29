@@ -25,6 +25,12 @@ public sealed record RoomSummary(
 
     /// <summary>이 방에 고른 스티커 팩 (4차 D2, 없으면 전체 설정) — 목록 표정 그림.</summary>
     public string? StickerPack { get; init; }
+
+    /// <summary>
+    /// 단톡방의 구성원 이름 (알림 · 미니 창, 계획서 2026-10-29_단톡방-차례-알림): 승인 · 질문을 기다리는 구성원, 실행 중이면 도는 구성원,
+    /// 쉬면 마지막 사용자 말에 답한 구성원들 (", "로). 보통 방 · 없으면 null.
+    /// </summary>
+    public string? Member { get; init; }
 }
 
 /// <summary>말풍선 한 쪽: 보일 말들과 그 앞에 더 있는지 (계획서 2-2 b, 50개씩 위로 불러오기).</summary>
@@ -74,6 +80,32 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
         };
     }
 
+    /// <summary>
+    /// 단톡방 줄의 구성원 이름 · 표정 (알림 · 미니 창, 결정 "늘 보이기" · "이번 말에 답한 모두"): 그 상태인 구성원 — 쉬면 마지막 사용자 말 뒤에 답한 구성원.
+    /// 표정은 기다리는 카드가 모두 질문이면 Question(데스크톱이 "질문"으로 보인다), 그 밖의 기다림은 Approval, 아니면 Idle.
+    /// </summary>
+    private (string? Member, Face Face) GroupWho(Room group, IReadOnlyList<GroupEntry> log, RoomActivity activity)
+    {
+        if (activity != RoomActivity.Idle)
+        {
+            var hits = group.Members.Where(m => m.RoomId.Length > 0 && hub.ActivityOf(m.RoomId) == activity).ToList();
+            var face = Face.Idle;
+            // 따로 읽는 사이 카드가 끝나 hits가 비면 빈 All이 참이 된다 — 그때는 Approval (/self-review 175acbd35a C5)
+            if (activity == RoomActivity.Approval)
+                face = hits.Count > 0 && hits.All(m => store.Get(m.RoomId) is { } child && hub.FaceOf(child, transient: false) == Face.Question)
+                    ? Face.Question : Face.Approval;
+            return (hits.Count == 0 ? null : string.Join(", ", hits.Select(m => m.Name)), face);
+        }
+        // 마지막 사용자 말은 뒤에서 찾고(목록 · 폴링마다 불린다 — C6), 실패 · 중지 표시 줄은 답으로 세지 않는다 (C2)
+        var from = 0;
+        for (var i = log.Count - 1; i >= 0; i--)
+            if (log[i].Kind == GroupEntryKind.User) { from = i + 1; break; }
+        var answered = log.Skip(from)
+            .Where(e => e is { Kind: GroupEntryKind.Member, Failed: false, MemberId: not null }).Select(e => e.MemberId!).Distinct()
+            .Select(id => group.Members.FirstOrDefault(m => m.Id == id)?.Name).OfType<string>().ToList();
+        return (answered.Count == 0 ? null : string.Join(", ", answered), Face.Idle);
+    }
+
     /// <summary>단톡방 한 줄: 구성원 중 하나라도 실행 · 답 기다림이면 그 상태, 미리보기 · 시각은 대화 줄 마지막 말.</summary>
     private RoomSummary SummarizeGroup(Room room)
     {
@@ -87,9 +119,12 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
         var preview = last is null ? "[단톡방] " + string.Join(", ", room.Members.Select(m => m.Name))
             : Preview((who is null ? "" : who + ": ") + last.Text);
         var lastAt = new[] { last?.At, room.CreatedAt }.Max() ?? room.CreatedAt;
-        return new RoomSummary(room.Id, room.Title ?? "단톡방", preview, lastAt, 0, GroupChat.ActivityOf(room, hub), false, room.Level, room.Model)
+        var activity = GroupChat.ActivityOf(room, hub);
+        var (member, face) = GroupWho(room, log, activity);
+        return new RoomSummary(room.Id, room.Title ?? "단톡방", preview, lastAt, 0, activity, false, room.Level, room.Model)
         {
-            Face = Face.Idle,
+            Face = face,
+            Member = member,
             Workspace = room.Workspace,
             StickerPack = room.StickerPack,
         };

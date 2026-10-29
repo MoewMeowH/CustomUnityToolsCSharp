@@ -777,4 +777,65 @@ public sealed class GroupTests : IDisposable
         Assert.Contains("생략", delta); // 옛 대화는 줄었다
         Assert.True(delta.Length < 15_000 + GroupChat.DeltaMaxChars + 2_000);
     }
+
+    /// <summary>
+    /// ⑤ K9 (2026-10-29_단톡방-차례-알림, 결정 "안내 줄 남기기"): A · C가 같이 답하며 둘 다 @B를 부르면 B는 한 번만 이어 답하고,
+    /// 뒤에 부른 쪽에는 "이미 이어 불려" 안내 줄이 남는다 (전에는 말없이 사라짐). 가짜 claude 'call'은 '#'을 '@'로 바꾼 말을 답한다.
+    /// </summary>
+    [Fact]
+    public async Task Chain_SecondCallToChainedMember_LeavesNote()
+    {
+        var (group, error) = _groups.Create("ws", PermissionLevel.Read, "opus", null, "셋",
+            [new GroupMemberSpec("A", ""), new GroupMemberSpec("B", ""), new GroupMemberSpec("C", "")]);
+        Assert.Null(error);
+        var b = group!.Members[1];
+        Assert.Null(_groups.Send(group.Id, "call @A @C #B"));
+        await WaitAllIdleAsync(group);
+        var log = _log.Read(group.Id);
+        Assert.Single(log, e => e.Kind == GroupEntryKind.Note && e.Text.StartsWith("@B는 이 말에서 이미 이어 불려", StringComparison.Ordinal));
+        Assert.Single(log, e => e.MemberId == b.Id);
+        lock (_specs) Assert.Single(_specs, s => s.RoomId == b.RoomId);
+    }
+
+    /// <summary>
+    /// ⑤ K8: 갈음한 구성원(B — 차례를 기다리는 동안 A가 부름)의 차례 보내기가 실패하면 실패 줄에 "@A가 부른 것도 함께 끝남"을 적는다.
+    /// B 방을 휴지통에 넣어 보내기를 막는다.
+    /// </summary>
+    [Fact]
+    public async Task Writer_MergedTurnFails_NoteSaysCallEndedToo()
+    {
+        var group = WriterGroup();
+        var b = group.Members[1];
+        Assert.Null(_groups.Send(group.Id, "(probe) @A @B"));
+        _store.Update(b.RoomId, r => r with { DeletedAt = DateTimeOffset.Now });
+        await WaitAllIdleAsync(group);
+        var log = _log.Read(group.Id);
+        Assert.Equal([b.Id], log.Single(e => e.MemberId == group.Members[0].Id).Merged);
+        var fromB = log.Single(e => e.MemberId == b.Id);
+        Assert.True(fromB.Failed);
+        Assert.StartsWith("(보내지 못함: ", fromB.Text);
+        Assert.EndsWith("— @A가 부른 것도 함께 끝남)", fromB.Text);
+    }
+
+    /// <summary>알림 · 미니 창 (2026-10-29_단톡방-차례-알림, 결정 "이번 말에 답한 모두"): 쉬는 단톡방 줄의 Member는 마지막 사용자 말 뒤에 답한 구성원들.</summary>
+    [Fact]
+    public void Summary_Member_IsAnsweredMembersSinceLastUserLine()
+    {
+        var group = NewGroup();
+        var (a, b) = (group.Members[0], group.Members[1]);
+        var list = new RoomList(_store, _hub, new ChatTranscripts(() => Path.Combine(_dir, "projects")), _log);
+        Assert.Null(Assert.Single(list.All()).Member); // 대화 없음
+        _log.Append(group.Id, new GroupEntry(0, DateTimeOffset.Now, GroupEntryKind.User, null, "첫 말"));
+        _log.Append(group.Id, new GroupEntry(0, DateTimeOffset.Now, GroupEntryKind.Member, a.Id, "옛 답"));
+        _log.Append(group.Id, new GroupEntry(0, DateTimeOffset.Now, GroupEntryKind.User, null, "둘째 말"));
+        _log.Append(group.Id, new GroupEntry(0, DateTimeOffset.Now, GroupEntryKind.Member, b.Id, "답 1"));
+        _log.Append(group.Id, new GroupEntry(0, DateTimeOffset.Now, GroupEntryKind.Note, null, "안내"));
+        _log.Append(group.Id, new GroupEntry(0, DateTimeOffset.Now, GroupEntryKind.Member, a.Id, "답 2"));
+        _log.Append(group.Id, new GroupEntry(0, DateTimeOffset.Now, GroupEntryKind.Member, b.Id, "답 3"));
+        var c = _store.Update(group.Id, r => r with { Members = [.. r.Members, new GroupMember("cc", "C", "", "")] }).Members[^1];
+        _log.Append(group.Id, new GroupEntry(0, DateTimeOffset.Now, GroupEntryKind.Member, c.Id, "(중지됨 — 차례가 오기 전)") { Failed = true }); // 실패 · 중지 줄은 답이 아님 (175acbd35a C2)
+        var row = Assert.Single(list.All());
+        Assert.Equal(("B, A", Face.Idle), (row.Member, row.Face));
+        Assert.Equal("B, A", Assert.Single(RoomApi.Rows(list.All())).Member); // 알림 본문 설정과 상관없이 싣는다
+    }
 }

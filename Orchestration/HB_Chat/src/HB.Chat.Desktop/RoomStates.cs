@@ -2,9 +2,16 @@ using System.Text.Json;
 
 namespace HB.Chat.Desktop;
 
-/// <summary>`/api/rooms`의 방 한 줄 (데스크톱이 쓰는 칸만). Preview는 서버 설정 "알림에 답 앞부분 보이기"가 켜졌을 때만 온다.</summary>
-public sealed record RoomState(string Id, string Title, string Activity, bool Failed, int Unread, string? Face = null, string? Preview = null)
+/// <summary>
+/// `/api/rooms`의 방 한 줄 (데스크톱이 쓰는 칸만). Preview는 서버 설정 "알림에 답 앞부분 보이기"가 켜졌을 때만 온다.
+/// Member는 단톡방의 구성원 이름 (승인 · 실행 · 답한 구성원 — 계획서 2026-10-29_단톡방-차례-알림, 옛 서버 · 보통 방은 null).
+/// </summary>
+public sealed record RoomState(string Id, string Title, string Activity, bool Failed, int Unread, string? Face = null, string? Preview = null,
+    string? Member = null)
 {
+    /// <summary>알림 · 미니 창에 보일 이름: 단톡방이면 "제목 — 구성원", 아니면 제목.</summary>
+    public string Named => string.IsNullOrWhiteSpace(Member) ? Title : $"{Title} — {Member}";
+
     public bool IsIdle => Activity.Equals("Idle", StringComparison.OrdinalIgnoreCase);
     /// <summary>승인 · 질문 카드가 답을 기다린다 (서버는 둘 다 Approval). 알림 · 트레이 우선순위는 같게 둔다.</summary>
     public bool IsApproval => Activity.Equals("Approval", StringComparison.OrdinalIgnoreCase);
@@ -80,9 +87,9 @@ public static class Notices
         foreach (var room in after)
         {
             if (room.Id == viewingRoom || !before.TryGetValue(room.Id, out var was)) continue;
-            if (room.IsApproval && !was.IsApproval) notices.Add(new Notice(NoticeKind.Approval, room.Id, room.Title, room.IsQuestion));
+            if (room.IsApproval && !was.IsApproval) notices.Add(new Notice(NoticeKind.Approval, room.Id, room.Named, room.IsQuestion));
             else if (room.IsIdle && !was.IsIdle)
-                notices.Add(new Notice(room.Failed ? NoticeKind.Failed : NoticeKind.Done, room.Id, room.Title, Preview: room.Preview));
+                notices.Add(new Notice(room.Failed ? NoticeKind.Failed : NoticeKind.Done, room.Id, room.Named, Preview: room.Preview));
         }
         return notices;
     }

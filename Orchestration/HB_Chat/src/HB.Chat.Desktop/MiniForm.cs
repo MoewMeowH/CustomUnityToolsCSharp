@@ -94,7 +94,8 @@ public sealed class MiniForm : Form
         var items = new List<RoomItem> { new(null, "자동 (승인 · 답 기다림 · 최근 방)") };
         items.AddRange(rooms.Select(r => new RoomItem(r.Id, Label(r))));
         var key = string.Join("\n", items.Select(i => i.Id + "\t" + i.Label)) + "\n" + Pinned;
-        if (key != _itemsKey)
+        // 펼쳐 둔 동안은 다시 채우지 않는다 — 닫힌 뒤 다음 목록 갱신에 맞춘다 (/self-review 175acbd35a C4)
+        if (key != _itemsKey && !_rooms.DroppedDown)
         {
             _itemsKey = key;
             _rooms.BeginUpdate();
@@ -117,6 +118,8 @@ public sealed class MiniForm : Form
     {
         var mark = r.IsQuestion ? "● 질문 · " : r.IsApproval ? "● 승인 · " : r.IsBusy ? "… " : "";
         var title = r.Title.Length > 40 ? r.Title[..40] + "…" : r.Title;
+        // 단톡방 구성원 (2026-10-29_단톡방-차례-알림) — 승인 · 질문을 기다리는 구성원만: 실행 · 답 끝 이름은 답마다 바뀌어 고르기 칸을 자꾸 다시 채웠다 (C4)
+        if (r.IsApproval && !string.IsNullOrWhiteSpace(r.Member)) title += $" ({(r.Member.Length > 30 ? r.Member[..30] + "…" : r.Member)})";
         return mark + (title.Length > 0 ? title : r.Id);
     }
 
