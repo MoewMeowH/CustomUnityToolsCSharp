@@ -17,6 +17,10 @@ public sealed class RoomApiTests
         Assert.Equal(new RoomRow("0123456789ab", "방 하나", "Approval", false, 2, "Approval", at), rows[0]);
         Assert.Equal(("Idle", true, "Idle"), (rows[1].Activity, rows[1].Failed, rows[1].Face));
         Assert.All(rows, r => Assert.Null(r.Preview)); // 기본(알림 본문 끔)은 본문을 싣지 않는다
+        Assert.All(rows, r => Assert.Null(r.FaceUrl));
+        // 바탕화면 펫 (계획서 2026-10-29_바탕화면-펫): 방마다 표정 그림 주소를 함수로 받아 싣는다
+        var withFace = RoomApi.Rows(rooms, faceUrl: s => s.Face == Face.Approval ? "/sticker-pack/p/" + s.Id : null);
+        Assert.Equal(["/sticker-pack/p/0123456789ab", null], withFace.Select(r => r.FaceUrl));
 
         var withPreview = RoomApi.Rows(rooms, withPreview: true);
         Assert.Equal("본문 미리보기", withPreview[0].Preview);

@@ -3,11 +3,12 @@ using System.Text.Json;
 namespace HB.Chat.Desktop;
 
 /// <summary>
-/// `/api/rooms`의 방 한 줄 (데스크톱이 쓰는 칸만). Preview는 서버 설정 "알림에 답 앞부분 보이기"가 켜졌을 때만 온다.
+/// `/api/rooms`의 방 한 줄 (데스크톱이 쓰는 칸만). Preview는 늘 온다 (옛 서버는 설정을 켰을 때만) — 토스트 본문은 notifyBody로 가리고 펫 말풍선은 늘 보인다.
+/// FaceUrl은 그 방 스티커 팩의 지금 표정 그림 주소 (서버 기준 상대 경로 — 바탕화면 펫, 계획서 2026-10-29_바탕화면-펫).
 /// Member는 단톡방의 구성원 이름 (승인 · 실행 · 답한 구성원 — 계획서 2026-10-29_단톡방-차례-알림, 옛 서버 · 보통 방은 null).
 /// </summary>
 public sealed record RoomState(string Id, string Title, string Activity, bool Failed, int Unread, string? Face = null, string? Preview = null,
-    string? Member = null)
+    string? Member = null, string? FaceUrl = null)
 {
     /// <summary>알림 · 미니 창에 보일 이름: 단톡방이면 "제목 — 구성원", 아니면 제목.</summary>
     public string Named => string.IsNullOrWhiteSpace(Member) ? Title : $"{Title} — {Member}";

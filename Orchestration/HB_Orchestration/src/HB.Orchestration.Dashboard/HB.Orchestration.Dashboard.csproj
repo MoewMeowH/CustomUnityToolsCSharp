@@ -7,6 +7,12 @@
     <PackageReference Include="Markdig" Version="1.4.0" />
   </ItemGroup>
 
+  <!-- 스티커 그림 · 데스크톱 내장 펫(IconPack/Pets)을 exe 옆으로 — 설정 Stickers:Dir 기본값 "IconPack"(상대 경로)이 content root가 exe 폴더일 때도 찾는다
+       (HB_Chat 계획서 2026-10-29_바탕화면-펫 결정) -->
+  <ItemGroup>
+    <None Include="IconPack\**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\HB.Orchestration.Shared\HB.Orchestration.Shared.csproj" />
     <!-- 말풍선 화면 공용 (SafeMarkdown · 스티커 · 실시간 표시), 채팅 앱 HB_Chat과 같이 쓴다 -->

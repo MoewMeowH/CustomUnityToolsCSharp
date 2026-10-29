@@ -7,6 +7,8 @@
     <!-- Windows 10 판 (알림 토스트 — Windows.UI.Notifications) -->
     <TargetFramework>net10.0-windows10.0.17763.0</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
+    <!-- 바탕화면 펫 (계획서 2026-10-29_바탕화면-펫): 스프라이트 시트 WebP를 WIC(System.Windows.Media.Imaging)로 읽는다 -->
+    <UseWPF>true</UseWPF>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <AssemblyName>HB.Chat.Desktop</AssemblyName>
     <!-- 알림 센터 · 작업 표시줄에 보이는 앱 이름 · 아이콘 (패키지 없는 앱의 토스트는 exe에서 가져온다) -->
@@ -18,6 +20,18 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
     <PackageReference Include="Microsoft.Toolkit.Uwp.Notifications" Version="7.1.3" />
+  </ItemGroup>
+
+  <!-- UseWPF를 켜면 암시적 using이 WPF 쪽 목록으로 바뀌어 아래 둘이 빠진다 — 그 전과 같게 -->
+  <ItemGroup>
+    <Using Include="System.IO" />
+    <Using Include="System.Net.Http" />
+  </ItemGroup>
+
+  <!-- 내장 펫 (계획서 2026-10-29_바탕화면-펫 결정): 원본은 대시보드 IconPack/Pets/<이름>/ (스티커와 한 곳) — exe 옆 Pets/<이름>/으로 복사.
+       기본 펫 gpt_chan = CodePet 기본 스프라이트 (MIT, main ca3d5c1 — 폴더 안 LICENSE-CodePet.txt) -->
+  <ItemGroup>
+    <None Include="..\..\..\HB_Orchestration\src\HB.Orchestration.Dashboard\IconPack\Pets\**" LinkBase="Pets" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

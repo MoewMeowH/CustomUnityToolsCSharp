@@ -24,14 +24,17 @@ builder.Services.Configure<ChatOptions>(builder.Configuration.GetSection("Chat")
 
 // 스티커 설정은 대시보드 설정 파일(Dashboard:Stickers)을 그대로 읽는다 — 목록 · 그림 폴더를 두 벌 두지 않게.
 // 이 앱 설정과 섞이지 않게 따로 읽는다 (대시보드의 Urls 같은 값이 들어오지 않게).
+// 대시보드 폴더 · 그 안의 스티커 폴더는 상대 경로도 받는다 — 이 앱 content root 기준, 스티커 폴더는 그 대시보드 폴더 기준 (계획서 2026-10-29_바탕화면-펫 결정)
 var stickerConfig = new ConfigurationBuilder();
-if (builder.Configuration["Chat:StickerSettingsDir"] is { Length: > 0 } stickerDir && Directory.Exists(stickerDir))
+var stickerBase = StickerOptions.Resolve(builder.Configuration["Chat:StickerSettingsDir"], builder.Environment.ContentRootPath);
+if (stickerBase is { Length: > 0 } stickerDir && Directory.Exists(stickerDir))
 {
     stickerConfig.SetBasePath(Path.GetFullPath(stickerDir))
         .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
         .AddJsonFile("appsettings.local.json", optional: true, reloadOnChange: true);
 }
 builder.Services.Configure<StickerOptions>(stickerConfig.Build().GetSection("Dashboard:Stickers"));
+builder.Services.PostConfigure<StickerOptions>(o => o.Dir = StickerOptions.Resolve(o.Dir, stickerBase is { Length: > 0 } b ? Path.GetFullPath(b) : builder.Environment.ContentRootPath));
 builder.Services.AddSingleton(sp => new StickerCatalog(() => sp.GetRequiredService<IOptionsMonitor<StickerOptions>>().CurrentValue));
 
 builder.Services.AddSingleton(sp => new RoomStore(Path.Combine(sp.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder, "rooms.json")));
@@ -76,6 +79,11 @@ builder.Services.AddSingleton<RoomRuns>();
 builder.Services.AddSingleton(sp => new RoomNotes(sp.GetRequiredService<IOptions<ChatOptions>>())); // 방 기록 줄 (승인 결과 · 정리 표시)
 
 var app = builder.Build();
+
+// 스티커 설정 폴더를 못 찾으면 스티커 · 표정 그림이 조용히 빠진다 — 상대 경로(content root 기준)로 바뀐 뒤라 시작 로그에 남긴다 (/self-review b280752387 C6)
+if (builder.Configuration["Chat:StickerSettingsDir"] is { Length: > 0 } configuredStickers && (stickerBase is null || !Directory.Exists(stickerBase)))
+    app.Logger.LogWarning("스티커 설정 폴더를 찾지 못했습니다: {Configured} → {Resolved} (content root {Root}) — 스티커 · 표정 그림 없이 돕니다",
+        configuredStickers, stickerBase, builder.Environment.ContentRootPath);
 
 // 데이터 폴더 쓰기가 Claude 데스크톱 앱(MSIX) 패키지 캐시로 옮겨지면 켜지 않는다 (4차 A) — 밖에서 띄운 앱과 방 목록 · 기록이 두 벌로 갈린다.
 // 데이터 폴더를 설정 · 인자로 준 실행도 같이 본다: 옮겨지지 않는 폴더(F: · %TEMP% — 시험 서버의 scratchpad)는 Probe가 null이라 막히지 않는다
@@ -267,10 +275,13 @@ app.MapGet("/profile-image/{file}", IResult (string file, ProfileStore profiles,
 var sseJson = new JsonSerializerOptions(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
 
 // 데스크톱 앱 (계획서 2-3): 방 상태 요약 — 서버 확인 · 알림 · 트레이 상태용. 읽기만.
-app.MapGet("/api/rooms", (RoomList list, ProfileStore profiles, HttpContext ctx) =>
+// faceUrl: 그 방 팩의 표정 그림 주소 — 데스크톱 펫 (계획서 2026-10-29_바탕화면-펫), 방 목록 아바타와 같은 식
+app.MapGet("/api/rooms", (RoomList list, ProfileStore profiles, FaceCatalog faces, StickerPacks packs, HttpContext ctx) =>
 {
     ctx.Response.Headers.CacheControl = "no-store";
-    return Results.Json(RoomApi.Rows(list.All(), withPreview: profiles.NotifyBody()), RoomApi.Json);
+    // 미리보기는 늘 싣는다 — 펫 말풍선(4초, 알림 센터에 남지 않음)은 늘 보이고(결정 "말풍선은 늘"), 토스트 본문은 데스크톱이 notifyBody로 가린다
+    return Results.Json(RoomApi.Rows(list.All(), withPreview: true, faceUrl: s => faces.Url(s.Face, packs.For(packs.Effective(s.StickerPack)))),
+        RoomApi.Json);
 });
 app.MapGet("/events/{id}", async (string id, RoomStore store, RoomHub hub, HttpContext ctx) =>
 {

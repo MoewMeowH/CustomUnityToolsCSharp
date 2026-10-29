@@ -20,6 +20,9 @@ public sealed class MiniForm : Form
     private string _itemsKey = "";
     private bool _appClosing, _dark;
 
+    /// <summary>펫을 눌러 연 방 — 숨길 때까지 자동 전환하지 않는다. 숨기거나 직접 고르면 null.</summary>
+    private string? _held;
+
     /// <summary>고정한 방 (null = 자동).</summary>
     public string? Pinned { get; private set; }
 
@@ -55,6 +58,7 @@ public sealed class MiniForm : Form
         {
             if (_rooms.SelectedItem is not RoomItem item) return;
             Pinned = item.Id; // null이면 자동
+            _held = null; // 직접 고르면 펫으로 연 방 붙잡기도 푼다
             if ((item.Id ?? MiniRoom.Next(_last, null, null)) is { } id && id != Current) ShowRoom(id);
         };
         // 쓰는 중이라 미룬 자동 전환은 미니 창에서 나갈 때 다시 본다 (bde22e2224 C4)
@@ -111,6 +115,7 @@ public sealed class MiniForm : Form
     private void Follow()
     {
         if (Current is not null && ActiveForm == this) return;
+        if (_held is not null && Visible) return; // 펫을 눌러 연 방은 숨길 때까지 그대로 (/self-review b280752387 C5)
         if (MiniRoom.Next(_last, Pinned, Current) is { } next) ShowRoom(next);
     }
 
@@ -165,6 +170,30 @@ public sealed class MiniForm : Form
             WindowState = FormWindowState.Normal;
             Activate();
         }
+    }
+
+    /// <summary>
+    /// 펫을 눌렀을 때 (계획서 2026-10-29_바탕화면-펫): 보이면 숨기고, 아니면 펫 옆(그 화면 안)에 roomId 방으로 연다. 크기는 지금 크기 그대로.
+    /// </summary>
+    public void ToggleNear(Rectangle pet, string? roomId)
+    {
+        if (Visible && WindowState != FormWindowState.Minimized)
+        {
+            Hide();
+            return;
+        }
+        WindowState = FormWindowState.Normal;
+        Bounds = PetPlace.MiniNear(pet, Size, Screen.FromRectangle(pet).WorkingArea);
+        _held = roomId;
+        if (roomId is not null && roomId != Current) ShowRoom(roomId);
+        Show();
+        Activate();
+    }
+
+    protected override void OnVisibleChanged(EventArgs e)
+    {
+        base.OnVisibleChanged(e);
+        if (!Visible) _held = null; // 숨기면 펫으로 연 방 붙잡기를 푼다 — 다음부터 다시 자동
     }
 
     /// <summary>닫기(X)는 숨김. 앱이 끝날 때(<see cref="CloseForExit"/>)만 진짜 닫힌다.</summary>

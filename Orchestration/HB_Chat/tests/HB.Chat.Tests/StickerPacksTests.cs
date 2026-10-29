@@ -17,6 +17,7 @@ public sealed class StickerPacksTests : IDisposable
         Directory.CreateDirectory(Path.Combine(_root, "cat"));
         Directory.CreateDirectory(Path.Combine(_root, "dog"));
         Directory.CreateDirectory(Path.Combine(_root, ".hidden"));
+        Directory.CreateDirectory(Path.Combine(_root, "Pets", "gpt_chan")); // 데스크톱 내장 펫 폴더는 팩이 아니다 (계획서 2026-10-29_바탕화면-펫)
         File.WriteAllBytes(Path.Combine(_root, "01-idle.png"), [1]);
         File.WriteAllBytes(Path.Combine(_root, "06-done.png"), [1]);
         File.WriteAllBytes(Path.Combine(_root, "cat", "06-done.png"), [2]);
@@ -109,5 +110,19 @@ public sealed class StickerPacksTests : IDisposable
     [InlineData("끝점.", false)]
     [InlineData("", false)]
     [InlineData(null, false)]
+    [InlineData("Pets", false)]
+    [InlineData("pets", false)]
     public void IsPackName(string? name, bool ok) => Assert.Equal(ok, StickerPacks.IsPackName(name));
+
+    [Fact]
+    public void StickerDir_RelativeResolvedAgainstSettingsFolder()
+    {
+        // 스티커 폴더 상대 경로 (계획서 2026-10-29_바탕화면-펫 결정): 설정 파일 폴더 기준, 절대 · 빈 값은 그대로
+        var baseDir = Path.Combine(_dir, "dash");
+        Assert.Equal(Path.Combine(baseDir, "IconPack"), HB.Orchestration.ChatUi.StickerOptions.Resolve("IconPack", baseDir));
+        Assert.Equal(Path.GetFullPath(Path.Combine(_dir, "IconPack")), HB.Orchestration.ChatUi.StickerOptions.Resolve("../IconPack", baseDir));
+        Assert.Equal(_root, HB.Orchestration.ChatUi.StickerOptions.Resolve(_root, baseDir));
+        Assert.Null(HB.Orchestration.ChatUi.StickerOptions.Resolve(null, baseDir));
+        Assert.Equal("", HB.Orchestration.ChatUi.StickerOptions.Resolve("", baseDir));
+    }
 }

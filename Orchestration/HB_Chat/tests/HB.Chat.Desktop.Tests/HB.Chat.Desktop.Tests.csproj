@@ -4,6 +4,8 @@
   <PropertyGroup>
     <TargetFramework>net10.0-windows10.0.17763.0</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
+    <!-- 펫 시트 읽기(WIC)를 시험하려면 앱과 같이 WPF 틀이 필요하다 (계획서 2026-10-29_바탕화면-펫) -->
+    <UseWPF>true</UseWPF>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
@@ -19,6 +21,8 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Using Include="System.IO" />
+    <Using Include="System.Net.Http" />
   </ItemGroup>
 
 </Project>

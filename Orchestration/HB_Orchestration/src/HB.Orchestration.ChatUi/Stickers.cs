@@ -13,8 +13,19 @@ namespace HB.Orchestration.ChatUi;
 /// </summary>
 public sealed class StickerOptions
 {
-    /// <summary>그림 폴더 (절대 경로). 비우면 그림 없이 글자 배지로 보인다.</summary>
+    /// <summary>
+    /// 그림 폴더. 비우면 그림 없이 글자 배지로 보인다. 상대 경로면 그 설정 파일 폴더 기준으로 푼다 (<see cref="Resolve"/> —
+    /// 대시보드는 content root, HB_Chat은 Chat:StickerSettingsDir). 기본값 "IconPack" — 대시보드 빌드가 exe 옆으로도 복사한다.
+    /// </summary>
     public string? Dir { get; set; }
+
+    /// <summary>상대 경로인 Dir을 baseDir 기준 절대 경로로 (빈 값 · 절대 경로는 그대로, 형식이 틀리면 그대로 둔다 — 찾기에서 없음으로).</summary>
+    public static string? Resolve(string? dir, string baseDir)
+    {
+        if (string.IsNullOrWhiteSpace(dir) || Path.IsPathRooted(dir)) return dir;
+        try { return Path.GetFullPath(Path.Combine(baseDir, dir)); }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { return dir; }
+    }
 
     /// <summary>말풍선 안 스티커 크기 (CSS 픽셀).</summary>
     public int SizePx { get; set; } = 96;

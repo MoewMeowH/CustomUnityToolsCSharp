@@ -75,6 +75,10 @@ public sealed class MainForm : Form
     private Task? _miniReady;
     private IReadOnlyList<RoomState> _roomList = [];
     private bool _hotkeyRegistered;
+
+    // 바탕화면 펫 (계획서 2026-10-29_바탕화면-펫)
+    private PetController? _pet;
+    private readonly ToolStripMenuItem _petItem = new("펫 보이기");
     private const int HotkeyId = 0x4842, WmHotkey = 0x0312;
 
     public MainForm(DesktopSettings settings, string? startWarning, EventWaitHandle show, EventWaitHandle exit)
@@ -129,6 +133,8 @@ public sealed class MainForm : Form
         // 트레이 (2-3 b): 닫기(X)는 여기로 숨김, 메뉴 열기 · 끝내기, 두 번 누르면 열기, 풍선을 누르면 그 방
         _trayMenu.Items.Add("열기", null, (_, _) => BringUp());
         _trayMenu.Items.Add("미니 창", null, (_, _) => ToggleMini());
+        _trayMenu.Items.Add(_petItem);
+        _petItem.Click += (_, _) => _pet?.SetVisible(!_pet.Visible);
         _trayMenu.Items.Add(new ToolStripSeparator());
         _trayMenu.Items.Add("끝내기", null, (_, _) => Exit());
         _tray = new NotifyIcon { Icon = _trayIcons[TrayLevel.Idle], Text = "HB Chat", ContextMenuStrip = _trayMenu, Visible = true };
@@ -136,6 +142,14 @@ public sealed class MainForm : Form
         _tray.BalloonTipClicked += (_, _) => OpenRoom(_balloonRoom);
         // 작업 표시줄 · Alt-Tab으로 앞에 오면 보고 있는 방의 안 본 실패를 지운다 (0f0b6007a4 C3)
         Activated += (_, _) => UpdateTray();
+
+        // 바탕화면 펫 (결정 "기본 켬"): 누르면 그 방 미니 창을 펫 옆에, 오른쪽 메뉴 "미니 창"은 미니 창 토글
+        _pet = new PetController(settings.DataFolder, _chatUrl, _http, Trace);
+        _pet.Clicked += (roomId, near) => ToggleMini(roomId, near);
+        _pet.MiniRequested += () => ToggleMini();
+        _pet.VisibleChanged += visible => _petItem.Checked = visible;
+        _petItem.Checked = _pet.Visible;
+        _pet.Start(Appearance.IsDark(_theme, Appearance.SystemDark()));
     }
 
     protected override async void OnLoad(EventArgs e)
@@ -389,6 +403,7 @@ public sealed class MainForm : Form
         RefreshAppearance();
         var viewing = ViewingRoom();
         var notices = Notices.Diff(_rooms, rooms, viewing);
+        _pet?.Update(_rooms, rooms, notices);
         _rooms = rooms.ToDictionary(r => r.Id);
         _roomList = rooms;
         _mini?.UpdateRooms(rooms);
@@ -498,6 +513,7 @@ public sealed class MainForm : Form
         }
         if (_rooms is null) return;
         _rooms = null;
+        _pet?.Disconnected();
         _trayLevel = TrayLevel.Idle;
         _tray.Icon = _trayIcons[TrayLevel.Idle];
         _tray.Text = TrayStatus.Disconnected;
@@ -545,8 +561,11 @@ public sealed class MainForm : Form
 
     // ---- 미니 창 · 전역 단축키 (2-3 c) ----
 
-    /// <summary>미니 창 보이기 · 숨기기 (트레이 메뉴 · 단축키). 처음 부를 때 만든다 — 채팅 서버가 준비된 뒤에만.</summary>
-    private async void ToggleMini()
+    /// <summary>
+    /// 미니 창 보이기 · 숨기기 (트레이 메뉴 · 단축키 · 펫). 처음 부를 때 만든다 — 채팅 서버가 준비된 뒤에만.
+    /// near가 있으면(펫을 누름) 그 옆에 roomId 방으로 연다 (계획서 2026-10-29_바탕화면-펫 결정 "미니 창 열기 · 닫기").
+    /// </summary>
+    private async void ToggleMini(string? roomId = null, Rectangle? near = null)
     {
         if (_closing) return;
         if (_chatError is not null || _env is null)
@@ -568,7 +587,8 @@ public sealed class MainForm : Form
             return;
         }
         if (_closing || _mini is null) return;
-        _mini.Toggle();
+        if (near is { } pet) _mini.ToggleNear(pet, roomId);
+        else _mini.Toggle();
         Trace($"미니 창 {(_mini.Visible ? "보임" : "숨김")} {_mini.Current}");
     }
 
@@ -688,6 +708,7 @@ public sealed class MainForm : Form
         if (_chatView.CoreWebView2 is { } core) core.Profile.PreferredColorScheme = Appearance.Scheme(theme); // 두 탭 · 미니 창이 같은 프로필
         if (IsHandleCreated) WindowFrame.SetDark(Handle, dark);
         _mini?.ApplyTheme(colors, dark);
+        _pet?.SetDark(dark);
     }
 
     /// <summary>
@@ -824,6 +845,8 @@ public sealed class MainForm : Form
         }
         _closing = true;
         _mini?.CloseForExit(); // 미니 창 위치를 남기고 진짜 닫는다
+        _pet?.Dispose(); // 펫 창 · 말풍선도 같이 (위치는 끌 때마다 저장)
+        _pet = null;
         var bounds = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
         new WindowPlacement(bounds.X, bounds.Y, bounds.Width, bounds.Height, WindowState == FormWindowState.Maximized).Save(_placementPath);
         base.OnFormClosing(e);
@@ -854,6 +877,7 @@ public sealed class MainForm : Form
         if (disposing)
         {
             _mini?.Dispose();
+            _pet?.Dispose();
             _closing = true;
             SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged; // 정적 이벤트 — 안 빼면 창이 남는다
             ToastNotificationManagerCompat.OnActivated -= OnToastActivated;

@@ -119,8 +119,15 @@ public sealed partial class StickerPacks(StickerCatalog stickers, ProfileStore p
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { return null; }
     }
 
-    /// <summary>팩 이름 모양: 글자 · 숫자 · - _ . 공백 40자까지, 점 · 공백으로 시작하거나 끝나지 않음 (경로 · 주소에 들어간다 — Windows는 끝 점 · 공백을 지운다).</summary>
-    public static bool IsPackName(string? name) => name is not null && PackName().IsMatch(name);
+    /// <summary>
+    /// 팩 이름 모양: 글자 · 숫자 · - _ . 공백 40자까지, 점 · 공백으로 시작하거나 끝나지 않음 (경로 · 주소에 들어간다 — Windows는 끝 점 · 공백을 지운다).
+    /// <see cref="PetsFolder"/>는 팩이 아니다 (데스크톱 내장 펫 폴더 — 계획서 2026-10-29_바탕화면-펫 결정).
+    /// </summary>
+    public static bool IsPackName(string? name) =>
+        name is not null && PackName().IsMatch(name) && !string.Equals(name, PetsFolder, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>스티커 폴더 아래 데스크톱 펫 폴더 이름 (IconPack/Pets/&lt;펫&gt;/spritesheet.webp).</summary>
+    public const string PetsFolder = "Pets";
 
     [GeneratedRegex(@"^[\p{L}\p{N}_\-][\p{L}\p{N}_\-. ]{0,39}(?<![. ])\z")]
     private static partial Regex PackName();
