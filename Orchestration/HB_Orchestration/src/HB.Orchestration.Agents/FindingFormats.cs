@@ -4,7 +4,7 @@ using System.Text.Json.Nodes;
 namespace HB.Orchestration.Agents;
 
 /// <summary>
-/// 역할 Output으로 고르는 구조화 출력 형식 (계획서 2026-10-19_리뷰-구조화-출력). 스키마는 코드에 둔다:
+/// 역할 Output으로 고르는 구조화 출력 형식. 스키마는 코드에 둔다:
 /// strict 스키마 규칙(모든 필드 required, additionalProperties false)과 서버의 해석·그리기 코드가 어긋나지 않도록.
 /// 스키마를 바꾸면 Version을 올린다 (기록의 Format에 남아 예전 기록과 구별된다).
 /// </summary>
@@ -12,7 +12,7 @@ public sealed record FindingFormat(string Name, int Version, IReadOnlyList<strin
 {
     public string Tag => $"{Name}@{Version}";
 
-    // 2: needsInfo가 문자열에서 객체(what · path · symbol · why)로 (계획서 2026-10-19_자료요청-왕복). 해석은 @1 문자열도 받는다.
+    // 2: needsInfo가 문자열에서 객체(what · path · symbol · why)로. 해석은 @1 문자열도 받는다.
 
     /// <summary>Reviewer: 일반 코드 리뷰.</summary>
     public static readonly FindingFormat Findings = new("findings", 2, ["critical", "major", "minor", "nit"], Perf: false);

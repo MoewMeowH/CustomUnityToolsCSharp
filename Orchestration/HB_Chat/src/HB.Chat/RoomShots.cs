@@ -4,7 +4,7 @@ namespace HB.Chat;
 
 /// <summary>
 /// 방 기록 스크린샷 파일 (데이터 폴더 browser-shots/&lt;방&gt;/) — 지휘자 브라우저 스크린샷과 Unity capture_game_view 그림이 같이 쓴다
-/// (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결 결정 3). 폴더 이름은 먼저 만든 브라우저 것 그대로 (이미 남은 그림 · 휴지통 정리와 맞게).
+/// 폴더 이름은 먼저 만든 브라우저 것 그대로 (이미 남은 그림 · 휴지통 정리와 맞게).
 /// 기록 줄(<see cref="RoomNotes"/>)의 요약 칸에 파일 이름을 적고, 화면은 ?handler=Shot으로 받는다.
 /// </summary>
 public static partial class RoomShots

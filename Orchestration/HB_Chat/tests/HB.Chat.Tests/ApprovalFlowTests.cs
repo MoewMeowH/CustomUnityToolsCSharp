@@ -214,7 +214,7 @@ public sealed class ApprovalFlowTests : IDisposable
     [Fact]
     public async Task BackgroundBash_CardShowsMinutes_SecondAnswerReceived()
     {
-        // 계획서 2026-10-29_HB_Chat-백그라운드-명령: 카드에 백그라운드 표시, 메인 답 뒤 기다림 알림, 끝 알림 뒤 두 번째 답까지 받고 끝난다
+        // 카드에 백그라운드 표시, 메인 답 뒤 기다림 알림, 끝 알림 뒤 두 번째 답까지 받고 끝난다
         var room = CommandRoom();
         var ch = _hub.Subscribe(room.Id);
         _hub.Send(room.Id, "bgbash please");
@@ -266,7 +266,7 @@ public sealed class ApprovalFlowTests : IDisposable
             _hub.WrapUp(room.Id);
             var seen = await Until(ch, e => e.Kind == "idle");
             Assert.True(seen.Single(e => e.Kind == "end").Ok);
-            // 정리 표시가 방 기록 줄로 남는다 (계획서 2026-10-29_HB_Chat-진행줄-자리-정리표시)
+            // 정리 표시가 방 기록 줄로 남는다
             Assert.Contains("백그라운드 작업 1개를 '지금 끝내기'로 정리했습니다", Log());
         }
         finally { ClaudeRunner.CloseGrace = grace; }
@@ -355,7 +355,7 @@ public sealed class ApprovalFlowTests : IDisposable
     [Fact]
     public async Task TerminalStart_CardWithoutAlwaysAllow_LeavesOneTicket()
     {
-        // 터미널 곁칸 (계획서 2026-10-29_HB_Chat-터미널-곁칸, 결정 "늘 카드"): terminal_start는 카드로 묻고 항상 허용은 받지 않는다.
+        // 터미널 곁칸 (결정 "늘 카드"): terminal_start는 카드로 묻고 항상 허용은 받지 않는다.
         // 허용하면 name · command만 돌려주고(가짜가 extra 키를 확인) 앱 MCP가 쓸 표를 하나 남긴다
         var room = CommandRoom();
         var ch = _hub.Subscribe(room.Id);
@@ -376,7 +376,7 @@ public sealed class ApprovalFlowTests : IDisposable
     [Fact]
     public async Task BrowserOpen_OutsideSiteCardOnce_LocalNoCard()
     {
-        // 지휘자 브라우저 (계획서 2026-10-29_HB_Chat-지휘자-브라우저, 결정 "localhost만 묻지 않음"): 밖 사이트는 사이트마다 한 번 카드,
+        // 지휘자 브라우저 (결정 "localhost만 묻지 않음"): 밖 사이트는 사이트마다 한 번 카드,
         // localhost · 허용한 사이트의 다른 쪽은 카드 없이. 허용 답은 url만 (가짜가 extra 키를 확인)
         var room = CommandRoom();
         var ch = _hub.Subscribe(room.Id);
@@ -634,7 +634,7 @@ public sealed class ApprovalFlowTests : IDisposable
     [Fact]
     public async Task Interrupt_DeniesPendingCard()
     {
-        // 끼어들기는 기다리던 승인을 "끼어들기"로 거절하고 지금 실행을 끝낸다 (계획서 2-2 d)
+        // 끼어들기는 기다리던 승인을 "끼어들기"로 거절하고 지금 실행을 끝낸다
         var room = CommandRoom();
         var ch = _hub.Subscribe(room.Id);
         _hub.Send(room.Id, "approve please");
@@ -791,7 +791,7 @@ public sealed class ApprovalFlowTests : IDisposable
         Assert.Contains(ClaudeRunner.NoApprover, seen.Single(e => e.Kind == "end").Text);
     }
 
-    // ---- 방별 서버 도구 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결 결정 4) ----
+    // ---- 방별 서버 도구 ----
 
     [Fact]
     public async Task UnityTools_NoCardButEval_AndRecheckedAfterLowering()
@@ -844,7 +844,7 @@ public sealed class ApprovalFlowTests : IDisposable
     [Fact]
     public async Task RunModeCard_AllowWithPicks_RewritesAgentsAndReasoning()
     {
-        // 계획서 2026-10-29_모델-선택창 2번: 외부 요청 전에 묻기 → run_mode를 미리 허용하지 않음 → 모델 선택 카드 → 고른 값으로 agents · reasoning을 다시 써서 허가
+        // 외부 요청 전에 묻기 → run_mode를 미리 허용하지 않음 → 모델 선택 카드 → 고른 값으로 agents · reasoning을 다시 써서 허가
         var room = ModeRoom();
         var ch = _hub.Subscribe(room.Id);
         _hub.Send(room.Id, "runmode");
@@ -896,7 +896,7 @@ public sealed class ApprovalFlowTests : IDisposable
     [Fact]
     public async Task ModePick_RidesItsOwnMessage_PrefillsOnce_EvenWithSwitchOff()
     {
-        // 계획서 3번 + /self-review 785ebb5e97 C1: + 요청 창 값은 그 말에 붙는다 — 앞에 기다리던 보통 말의 실행은 카드 모드가 아니고,
+        // + /self-review 785ebb5e97 C1: + 요청 창 값은 그 말에 붙는다 — 앞에 기다리던 보통 말의 실행은 카드 모드가 아니고,
         // 그 말의 실행만 스위치가 꺼져 있어도 카드로 묻고 미리 채운다
         var room = ModeRoom(ask: false);
         var ch = _hub.Subscribe(room.Id);

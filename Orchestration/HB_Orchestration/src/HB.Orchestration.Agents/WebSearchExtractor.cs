@@ -51,7 +51,7 @@ public static partial class WebSearchExtractor
     /// 응답 원본(OpenAI ResponseResult)의 web_search_call에서 open_page·find_in_page 동작의 URL과 search 동작 수.
     /// 연 페이지는 Sources에 없을 수 있어, 그 URL을 인용하면 출처 대조가 잘못 경고한다 (2026-10-19 실제 호출에서
     /// 원인을 가리지 못한 경고 1건 — 검색 6회 중 연 페이지 URL을 기록하지 않고 있었음).
-    /// search 동작 수는 청구 단위로 본다 (추정, 계획서 2026-10-20_청구대조-openai-web-검색횟수). 원본을 못 읽으면 null.
+    /// search 동작 수는 청구 단위로 본다 (추정). 원본을 못 읽으면 null.
     /// open_page·find_in_page가 아닌 동작은 search로 센다 — SDK에 새 동작 타입이 생겨도 적게 세지 않게.
     /// </summary>
     public static (IReadOnlyList<string> Opened, int? SearchActions, int RawCalls) RawActions(object? raw)

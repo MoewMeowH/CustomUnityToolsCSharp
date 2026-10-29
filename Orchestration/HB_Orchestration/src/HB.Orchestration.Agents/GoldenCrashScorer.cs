@@ -17,7 +17,7 @@ public sealed record GoldenCrashScore(
     IReadOnlyList<string> Unverified);
 
 /// <summary>
-/// crash 모드(분류 → 웹검색) 채점 (계획서 2026-10-19_골든-crash사례). 두 단계 모두 자유 형식이라 리뷰처럼 지적을 짝짓지 않고,
+/// crash 모드(분류 → 웹검색) 채점. 두 단계 모두 자유 형식이라 리뷰처럼 지적을 짝짓지 않고,
 /// 분류 본문의 키워드와 검색 단계가 실제로 본 URL(참고 · 인용 · 직접 연 페이지)로 매긴다. LLM 판정자 없음.
 /// 키워드는 부정 문맥("이중 해제는 아니다")에서도 맞는다 — 근거 줄을 보고 사람이 확인한다.
 /// </summary>

@@ -35,7 +35,7 @@ public static class CallLog
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "HB_Orchestration", "calls.jsonl");
 
-    // ── 프롬프트 원문을 blobs로 (계획서 2026-10-23_호출기록-blobs-분리와-첫화면-쪽나누기) ──
+    // ── 프롬프트 원문을 blobs로 ──
     // 측정: 기록의 66%가 프롬프트인데 서로 다른 것은 4분의 1뿐 (골든 반복). 해시 이름이라 같은 원문은 한 번만 저장된다.
 
     /// <summary>이 크기(UTF-8 바이트) 이상인 프롬프트만 blobs에 둔다. 작은 것은 파일 수만 늘린다.</summary>
@@ -325,7 +325,7 @@ public static class CallLog
     }
 
     /// <summary>
-    /// offset 바이트부터 끝난 줄(\n까지)만 파일 순서대로 읽는다 — 덧붙은 기록만 따라 읽기 (HB_Chat 외부 에이전트 말풍선, 계획서 2-2 e).
+    /// offset 바이트부터 끝난 줄(\n까지)만 파일 순서대로 읽는다 — 덧붙은 기록만 따라 읽기 (HB_Chat 외부 에이전트 말풍선).
     /// End는 다음에 읽을 위치(쓰는 도중인 마지막 줄은 다음에). 깨진 줄은 건너뛴다. 파일이 offset보다 짧으면(압축 등으로 다시 쓰임) Reset이고 처음부터 읽은 결과다.
     /// </summary>
     public static (List<CallRecord> Records, long End, bool Reset) ReadFrom(string path, long offset)

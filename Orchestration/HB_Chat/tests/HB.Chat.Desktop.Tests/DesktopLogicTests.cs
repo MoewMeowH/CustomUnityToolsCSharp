@@ -3,7 +3,7 @@ using HB.Chat.Desktop;
 
 namespace HB.Chat.Desktop.Tests;
 
-/// <summary>데스크톱 앱 (계획서 2-3 a): 이동 규칙 · 서버 확인 · 저장소 경로 · 설정 · 창 위치.</summary>
+/// <summary>데스크톱 앱: 이동 규칙 · 서버 확인 · 저장소 경로 · 설정 · 창 위치.</summary>
 public sealed class DesktopLogicTests : IDisposable
 {
     private readonly string _dir = Directory.CreateTempSubdirectory("hbchat-desktop-").FullName;

@@ -9,7 +9,7 @@ using Microsoft.Extensions.Options;
 namespace HB.Orchestration.Tests;
 
 /// <summary>
-/// 채팅방 (계획서 2026-10-27_에이전트-채팅방): 세션 기록 본문 읽기 · 스티커 치환과 파일 범위 · 말풍선 엮기.
+/// 채팅방: 세션 기록 본문 읽기 · 스티커 치환과 파일 범위 · 말풍선 엮기.
 /// 세션 기록은 합성 데이터 (실제 기록에는 대화 전체가 있어 커밋하지 않는다).
 /// </summary>
 public sealed class ChatRoomTests : IDisposable
@@ -236,7 +236,7 @@ public sealed class ChatRoomTests : IDisposable
             User(10, new object[] { new { type = "tool_result", tool_use_id = "v4", is_error = true, content = "denied" } }),
             Assistant(11, Use("v5", "mcp__hb-orchestration__record_verdicts", new { runId = "ffffffffff" })));
 
-        // 세션 요약이 가진다 (실행 → 방을 본문 없이 찾도록, 계획서 2026-10-27_채팅방-실행연결-색인).
+        // 세션 요약이 가진다 (실행 → 방을 본문 없이 찾도록).
         Assert.Equal(["aaaaaaaaaa", "bbbbbbbbbb"], ClaudeTranscriptReader.Read(path).VerdictRunIds);
     }
 
@@ -311,7 +311,7 @@ public sealed class ChatRoomTests : IDisposable
     [Fact]
     public void Catalog_FindsOtherExtension_AndDefaultPack()
     {
-        // HB_Chat 2026-10-29_스티커-GIF-지원: 설정은 .png 이름이어도 팩의 같은 이름 .gif를 찾고 형식은 찾은 파일대로,
+        // HB_Chat 스티커 GIF: 설정은 .png 이름이어도 팩의 같은 이름 .gif를 찾고 형식은 찾은 파일대로,
         // 스티커 폴더 바로 아래에 그림이 없으면 기본 팩 폴더에서
         var root = Path.Combine(_dir, "stickers");
         var animal = Path.Combine(root, "animal");
@@ -609,7 +609,7 @@ public sealed class ChatRoomTests : IDisposable
         Assert.Equal(2, reads);
     }
 
-    // ── 실시간 갱신: 이어 읽기 · 말풍선 키 · 바뀜 표시 (계획서 2026-10-27_채팅방-실시간-갱신) ──
+    // ── 실시간 갱신: 이어 읽기 · 말풍선 키 · 바뀜 표시 ──
 
     private static readonly UTF8Encoding Utf8NoBom = new(false);
 

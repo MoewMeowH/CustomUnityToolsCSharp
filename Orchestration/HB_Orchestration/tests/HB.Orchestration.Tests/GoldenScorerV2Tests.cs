@@ -2,7 +2,7 @@ using HB.Orchestration.Agents;
 
 namespace HB.Orchestration.Tests;
 
-/// <summary>채점기 판 2 (계획서 2026-10-22_채점기-구조-개선): 필수 키워드 · 양쪽 경계 · 위치 목록 · 최적 배정 · 중복 분류.</summary>
+/// <summary>채점기 판 2: 필수 키워드 · 양쪽 경계 · 위치 목록 · 최적 배정 · 중복 분류.</summary>
 public sealed class GoldenScorerV2Tests
 {
     private static GoldenItem Item(string id, string? file = "A.cs", int[]? lines = null, string[]? keywords = null, string[]? required = null,

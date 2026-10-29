@@ -15,13 +15,13 @@ public static partial class ResponseChecker
 
     /// <summary>
     /// 소량 섞임: 비율 경고가 없을 때, 코드 · 따옴표 밖 가나가 이 수 이상이면 경고 ('ログ 수집' 같은 낱말 하나도).
-    /// 기준은 지난 응답 836건으로 정함 (계획서 2026-10-28_소량-외국어-섞임-경고).
+    /// 기준은 지난 응답 836건으로 정함.
     /// </summary>
     public const int MinMixedKana = 2;
 
     /// <summary>
     /// 영어 문장 줄: 코드 밖, 한글이 없고 영어 낱말(글자 2개 이상)이 이만큼 있는 줄. 이런 줄이 <see cref="MinEnglishLines"/>줄 이상이면 경고.
-    /// 기준은 지난 응답 754건으로 정함 — 걸린 것은 sol의 작업 메모 · 이탈 두 건(5e81a2ed47 · 8f8065bf09)뿐 (계획서 2026-10-27_한국어-응답-지시-강화).
+    /// 기준은 지난 응답 754건으로 정함 — 걸린 것은 sol의 작업 메모 · 이탈 두 건(5e81a2ed47 · 8f8065bf09)뿐.
     /// </summary>
     public const int MinEnglishWords = 5;
 

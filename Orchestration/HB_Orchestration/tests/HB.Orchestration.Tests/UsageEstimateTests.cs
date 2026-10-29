@@ -5,7 +5,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace HB.Orchestration.Tests;
 
-/// <summary>끊긴 호출 비용 추정 (계획서 2026-10-24_끊긴-호출-비용-추정): 읽을 때 추정 · 호출 중 표시 · Lost 기록.</summary>
+/// <summary>끊긴 호출 비용 추정: 읽을 때 추정 · 호출 중 표시 · Lost 기록.</summary>
 public sealed class UsageEstimateTests : IDisposable
 {
     private readonly string _log = Path.Combine(Directory.CreateTempSubdirectory("hb-orch-est-").FullName, "calls.jsonl");

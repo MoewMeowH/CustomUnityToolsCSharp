@@ -10,7 +10,7 @@ public enum RunBubbleKind
 }
 
 /// <summary>
-/// run_mode 실행 하나의 말풍선 (대시보드 채팅방 · HB_Chat 공용, 계획서 2026-10-28_HB_Chat-2차 2-2 e).
+/// run_mode 실행 하나의 말풍선 (대시보드 채팅방 · HB_Chat 공용).
 /// Situation은 자동 스티커 상황 이름(ChatUi AutoSticker와 같은 값) — 그림으로 바꾸는 것은 화면 몫. CallId는 호출 상세 링크용.
 /// </summary>
 public sealed record RunBubble(

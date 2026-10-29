@@ -17,7 +17,7 @@ public sealed record VerdictItem(
 
 /// <summary>
 /// /self-review의 self-reviewer 실행 (record_verdicts에 runId 대신 준다). 서버가 calls.jsonl에 실행 1건(단계 1 = self-reviewer)을 만든다.
-/// 토큰은 InputTokens·OutputTokens에 넣지 않는다 — 대시보드 오늘 사용량은 외부 에이전트 기준 (계획서 2026-10-20_리뷰조건-self-reviewer).
+/// 토큰은 InputTokens·OutputTokens에 넣지 않는다 — 대시보드 오늘 사용량은 외부 에이전트 기준.
 /// </summary>
 public sealed record SelfReviewInfo(
     [property: Description("self-reviewer 결과 원문 (## 지적 · ## 자료 부족 · ## 읽은 파일 · ## 비고)")] string Review,
@@ -45,8 +45,8 @@ public static class VerdictRecorder
     public const string SelfReviewAgent = "self-reviewer";
 
     /// <summary>
-    /// selfReview.agent로 받는 검토형 서브에이전트 (계획서 2026-10-23_서브에이전트-종류-추가). 대시보드가 에이전트별 채택률을 낸다.
-    /// 대시보드 '서브에이전트 결과'가 보관하는 대상과 같은 목록 (계획서 2026-10-27_서브에이전트-결과-보존).
+    /// selfReview.agent로 받는 검토형 서브에이전트. 대시보드가 에이전트별 채택률을 낸다.
+    /// 대시보드 '서브에이전트 결과'가 보관하는 대상과 같은 목록.
     /// </summary>
     public static IReadOnlyList<string> SelfReviewAgents => SubagentArchive.ReviewerTypes;
     public const string SelfReviewProvider = "claude-subagent";
@@ -296,7 +296,7 @@ public static class VerdictRecorder
 
     /// <summary>
     /// 지적으로 검사돼 거절된 항목이 사실 자료 요청 처리였을 것 같으면 true: findingIds 없이 요청용 verdict를 썼거나 findingKey가 요청 ID.
-    /// 안내만 한다 — 자동으로 요청 처리로 바꾸면 우연히 같은 키를 쓴 지적의 판정 종류가 조용히 바뀐다 (계획서 2026-10-23_record_verdicts-자료요청-안내).
+    /// 안내만 한다 — 자동으로 요청 처리로 바꾸면 우연히 같은 키를 쓴 지적의 판정 종류가 조용히 바뀐다.
     /// </summary>
     private static bool RequestHint(VerdictItem it, string? verdict, bool isRequest, IReadOnlyDictionary<string, InfoRequest> requests) =>
         !isRequest && it.FindingIds is not { Length: > 0 }

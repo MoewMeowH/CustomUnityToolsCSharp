@@ -3,7 +3,7 @@ using System.Drawing.Drawing2D;
 namespace HB.Chat.Desktop;
 
 /// <summary>
-/// 바탕화면 펫 창 (계획서 2026-10-29_바탕화면-펫): 테두리 없는 항상 위 레이어드 창(UpdateLayeredWindow) — 그림의 투명 부분이 그대로 투명하다.
+/// 바탕화면 펫 창: 테두리 없는 항상 위 레이어드 창(UpdateLayeredWindow) — 그림의 투명 부분이 그대로 투명하다.
 /// 스프라이트 시트면 지금 동작 행의 프레임을 fps로 돌리고, 한 번 동작이 끝나면 계속 동작으로 돌아간다. 표정 그림이면 그 그림(gif면 프레임)을 그린다.
 /// 누르면 Clicked, 끌면 옮기고 Moved, 오른쪽 단추는 ContextMenuStrip. 포커스는 가져가지 않는다 (WS_EX_NOACTIVATE).
 /// </summary>

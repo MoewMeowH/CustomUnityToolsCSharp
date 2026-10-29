@@ -5,7 +5,7 @@ using Microsoft.Extensions.Options;
 namespace HB.Chat.Tests;
 
 /// <summary>
-/// 단톡방 ② Codex 구성원 (계획서 2026-10-29_HB_Chat-단톡방): 인자(읽기 전용 · 모델 · 강도 · 지시 · resume) · TOML 이스케이프 · 모델 목록 ·
+/// 단톡방 ② Codex 구성원: 인자(읽기 전용 · 모델 · 강도 · 지시 · resume) · TOML 이스케이프 · 모델 목록 ·
 /// 켤 작업 폴더 설정 · 단톡방에서 Codex 구성원 부르기(새 스레드 → 이어 가기) · 실패 · 과정 기록. 진짜 Codex 대신 TestData/fake-codex.ps1.
 /// </summary>
 public sealed class CodexTests : IDisposable
@@ -186,7 +186,7 @@ public sealed class CodexTests : IDisposable
         Assert.Contains("resume=True instr=False", second.Text);
         Assert.Equal(thread, _store.Get(group.Members[1].RoomId)!.CodexThread);
         lock (_codexArgs) Assert.Equal(["resume", thread!, "-"], _codexArgs[^1].TakeLast(3));
-        // 단톡방 비용 합계용 토큰 누적 (가짜 codex는 턴마다 입력 100 · 출력 7 — 2026-10-29_사용량-한도-표시, b40d9efb00 C3)
+        // 단톡방 비용 합계용 토큰 누적 (가짜 codex는 턴마다 입력 100 · 출력 7 — b40d9efb00 C3)
         Assert.Equal((200L, 14L), (_store.Get(group.Members[1].RoomId)!.CodexInputTokens, _store.Get(group.Members[1].RoomId)!.CodexOutputTokens));
 
         // 과정 기록: 보낸 말 · 명령 · 답 · 토큰 (개발 중 기능 경고는 빼고)
@@ -290,7 +290,7 @@ public sealed class CodexTests : IDisposable
         Assert.Contains("delta=1 ", next.Text); // 실패한 말(crash) — 자기 답 · 실패 줄은 빠짐 (③)
 
         // 문구("no rollout found")가 없어도: 이어 가기가 thread.started 없이 실패했고 그 스레드의 세션 기록이 Codex 홈에 정말 없으면 잊는다.
-        // 기록이 있으면 설정 오류가 몇 번 나도 잊지 않는다 (2026-10-29_단톡방-보류-나머지 A4 · 9c54e0c54a C1)
+        // 기록이 있으면 설정 오류가 몇 번 나도 잊지 않는다 (9c54e0c54a C1)
         var day = Directory.CreateDirectory(Path.Combine(_dir, "codexhome", "sessions", "2026", "10", "29")).FullName;
         var rollout = Path.Combine(day, $"rollout-2026-10-29T10-00-00-{thread}.jsonl");
         File.WriteAllText(rollout, "{}\n");

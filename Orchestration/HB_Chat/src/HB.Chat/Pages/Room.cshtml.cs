@@ -9,7 +9,7 @@ namespace HB.Chat.Pages;
 
 /// <summary>
 /// 방 하나. 말풍선은 세션 기록에서 읽는다 (앱은 말 본문을 따로 저장하지 않는다). 진행 중 턴은 /events/{id} SSE로 흘린다.
-/// ?handler=Messages: 말풍선 한 쪽 — 맨 끝 50개, before=줄이면 그 앞 50개(위로 불러오기), after=줄이면 그 뒤 전부(턴이 끝난 뒤 새 말, 계획서 2-2 b).
+/// ?handler=Messages: 말풍선 한 쪽 — 맨 끝 50개, before=줄이면 그 앞 50개(위로 불러오기), after=줄이면 그 뒤 전부(턴이 끝난 뒤 새 말).
 /// ?handler=Pane: 방 전환 때 오른쪽 칸만 (2-2 a). Send · Stop · MarkRead는 POST (antiforgery + 같은 출처).
 /// </summary>
 public sealed partial class RoomModel(
@@ -17,7 +17,7 @@ public sealed partial class RoomModel(
     RoomNotes notes, Terminals terminals, AgentBrowser browser, McpProbe probe, IOptions<ChatOptions> options, GroupChat groups)
     : PageModel
 {
-    // ---- 단톡방 (계획서 2026-10-29_HB_Chat-단톡방): 같은 방 주소, 칸 · 말풍선 · 보내기만 다르다 ----
+    // ---- 단톡방: 같은 방 주소, 칸 · 말풍선 · 보내기만 다르다 ----
 
     /// <summary>단톡방 대화 줄 (after가 있으면 그 줄 뒤만 — 새 말 받기).</summary>
     public IReadOnlyList<GroupEntry> GroupEntries { get; private set; } = [];
@@ -71,7 +71,7 @@ public sealed partial class RoomModel(
         ? new(StickerRenderer.Replace(SafeMarkdown.ToHtml(e.Text, SafeMarkdown.KeepLineBreaks), Stickers))
         : new(StickerRenderer.Replace(SafeMarkdown.ToHtml(e.Text, SafeMarkdown.Default), Stickers));
 
-    // ---- 연결 탭 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결 — Claude 앱 커넥터처럼) ----
+    // ---- 연결 탭 (Claude 앱 커넥터처럼) ----
 
     /// <summary>
     /// 연결 한 줄. Kind: base(기본 MCP) · app(앱 MCP hb-chat) · extra(작업 폴더 .mcp.json의 다른 서버) · unity. On: 이 방에서 켬.
@@ -80,7 +80,7 @@ public sealed partial class RoomModel(
     public sealed record Connection(string Name, string Kind, string Transport, string? Command, bool On, bool Applies, string? Note,
         string? Init, ProbeResult? Probe, bool Probing, IReadOnlyList<(string Name, string? Description)>? StaticTools = null)
     {
-        /// <summary>작업 폴더 .mcp.json과 앱 서버 목록에 같은 이름이 있음 — 작업 폴더 것을 쓴다 (결정 1, 줄에 표시).</summary>
+        /// <summary>작업 폴더 .mcp.json과 앱 서버 목록에 같은 이름이 있음 — 작업 폴더 것을 쓴다 (줄에 표시).</summary>
         public bool Shadowed { get; init; }
 
         /// <summary>http 앱 서버 — OAuth 로그인 서버면 터미널 claude의 /mcp에서 한 번 로그인해야 붙는다 (안내).</summary>
@@ -125,7 +125,7 @@ public sealed partial class RoomModel(
                     Init(TerminalMcp.Server), null, false, McpProbe.AppTools()),
             };
             var names = ws is null ? [] : McpConfigFile.ServerNames(ws);
-            // 앱에서 더한 서버 (계획서 2026-10-29_HB_Chat-앱-MCP-서버-더하기) — 같은 이름이 작업 폴더에 있으면 그쪽을 쓴다(결정 1)
+            // 앱에서 더한 서버 — 같은 이름이 작업 폴더에 있으면 그쪽을 쓴다
             var appServers = o.AppMcp?.All() ?? [];
             foreach (var name in names.Concat(appServers.Select(a => a.Name)).Concat(room.McpExtra).Distinct(StringComparer.Ordinal)
                          .Where(n => n != o.McpServer && n != TerminalMcp.Server && n != McpConfigFile.UnityServer))
@@ -216,7 +216,7 @@ public sealed partial class RoomModel(
             if (o.ResolveUnityCli() is not { } cli) return BadRequest("Unity CLI(unity.exe)를 찾지 못했습니다.");
             entry = McpConfigFile.UnityEntry(cli, path);
         }
-        else entry = McpConfigFile.Entry(ws, name) ?? o.AppMcp?.Get(name); // 작업 폴더 것 먼저 (결정 1)
+        else entry = McpConfigFile.Entry(ws, name) ?? o.AppMcp?.Get(name); // 작업 폴더 것 먼저
         if (entry is null) return BadRequest("작업 폴더 .mcp.json에도 앱 서버 목록에도 없는 서버입니다.");
         var result = await probe.ProbeAsync(id, name, entry, ws, HttpContext.RequestAborted);
         if (result is null) return BadRequest("이미 확인 중입니다.");
@@ -237,7 +237,7 @@ public sealed partial class RoomModel(
 
     public StickerPacks Packs => packs;
 
-    /// <summary>데스크톱 미니 창 배치 (계획서 2-3 c, `?view=mini`). 서버 동작은 같고 CSS만 다르다.</summary>
+    /// <summary>데스크톱 미니 창 배치 (`?view=mini`). 서버 동작은 같고 CSS만 다르다.</summary>
     public bool Mini => string.Equals(Request.Query["view"], "mini", StringComparison.OrdinalIgnoreCase);
     public ChatTranscript? Transcript { get; private set; }
     public string Title => RoomList.TitleOf(Room, Transcript);
@@ -254,7 +254,7 @@ public sealed partial class RoomModel(
     /// </summary>
     public bool AfterFragment { get; private set; }
 
-    /// <summary>이 방에서 부른 run_mode 실행 말풍선의 자리 (계획서 2-2 e). 그릴 때 처음 한 번 계산한다 (Fork 등은 안 읽음 — a9e6066519 C3).</summary>
+    /// <summary>이 방에서 부른 run_mode 실행 말풍선의 자리. 그릴 때 처음 한 번 계산한다 (Fork 등은 안 읽음 — a9e6066519 C3).</summary>
     public RunPlacement Runs => _runs ??= runs.For(Transcript);
     private RunPlacement? _runs;
 
@@ -262,7 +262,7 @@ public sealed partial class RoomModel(
     public AnswerPlacement Answers => _answers ??= AnswerPlacement.Of(Transcript);
     private AnswerPlacement? _answers;
 
-    /// <summary>방 기록 줄(승인 결과 · 백그라운드 정리 표시)의 자리 (계획서 2026-10-29_HB_Chat-진행줄-자리-정리표시).</summary>
+    /// <summary>방 기록 줄(승인 결과 · 백그라운드 정리 표시)의 자리.</summary>
     public NotePlacement Notes => _notes ??= notes.For(Room.Id, Transcript);
     private NotePlacement? _notes;
 
@@ -483,7 +483,7 @@ public sealed partial class RoomModel(
         if (lv != PermissionLevel.Command && expectedLevel == PermissionLevel.Command)
         {
             terminals.StopRoom(id, "권한 낮춤", TerminalKind.Agent);
-            browser.Close(id, "권한 낮춤"); // 지휘자 브라우저도 명령 방만 (계획서 2026-10-29_HB_Chat-지휘자-브라우저)
+            browser.Close(id, "권한 낮춤"); // 지휘자 브라우저도 명령 방만
         }
         result = new JsonResult(new { ok = true });
         if (result is JsonResult) hub.ProfilesChanged([id]);
@@ -500,7 +500,7 @@ public sealed partial class RoomModel(
         return Change(id, r => r with { PlanNext = on }, "계획 먼저를 바꾸지 못했습니다");
     }
 
-    /// <summary>"외부 요청 전에 묻기" 켜기 · 끄기 (계획서 2026-10-29_모델-선택창): 다음 실행부터 run_mode를 모델 선택 카드로 묻는다.</summary>
+    /// <summary>"외부 요청 전에 묻기" 켜기 · 끄기: 다음 실행부터 run_mode를 모델 선택 카드로 묻는다.</summary>
     public IActionResult OnPostAskRunMode(string id, bool on)
     {
         if (!RoomStore.IsRoomId(id) || store.Get(id) is not { } room) return NotFound();
@@ -508,7 +508,7 @@ public sealed partial class RoomModel(
         return Change(id, r => r with { AskRunMode = on }, "외부 요청 전에 묻기를 바꾸지 못했습니다");
     }
 
-    /// <summary>+ 요청 창의 모드 · 에이전트 목록 (계획서 3번). 읽지 못하면 빈 목록과 error.</summary>
+    /// <summary>+ 요청 창의 모드 · 에이전트 목록. 읽지 못하면 빈 목록과 error.</summary>
     public IActionResult OnGetModes(string id)
     {
         Response.Headers.CacheControl = "no-store";
@@ -527,7 +527,7 @@ public sealed partial class RoomModel(
         options.Value.WorkspacePath(room.Workspace) is { } ws ? ModeCatalog.Read(ws, options.Value.McpServer) : ModeList.Empty with { Error = "작업 폴더를 찾지 못했습니다." };
 
     /// <summary>
-    /// + 요청 창 보내기 (계획서 3번): 머리 줄을 붙인 말을 지휘자에게 보내고, 고른 값은 그 말에 붙인다 — 그 말의 실행만 run_mode를 카드로 묻고 미리 채운다
+    /// + 요청 창 보내기: 머리 줄을 붙인 말을 지휘자에게 보내고, 고른 값은 그 말에 붙인다 — 그 말의 실행만 run_mode를 카드로 묻고 미리 채운다
     /// (/self-review 785ebb5e97 C1). interrupt면 끼어들기로.
     /// </summary>
     public IActionResult OnPostModeRequest(string id, string? mode, string? picks, string? text, bool interrupt)
@@ -556,7 +556,7 @@ public sealed partial class RoomModel(
         if (store.Get(id) is { GroupId: not null }) return BadRequest("단톡방 구성원 방은 단톡방과 함께 휴지통에 넣습니다.");
         if (hub.IsBusy(id)) return BadRequest("실행 중인 방입니다 — 중지한 뒤 휴지통에 넣으세요.");
         hub.ForgetCommands(id);
-        terminals.StopRoom(id, "방 삭제"); // 그 방 터미널도 끝낸다 (계획서 2026-10-29_HB_Chat-터미널-곁칸)
+        terminals.StopRoom(id, "방 삭제"); // 그 방 터미널도 끝낸다
         browser.Close(id, "방 삭제");
         probe.Forget(id); // 연결 탭 확인 결과
         return Change(id, r => r with { DeletedAt = DateTimeOffset.Now }, "휴지통에 넣지 못했습니다");
@@ -577,7 +577,7 @@ public sealed partial class RoomModel(
     }
 
     /// <summary>
-    /// 방 복제(갈래, 계획서 2-2 c): 지금까지 대화를 이어받는 새 방. 같은 작업 폴더 · 권한 · 모델, "항상 허용" 규칙은 옮기지 않는다.
+    /// 방 복제(갈래): 지금까지 대화를 이어받는 새 방. 같은 작업 폴더 · 권한 · 모델, "항상 허용" 규칙은 옮기지 않는다.
     /// 첫 말을 보낼 때 CLI가 대화를 복사한다 (--fork-session). 세션 기록이 없거나 실행 중이면 거절.
     /// </summary>
     public IActionResult OnPostFork(string id)
@@ -593,7 +593,7 @@ public sealed partial class RoomModel(
                 forkSourceSize: transcripts.Size(Room.SessionId));
             // 이 방에 고른 스티커 팩 · 추론 강도도 따라간다 (4차 D2 — ef2c83416c C6). "항상 허용" 규칙은 그대로 옮기지 않는다
             // 연결(더한 서버 · 끈 기본 연결 · Unity)도 따라간다 — 갈래가 원래 방과 다른 도구로 시작하지 않게 (/self-review 0bcf01451b C5)
-            // 원래 방(과 그 조상)의 첨부 폴더도 읽게 — 이어받은 대화의 [첨부] 줄이 그 폴더를 가리킨다 (계획서 2026-10-29_HB_Chat-2-2-작은-한계-정리)
+            // 원래 방(과 그 조상)의 첨부 폴더도 읽게 — 이어받은 대화의 [첨부] 줄이 그 폴더를 가리킨다
             store.Update(fork.Id, r => r with
             {
                 StickerPack = Room.StickerPack, Effort = Room.Effort, McpExtra = Room.McpExtra, McpOff = Room.McpOff, UnityProject = Room.UnityProject,
@@ -667,7 +667,7 @@ public sealed partial class RoomModel(
     }
 
     /// <summary>
-    /// 단톡방 머리의 구성원 비용 합계 (계획서 2026-10-29_사용량-한도-표시 — 결정 "구성원 누적 합계"):
+    /// 단톡방 머리의 구성원 비용 합계 (결정 "구성원 누적 합계"):
     /// Claude 구성원은 claude가 알려 준 세션 누적 비용(클라이언트 추정)의 합, Codex 구성원은 턴마다 더해 둔 토큰(Room.CodexInputTokens · CodexOutputTokens —
     /// b40d9efb00 C3)의 합. 아무것도 없으면 null.
     /// </summary>
@@ -719,7 +719,7 @@ public sealed partial class RoomModel(
     private static partial System.Text.RegularExpressions.Regex LeadingGuide();
 
     /// <summary>
-    /// 입력칸 + 메뉴의 "외부 에이전트 요청" · "외부 요청 전에 묻기" 스위치를 보일지 (계획서 2026-10-29_모델-선택창): 읽기 이상 단계 · 기본 MCP 서버가 켜진 보통 방.
+    /// 입력칸 + 메뉴의 "외부 에이전트 요청" · "외부 요청 전에 묻기" 스위치를 보일지: 읽기 이상 단계 · 기본 MCP 서버가 켜진 보통 방.
     /// </summary>
     public bool CanModeRequest => Room.Level != PermissionLevel.Chat && Room.DeletedAt is null && !Room.IsGroup && Room.GroupId is null
                                   && Room.Engine is null && !Room.McpOff.Contains(options.Value.McpServer);
@@ -748,7 +748,7 @@ public sealed partial class RoomModel(
         return new JsonResult(new { ok = true });
     }
 
-    /// <summary>지금 끝내기: 답이 끝난 뒤 기다리는 백그라운드 작업(서버 등)을 정리한다 (계획서 2026-10-29_HB_Chat-백그라운드-명령).</summary>
+    /// <summary>지금 끝내기: 답이 끝난 뒤 기다리는 백그라운드 작업(서버 등)을 정리한다.</summary>
     public IActionResult OnPostWrapUp(string id)
     {
         if (!RoomStore.IsRoomId(id)) return NotFound();
@@ -756,9 +756,9 @@ public sealed partial class RoomModel(
         return new JsonResult(new { ok = true });
     }
 
-    // ---- 터미널 곁칸 (계획서 2026-10-29_HB_Chat-터미널-곁칸) ----
+    // ---- 터미널 곁칸 ----
 
-    // ---- 지휘자 브라우저 (계획서 2026-10-29_HB_Chat-지휘자-브라우저) ----
+    // ---- 지휘자 브라우저 ----
 
     /// <summary>방 기록의 스크린샷 그림: 그 방 폴더 · 이름 모양이 맞을 때만, nosniff · 같은 출처.</summary>
     public IActionResult OnGetShot(string id, string? name)
@@ -851,7 +851,7 @@ public sealed partial class RoomModel(
 
     /// <summary>
     /// 카드 답 실패: 이미 끝난 카드면 409 — 단톡방 화면과 과정 보기가 같은 카드를 보여 한쪽에서 답한 뒤 다른 쪽을 누른 경우라 화면이 오류 창 없이 카드만 닫는다
-    /// (2026-10-29_단톡방-보류-나머지 A3, ⑤ K3). 그 밖의 실패는 지금처럼 400(오류 창).
+    /// 그 밖의 실패는 지금처럼 400(오류 창).
     /// </summary>
     private IActionResult CardError(string error) =>
         error is RoomHub.QuestionDone or RoomHub.ApprovalDone
@@ -893,7 +893,7 @@ public sealed partial class RoomModel(
         return hub.RemoveRule(id, rule) is { } error ? BadRequest(error) : new JsonResult(new { ok = true });
     }
 
-    /// <summary>끼어들기 (계획서 2-2 d): 지금 턴을 멈추고 이 말을 바로 보낸다. 큐의 다른 말은 남는다.</summary>
+    /// <summary>끼어들기: 지금 턴을 멈추고 이 말을 바로 보낸다. 큐의 다른 말은 남는다.</summary>
     public IActionResult OnPostInterrupt(string id, string? text)
     {
         if (!RoomStore.IsRoomId(id)) return NotFound();
@@ -903,7 +903,7 @@ public sealed partial class RoomModel(
         return hub.Interrupt(id, text ?? "") is { } error ? BadRequest(error) : new JsonResult(new { ok = true });
     }
 
-    /// <summary>기다리는 말 하나 취소 (계획서 2-2 d).</summary>
+    /// <summary>기다리는 말 하나 취소.</summary>
     public IActionResult OnPostCancelQueued(string id, string? queued)
     {
         if (!RoomStore.IsRoomId(id) || string.IsNullOrEmpty(queued)) return NotFound();
@@ -911,7 +911,7 @@ public sealed partial class RoomModel(
     }
 
     /// <summary>
-    /// 파일 첨부 (계획서 2-2 d): 하나씩 받아 그 방 첨부 폴더에 저장하고 절대 경로를 돌려준다 — 화면이 보낼 때 [첨부] 줄로 붙인다.
+    /// 파일 첨부: 하나씩 받아 그 방 첨부 폴더에 저장하고 절대 경로를 돌려준다 — 화면이 보낼 때 [첨부] 줄로 붙인다.
     /// 대화 단계 방 · 휴지통 방은 받지 않는다. 20MB 넘으면 거절.
     /// </summary>
     public async Task<IActionResult> OnPostAttach(string id, IFormFile? file)

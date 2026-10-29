@@ -2,7 +2,7 @@ using HB.Chat.Desktop;
 
 namespace HB.Chat.Desktop.Tests;
 
-/// <summary>토스트 알림 (계획서 2026-10-28 알림-토스트): 글 · 방 인자 · 로고 주소 · 캐시 이름.</summary>
+/// <summary>토스트 알림: 글 · 방 인자 · 로고 주소 · 캐시 이름.</summary>
 public sealed class ToastTests
 {
     [Fact]

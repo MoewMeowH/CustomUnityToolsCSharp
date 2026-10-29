@@ -223,7 +223,7 @@ public class ResultFormatterTests
     }
 
     [Fact]
-    public void Headroom_line_goes_right_after_run_id()   // 계획서 2026-10-27_외부-첨부-범위-규칙
+    public void Headroom_line_goes_right_after_run_id()
     {
         var header = ResultFormatter.AttachmentHeadroom(12_000, 3_000, 350_000);
         Assert.Equal("첨부 12,000자 + input 3,000자 = 15,000자 / 상한 350,000자 (4%)", header);

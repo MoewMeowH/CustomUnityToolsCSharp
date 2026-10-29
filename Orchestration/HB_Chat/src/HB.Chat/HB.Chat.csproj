@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
-  <!-- 오케스트레이션 대화형 채팅 앱 (계획서 HB_Orchestration docs/plans/2026-10-27_대화형-채팅-앱). -->
+  <!-- 오케스트레이션 대화형 채팅 앱. -->
   <ItemGroup>
     <!-- 세션 기록 읽기 (ClaudeChatReader) -->
     <ProjectReference Include="..\..\..\HB_Orchestration\src\HB.Orchestration.Shared\HB.Orchestration.Shared.csproj" />

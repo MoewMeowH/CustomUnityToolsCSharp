@@ -6,7 +6,7 @@ using Microsoft.Extensions.Options;
 
 namespace HB.Orchestration.Dashboard.Pages;
 
-/// <summary>채팅방 하나 (세션 하나). ?handler=Stamp · Messages는 실시간 갱신용 (계획서 2026-10-27_채팅방-실시간-갱신).</summary>
+/// <summary>채팅방 하나 (세션 하나). ?handler=Stamp · Messages는 실시간 갱신용.</summary>
 public sealed class RoomModel(ChatRoomService rooms, ChatAppRooms appRooms, IOptions<DashboardOptions> options) : PageModel
 {
     /// <summary>이 세션이 채팅 앱(HB_Chat)의 방이면 그 방 (머리말 표시 · 앱 링크).</summary>

@@ -3,7 +3,7 @@ using Microsoft.Extensions.Options;
 
 namespace HB.Orchestration.Tests;
 
-/// <summary>채팅 앱(HB_Chat) 방 색인 읽기 — 대시보드는 표시 · 링크만 (계획서 2026-10-27_대화형-채팅-앱 "대시보드와의 경계").</summary>
+/// <summary>채팅 앱(HB_Chat) 방 색인 읽기 — 대시보드는 표시 · 링크만.</summary>
 public sealed class ChatAppRoomsTests : IDisposable
 {
     private const string Sid = "69a95e9f-612a-4105-ac02-19e7ccc2c419";

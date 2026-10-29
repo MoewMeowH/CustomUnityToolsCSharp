@@ -1,5 +1,5 @@
 """PreToolUse 훅 H1 (Bash · PowerShell): 재귀 삭제는 따로, 절대 경로로, 셸 현재 폴더 밖에서
-(CLAUDE.md "명령 실행", 계획서 2026-10-19_훅-규칙-강제, /cross-review 10bfc8de41 반영).
+(CLAUDE.md "명령 실행", /cross-review 10bfc8de41 반영).
 
 - 재귀 삭제: rm(경로가 붙은 /usr/bin/rm · \\rm 포함) -r/-R/-rf/-fr/--recursive, Remove-Item(rm·del·erase·ri·rd·rmdir 별칭) -Recurse,
   rmdir /s · rd /s. `git rm -r`은 작업 트리 파일 삭제가 아니므로 대상이 아니다.
@@ -9,7 +9,7 @@
 - 따옴표 안·heredoc·here-string 본문의 글자는 명령으로 보지 않는다. PowerShell은 PowerShell 따옴표 규칙(백틱 이스케이프)으로 읽는다.
   단 본문에 재귀 삭제가 있으면 받는 명령이 데이터 전용(cat · tee · git commit 등, hook_common.data_only)일 때만 통과 — bash <<'EOF' 등.
 - GNU rm의 줄인 긴 옵션(--rec · --r), PowerShell `-Recurse:$true`(값이 $false · 0 · false가 아니면), PowerShell이 '-'로 받는
-  대시 글자(– — ―)도 재귀로 본다 (실측 2026-10-23, 계획서 2026-10-23_H1-H2-heredoc-본문과-rm-옵션).
+  대시 글자(– — ―)도 재귀로 본다 (실측 2026-10-23).
 - 실패하면 막는다: 통과 판정일 때만 exit 0. python이 없거나 스크립트를 못 찾으면 훅 명령의 `|| exit 2`가 막는다.
 
 입력: stdin JSON {"tool_name": "Bash"|"PowerShell", "tool_input": {"command": "..."}, "cwd": "..."}.
@@ -144,7 +144,7 @@ def check(data: dict) -> None:
     if rough and has_substitution(stripped, inner, shell):  # 따옴표 검사보다 먼저 — 이쪽 안내가 더 정확하다
         deny('재귀 삭제가 명령 치환($( ) · 백틱) 안이나 함께 있다.')
     # 따옴표 문자열 속 재귀 삭제 (bash -c "…" · powershell -Command "…" · iex "…" · cmd /c "…"): 글을 실행하지 않는 명령
-    # (데이터 전용 + grep · echo · git commit/log 등)만 받는다 — 허용 목록 (계획서 2026-10-23_따옴표-명령-허용목록과-perf-ownReview).
+    # (데이터 전용 + grep · echo · git commit/log 등)만 받는다 — 허용 목록.
     # 안쪽 따옴표는 공백으로 바꿔 본다 (python -c "os.system('rm -rf …')"). 따옴표 · 백틱을 지운 글 전체도 본다 — 겹친 따옴표로
     # 명령이 조각 여럿에 나뉘거나(powershell -Command "Remove-Item "$p" -Recurse") 이름을 쪼갠 것(r""m) (/self-review security ddb47044d1 C1 · C5)
     joined = not rough and ROUGH.search(lx.unquoted(raw))

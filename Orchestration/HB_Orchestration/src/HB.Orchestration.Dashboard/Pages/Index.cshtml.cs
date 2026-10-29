@@ -22,7 +22,7 @@ public sealed class IndexModel(IOptions<DashboardOptions> options, PricingServic
     /// <summary>true면 10초마다 자동 새로고침.</summary>
     [BindProperty(SupportsGet = true)] public bool Live { get; set; }
 
-    /// <summary>표의 쪽 (1부터). 합계 · 비용 · 일별 그래프는 걸러진 전체 기준이고 표만 나눈다 (계획서 2026-10-23_호출기록-blobs-분리와-첫화면-쪽나누기).</summary>
+    /// <summary>표의 쪽 (1부터). 합계 · 비용 · 일별 그래프는 걸러진 전체 기준이고 표만 나눈다.</summary>
     [BindProperty(SupportsGet = true)] public int P { get; set; } = 1;
 
     /// <summary>한 쪽의 행 수 (사용자 결정 2026-10-23: 200).</summary>
@@ -67,7 +67,7 @@ public sealed class IndexModel(IOptions<DashboardOptions> options, PricingServic
     public decimal? TotalCost => pricing.TotalOf(Calls);
 
     /// <summary>
-    /// 오늘(로컬 0시부터) 사용 토큰 (FreeProviders 제외). 화면 필터와 상관없이 전체 기록에서 센다 (하루 상한은 없음 — 계획서 2026-10-20_하루상한-제거).
+    /// 오늘(로컬 0시부터) 사용 토큰 (FreeProviders 제외). 화면 필터와 상관없이 전체 기록에서 센다 (하루 상한은 없음).
     /// 위 기간 필터의 "최근 24시간"은 지금부터 24시간 전까지라 이 값과 다르다.
     /// </summary>
     public long TodayCounted { get; private set; }
@@ -81,10 +81,10 @@ public sealed class IndexModel(IOptions<DashboardOptions> options, PricingServic
     /// <summary>오늘 기록 중 단가가 없어 비용에 넣지 못한 건수.</summary>
     public int TodayUnpriced { get; private set; }
 
-    /// <summary>최근 7일 검토형 서브에이전트 결과 중 서버 기록에 없는 수 (계획서 2026-10-27_서브에이전트-결과-보존).</summary>
+    /// <summary>최근 7일 검토형 서브에이전트 결과 중 서버 기록에 없는 수.</summary>
     public int UnrecordedSubagents { get; private set; }
 
-    /// <summary>API 리뷰(claude-cli 제공사) 이번 달(로컬) 실행 수 · 비용. 월 크레딧을 보며 쓰려고 (계획서 2026-10-27_검토형-서브에이전트-API-전환 2차 설계 2c).</summary>
+    /// <summary>API 리뷰(claude-cli 제공사) 이번 달(로컬) 실행 수 · 비용. 월 크레딧을 보며 쓰려고 (차 설계 2c).</summary>
     public int SubReviewMonthRuns { get; private set; }
     public decimal SubReviewMonthCost { get; private set; }
 

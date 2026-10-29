@@ -9,7 +9,7 @@ using Microsoft.Win32;
 namespace HB.Chat.Desktop;
 
 /// <summary>
-/// 큰 창 (계획서 2-3 a): 위 탭 줄(채팅 · 대시보드) + WebView2 둘(같은 사용자 데이터 폴더). 켤 때 두 서버를 띄우거나 붙는다.
+/// 큰 창: 위 탭 줄(채팅 · 대시보드) + WebView2 둘(같은 사용자 데이터 폴더). 켤 때 두 서버를 띄우거나 붙는다.
 /// 5차 b: Windows 제목 줄 없이 앱이 맨 위 줄(<see cref="TitleBar"/>)을 그리고, 채팅 서버의 화면 테마를 창 틀 · WebView2 색 설정에 입힌다.
 /// WebView2 규칙: 호스트 다리 없음(웹 메시지 · 호스트 객체 끔), 권한 요청 모두 거부, WebRTC를 문서 생성 스크립트로 지움(위젯 · 중첩 틀까지 — 0번 실측),
 /// localhost 말고 이름 조회를 막음(DNS로 알리는 길 — dns-prefetch 등), 큰 틀 이동 · 새 창은 <see cref="NavigationPolicy"/>와 사용자 클릭,
@@ -76,7 +76,7 @@ public sealed class MainForm : Form
     private IReadOnlyList<RoomState> _roomList = [];
     private bool _hotkeyRegistered;
 
-    // 바탕화면 펫 (계획서 2026-10-29_바탕화면-펫)
+    // 바탕화면 펫
     private PetController? _pet;
     private readonly ToolStripMenuItem _petItem = new("펫 보이기");
     private const int HotkeyId = 0x4842, WmHotkey = 0x0312;
@@ -420,7 +420,7 @@ public sealed class MainForm : Form
         _tray.ShowBalloonTip(5000, title, text.Length > 0 ? text : "(제목 없음)", icon);
     }
 
-    // ---- 토스트 알림 (계획서 2026-10-28 알림-토스트) ----
+    // ---- 토스트 알림 ----
 
     /// <summary>토스트를 띄운 방 — 그 방을 열면 알림 센터에서 지운다.</summary>
     private readonly HashSet<string> _toastRooms = [];
@@ -563,7 +563,7 @@ public sealed class MainForm : Form
 
     /// <summary>
     /// 미니 창 보이기 · 숨기기 (트레이 메뉴 · 단축키 · 펫). 처음 부를 때 만든다 — 채팅 서버가 준비된 뒤에만.
-    /// near가 있으면(펫을 누름) 그 옆에 roomId 방으로 연다 (계획서 2026-10-29_바탕화면-펫 결정 "미니 창 열기 · 닫기").
+    /// near가 있으면(펫을 누름) 그 옆에 roomId 방으로 연다 (결정 "미니 창 열기 · 닫기").
     /// </summary>
     private async void ToggleMini(string? roomId = null, Rectangle? near = null)
     {

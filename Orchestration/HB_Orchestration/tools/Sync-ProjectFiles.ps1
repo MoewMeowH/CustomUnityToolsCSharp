@@ -23,7 +23,7 @@
     이스케이프 잔재(줄 맨 앞 \---, \_, \[, 1\. 등)가 보이면 경고만 한다 (.md 파일만). 종료 코드에는 영향이 없다.
 
     서브에이전트 정의(.claude/agents/*.md)는 비교 전에 원본을 check_agents.py로 검사한다. tools가 없거나(MCP 도구까지 상속) 허용 밖 도구가 있으면
-    아무것도 비교·복사하지 않고 2로 끝낸다 (경고가 아니다, 계획서 2026-10-19_서브에이전트-도입-검토 공통 규칙 8).
+    아무것도 비교·복사하지 않고 2로 끝낸다 (경고가 아니다, 공통 규칙 8).
 
     종료 코드: 0 동기화 대상이 모두 같음 / 1 다른 것이 있음(또는 -Apply가 멈춤) / 2 실행 오류(정의 파일 검사 실패 포함)
 
@@ -200,7 +200,7 @@ $syncDirs = @(
     @{ Dir = '.claude/commands'; Filter = '*.md' },   # 슬래시 명령
     @{ Dir = '.claude/scripts';  Filter = '*.py' },   # 명령이 부르는 도우미 (예: /work-order의 xlsx_dump.py, 서브에이전트 읽기 차단 훅)
     @{ Dir = '.claude/agents';   Filter = '*.md' },   # 서브에이전트 정의 (self-reviewer, evidence-collector)
-    @{ Dir = '.claude/mistakes'; Filter = '*.md' }    # 서브에이전트 실수 목록 (계획서 2026-10-27_실수목록-분리)
+    @{ Dir = '.claude/mistakes'; Filter = '*.md' }    # 서브에이전트 실수 목록
 )
 
 # 서브에이전트 정의 검사: 원본에 정의가 있으면 비교·복사 전에 검사한다. 실패하면 Unity 쪽은 건드리지 않는다.

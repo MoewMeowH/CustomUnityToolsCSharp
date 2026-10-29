@@ -1,7 +1,7 @@
 namespace HB.Chat;
 
 /// <summary>
-/// 위젯 (계획서 2-2 f): 지휘자가 ```widget 코드 블록에 쓴 HTML 한 장을 말풍선 안 격리 iframe에 그린다.
+/// 위젯: 지휘자가 ```widget 코드 블록에 쓴 HTML 한 장을 말풍선 안 격리 iframe에 그린다.
 /// 그리기는 화면(chat.js widgets — 처음엔 스크립트 없이, "실행"을 누르면 sandbox="allow-scripts" + srcdoc 문서 CSP),
 /// 서버는 말풍선 HTML을 그대로 두고 아래만 정한다.
 /// ```chart(차트 시안, 2026-10-29)는 Chart.js 설정 JSON — 화면(chat.js charts)이 앱에 넣어 둔 wwwroot/lib/chart.umd.min.js와 같은 격리 틀에 그린다.

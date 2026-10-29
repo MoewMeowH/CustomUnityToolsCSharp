@@ -10,7 +10,7 @@ public sealed record GuidelinesFileUse(string Path, string? Sha256, int Calls, i
 public sealed record MissingGuidelinesUse(string? ProjectDir, int Calls, int Runs, DateTimeOffset LastUsed);
 
 /// <summary>
-/// 호출 기록의 provenance.guidelines로 최근 실행이 쓴 리뷰 지침을 모은다 (계획서 2026-10-22_지침-파일-경고).
+/// 호출 기록의 provenance.guidelines로 최근 실행이 쓴 리뷰 지침을 모은다.
 /// 프로젝트마다 자기 지침을 고쳐 쓰므로 내용 해시는 비교하지 않고, 경로 규칙으로 의도하지 않은 지침만 경고한다.
 /// 역할 UseGuidelines=false · 골든 --no-guidelines는 일부러 끈 것이라 어느 쪽에도 넣지 않는다.
 /// </summary>

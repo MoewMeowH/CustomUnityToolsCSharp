@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 namespace HB.Orchestration.Agents;
 
 /// <summary>
-/// claude-cli 작업 폴더의 정의 색인 (계획서 2026-10-27_작업폴더-정의-색인).
+/// claude-cli 작업 폴더의 정의 색인.
 /// 이 PC의 claude -p는 Read만 주므로(Grep · Glob 없음) 에이전트가 정의 위치를 모른 채 파일을 통째로 읽는다 —
 /// 파일 목록에 타입 · 메서드 · 제목 이름과 줄 번호를 붙여 필요한 범위만 읽게 한다.
 /// 줄 단위 정규식이라 대략의 위치다 (여러 줄 주석 · 문자열 안은 따지지 않음). 에이전트는 Read로 확인한다.

@@ -75,7 +75,7 @@ public sealed class BudgetTests : IDisposable
         Assert.Equal(2m, noWrite.CostOf(Call("openai", 1_000_000, 0) with { CacheWriteTokens = 1_000_000 }));
     }
 
-    // ── 날짜별 단가 변경 (계획서 2026-10-23_단가-적용-시작일) ─────────────
+    // ── 날짜별 단가 변경 ─────────────
 
     private static ModelPrice Argon() => new()
     {
@@ -200,7 +200,7 @@ public sealed class BudgetTests : IDisposable
         Assert.Equal(1, budget.UnpricedCalls(calls, Prices()));
     }
 
-    // 하루 토큰·비용 상한은 없앴다 (계획서 2026-10-20_하루상한-제거): 오늘 많이 썼어도, 단가 없는 모델이어도 실행한다.
+    // 하루 토큰·비용 상한은 없앴다: 오늘 많이 썼어도, 단가 없는 모델이어도 실행한다.
 
     [Fact]
     public async Task HeavyUsageToday_StillRuns()

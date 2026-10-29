@@ -4,7 +4,7 @@ using HB.Orchestration.Shared;
 
 namespace HB.Orchestration.Tests;
 
-/// <summary>큰 프롬프트를 blobs로 · 원문 읽기 · 예전 기록 압축 (계획서 2026-10-23_호출기록-blobs-분리와-첫화면-쪽나누기).</summary>
+/// <summary>큰 프롬프트를 blobs로 · 원문 읽기 · 예전 기록 압축.</summary>
 public sealed class PromptBlobTests : IDisposable
 {
     private readonly string _dir = Directory.CreateTempSubdirectory("hb-prompt-blob-").FullName;

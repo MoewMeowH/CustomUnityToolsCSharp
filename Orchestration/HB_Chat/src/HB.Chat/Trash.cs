@@ -1,7 +1,7 @@
 namespace HB.Chat;
 
 /// <summary>
-/// 휴지통 (계획서 2-2 c). 방은 DeletedAt을 적어 목록 · 검색 · 보내기에서 빼고, 30일이 지나면(또는 휴지통 화면에서 바로) 방 색인과 그 방 첨부 폴더를 지운다.
+/// 휴지통. 방은 DeletedAt을 적어 목록 · 검색 · 보내기에서 빼고, 30일이 지나면(또는 휴지통 화면에서 바로) 방 색인과 그 방 첨부 폴더를 지운다.
 /// 세션 기록(~/.claude/projects)은 지우지 않는다 — 사용자 결정 2026-10-28 "추천대로" (대시보드 기록 · 비용 근거가 남는다).
 /// </summary>
 public static class Trash
@@ -31,7 +31,7 @@ public static class Trash
     {
         if (store.LoadError is not null) return [];
         var removed = store.RemoveWhere(which).ToList();
-        // 단톡방을 지우면 구성원 자식 방도 (계획서 2026-10-29_HB_Chat-단톡방) — 자식 방만 따로 지우지는 않는다(휴지통 목록에 없음)
+        // 단톡방을 지우면 구성원 자식 방도 — 자식 방만 따로 지우지는 않는다(휴지통 목록에 없음)
         if (removed.Count > 0) removed.AddRange(store.RemoveWhere(r => r.GroupId is { } g && removed.Contains(g)));
         foreach (var id in removed.Where(RoomStore.IsRoomId))
         {
@@ -44,7 +44,7 @@ public static class Trash
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { } // 다음 지우기 때 남은 폴더는 그대로 — 색인에서는 빠졌다
             }
-            // 실행 도중 앱이 죽어 남은 방별 MCP 설정 파일 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결, 지휘자 검토 K7)
+            // 실행 도중 앱이 죽어 남은 방별 MCP 설정 파일 (지휘자 검토 K7)
             McpConfigFile.DeleteRoom(McpConfigFile.RoomPath(dataFolder, id));
             new GroupLog(() => dataFolder).Delete(id); // 단톡방 대화 줄 (없으면 아무것도 안 함)
             new CodexLog(() => dataFolder).Delete(id); // Codex 구성원 과정 기록

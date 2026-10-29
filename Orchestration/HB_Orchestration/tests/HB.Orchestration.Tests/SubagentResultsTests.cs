@@ -6,7 +6,7 @@ using HB.Orchestration.Shared;
 namespace HB.Orchestration.Tests;
 
 /// <summary>
-/// 검토형 서브에이전트 결과 보관 · 서버 기록 연결 (계획서 2026-10-27_서브에이전트-결과-보존).
+/// 검토형 서브에이전트 결과 보관 · 서버 기록 연결.
 /// 합성 데이터 — 실제 서브에이전트 기록은 리뷰 대상 코드가 들어 있어 커밋하지 않는다.
 /// </summary>
 public sealed class SubagentResultsTests : IDisposable

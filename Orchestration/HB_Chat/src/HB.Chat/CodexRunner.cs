@@ -6,16 +6,16 @@ using System.Text.Json.Nodes;
 
 namespace HB.Chat;
 
-/// <summary>방 실행 엔진: null = Claude Code(기본), "codex" = OpenAI Codex CLI (계획서 2026-10-29_HB_Chat-단톡방 2단계).</summary>
+/// <summary>방 실행 엔진: null = Claude Code(기본), "codex" = OpenAI Codex CLI (단계).</summary>
 public static class RoomEngines
 {
     public const string Codex = "codex";
 }
 
 /// <summary>
-/// Codex CLI 구성원 실행 (계획서 2026-10-29_HB_Chat-단톡방 ② — 결정 4 "읽기 전용만"): <c>codex exec --json -s read-only</c>, 둘째 턴부터 <c>resume &lt;thread&gt;</c>.
+/// Codex CLI 구성원 실행 (② — 결정 4 "읽기 전용만"): <c>codex exec --json -s read-only</c>, 둘째 턴부터 <c>resume &lt;thread&gt;</c>.
 /// 프롬프트는 stdin(<c>-</c>)으로 주고 바로 닫는다(닫지 않으면 "Reading additional input from stdin"에서 기다림 — 0단계 실측).
-/// 승인을 물을 곳이 없어 늘 읽기 전용 샌드박스 — 단, 읽기 전용이어도 디스크 전체를 읽을 수 있다(실측). 그래서 켤 수 있는 작업 폴더를 설정에서 고른다(결정 5).
+/// 승인을 물을 곳이 없어 늘 읽기 전용 샌드박스 — 단, 읽기 전용이어도 디스크 전체를 읽을 수 있다(실측). 그래서 켤 수 있는 작업 폴더를 설정에서 고른다.
 /// 이벤트(JSONL): thread.started · turn.started · item.completed(agent_message · command_execution · error) · turn.completed(usage) · turn.failed · error.
 /// </summary>
 public static class CodexRunner
@@ -88,13 +88,13 @@ public static class CodexRunner
         /// </summary>
         public bool ThreadMissing { get; init; }
 
-        /// <summary>프로세스가 떠서 끝까지 돌고 실패했다 (실행 파일을 못 띄운 실패 · 중지 · 시간 초과가 아님) — 스레드 유실 판정 보강용 (2026-10-29_단톡방-보류-나머지 A4).</summary>
+        /// <summary>프로세스가 떠서 끝까지 돌고 실패했다 (실행 파일을 못 띄운 실패 · 중지 · 시간 초과가 아님) — 스레드 유실 판정 보강용.</summary>
         public bool Ran { get; init; }
     }
 
     /// <summary>
     /// 그 스레드의 세션 기록(rollout-*-&lt;thread&gt;.jsonl)이 Codex 홈에 있는지 — 문구("no rollout found")가 바뀌어도 유실을 알아보려고
-    /// (2026-10-29_단톡방-보류-나머지 A4, /self-review 9c54e0c54a C1: "연달아 실패"로 보면 계속 나는 설정 오류에도 멀쩡한 대화를 버렸다).
+    /// (/self-review 9c54e0c54a C1: "연달아 실패"로 보면 계속 나는 설정 오류에도 멀쩡한 대화를 버렸다).
     /// true 있음 · false 세션 폴더는 있는데 없음 · null 알 수 없음(폴더 없음 · 못 읽음 · 이상한 스레드 ID).
     /// </summary>
     public static bool? RolloutExists(string codexHome, string thread)
@@ -386,7 +386,7 @@ public sealed class CodexLog(Func<string> dataFolder)
 }
 
 /// <summary>
-/// Codex 설정 (결정 5): Codex 구성원을 켤 수 있는 작업 폴더 — 데이터 폴더 codex.json, 기본은 아무 데도 없음.
+/// Codex 설정: Codex 구성원을 켤 수 있는 작업 폴더 — 데이터 폴더 codex.json, 기본은 아무 데도 없음.
 /// Codex는 읽기 전용이어도 디스크 전체를 읽을 수 있어(실측), 사용자가 고른 작업 폴더의 단톡방에서만 Codex 구성원을 만든다.
 /// </summary>
 /// <remarks>

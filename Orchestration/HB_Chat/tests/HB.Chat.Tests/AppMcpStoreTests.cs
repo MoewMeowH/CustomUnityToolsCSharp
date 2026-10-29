@@ -4,7 +4,7 @@ using HB.Chat;
 namespace HB.Chat.Tests;
 
 /// <summary>
-/// 앱에서 더한 MCP 서버 (계획서 2026-10-29_HB_Chat-앱-MCP-서버-더하기): 저장소 검사 · 저장 · 다시 읽기, JSON 붙여넣기 세 모양, 칸 채우기,
+/// 앱에서 더한 MCP 서버: 저장소 검사 · 저장 · 다시 읽기, JSON 붙여넣기 세 모양, 칸 채우기,
 /// ~/.claude.json 읽기, 평문 비밀 값 경고, 방 설정 파일에 앱 서버가 들어가는 순서(작업 폴더 먼저).
 /// </summary>
 public sealed class AppMcpStoreTests : IDisposable
@@ -207,7 +207,7 @@ public sealed class AppMcpStoreTests : IDisposable
         var (path, missing) = McpConfigFile.WriteRoom(ws, ["notion", "gone"], null, Path.Combine(_dir, "data"), Room, store.Get);
         Assert.Equal(["gone"], missing);
         Assert.Equal("https://app/mcp", JsonNode.Parse(File.ReadAllText(path))!["mcpServers"]!["notion"]!["url"]!.GetValue<string>());
-        // 작업 폴더에 같은 이름이 있으면 그쪽 (결정 1)
+        // 작업 폴더에 같은 이름이 있으면 그쪽
         File.WriteAllText(Path.Combine(ws, ".mcp.json"), """{"mcpServers":{"memory":{"command":"ws-memory"}}}""");
         var (path2, _) = McpConfigFile.WriteRoom(ws, ["memory", "notion"], null, Path.Combine(_dir, "data"), Room, store.Get);
         var servers = JsonNode.Parse(File.ReadAllText(path2))!["mcpServers"]!;

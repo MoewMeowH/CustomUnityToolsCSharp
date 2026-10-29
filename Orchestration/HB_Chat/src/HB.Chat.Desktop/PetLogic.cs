@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace HB.Chat.Desktop;
 
 /// <summary>
-/// 스프라이트 시트 규격 (CodePet · Codex 펫 형식, 계획서 2026-10-29_바탕화면-펫 결정): 가로 8칸, v1은 9행 · v2는 11행, 칸 비율 가로 192 : 세로 208.
+/// 스프라이트 시트 규격 (CodePet · Codex 펫 형식, 결정): 가로 8칸, v1은 9행 · v2는 11행, 칸 비율 가로 192 : 세로 208.
 /// pet.json의 spriteVersionNumber가 없으면 그림 비율로 가른다 (CodePet sprite-layout.js detectSpriteRows와 같은 0.08행 오차).
 /// </summary>
 public sealed record PetSheet(int Width, int Height, int Rows)
@@ -64,7 +64,7 @@ public static class PetMood
         room is null ? PetAction.Idle : room.IsApproval ? PetAction.Waiting : room.IsBusy ? PetAction.Running : PetAction.Idle;
 
     /// <summary>
-    /// 한 번 동작 (계획서 결정 표): 같은 방이 쉼 → 실행이면 점프, 실행 · 기다림 → 쉼이면 실패면 실패 동작 · 아니면 손 흔들기. 그 밖 · 처음 목록은 null.
+    /// 한 번 동작: 같은 방이 쉼 → 실행이면 점프, 실행 · 기다림 → 쉼이면 실패면 실패 동작 · 아니면 손 흔들기. 그 밖 · 처음 목록은 null.
     /// 서버 목록은 끝난 턴의 잠깐 표정(끝남 · 실패)을 싣지 않아 앞 · 뒤 상태로 정한다.
     /// </summary>
     public static PetAction? Burst(RoomState? before, RoomState? after)
@@ -190,7 +190,7 @@ public static class PetPlace
 public sealed record PetSource(string Key, string Label, string Path, int? Version);
 
 /// <summary>
-/// 펫 찾기 (결정): 내장 펫(exe 옆 Pets/&lt;이름&gt; — 원본 대시보드 IconPack/Pets) · Codex가 깐 ~/.codex/pets/* · 데이터 폴더 pets/*.
+/// 펫 찾기: 내장 펫(exe 옆 Pets/&lt;이름&gt; — 원본 대시보드 IconPack/Pets) · Codex가 깐 ~/.codex/pets/* · 데이터 폴더 pets/*.
 /// 폴더마다 spritesheet.webp가 있어야 하고, pet.json(displayName · spriteVersionNumber)은 없어도 된다 (CodePet listAvailablePets와 같음).
 /// </summary>
 public static class PetSources

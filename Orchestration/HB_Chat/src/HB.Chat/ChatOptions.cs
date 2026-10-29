@@ -2,7 +2,7 @@ using HB.Orchestration.Shared;
 
 namespace HB.Chat;
 
-/// <summary>방마다 고르는 권한 단계 (계획서 4번 인자 표).</summary>
+/// <summary>방마다 고르는 권한 단계 (인자 표).</summary>
 public enum PermissionLevel
 {
     /// <summary>도구 없이 대화만. MCP도 없음.</summary>
@@ -11,7 +11,7 @@ public enum PermissionLevel
     Read,
     /// <summary>읽기 + 작업 폴더 파일 편집(acceptEdits). 명령 실행은 없음.</summary>
     Edit,
-    /// <summary>편집 + 명령 실행(Bash · PowerShell). 명령은 실행 전에 방의 카드로 승인한다 (2차 계획서 2-1).</summary>
+    /// <summary>편집 + 명령 실행(Bash · PowerShell). 명령은 실행 전에 방의 카드로 승인한다 (2차).</summary>
     Command,
 }
 
@@ -24,12 +24,12 @@ public sealed class ChatOptions
     public string? ClaudePath { get; set; }
 
     /// <summary>
-    /// Codex CLI 실행 파일 (단톡방 Codex 구성원, 계획서 2026-10-29_HB_Chat-단톡방 ②). 비우면 npm 전역 설치의 codex.exe(%APPDATA%\npm\…\vendor\…\codex.exe),
+    /// Codex CLI 실행 파일 (단톡방 Codex 구성원, ②). 비우면 npm 전역 설치의 codex.exe(%APPDATA%\npm\…\vendor\…\codex.exe),
     /// 그다음 PATH의 codex.exe. 못 찾으면 null — Codex 구성원이 "Codex CLI를 찾지 못함"으로 실패한다.
     /// </summary>
     public string? CodexPath { get; set; }
 
-    /// <summary>Codex 홈 폴더 (세션 기록 sessions/ 가 있는 곳). 비우면 CODEX_HOME, 그다음 ~/.codex. 스레드 유실 확인에 쓴다 (2026-10-29_단톡방-보류-나머지 A4).</summary>
+    /// <summary>Codex 홈 폴더 (세션 기록 sessions/ 가 있는 곳). 비우면 CODEX_HOME, 그다음 ~/.codex. 스레드 유실 확인에 쓴다.</summary>
     public string? CodexHome { get; set; }
 
     public string CodexHomeDir() =>
@@ -94,7 +94,7 @@ public sealed class ChatOptions
     /// </summary>
     public int ApprovalTimeoutSeconds { get; set; } = 570;
 
-    /// <summary>run_mode 호출 기록 (외부 에이전트 말풍선, 계획서 2-2 e). 비우면 HB_ORCH_LOG_PATH 또는 %LOCALAPPDATA%/HB_Orchestration/calls.jsonl. 대시보드 Dashboard:LogPath를 바꿨으면 같은 값으로.</summary>
+    /// <summary>run_mode 호출 기록 (외부 에이전트 말풍선). 비우면 HB_ORCH_LOG_PATH 또는 %LOCALAPPDATA%/HB_Orchestration/calls.jsonl. 대시보드 Dashboard:LogPath를 바꿨으면 같은 값으로.</summary>
     public string? CallLogPath { get; set; }
 
     public string CallLogFile => string.IsNullOrWhiteSpace(CallLogPath) ? CallLog.DefaultPath : CallLogPath.Trim();
@@ -148,11 +148,11 @@ public sealed class ChatOptions
     public IReadOnlyList<WorkspaceEntry> AllWorkspaces =>
         AppWorkspaces?.All() ?? [.. Workspaces.Where(p => !string.IsNullOrWhiteSpace(p.Value)).Select(p => new WorkspaceEntry(p.Key, p.Value.Trim(), true))];
 
-    /// <summary>앱에서 더한 MCP 서버 (데이터 폴더 mcp-servers.json, 계획서 2026-10-29_HB_Chat-앱-MCP-서버-더하기). 켤 때 Program이 채운다.</summary>
+    /// <summary>앱에서 더한 MCP 서버 (데이터 폴더 mcp-servers.json). 켤 때 Program이 채운다.</summary>
     [Microsoft.Extensions.Configuration.ConfigurationKeyName("__app_mcp_not_bound__")]
     public AppMcpStore? AppMcp { get; set; }
 
-    // ---- Unity 프로젝트 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결) ----
+    // ---- Unity 프로젝트 ----
 
     /// <summary>설정 파일의 Unity 프로젝트 이름 → 경로 (작업 폴더와 같은 모양). 앱에서 더한 것은 <see cref="AppUnityProjects"/>.</summary>
     public Dictionary<string, string> UnityProjects { get; set; } = new(StringComparer.OrdinalIgnoreCase);

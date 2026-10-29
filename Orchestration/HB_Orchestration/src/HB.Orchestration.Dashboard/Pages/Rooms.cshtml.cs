@@ -6,8 +6,8 @@ using Microsoft.Extensions.Options;
 namespace HB.Orchestration.Dashboard.Pages;
 
 /// <summary>
-/// 채팅방 목록: 최근 Claude 세션마다 방 하나 (계획서 2026-10-27_에이전트-채팅방).
-/// ?handler=Stamp · List는 실시간 갱신용 (계획서 2026-10-27_채팅방-실시간-갱신 결정: 방 목록도 실시간).
+/// 채팅방 목록: 최근 Claude 세션마다 방 하나.
+/// ?handler=Stamp · List는 실시간 갱신용 (결정: 방 목록도 실시간).
 /// </summary>
 public sealed class RoomsModel(ChatRoomService rooms, ChatAppRooms appRooms, IOptions<DashboardOptions> options) : PageModel
 {

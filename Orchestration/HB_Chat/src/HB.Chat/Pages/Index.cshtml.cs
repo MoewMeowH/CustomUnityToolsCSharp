@@ -6,12 +6,12 @@ namespace HB.Chat.Pages;
 
 /// <summary>
 /// 방을 고르지 않은 첫 화면: 왼쪽 방 목록 + 오른쪽 새 방 만들기.
-/// ?handler=RoomList: 앱 전체 알림을 받은 화면이 목록 부분만 다시 받는다 (계획서 2-2 a).
+/// ?handler=RoomList: 앱 전체 알림을 받은 화면이 목록 부분만 다시 받는다.
 /// </summary>
 public sealed class IndexModel(RoomStore store, RoomHub hub, RoomList list, ChatTranscripts transcripts, IOptions<ChatOptions> options, GroupChat groups) : PageModel
 {
     /// <summary>
-    /// 새 단톡방 (계획서 2026-10-29_HB_Chat-단톡방, 1단계): 구성원 이름 · 역할 줄들, 대화 · 읽기 단계만. 구성원마다 숨은 자식 방이 생긴다.
+    /// 새 단톡방 (1단계): 구성원 이름 · 역할 줄들, 대화 · 읽기 단계만. 구성원마다 숨은 자식 방이 생긴다.
     /// </summary>
     /// <summary>Codex 구성원 모델 목록 (이 계정 — ~/.codex/models_cache.json). 비면 "Codex 기본"만.</summary>
     public IReadOnlyList<CodexModels.Model> CodexModelList => CodexModels.Available();
@@ -20,7 +20,7 @@ public sealed class IndexModel(RoomStore store, RoomHub hub, RoomList list, Chat
     public IReadOnlyList<string> CodexWorkspaces => groups.CodexSettings?.Workspaces() ?? [];
 
     /// <summary>
-    /// 새 단톡방. 단계는 구성원 칸마다(levels — ⑤ 결정, 비면 읽기 · Codex는 읽기), baseMcp: Claude 구성원에게 작업 폴더 기본 MCP (기본 끔).
+    /// 새 단톡방. 단계는 구성원 칸마다(levels — 비면 읽기 · Codex는 읽기), baseMcp: Claude 구성원에게 작업 폴더 기본 MCP (기본 끔).
     /// </summary>
     public IActionResult OnPostCreateGroup(string workspace, string model, string? title, string? effort,
         string[]? names, string[]? roles, string[]? engines, string[]? codexModels, string[]? codexEfforts, string[]? levels, bool baseMcp = false)
@@ -57,7 +57,7 @@ public sealed class IndexModel(RoomStore store, RoomHub hub, RoomList list, Chat
     public string? LoadError => store.LoadError;
     public string? Error { get; private set; }
 
-    /// <summary>?trash=1이면 오른쪽에 휴지통 (계획서 2-2 c).</summary>
+    /// <summary>?trash=1이면 오른쪽에 휴지통.</summary>
     public bool ShowTrash { get; private set; }
     public IReadOnlyList<Room> TrashRooms { get; private set; } = [];
 
@@ -69,7 +69,7 @@ public sealed class IndexModel(RoomStore store, RoomHub hub, RoomList list, Chat
         if (ShowTrash) TrashRooms = [.. store.All().Where(r => r.DeletedAt is not null && r.GroupId is null).OrderByDescending(r => r.DeletedAt)];
     }
 
-    /// <summary>사이드바 구독 한도 줄 (계획서 2026-10-29_사용량-한도-표시) — 목록을 다시 받을 때 화면이 같이 받는다.</summary>
+    /// <summary>사이드바 구독 한도 줄 — 목록을 다시 받을 때 화면이 같이 받는다.</summary>
     public IActionResult OnGetLimits()
     {
         Response.Headers.CacheControl = "no-store";
@@ -85,7 +85,7 @@ public sealed class IndexModel(RoomStore store, RoomHub hub, RoomList list, Chat
         });
     }
 
-    /// <summary>검색 (계획서 2-2 c): 휴지통 밖 모든 방의 제목 · 말. 결과는 왼쪽 칸에 목록 대신.</summary>
+    /// <summary>검색: 휴지통 밖 모든 방의 제목 · 말. 결과는 왼쪽 칸에 목록 대신.</summary>
     public IActionResult OnGetSearch(string? q)
     {
         Response.Headers.CacheControl = "no-store";
@@ -98,7 +98,7 @@ public sealed class IndexModel(RoomStore store, RoomHub hub, RoomList list, Chat
         if (!RoomStore.IsRoomId(id)) return NotFound();
         try
         {
-            // 단톡방이면 구성원 자식 방도 함께 (계획서 2026-10-29_HB_Chat-단톡방)
+            // 단톡방이면 구성원 자식 방도 함께
             if (store.Get(id) is { IsGroup: true }) { if (groups.SetDeleted(id, null) is { } groupError) throw new InvalidOperationException(groupError); }
             else store.Update(id, r => r with { DeletedAt = null });
         }

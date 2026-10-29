@@ -6,7 +6,7 @@ namespace HB.Orchestration.Shared;
 
 /// <summary>
 /// 검토형 서브에이전트가 지휘자에게 넘긴 결과 하나 (SubagentHandback 한 번 = 보관 파일 하나).
-/// 이어 부른 서브에이전트(SendMessage)는 넘길 때마다 따로 남는다 (계획서 2026-10-27_서브에이전트-결과-보존).
+/// 이어 부른 서브에이전트(SendMessage)는 넘길 때마다 따로 남는다.
 /// </summary>
 public sealed record SubagentResult
 {

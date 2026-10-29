@@ -91,7 +91,7 @@ public sealed record VerdictSummary(
 public sealed record OpenRequest(string RunId, string Id, string What, string Mode, string? CallId);
 
 /// <summary>
-/// 자료 요청(1-N1) 처리 집계 — 채택률과 따로 (계획서 2026-10-19_자료요청-왕복, 사용자 결정 "응 그러자").
+/// 자료 요청(1-N1) 처리 집계 — 채택률과 따로 (사용자 결정 "응 그러자").
 /// Total = 기간 안 실행의 구조화 결과에 나온 요청 수, Open = 처리 판정(supplied·declined·deferred)이 없는 요청.
 /// </summary>
 public sealed record RequestSummary(int Total, int Supplied, int Declined, int Deferred, IReadOnlyList<OpenRequest> Open)
@@ -99,7 +99,7 @@ public sealed record RequestSummary(int Total, int Supplied, int Declined, int D
     /// <summary>보충 단계(followUp)가 새로 낸 요청 — 실행마다 1회라 다시 보충할 수 없어 Open에 넣지 않는다.</summary>
     public int FromFollowUps { get; init; }
 
-    /// <summary>주별 요청 비율 (최근 주가 먼저) — 첨부 범위 규칙 전후 비교용 (계획서 2026-10-27_외부-첨부-범위-규칙).</summary>
+    /// <summary>주별 요청 비율 (최근 주가 먼저) — 첨부 범위 규칙 전후 비교용.</summary>
     public IReadOnlyList<RequestWeek> Weeks { get; init; } = [];
 }
 

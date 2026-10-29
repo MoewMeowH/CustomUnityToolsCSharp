@@ -5,8 +5,8 @@ namespace HB.Orchestration.Agents;
 
 /// <summary>
 /// 모델별 프롬프트 덧붙임: prompts/&lt;역할&gt;/&lt;에이전트&gt;.md를 시스템 프롬프트 맨 끝에 붙인다
-/// (계획서 2026-10-23_모델별-프롬프트-덧붙임). 공통 프롬프트는 그대로 두고 모델 버릇 · 자주 하는 실수만 고치는 자리 — 역할 사본(Reviewer_DS)을 만들지 않는다.
-/// prompts 폴더는 설정 Orchestration:PromptsPath, 비우면 modes.json 옆 (계획서 2026-10-27_실수목록-분리 결정 1).
+///. 공통 프롬프트는 그대로 두고 모델 버릇 · 자주 하는 실수만 고치는 자리 — 역할 사본(Reviewer_DS)을 만들지 않는다.
+/// prompts 폴더는 설정 Orchestration:PromptsPath, 비우면 modes.json 옆.
 /// 실행마다 다시 읽고, 파일이 없거나 HTML 주석을 뺀 본문이 비면 붙이지 않는다 (기본 파일은 서식 안내 주석뿐, 결정 4).
 /// 에이전트는 교체(agents) 뒤 실제 이름으로 찾는다.
 /// </summary>

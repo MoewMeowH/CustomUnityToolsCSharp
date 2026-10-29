@@ -22,7 +22,7 @@ public sealed class OrchestrationOptions
     public string? GuidelinesPath { get; set; }
 
     /// <summary>
-    /// 모델별 덧붙임(prompts/&lt;역할&gt;/&lt;에이전트&gt;.md) 폴더. 원본은 저장소 project-files/prompts (계획서 2026-10-27_실수목록-분리).
+    /// 모델별 덧붙임(prompts/&lt;역할&gt;/&lt;에이전트&gt;.md) 폴더. 원본은 저장소 project-files/prompts.
     /// 상대 경로는 서버 폴더 기준. 비우면 modes.json 옆 prompts. 지정했는데 폴더가 없으면 실행을 거절한다.
     /// </summary>
     public string? PromptsPath { get; set; }
@@ -181,7 +181,7 @@ public sealed class ModelPrice
     public decimal? WebSearchPerThousand { get; set; }
 
     /// <summary>
-    /// 날짜별 단가 변경 (계획서 2026-10-23_단가-적용-시작일). 위의 칸은 처음 단가이고, 기록 시각이 변경의 시작일(UTC 0시) 이후면
+    /// 날짜별 단가 변경. 위의 칸은 처음 단가이고, 기록 시각이 변경의 시작일(UTC 0시) 이후면
     /// 그 변경에 적은 칸만 덮는다. 설정을 그날 바꾸면 이전 기록 비용까지 새 단가로 다시 계산되므로, 단가가 오르내릴 때는 위 칸을 고치지 말고 여기에 더한다.
     /// 날짜를 읽지 못한 변경은 적용하지 않는다 (서버가 설정을 읽을 때 경고 — <see cref="ChangeProblems"/>).
     /// </summary>
@@ -310,7 +310,7 @@ public sealed class ContextOptions
     public List<string> WriteDenyPatterns { get; set; } = [];
 
     /// <summary>
-    /// 쓰기 전용 내장 금지 목록: 외부 LLM 응답이 실행·설정에 영향을 주는 파일로 들어가지 않게 한다 (계획서 2026-10-19_save_result-쓰기-보강).
+    /// 쓰기 전용 내장 금지 목록: 외부 LLM 응답이 실행·설정에 영향을 주는 파일로 들어가지 않게 한다.
     /// Claude Code·에이전트 설정, 저장소·CI, IDE 실행 설정, 빌드·패키지, 실행 파일·스크립트, Unity 컴파일 대상.
     /// 응답 코드는 docs/·review_tmp/ 등에 저장한 뒤 지휘자·사람이 합친다.
     /// </summary>
@@ -320,7 +320,7 @@ public sealed class ContextOptions
         // Claude Code·에이전트 설정과 지침
         "**/.claude/**", ".mcp.json", "CLAUDE.md", "CLAUDE.local.md", "REVIEW_GUIDELINES.md", "hb-modes.json",
         "AGENTS.md", "GEMINI.md", "**/.cursor/**",
-        // 모델별 프롬프트 덧붙임 (modes.json 옆 prompts/<역할>/<에이전트>.md — 계획서 2026-10-23_모델별-프롬프트-덧붙임)
+        // 모델별 프롬프트 덧붙임 (modes.json 옆 prompts/<역할>/<에이전트>.md)
         "**/prompts/**",
         // 저장소·CI·git 훅
         "**/.github/**", ".gitattributes", ".gitmodules", "**/.husky/**", "**/.githooks/**", ".pre-commit-config.yaml",
@@ -480,7 +480,7 @@ public sealed class AgentOptions
 
     /// <summary>
     /// 추론 강도: none · low · medium · high · xhigh (대소문자 무시). 비우면 보내지 않는다 (제공사·모델 기본값).
-    /// 제공사 단위 기본값은 두지 않는다 — 같은 제공사라도 모델마다 받는 값이 다르다 (계획서 2026-10-20_추론강도-설정).
+    /// 제공사 단위 기본값은 두지 않는다 — 같은 제공사라도 모델마다 받는 값이 다르다.
     /// 실행마다 run_mode reasoning · 골든 --reasoning으로 덮어쓸 수 있다.
     /// </summary>
     public string? ReasoningEffort { get; set; }
@@ -494,8 +494,8 @@ public sealed class AgentOptions
 
 /// <summary>
 /// 입력 상한 · 사용량 집계. 하루 토큰·비용 상한(DailyTokenLimit · DailyCostLimitUsd)은 없앴다
-/// (계획서 2026-10-20_하루상한-제거 — 하루에 몰아 쓰는 사용 방식, 제공사 계정 한도가 마지막 방어선).
-/// 세션당 실행 한도(DefaultMaxRunsPerSession · 모드 MaxRunsPerSession)도 없앴다 (계획서 2026-10-20_모드이름-통일-세션한도-제거).
+/// (하루에 몰아 쓰는 사용 방식, 제공사 계정 한도가 마지막 방어선).
+/// 세션당 실행 한도(DefaultMaxRunsPerSession · 모드 MaxRunsPerSession)도 없앴다.
 /// 예전 appsettings·modes.json에 키가 남아 있어도 무시된다.
 /// </summary>
 public sealed class BudgetOptions

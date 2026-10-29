@@ -2,7 +2,7 @@ using HB.Chat.Desktop;
 
 namespace HB.Chat.Desktop.Tests;
 
-/// <summary>바탕화면 펫 (계획서 2026-10-29_바탕화면-펫): 시트 규격 · 동작 · 따라갈 방 · 설정 · 자리 · 펫 찾기 · 내장 기본 펫 읽기.</summary>
+/// <summary>바탕화면 펫: 시트 규격 · 동작 · 따라갈 방 · 설정 · 자리 · 펫 찾기 · 내장 기본 펫 읽기.</summary>
 public sealed class PetTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "hbchat-pet-" + Guid.NewGuid().ToString("N"));

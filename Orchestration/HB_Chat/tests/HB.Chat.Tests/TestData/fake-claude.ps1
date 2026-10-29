@@ -198,7 +198,7 @@ switch ($mode) {
         Finish $d 'ExitPlanMode' 'planned'
     }
     'runmode' {
-        # model picker card (plan 2026-10-29_모델-선택창): run_mode asks the app (not pre-allowed). allow -> error result whose text is 'ALLOWED ' + updatedInput JSON
+        # model picker card: run_mode asks the app (not pre-allowed). allow -> error result whose text is 'ALLOWED ' + updatedInput JSON
         # (like echo: only error results carry their text to the end event) so the test reads what the app sent back
         $d = Ask 'req_rm' '{"subtype":"can_use_tool","tool_name":"mcp__hb-orchestration__run_mode","display_name":"run_mode","input":{"mode":"design_main","input":"check this design","reason":"pick one","files":["a.cs"],"reasoning":["*=low"]},"tool_use_id":"toolu_rm1"}'
         if ($d -and $d.behavior -eq 'allow') {

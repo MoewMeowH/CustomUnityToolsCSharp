@@ -2,7 +2,7 @@ using HB.Chat;
 
 namespace HB.Chat.Tests;
 
-/// <summary>권한 단계 → claude 인자 (계획서 4번 표 + 0번 실측 B · C).</summary>
+/// <summary>권한 단계 → claude 인자 (+ 0번 실측 B · C).</summary>
 public sealed class ClaudeArgsTests
 {
     private const string Sid = "15eb061e-7153-4c14-83ba-083385ed6945";
@@ -121,7 +121,7 @@ public sealed class ClaudeArgsTests
     [Fact]
     public void AskRunMode_AllowsOtherServerToolsButNotRunMode()
     {
-        // 외부 요청 전에 묻기 (계획서 2026-10-29_모델-선택창): 서버 전체 대신 도구 넷만 미리 허용 — run_mode는 앱에 물어 카드가 뜬다
+        // 외부 요청 전에 묻기: 서버 전체 대신 도구 넷만 미리 허용 — run_mode는 앱에 물어 카드가 뜬다
         var args = ClaudeArgs.Build(Spec(PermissionLevel.Read) with { AskRunMode = true }, Models);
         Assert.Contains("--allowedTools | mcp__hb-orchestration__list_modes | mcp__hb-orchestration__save_result | mcp__hb-orchestration__record_verdicts | " +
                         "mcp__hb-orchestration__server_info", Joined(args));

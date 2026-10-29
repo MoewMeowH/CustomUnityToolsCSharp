@@ -16,7 +16,7 @@ public enum ChatSpeaker
 /// <summary>
 /// 세션 기록에서 읽은 말 하나.
 /// ToolsBefore: 바로 앞 말 이후 지휘자가 쓴 도구 수 (채팅방에 "도구 N개"로 접어 보인다).
-/// Tools: 그 도구들의 이름 (호출 차례, HB_Chat 도구 칩 — 계획서 2026-10-28_HB_Chat-2차 2-2 b).
+/// Tools: 그 도구들의 이름 (호출 차례, HB_Chat 도구 칩).
 /// </summary>
 public sealed record ChatEntry(int Line, DateTimeOffset? Timestamp, ChatSpeaker Speaker, string Text, int ToolsBefore)
 {
@@ -43,7 +43,7 @@ public sealed record ChatAnswer(int Line, DateTimeOffset? Timestamp, IReadOnlyLi
 public sealed record ChatAnswerItem(string Question, string? Header, string? Answer);
 
 /// <summary>
-/// 채팅방용 세션 기록 (계획서 2026-10-27_에이전트-채팅방). <see cref="TranscriptSummary"/>와 달리 대화 본문을 담는다:
+/// 채팅방용 세션 기록. <see cref="TranscriptSummary"/>와 달리 대화 본문을 담는다:
 /// 사용자 글 · 지휘자 글(text 블록)만. 도구 호출 · 결과 · thinking · system-reminder · isMeta 줄은 넣지 않는다.
 /// </summary>
 public sealed record ChatTranscript
@@ -97,7 +97,7 @@ public static partial class ClaudeChatReader
     }
 
     /// <summary>
-    /// 이어 읽기 (계획서 2026-10-27_채팅방-실시간-갱신): from이 있으면 그 바이트 위치부터 붙은 줄만 읽어 앞 결과에 더한다.
+    /// 이어 읽기: from이 있으면 그 바이트 위치부터 붙은 줄만 읽어 앞 결과에 더한다.
     /// '\n'으로 끝난 줄만 읽고 쓰는 중인 마지막 줄은 다음 읽기로 넘긴다. 파일이 from보다 작아졌으면(다시 쓰임) 처음부터.
     /// from은 이 호출이 고쳐 쓴다 — 같은 from을 두 곳에서 동시에 넘기지 않는다 (호출자가 잠근다).
     /// 읽다 실패하면(FormatError · 취소 예외) from에는 일부 줄이 이미 더해졌을 수 있다 — 그 from은 버리고 다음엔 처음부터 읽는다.

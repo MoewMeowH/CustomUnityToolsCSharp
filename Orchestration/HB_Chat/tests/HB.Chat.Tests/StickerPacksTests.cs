@@ -17,7 +17,7 @@ public sealed class StickerPacksTests : IDisposable
         Directory.CreateDirectory(Path.Combine(_root, "cat"));
         Directory.CreateDirectory(Path.Combine(_root, "dog"));
         Directory.CreateDirectory(Path.Combine(_root, ".hidden"));
-        Directory.CreateDirectory(Path.Combine(_root, "Pets", "gpt_chan")); // 데스크톱 내장 펫 폴더는 팩이 아니다 (계획서 2026-10-29_바탕화면-펫)
+        Directory.CreateDirectory(Path.Combine(_root, "Pets", "gpt_chan")); // 데스크톱 내장 펫 폴더는 팩이 아니다
         File.WriteAllBytes(Path.Combine(_root, "01-idle.png"), [1]);
         File.WriteAllBytes(Path.Combine(_root, "06-done.png"), [1]);
         File.WriteAllBytes(Path.Combine(_root, "cat", "06-done.png"), [2]);
@@ -77,7 +77,7 @@ public sealed class StickerPacksTests : IDisposable
     [Fact]
     public void GifPack_IsCounted_AndDefaultPackFillsTheRest()
     {
-        // 2026-10-29_스티커-GIF-지원: 설정 이름이 .png여도 팩의 .gif로 찾고 세며, 팩 · 스티커 폴더에 없으면 기본 팩
+        // 설정 이름이 .png여도 팩의 .gif로 찾고 세며, 팩 · 스티커 폴더에 없으면 기본 팩
         var root = Path.Combine(_dir, "packs-only");
         Directory.CreateDirectory(Path.Combine(root, "animal"));
         Directory.CreateDirectory(Path.Combine(root, "gpt_chan"));
@@ -117,7 +117,7 @@ public sealed class StickerPacksTests : IDisposable
     [Fact]
     public void StickerDir_RelativeResolvedAgainstSettingsFolder()
     {
-        // 스티커 폴더 상대 경로 (계획서 2026-10-29_바탕화면-펫 결정): 설정 파일 폴더 기준, 절대 · 빈 값은 그대로
+        // 스티커 폴더 상대 경로: 설정 파일 폴더 기준, 절대 · 빈 값은 그대로
         var baseDir = Path.Combine(_dir, "dash");
         Assert.Equal(Path.Combine(baseDir, "IconPack"), HB.Orchestration.ChatUi.StickerOptions.Resolve("IconPack", baseDir));
         Assert.Equal(Path.GetFullPath(Path.Combine(_dir, "IconPack")), HB.Orchestration.ChatUi.StickerOptions.Resolve("../IconPack", baseDir));

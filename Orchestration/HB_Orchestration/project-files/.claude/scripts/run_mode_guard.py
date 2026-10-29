@@ -1,4 +1,4 @@
-"""PreToolUse 훅 H3·H4 (mcp__hb-orchestration__run_mode) — 계획서 2026-10-19_훅-규칙-강제.
+"""PreToolUse 훅 H3·H4 (mcp__hb-orchestration__run_mode)
 
 - H3: mode가 review_main · review_high인데 프로젝트 안 docs/plans/에 오늘 날짜 이름이거나 오늘 고친 계획서(.md)가 없으면 막는다.
   CLAUDE.md "외부 에이전트 리뷰(review_* 모드)를 부르는 작업은 계획서. 없던 작업이면 리뷰 전에 만들고 '사후 작성' 표시".
@@ -6,15 +6,15 @@
 - H4: reason이 [ownReview:<서브에이전트>]로 시작하면 ownReview는 그 서브에이전트 결과 원문이어야 한다
   (/cross-review 3단계 · /mode perf_* 3단계). 서브에이전트는 self-reviewer · perf-reviewer · security-reviewer, 둘 이상은
   '+'로 잇고(예: [ownReview:self-reviewer+security-reviewer]) 결과도 이어 붙인다 — '## 지적' 절이 서브에이전트 수만큼 있어야 한다.
-  모르는 이름 · 겹친 이름이면 막는다 (계획서 2026-10-23_서브에이전트-종류-추가). '## 지적'·'## 읽은 파일' 절이 있고, 읽은 파일 줄이 모두 subagent_in/ 안이어야 통과.
+  모르는 이름 · 겹친 이름이면 막는다. '## 지적'·'## 읽은 파일' 절이 있고, 읽은 파일 줄이 모두 subagent_in/ 안이어야 통과.
   2026-10-19: 첫 호출이 거절된 뒤 재호출 때 원문 대신 요약을 넣은 적이 있다.
   '## 읽은 파일' 절이 여러 개면 모두 검사한다. '## 비고' 등 다른 절은 경로 검사를 하지 않는다 — 설명 줄은 '## 비고'에 쓰고
-  '## 읽은 파일'의 설명 줄은 계속 막는다 (계획서 2026-10-22_self-reviewer-비고-칸, 느슨하게 만들지 않는다는 사용자 결정).
+  '## 읽은 파일'의 설명 줄은 계속 막는다 (느슨하게 만들지 않는다는 사용자 결정).
   '## 읽은 파일'에 '- '로 시작하지 않는 줄이 있어도 막는다. 태그가 없어도: review_*에 ownReview가 있거나, ownReview에
-  '## 읽은 파일' 절이 있으면 막는다 — 태그를 빼면 검사를 건너뛰던 빈틈 (계획서 2026-10-23_H5-셸-문법-우회).
+  '## 읽은 파일' 절이 있으면 막는다 — 태그를 빼면 검사를 건너뛰던 빈틈.
   API 리뷰(run_mode sub_* — 서버 작업 폴더에서 읽음)는 태그에 모드 이름을 쓴다: [ownReview:sub_self] · [ownReview:sub_self+sub_security]
   · [ownReview:sub_perf]. 형식 검사는 같고, 읽은 파일은 subagent_in/ 대신 작업 폴더 기준 상대 경로(절대 경로 · 드라이브 · '~' · '..' 없음)인지 본다.
-  서브에이전트 이름과 섞지 않는다 (계획서 2026-10-27_검토형-서브에이전트-API-전환 '결정 (2차 리뷰 9ea51e562a 뒤)').
+  서브에이전트 이름과 섞지 않는다 (2차 리뷰 9ea51e562a 뒤 결정).
 - 실패하면 막는다: 통과 판정일 때만 exit 0.
 
 입력: stdin JSON {"tool_name": "mcp__hb-orchestration__run_mode", "tool_input": {"mode", "reason", "ownReview", ...}}.
@@ -26,7 +26,7 @@ import re
 import sys
 
 PLAN_MODES = {'review_main', 'review_high'}
-# ownReview를 쓸 수 있는 검토형 서브에이전트 (계획서 2026-10-23_서브에이전트-종류-추가). 둘 이상이면 '+'로 잇고, 결과 원문도 이어 붙인다.
+# ownReview를 쓸 수 있는 검토형 서브에이전트. 둘 이상이면 '+'로 잇고, 결과 원문도 이어 붙인다.
 REVIEWERS = {'self-reviewer', 'perf-reviewer', 'security-reviewer'}
 # 같은 자리의 API 리뷰 모드 (sub_direction은 ownReview에 쓰지 않는다)
 API_REVIEWERS = {'sub_self', 'sub_perf', 'sub_security'}
@@ -102,7 +102,7 @@ SEARCH_LINE = re.compile(r'^(grep|glob)\s*:', re.IGNORECASE)
 
 def read_item_ok(item: str, api: bool = False) -> bool:
     """읽은 파일 항목 하나. 'Grep: …'·'Glob: …' 검색 기록 줄은 경로 모양 토큰(/·\\ 포함)이 있으면 모두 subagent_in/ 안이어야 하고,
-    없으면 통과 (검색 기록은 폴더 밖 접근의 증거가 아님 — 읽기 차단 훅이 Grep·Glob path도 막는다. 계획서 2026-10-19_H4-검색기록줄).
+    없으면 통과 (검색 기록은 폴더 밖 접근의 증거가 아님 — 읽기 차단 훅이 Grep·Glob path도 막는다).
     api면 subagent_in/ 대신 작업 폴더 기준 상대 경로인지 본다."""
     inside = inside_work_folder if api else inside_subagent_in
     if not SEARCH_LINE.match(item):
@@ -180,7 +180,7 @@ def check(data: dict, today: datetime.date | None = None) -> None:
             keys = '' if own else f" (받은 입력 키: {', '.join(sorted(ti))})"
             deny(f'ownReview가 {"+".join(agents)} 결과 원문이 아니다: {problem}{keys}. /cross-review 3단계 · /mode 3단계: ownReview에는 서브에이전트 결과 원문만 넣는다'
                  + (" (API 리뷰면 응답 본문 '## 지적'부터 끝까지, runId · '### 단계' 머리 줄과 '[경고]' 줄은 빼고)." if api else '.'))
-    # 태그가 빠지면 검사를 건너뛰던 빈틈 (계획서 2026-10-23_H5-셸-문법-우회, security-reviewer 7282089076 C10).
+    # 태그가 빠지면 검사를 건너뛰던 빈틈 (security-reviewer 7282089076 C10).
     # review_*는 /cross-review로만 부르고 ownReview는 늘 서브에이전트 원문이다. perf_*는 설계안뿐이면 태그 없는 지휘자 의견 (mode.md 2단계).
     elif mode in PLAN_MODES and own.strip():
         deny(f"'{mode}'의 ownReview는 서브에이전트 결과 원문이다 — reason 맨 앞에 [ownReview:self-reviewer](둘이면 "
@@ -189,7 +189,7 @@ def check(data: dict, today: datetime.date | None = None) -> None:
         deny("ownReview에 서브에이전트 결과 형식('## 읽은 파일')이 있는데 reason에 [ownReview:<서브에이전트>] 태그가 없다 — "
              '태그를 붙여 훅이 원문을 검사하게 한다 (/cross-review 3단계 · /mode 3단계).')
     # perf_*는 대상이 설계안뿐이면 태그 없는 지휘자 의견('## 지휘자 의견')을 쓴다. 서브에이전트 결과를 요약해 '## 지적'만 남긴 것은 막는다
-    # (2026-10-19 사고 유형, 계획서 2026-10-23_따옴표-명령-허용목록과-perf-ownReview)
+    # (2026-10-19 사고 유형)
     elif mode.startswith('perf_') and FINDINGS_HEAD.search(own):
         deny("태그 없는 perf ownReview에 '## 지적' 절이 있다 — perf-reviewer 결과면 원문 그대로 넣고 reason 맨 앞에 [ownReview:perf-reviewer], "
              "설계안에 대한 지휘자 의견이면 '## 지휘자 의견' 제목으로 쓴다 (/mode 2단계).")

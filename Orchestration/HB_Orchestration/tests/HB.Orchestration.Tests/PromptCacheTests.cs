@@ -165,7 +165,7 @@ public sealed class PromptCacheTests : IDisposable
         Assert.Equal(2, texts.Count);
         Assert.StartsWith("## 첨부 코드", texts[0].Text);
         Assert.StartsWith("## 요청", texts[1].Text);
-        // 큰 프롬프트는 기록에 앞부분만 남고 원문은 blobs에 있다 (계획서 2026-10-23_호출기록-blobs-분리와-첫화면-쪽나누기)
+        // 큰 프롬프트는 기록에 앞부분만 남고 원문은 blobs에 있다
         Assert.Equal(CallLog.FullPrompt(_h.Records().Single(), _h.LogPath), (texts[0].Text + texts[1].Text, false));
     }
 

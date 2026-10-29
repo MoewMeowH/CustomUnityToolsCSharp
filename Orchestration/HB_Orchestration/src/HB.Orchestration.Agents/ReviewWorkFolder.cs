@@ -4,7 +4,7 @@ using System.Text;
 namespace HB.Orchestration.Agents;
 
 /// <summary>
-/// claude-cli 단계의 작업 폴더 (계획서 2026-10-27_검토형-서브에이전트-API-전환 "결정 뒤 설계 (B)").
+/// claude-cli 단계의 작업 폴더.
 /// context가 가리키는 파일을 <b>파일 전체</b>로 상대 경로 그대로 복사한다 — 에이전트가 그 안을 직접 읽는다.
 /// 경로 규칙 · 추가 루트 · 전송 금지 · 파일 크기 상한은 기존 첨부(ContextLoader)와 같다. 지휘자가 하던 subagent_in 복사를 서버가 대신하고,
 /// 복사한 파일 목록과 SHA-256 앞자리를 프롬프트(= 호출 기록)에 남긴다 — 폴더는 실행 뒤 지워지므로 에이전트가 무엇을 받았는지 나중에 대조할 수 있게.
@@ -172,7 +172,7 @@ public static class ReviewWorkFolder
                 .AppendLine("'정의' 줄은 서버가 정규식으로 뽑은 대략의 위치(이름 줄번호)다. 큰 파일은 필요한 범위만 Read(offset · limit)로 열고, 판단 전에 그 줄을 직접 확인한다.")
                 .AppendLine().AppendLine("### 파일 (경로 · SHA-256 앞 12자 · 줄 수)");
         }
-        // 정의 색인 (계획서 2026-10-27_작업폴더-정의-색인): 예산은 지휘자가 넘긴 순서(보통 중심 파일이 앞)로 쓰고,
+        // 정의 색인: 예산은 지휘자가 넘긴 순서(보통 중심 파일이 앞)로 쓰고,
         // 상한에 걸린 파일은 건너뛰고 다음 파일을 본다. 목록은 경로 순 (sub_self 535ca00022 C3).
         var indexes = new Dictionary<string, string>(copied.Comparer);
         var overBudget = new List<string>();
@@ -198,7 +198,7 @@ public static class ReviewWorkFolder
             text.AppendLine($"(Codex가 지시 · 설정으로 읽는 파일이라 작업 폴더에 두지 않음: {string.Join(", ", instructionSkipped.Distinct())})");
         text.AppendLine().AppendLine("### 이번 검토의 중심 (경로:줄)");
         foreach (var line in focus) text.AppendLine(line);
-        // Codex: 변경 diff는 본문을 붙인다 — 실험에서 'diff 첨부 + 나머지는 직접 찾기'가 시간 · 발견 균형이 가장 좋았다 (계획서 2026-10-29_Codex-외부-리뷰어).
+        // Codex: 변경 diff는 본문을 붙인다 — 실험에서 'diff 첨부 + 나머지는 직접 찾기'가 시간 · 발견 균형이 가장 좋았다.
         foreach (var (inside, dest) in diffs)
         {
             var body = File.ReadAllText(dest);

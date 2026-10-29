@@ -13,7 +13,7 @@ using OpenAI;
 
 namespace HB.Orchestration.Tests;
 
-/// <summary>에이전트별 추론 강도 (계획서 2026-10-20_추론강도-설정).</summary>
+/// <summary>에이전트별 추론 강도.</summary>
 public sealed class ReasoningEffortTests
 {
     // ── 설정 값 해석 ──────────────────────────────────────────────────────

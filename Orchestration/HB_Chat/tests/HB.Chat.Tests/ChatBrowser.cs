@@ -5,7 +5,7 @@ using HB.Chat;
 namespace HB.Chat.Tests;
 
 /// <summary>
-/// 화면 시험용 브라우저 (계획서 2026-10-29_HB_Chat-화면-스크립트-시험-틀): 설치된 Chrome(없으면 Edge)을 화면 없이 · 임시 프로필로 띄우고
+/// 화면 시험용 브라우저: 설치된 Chrome(없으면 Edge)을 화면 없이 · 임시 프로필로 띄우고
 /// 앱의 <see cref="CdpClient"/>로 조종한다 — npm · Playwright 없이. 시험 클래스마다 한 번 띄우고(IClassFixture), 시험마다 새 탭(<see cref="OpenAsync"/>).
 /// 브라우저가 없는 PC면 <see cref="Available"/>가 false — 시험은 그냥 돌아간다(AgentBrowserTests와 같은 방식, xUnit 2라 통과로 보인다).
 /// 띄우기 · 연결이 실패하면 그 시험 클래스는 실패한다(건너뛰지 않음).

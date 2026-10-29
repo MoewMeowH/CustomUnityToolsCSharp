@@ -4,7 +4,7 @@ using System.Text.Json.Nodes;
 namespace HB.Chat;
 
 /// <summary>
-/// 모델 선택 카드의 에이전트 줄 하나 (계획서 2026-10-29_모델-선택창 2번, 결정 "에이전트 + 강도"): 모드가 쓰는 에이전트(Agent)와 그 에이전트를 쓰는 역할들.
+/// 모델 선택 카드의 에이전트 줄 하나 (결정 "에이전트 + 강도"): 모드가 쓰는 에이전트(Agent)와 그 에이전트를 쓰는 역할들.
 /// Pick · Effort는 카드가 처음 보일 값 — 지휘자가 넣은 agents · reasoning, 그 위에 + 요청 창에서 고른 값. Effort null이면 설정값 그대로.
 /// </summary>
 public sealed record ModeCardRow(string Agent, IReadOnlyList<string> Roles, string? Fallback, string Pick, string? Effort);
@@ -13,7 +13,7 @@ public sealed record ModeCardRow(string Agent, IReadOnlyList<string> Roles, stri
 public sealed record ModeRowPick(string Agent, string? Effort);
 
 /// <summary>
-/// + 요청 창에서 고른 값 (계획서 3번): 줄은 원래 에이전트 이름 → 고른 값. 그 말(큐 항목)에 붙어 가고, 그 말의 실행에서 같은 모드의 첫 run_mode 카드에 미리 채운다
+/// + 요청 창에서 고른 값: 줄은 원래 에이전트 이름 → 고른 값. 그 말(큐 항목)에 붙어 가고, 그 말의 실행에서 같은 모드의 첫 run_mode 카드에 미리 채운다
 /// (/self-review 785ebb5e97 C1 · C6).
 /// </summary>
 public sealed record ModePick(string Mode, IReadOnlyDictionary<string, ModeRowPick> Rows);

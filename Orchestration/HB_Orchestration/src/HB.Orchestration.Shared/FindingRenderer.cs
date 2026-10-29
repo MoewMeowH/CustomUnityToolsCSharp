@@ -2,7 +2,7 @@ using System.Text;
 
 namespace HB.Orchestration.Shared;
 
-// 대시보드 채팅방 · HB_Chat 실행 말풍선이 같이 쓰도록 Agents에서 옮김 (계획서 2026-10-28_HB_Chat-2차 2-2 e, 본문 그대로).
+// 대시보드 채팅방 · HB_Chat 실행 말풍선이 같이 쓰도록 Agents에서 옮김 (본문 그대로).
 /// <summary>해석된 구조화 출력을 지휘자에게 보낼 짧은 마크다운으로. 모든 필드를 보낸다 (빼면 판단 근거가 사라짐).</summary>
 public static class FindingRenderer
 {

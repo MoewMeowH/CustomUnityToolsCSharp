@@ -20,7 +20,7 @@ public sealed record SubagentLink(SubagentLinkKind Kind, string? RunId, string? 
 public sealed record SubagentView(SubagentResult Result, SubagentLink Link);
 
 /// <summary>
-/// 서브에이전트 결과 ↔ 호출 기록 연결 (계획서 2026-10-27_서브에이전트-결과-보존).
+/// 서브에이전트 결과 ↔ 호출 기록 연결.
 /// 비교 전에 줄바꿈(CRLF)과 줄 끝 공백 · 앞뒤 빈 줄만 정리한다. 2026-10-27 실측: 검토형 101건 중 63건이 그대로 일치,
 /// 15건가량은 지휘자가 고쳐 넣어 줄 81~97%만 일치 — 그래서 '거의 같음'을 따로 둔다.
 /// </summary>

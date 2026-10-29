@@ -12,7 +12,7 @@ using OpenAI;
 
 namespace HB.Orchestration.Tests;
 
-/// <summary>review 계열 구조화 출력 (계획서 2026-10-19_리뷰-구조화-출력).</summary>
+/// <summary>review 계열 구조화 출력.</summary>
 public sealed class StructuredOutputTests
 {
     private static string Finding(string severity = "major", string? file = "src/A.cs", object? line = null, string problem = "문제",

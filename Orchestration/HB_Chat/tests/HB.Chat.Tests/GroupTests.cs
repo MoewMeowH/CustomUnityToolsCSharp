@@ -5,7 +5,7 @@ using Microsoft.Extensions.Options;
 namespace HB.Chat.Tests;
 
 /// <summary>
-/// 단톡방 1단계 (계획서 2026-10-29_HB_Chat-단톡방): 멘션 해석 · 대화 줄 · 만들기와 숨은 자식 방 누출 · 부른 구성원만 실행 · 답 게시 ·
+/// 단톡방 1단계: 멘션 해석 · 대화 줄 · 만들기와 숨은 자식 방 누출 · 부른 구성원만 실행 · 답 게시 ·
 /// "본 뒤 대화" 전달 · 한 번에 하나 · 휴지통. 실행은 진짜 claude 대신 TestData/fake-claude.ps1 (프롬프트 첫 낱말로 동작을 고른다).
 /// </summary>
 public sealed class GroupTests : IDisposable
@@ -165,7 +165,7 @@ public sealed class GroupTests : IDisposable
     }
 
     [Fact]
-    public void Log_CacheReadsNewLinesOnly_AndRereadsWhenFileChanges()   // 2026-10-29_단톡방-보류-성능-검색
+    public void Log_CacheReadsNewLinesOnly_AndRereadsWhenFileChanges()
     {
         var group = NewGroup();
         GroupEntry Say(string text) => _log.Append(group.Id, new GroupEntry(0, DateTimeOffset.Now, GroupEntryKind.User, null, text));
@@ -233,7 +233,7 @@ public sealed class GroupTests : IDisposable
     }
 
     [Fact]
-    public void Search_FindsGroupUserAndMemberLines_NotNotes()   // 2026-10-29_단톡방-보류-성능-검색 (결정: 사용자 말 + 구성원 답)
+    public void Search_FindsGroupUserAndMemberLines_NotNotes()   // 찾는 줄: 사용자 말 + 구성원 답
     {
         var group = NewGroup();
         var a = group.Members[0];
@@ -267,7 +267,7 @@ public sealed class GroupTests : IDisposable
         var row = Assert.Single(list.All());
         Assert.Equal(group.Id, row.Id);
         Assert.Contains("A", row.Preview);
-        Assert.Equal(group.Id, Assert.Single(list.Search("팀")).RoomId); // 단톡방 이름은 찾되 숨은 자식 방은 나오지 않음 (2026-10-29_단톡방-보류-성능-검색)
+        Assert.Equal(group.Id, Assert.Single(list.Search("팀")).RoomId); // 단톡방 이름은 찾되 숨은 자식 방은 나오지 않음
         Assert.Single(RoomApi.Rows(list.All()));
     }
 
@@ -779,7 +779,7 @@ public sealed class GroupTests : IDisposable
     }
 
     /// <summary>
-    /// ⑤ K9 (2026-10-29_단톡방-차례-알림, 결정 "안내 줄 남기기"): A · C가 같이 답하며 둘 다 @B를 부르면 B는 한 번만 이어 답하고,
+    /// 안내 줄 남기기: A · C가 같이 답하며 둘 다 @B를 부르면 B는 한 번만 이어 답하고,
     /// 뒤에 부른 쪽에는 "이미 이어 불려" 안내 줄이 남는다 (전에는 말없이 사라짐). 가짜 claude 'call'은 '#'을 '@'로 바꾼 말을 답한다.
     /// </summary>
     [Fact]
@@ -817,7 +817,7 @@ public sealed class GroupTests : IDisposable
         Assert.EndsWith("— @A가 부른 것도 함께 끝남)", fromB.Text);
     }
 
-    /// <summary>알림 · 미니 창 (2026-10-29_단톡방-차례-알림, 결정 "이번 말에 답한 모두"): 쉬는 단톡방 줄의 Member는 마지막 사용자 말 뒤에 답한 구성원들.</summary>
+    /// <summary>알림 · 미니 창 ("이번 말에 답한 모두"): 쉬는 단톡방 줄의 Member는 마지막 사용자 말 뒤에 답한 구성원들.</summary>
     [Fact]
     public void Summary_Member_IsAnsweredMembersSinceLastUserLine()
     {

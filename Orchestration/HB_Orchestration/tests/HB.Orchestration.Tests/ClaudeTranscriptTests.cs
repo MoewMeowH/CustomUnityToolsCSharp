@@ -146,7 +146,7 @@ public sealed class ClaudeTranscriptTests : IDisposable
         Assert.All(ClaudeTranscriptReader.Read(path).RunCalls, c => Assert.Null(c.RunId));
     }
 
-    // ── 백그라운드 판별 (계획서 2026-10-19_세션연결-백그라운드-판별) ─────────────
+    // ── 백그라운드 판별 ─────────────
 
     private const string NewBackground = "MCP tool \"hb-orchestration/run_mode\" was moved to the background as task kxu568pwf so that a message that arrived while it was running can reach you; it was not interrupted and keeps running";
 
@@ -411,7 +411,7 @@ public sealed class ClaudeTranscriptTests : IDisposable
         Assert.Equal(RunLinkKind.Confirmed, links[b].Single().Kind);
     }
 
-    // ── 추정 배타 (계획서 2026-10-19_세션연결-추정-배타) ────────────────────────
+    // ── 추정 배타 ────────────────────────
 
     [Fact]
     public void Linker_two_calls_in_same_session_estimating_one_run_are_contested()

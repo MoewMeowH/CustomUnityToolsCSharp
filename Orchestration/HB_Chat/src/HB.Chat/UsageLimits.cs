@@ -29,7 +29,7 @@ public sealed record LimitSnapshot(string Source, DateTimeOffset At, IReadOnlyLi
 }
 
 /// <summary>
-/// 구독 사용량 한도 (계획서 2026-10-29_사용량-한도-표시 — 결정: 추가 호출 없이 실행 때 받은 마지막 값).
+/// 구독 사용량 한도 (결정: 추가 호출 없이 실행 때 받은 마지막 값).
 /// Claude: 실행마다 오는 rate_limit_event를 데이터 폴더 limits.json에 남긴다 (마지막 값만).
 /// Codex: 세션 기록(CODEX_HOME/sessions/…/rollout-*.jsonl)의 token_count 이벤트 rate_limits 중 가장 최근 것 — 대화형 Codex 사용도 반영된다.
 /// </summary>

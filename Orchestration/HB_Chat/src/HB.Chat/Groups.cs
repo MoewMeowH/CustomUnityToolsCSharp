@@ -8,7 +8,7 @@ using Microsoft.Extensions.Options;
 namespace HB.Chat;
 
 /// <summary>
-/// 단톡방 구성원 (계획서 2026-10-29_HB_Chat-단톡방). Id는 고정 — 빼고 같은 이름으로 다시 더해도 옛 세션에 이어지지 않게 (설계 검토 1).
+/// 단톡방 구성원. Id는 고정 — 빼고 같은 이름으로 다시 더해도 옛 세션에 이어지지 않게 (설계 검토 1).
 /// RoomId는 이 구성원이 도는 숨은 자식 방. SeenUpTo: 이 구성원에게 전달한 대화 줄 수 (그 앞은 이미 봄).
 /// </summary>
 public sealed record GroupMember(string Id, string Name, string Role, string RoomId)
@@ -65,7 +65,7 @@ public sealed class GroupLog(Func<string> dataFolder)
         RoomStore.IsRoomId(groupId) ? Path.Combine(dataFolder(), "groups", groupId + ".jsonl") : throw new ArgumentException("방 ID 모양이 아닙니다.", nameof(groupId));
 
     /// <summary>
-    /// 파일별 이어 읽기 캐시 (계획서 2026-10-29_단톡방-보류-성능-검색): 덧붙이기만 하는 파일이라 지난번 읽은 자리부터 새 줄만 읽는다.
+    /// 파일별 이어 읽기 캐시: 덧붙이기만 하는 파일이라 지난번 읽은 자리부터 새 줄만 읽는다.
     /// Offset = 줄바꿈까지 읽은 바이트, Lines = 그 앞의 파일 줄 수, Tail = Offset 바로 앞 바이트(앞부분이 그대로인지 확인용).
     /// 잠금은 <see cref="_gate"/> 하나 (모든 인스턴스 공용 — 같은 파일을 여러 인스턴스가 만져도 캐시가 하나).
     /// </summary>
@@ -337,7 +337,7 @@ public sealed partial class GroupChat
 
     private string McpServer => _options?.Value.McpServer ?? new ChatOptions().McpServer;
 
-    /// <summary>작업 폴더에 쓰는 구성원 방(편집 · 명령 단계 Claude) — 그 구성원이 낀 말은 차례로 돈다 (⑤ 결정). Codex는 늘 읽기 전용.</summary>
+    /// <summary>작업 폴더에 쓰는 구성원 방(편집 · 명령 단계 Claude) — 그 구성원이 낀 말은 차례로 돈다. Codex는 늘 읽기 전용.</summary>
     public static bool IsWriter(Room? room) =>
         room is { Level: PermissionLevel.Edit or PermissionLevel.Command } && room.Engine != RoomEngines.Codex;
 
@@ -361,7 +361,7 @@ public sealed partial class GroupChat
     public static readonly IReadOnlyList<string> CodexEfforts = ["low", "medium", "high", "xhigh", "max"];
 
     /// <summary>
-    /// 만들기. Codex 구성원(2단계)은 설정에서 고른 작업 폴더에서만(결정 5), 모델은 이 계정 Codex 목록(<see cref="CodexModels"/>)에 있는 것 · 빈 값(Codex 기본).
+    /// 만들기. Codex 구성원(2단계)은 설정에서 고른 작업 폴더에서만, 모델은 이 계정 Codex 목록(<see cref="CodexModels"/>)에 있는 것 · 빈 값(Codex 기본).
     /// 단계는 구성원마다(⑤ — 칸이 비면 <paramref name="level"/>), Codex는 늘 읽기. 단톡방 자체의 단계는 구성원 중 가장 높은 단계(표시용).
     /// <paramref name="baseMcp"/>: Claude 구성원에게 작업 폴더 기본 MCP(hb-orchestration)를 붙임 (⑤ 앞 결정 "만들 때 고름, 기본 끔") — 켰는데 .mcp.json에
     /// 그 항목이 없으면 거절(구성원이 매 턴 "읽지 못했습니다"로 실패하던 것). 명령 단계 구성원의 앱 MCP(터미널 · 지휘자 브라우저)는 늘 끔 — 그 곁칸이 단톡방 화면에 없다.
@@ -476,7 +476,7 @@ public sealed partial class GroupChat
         List<GroupMember> targets = parsed.All ? [.. current.Members] : [.. current.Members.Where(m => parsed.Names.Contains(m.Name, StringComparer.Ordinal))];
         if (targets.Count == 0)
         {
-            // 부름 없는 말 (결정 1): 대화 줄에 남기고 안내만 — 다음에 불린 구성원이 본다
+            // 부름 없는 말: 대화 줄에 남기고 안내만 — 다음에 불린 구성원이 본다
             _log.Append(groupId, new GroupEntry(0, DateTimeOffset.Now, GroupEntryKind.User, null, text));
             _log.Append(groupId, new GroupEntry(0, DateTimeOffset.Now, GroupEntryKind.Note, null,
                 parsed.Unknown.Count > 0
@@ -487,7 +487,7 @@ public sealed partial class GroupChat
         }
 
         // 모두 같은 대화 범위 — 이 사용자 말 앞까지 (먼저 끝난 답을 이번 턴의 다른 구성원에게 끼우지 않음, 설계 검토 5 · ③ 결정).
-        // 쓰는 구성원(편집 · 명령)이 끼면 차례로(⑤ 결정): 첫 구성원만 지금 보내고 나머지는 차례 대기열 — 차례가 오면 앞 답까지 붙여 보낸다(StartQueued)
+        // 쓰는 구성원(편집 · 명령)이 끼면 차례로: 첫 구성원만 지금 보내고 나머지는 차례 대기열 — 차례가 오면 앞 답까지 붙여 보낸다(StartQueued)
         var serial = targets.Any(m => IsWriter(_store.Get(m.RoomId)));
         var log = _log.Read(groupId);
         var prompts = new List<(GroupMember Member, string Prompt)>();
@@ -852,7 +852,7 @@ public sealed partial class GroupChat
             try
             {
                 PostAnswer(groupId, roomId, pending, result);
-                // 이 구성원이 답하는 동안 다른 구성원이 불렀으면 이제 이어서 (④ 결정 1). 옛 기다림을 지우기 전에 — 새 기다림이 덮어 쓰므로
+                // 이 구성원이 답하는 동안 다른 구성원이 불렀으면 이제 이어서. 옛 기다림을 지우기 전에 — 새 기다림이 덮어 쓰므로
                 // 기다림이 없는 틈이 생기지 않는다(그 틈에 화면이 찍으면 "이어 답이 없습니다"가 남았다 — 4단계 리뷰 지휘자 K1)
                 StartDeferred(groupId, roomId);
                 Pump(groupId, roomId); // 차례로 도는 말(⑤)의 다음 구성원
@@ -887,7 +887,7 @@ public sealed partial class GroupChat
             if (!round!.CalledBy.TryGetValue(c.Id, out var by)) round.CalledBy[c.Id] = by = [];
             by.Add(caller);
         }
-        // 같은 말에 아직 답하는 중(기다림이 있음)이면 그 답을 올린 뒤에 (④ 결정 1). 기다림 없이 실행만 남은 방은 바로 보낸다 — RoomHub가 큐에 넣어
+        // 같은 말에 아직 답하는 중(기다림이 있음)이면 그 답을 올린 뒤에. 기다림 없이 실행만 남은 방은 바로 보낸다 — RoomHub가 큐에 넣어
         // 이어 돌린다. Busy로도 미루면 그 방의 답 처리는 이미 끝나 미룬 것을 꺼낼 곳이 없었다 (4단계 리뷰 — sub_self C1 · ade73d4d61 1-F1 · Codex)
         var deferred = calls.Where(c => _pending.ContainsKey(c.RoomId)).ToList();
         var now = calls.Except(deferred).ToList();
@@ -974,7 +974,7 @@ public sealed partial class GroupChat
         foreach (var name in parsed.Names)
         {
             if (group.Members.FirstOrDefault(m => m.Name == name) is not { } target || target.Id == memberId) continue;
-            // 차례를 기다리는 구성원은 두 번째로 불려도 갈음 — 차례 안내에 부른 이들이 다 적힌다 (2026-10-29_단톡방-차례-알림 결정)
+            // 차례를 기다리는 구성원은 두 번째로 불려도 갈음 — 차례 안내에 부른 이들이 다 적힌다
             if (round.Queue.Any(q => q.MemberId == target.Id && q.Caller is null))
             {
                 round.Chained.Add(target.Id);

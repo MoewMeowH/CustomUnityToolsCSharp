@@ -7,7 +7,7 @@ using Microsoft.Extensions.AI;
 namespace HB.Orchestration.Tests;
 
 /// <summary>
-/// claude-cli 제공사 (claude --bare -p 읽기 전용 검토) · 작업 폴더 (계획서 2026-10-27_검토형-서브에이전트-API-전환).
+/// claude-cli 제공사 (claude --bare -p 읽기 전용 검토) · 작업 폴더.
 /// 실제 CLI는 부르지 않는다 — 실행기는 가짜, 결과 JSON은 2026-10-27 시험 출력 모양을 줄인 합성 데이터.
 /// </summary>
 public sealed class ClaudeCliTests : IDisposable
@@ -337,7 +337,7 @@ public sealed class ClaudeCliTests : IDisposable
         """;
 
     [Fact]
-    public async Task Mode_run_can_take_context_root_and_record_tool()   // 골든 리플레이 (계획서 2026-10-27_리플레이-골든)
+    public async Task Mode_run_can_take_context_root_and_record_tool()   // 골든 리플레이
     {
         using var h = new ModeRunnerHarness(CliModes, providerType: ClaudeCliProvider.TypeName);
         var root = Path.Combine(_dir, "case", "files");

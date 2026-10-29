@@ -6,7 +6,7 @@ using System.Text.Json.Nodes;
 namespace HB.Chat;
 
 /// <summary>
-/// Chrome DevTools 프로토콜(CDP) 연결 하나 — .NET 기본 WebSocket, 외부 패키지 없음 (계획서 2026-10-29_HB_Chat-지휘자-브라우저, 0단계 실측).
+/// Chrome DevTools 프로토콜(CDP) 연결 하나 — .NET 기본 WebSocket, 외부 패키지 없음 (0단계 실측).
 /// 명령은 id로 답을 짝짓고, 이벤트(id 없는 메시지)는 <see cref="Event"/>로 넘긴다. 연결이 끊기면 기다리던 명령은 모두 실패한다.
 /// </summary>
 public sealed class CdpClient : IAsyncDisposable

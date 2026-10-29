@@ -5,7 +5,7 @@ using Microsoft.Win32.SafeHandles;
 namespace HB.Chat;
 
 /// <summary>
-/// ConPTY(의사 콘솔)로 띄운 내 셸 하나 (계획서 2026-10-29_HB_Chat-터미널-곁칸, 결정 "입력도 (ConPTY)" · 결정 3 — 지휘자 프로세스는 <see cref="PipedProcess"/>).
+/// ConPTY(의사 콘솔)로 띄운 내 셸 하나 (결정 "입력도 (ConPTY)" · 결정 3 — 지휘자 프로세스는 <see cref="PipedProcess"/>).
 /// 출력은 VT 바이트 그대로(색 포함), 입력은 키 바이트 그대로(Ctrl+C = 0x03), 크기는 곁칸 탭을 따른다.
 /// 프로세스마다 KILL_ON_JOB_CLOSE Job Object를 두어 끝내기는 트리째(서버가 띄운 자식까지). 일시 정지로 띄워 Job에 넣은 뒤 풀어
 /// 넣기 전에 자식이 빠지는 틈을 없앤다 (<see cref="ProcessJob"/>과 같은 이유). 앱 전체 Job 안이라 앱이 끝나면 함께 끝난다.

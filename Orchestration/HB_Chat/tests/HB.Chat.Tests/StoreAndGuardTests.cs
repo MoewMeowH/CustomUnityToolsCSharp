@@ -133,7 +133,7 @@ public sealed class StoreAndGuardTests : IDisposable
     }
 
     [Fact]
-    public void SplitGuide_SeparatesLeadingReminderBlocks()   // 2026-10-29_단톡방-보류-나머지 D11
+    public void SplitGuide_SeparatesLeadingReminderBlocks()
     {
         var (guide, text) = HB.Chat.Pages.RoomModel.SplitGuide("<system-reminder>\n규칙 바뀜\n</system-reminder>\n<system-reminder>\n단톡방 안내\n</system-reminder>\n@X 안녕");
         Assert.Equal("@X 안녕", text);

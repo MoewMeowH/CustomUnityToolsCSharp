@@ -5,7 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace HB.Chat.Tests;
 
 /// <summary>
-/// 실제 앱 응답 (계획서 2026-10-29_HB_Chat-화면-스크립트-시험-틀): Program.cs에 이어진 미들웨어 · 끝점의 헤더와 상한.
+/// 실제 앱 응답: Program.cs에 이어진 미들웨어 · 끝점의 헤더와 상한.
 /// 그전에는 미들웨어만 따로 시험하고 연결은 curl로 봤다 (f 리뷰 self C7 · 4차 /self-review dc27a724bf C6 보류).
 /// </summary>
 public sealed class AppHeaderTests(ChatApp app) : IClassFixture<ChatApp>

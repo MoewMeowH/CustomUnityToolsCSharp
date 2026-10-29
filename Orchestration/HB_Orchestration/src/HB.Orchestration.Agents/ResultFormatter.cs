@@ -43,7 +43,7 @@ public static class ResultFormatter
 
     /// <summary>
     /// "첨부 12,000자 + input 3,000자 = 15,000자 / 상한 350,000자 (4%)" — 지휘자가 다음 호출에서 첨부를 넉넉히 붙여도 되는지 보게
-    /// (계획서 2026-10-27_외부-첨부-범위-규칙: 리뷰 입력은 상한의 1/3 안팎인데 자료 요청이 35% 실행에서 나왔다). 상한이 없으면 null.
+    /// (리뷰 입력은 상한의 1/3 안팎인데 자료 요청이 35% 실행에서 나왔다). 상한이 없으면 null.
     /// </summary>
     public static string? AttachmentHeadroom(int attachedChars, int inputChars, int maxChars)
     {

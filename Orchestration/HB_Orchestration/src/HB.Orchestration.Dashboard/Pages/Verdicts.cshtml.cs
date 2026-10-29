@@ -13,7 +13,7 @@ public sealed class VerdictsModel(PricingService pricing, CallLogCache log, Verd
 
     public VerdictSummary Summary { get; private set; } = null!;
 
-    /// <summary>runId → 이어진 채팅방. 이어지지 않은 실행(골든 등)에는 방 링크를 두지 않는다 (계획서 2026-10-27_에이전트-채팅방 결정).</summary>
+    /// <summary>runId → 이어진 채팅방. 이어지지 않은 실행(골든 등)에는 방 링크를 두지 않는다.</summary>
     public IReadOnlyDictionary<string, RunRoom> Rooms { get; private set; } = new Dictionary<string, RunRoom>();
 
     public void OnGet()

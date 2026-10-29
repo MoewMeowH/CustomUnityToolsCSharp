@@ -1,4 +1,4 @@
-// HB Chat 화면 (계획서 2-2 a · b). 왼쪽 방 목록 + 오른쪽 방 한 칸.
+// HB Chat 화면. 왼쪽 방 목록 + 오른쪽 방 한 칸.
 // - 방 목록: 앱 전체 알림(/events)을 받으면 목록 부분만 다시 받는다.
 // - 방 전환: 목록에서 방을 누르면 오른쪽 칸만 ?handler=Pane으로 받아 바꾸고, 앞 방의 SSE · 타이머를 끝낸 뒤 새 방을 붙인다 (mountRoom).
 // - 방 동작은 1차 · 2-1의 Room.cshtml 스크립트를 옮긴 것이다 (알림 차례 처리 · snapshot마다 다시 받기 · 승인 카드 …).
@@ -47,7 +47,7 @@
             }
         } catch { /* 다음 알림 때 다시 */ }
     }
-    // 사이드바 구독 한도 (계획서 2026-10-29_사용량-한도-표시): 목록을 다시 받을 때 같이 — 펼친 창은 펼친 채로, 늦게 온 옛 응답은 버림
+    // 사이드바 구독 한도: 목록을 다시 받을 때 같이 — 펼친 창은 펼친 채로, 늦게 온 옛 응답은 버림
     async function refreshLimits() {
         const seq = ++limitsSeq;
         try {
@@ -122,7 +122,7 @@
             if (list) list.hidden = true;
         } catch { /* 다음 입력 때 다시 */ }
     }
-    // ---- 단톡방 만들기: Codex 구성원은 읽기만 — 엔진 칸에서 Codex를 고르면 단계 칸을 읽기로 맞추고 다른 값을 막는다 (2026-10-29_단톡방-보류-나머지 A1) ----
+    // ---- 단톡방 만들기: Codex 구성원은 읽기만 — 엔진 칸에서 Codex를 고르면 단계 칸을 읽기로 맞추고 다른 값을 막는다 ----
     function lockCodexLevel(engine) {
         const level = engine?.closest(".group-member-row")?.querySelector("select[name=levels]");
         if (!level) return;
@@ -220,7 +220,7 @@
     // 맨 위 이동 · 모달 · 내려받기도 없음. 문서 CSP는 네트워크를 다 막고 인라인 스크립트 · 스타일 · data: 그림만.
     // 위젯이 스스로 다른 주소로 이동하는 것은 페이지 CSP frame-src 'none'(Widgets.cs)이 막는다. 소스는 서버가 이스케이프한 글의 textContent.
     // 틀 위 표시 · 단추 · "코드 보기" 글은 CSS로 넣는다 — 인용 답장이 innerText로 본문을 읽을 때 섞이지 않게 (803e5f13eb C4).
-    // 터미널 곁칸 (계획서 2026-10-29_HB_Chat-터미널-곁칸): xterm.js 5.5.0 + addon-fit 0.10.0 (wwwroot/lib 고정 판)은 터미널 탭을 처음 열 때 한 번만 불러온다.
+    // 터미널 곁칸: xterm.js 5.5.0 + addon-fit 0.10.0 (wwwroot/lib 고정 판)은 터미널 탭을 처음 열 때 한 번만 불러온다.
     let xtermLoading = null;
     function loadXterm() {
         if (window.Terminal && window.FitAddon) return Promise.resolve();
@@ -305,7 +305,7 @@
             box.append(bar, frame, details);
         });
     }
-    // ---- 차트 시안 (계획서 Orchestration/HB_Chat/docs/plans/2026-10-29_HB_Chat-차트-시안.md) ----
+    // ---- 차트 시안 ----
     // 지휘자 말풍선의 ```chart 코드 블록(Chart.js 설정 JSON)을 앱에 넣어 둔 Chart.js(wwwroot/lib, 4.6.1)로 그린다.
     // 지휘자 스크립트는 없다: 틀은 앱이 만들고, 데이터는 JSON 블록으로만 들어간다 (< > & 를 \u 이스케이프 — 글이 태그를 닫지 못하게).
     // 격리는 위젯과 같다 — srcdoc, allow-same-origin 없음, 같은 문서 CSP(네트워크 막음). 결정 "바로 그림"이라 처음부터 allow-scripts.
@@ -378,7 +378,7 @@
             "const s=()=>{const h=Math.ceil(document.body.getBoundingClientRect().height);if(h>0)parent.postMessage({hbWidgetHeight:h},\"*\");};" +
             "s();new ResizeObserver(s).observe(document.body);})()<\/script></body></html>";
     }
-    // ---- 차트 하나만 인쇄 · PDF (계획서 Orchestration/HB_Chat/docs/plans/2026-10-29_HB_Chat-차트-PDF.md) ----
+    // ---- 차트 하나만 인쇄 · PDF ----
     // 인쇄할 때만 밝은 색으로 그린 틀을 화면 틀 자리에 잠깐 바꿔 넣고(화면 틀은 숨김), 다 그려지면 window.print().
     // 인쇄 창에서 "PDF로 저장"을 고른다 — 데스크톱 껍데기의 페이지 → 호스트 통로는 그대로 닫혀 있다. afterprint에서 되돌린다.
     const ChartPrintTheme = { text: "#1d2330", line: "#d0d4dc", panel: "#ffffff" };
@@ -441,7 +441,7 @@
             bar.append(go);
         });
     }
-    // ---- 슬라이드 시안 (계획서 Orchestration/HB_Chat/docs/plans/2026-10-29_HB_Chat-슬라이드-시안.md) ----
+    // ---- 슬라이드 시안 ----
     // ```slides = {"title"?, "slides": [{"title"?, "body"?: Markdown, "chart"?: Chart.js 설정, "notes"?}]}.
     // 앱이 넣어 둔 reveal.js 6.0.2로 차트와 같은 격리 틀에 그린다. 제목 · 메모는 textContent, 본문 Markdown은 marked → DOMPurify(허용 태그만, 속성 없음)를
     // 틀 안에서 한다 — 정화가 뚫려도 격리된 틀 안 (결정 "Markdown 서식"). 슬라이드 차트는 ```chart와 같은 검사 · 같은 덮어쓰기.
@@ -591,7 +591,7 @@
         return ok;
     }
 
-    // 모델 선택 줄 (계획서 2026-10-29_모델-선택창, 결정 "에이전트 + 강도"): 모드가 쓰는 에이전트마다 교체 · 추론 강도 고르기.
+    // 모델 선택 줄 (결정 "에이전트 + 강도"): 모드가 쓰는 에이전트마다 교체 · 추론 강도 고르기.
     // rows: [{agent, roles, fallback, pick, effort}], agents: [{name, model, reasoning}]. read()는 {원래 에이전트: {agent, effort}} — run_mode 카드 · + 요청 창이 같이 쓴다.
     function modeRows(rows, agents, efforts) {
         const box = el("div", "mode-rows");
@@ -652,7 +652,7 @@
             if (a.description) card.append(el("div", "desc", (a.tool === "터미널" || a.tool === "브라우저" ? "" : "Claude 설명: ") + a.description));
             // 명령 밖의 입력도 허용하면 같이 실행된다 — 본 것 = 허용되는 것 (/self-review 5e747ff851 C1)
             if (a.extra) card.append(el("div", "cmd", "추가 입력: " + a.extra));
-            // 백그라운드 실행 명령 — 답이 끝난 뒤에도 돈다 (계획서 2026-10-29_HB_Chat-백그라운드-명령, 결정 "넣음")
+            // 백그라운드 실행 명령 — 답이 끝난 뒤에도 돈다 (결정 "넣음")
             if (a.backgroundMinutes) card.append(el("div", "warn-line",
                 `백그라운드: 답이 끝난 뒤에도 최대 ${a.backgroundMinutes}분 계속 돕니다 — 대화 아래 '지금 끝내기'로 먼저 정리할 수 있습니다.`));
             const denyOnly = a.truncated || a.risky;
@@ -723,7 +723,7 @@
             place(a, card);
             if (follow) toBottom();
         }
-        // 모델 선택 카드 (계획서 2026-10-29_모델-선택창): 지휘자의 run_mode — 모드 · 이유 · 요청 글 · 보낼 파일을 보이고, 에이전트마다 교체 · 강도를 골라 허가 · 거절.
+        // 모델 선택 카드: 지휘자의 run_mode — 모드 · 이유 · 요청 글 · 보낼 파일을 보이고, 에이전트마다 교체 · 강도를 골라 허가 · 거절.
         // 항상 허용은 없다. 모드 · 요청 글은 바꾸지 않는다 (지휘자가 준비한 입력과 어긋나지 않게).
         function showModeCard(a) {
             const m = a.mode;
@@ -1001,7 +1001,7 @@
                 const body = msg?.querySelector(".body");
                 if (!body) return;
                 // 위젯 · 차트 · 슬라이드 원문은 접힌 "코드 보기" 안이라 innerText에 안 잡힌다 — 같은 작업 안에서 잠깐 펼쳐 읽고 되돌린다
-                // (화면에 그려지기 전이라 깜빡이지 않음, 계획서 2026-10-29_HB_Chat-2-2-작은-한계-정리)
+                // (화면에 그려지기 전이라 깜빡이지 않음)
                 const folded = [...body.querySelectorAll("details.widget-code:not([open])")];
                 folded.forEach(d => { d.open = true; });
                 const text = body.innerText.trim();
@@ -1030,7 +1030,7 @@
         const faces = JSON.parse(root.dataset.faces || "{}");
         const faceImg = $("#face-img"), faceLetter = $("#face-letter"), faceLabel = $("#face-label");
         // 표정 그림은 스티커 원본(장당 약 1.4MB)이라 처음 바뀔 때 늦게 보인다 — 화면이 한가할 때 미리 받아 둔다 (하루 캐시,
-        // 계획서 2026-10-29_HB_Chat-2-2-작은-한계-정리 결정 "미리 받기"). 같은 그림은 한 번만.
+        // 결정 "미리 받기"). 같은 그림은 한 번만.
         const preloadFaces = () => [...new Set(Object.values(faces).map(f => f && f.url).filter(Boolean))]
             .forEach(url => { if (!disposed) new Image().src = url; });
         if (window.requestIdleCallback) requestIdleCallback(preloadFaces, { timeout: 5000 }); else setTimeout(preloadFaces, 2000);
@@ -1347,7 +1347,7 @@
             document.title = "HB Chat · " + title;
         }
 
-        // ---- 터미널 곁칸 (계획서 2026-10-29_HB_Chat-터미널-곁칸, 결정 3): 내 셸("+" PowerShell · ▾ 고르기, 입력 받음)과 지휘자 프로세스(읽기 전용).
+        // ---- 터미널 곁칸: 내 셸("+" PowerShell · ▾ 고르기, 입력 받음)과 지휘자 프로세스(읽기 전용).
         // 목록은 terminals 알림, 출력은 term-out 알림(base64 바이트). 탭을 처음 보일 때 xterm을 만들고 버퍼 전체를 받는다 — 그 끝 오프셋보다 앞선
         // 실시간 조각은 버리고, 틈이 보이거나 다시 붙으면 버퍼를 다시 받는다 (/self-review 57b59ef134 C4). 키 입력은 차례대로 보낸다(내 셸만). ----
         const termTabs = $("#term-tabs"), termHost = $("#term-host"), termBar = $("#term-bar");
@@ -1500,7 +1500,7 @@
             else writeTerm(v, ev.offset, bytes);
         }
 
-        // ---- 지휘자 브라우저 곁칸 (계획서 2026-10-29_HB_Chat-지휘자-브라우저, 결정 "보기만"): 상태는 browser 알림, 화면은 browser-frame 알림(jpeg base64,
+        // ---- 지휘자 브라우저 곁칸 (결정 "보기만"): 상태는 browser 알림, 화면은 browser-frame 알림(jpeg base64,
         // 바뀔 때만 옴). 탭을 열 때 마지막 화면을 받는다. 클릭 · 입력은 받지 않는다 — 지휘자 작업과 섞이지 않게. ----
         const browserFrame = $("#browser-frame");
         let browserOpen = false, browserFrameUrl = null;
@@ -1623,7 +1623,7 @@
                     if (await post("Settings", new FormData(settings))) { reopenRoom(roomId); return; }
                     button.disabled = false;
                 });
-                // 연결 탭 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결): 켜기 · 끄기 · Unity 고르기 · 확인. 다음 실행부터 — 성공하면 곁칸만 다시 받는다
+                // 연결 탭: 켜기 · 끄기 · Unity 고르기 · 확인. 다음 실행부터 — 성공하면 곁칸만 다시 받는다
                 $("#side-sec-mcp")?.addEventListener("change", async (e) => {
                     const t = e.target;
                     if (t.matches("input[data-mcp]")) {
@@ -1717,7 +1717,7 @@
             if (t.agent) line.dataset.agent = t.agent;
             if (t.kind) line.dataset.kind = t.kind;
             if (t.description) line.dataset.desc = t.description;
-            const bash = line.dataset.kind === "local_bash"; // 지휘자의 백그라운드 명령 (계획서 2026-10-29_HB_Chat-백그라운드-명령)
+            const bash = line.dataset.kind === "local_bash"; // 지휘자의 백그라운드 명령
             const state = t.phase === "done" ? (t.status === "completed" ? "끝" : "끝남(" + (t.status || "?") + ")")
                 : (bash ? "실행 중" : "진행 중" + (t.toolUses ? " · 도구 " + t.toolUses : ""));
             line.textContent = (bash ? "백그라운드 명령" : "서브에이전트 " + name) + (line.dataset.desc ? ": " + line.dataset.desc : "") + " — " + state;
@@ -1725,7 +1725,7 @@
             if (atBottom()) toBottom();
         }
 
-        // 메인 답 뒤 백그라운드 작업 기다림 줄: 몇 개 · 언제 정리 · "지금 끝내기" (계획서 2026-10-29_HB_Chat-백그라운드-명령).
+        // 메인 답 뒤 백그라운드 작업 기다림 줄: 몇 개 · 언제 정리 · "지금 끝내기".
         // 기다림은 정리 시각(until)이 있는 동안 — 작업 수가 0이어도 지휘자가 이어 답하는 중이라 줄과 단추를 둔다 (/self-review 6f64f4b039 C3). 끝 · 중지에서 지운다.
         let bgLine = null;
         function clearBackground() { bgLine?.remove(); bgLine = null; }
@@ -1895,7 +1895,7 @@
                     const refreshed = await refreshMessages();
                     // 보내지 못한 말은 남김 (C2). 질문 답 말풍선은 세션 기록의 것으로 바뀌므로 지운다 (4차 D1).
                     // 답하지 않은 질문 줄(q-done)은 성공으로 끝난 턴에서만 — 중지 · 실패면 기록에 결과 줄이 없을 수 있어 남긴다 (e8091295fe C4)
-                    // 승인 결과 줄 · 백그라운드 명령 진행 줄도 지운다 — 기록 속 제자리에 방 기록 줄 · 백그라운드 알림 줄로 다시 그려졌다 (계획서 2026-10-29_HB_Chat-진행줄-자리-정리표시).
+                    // 승인 결과 줄 · 백그라운드 명령 진행 줄도 지운다 — 기록 속 제자리에 방 기록 줄 · 백그라운드 알림 줄로 다시 그려졌다.
                     // 서브에이전트 진행 줄은 기록에 같은 줄이 없어 다음 턴까지 둔다 (/self-review e464ec29ba 자료 부족)
                     if (refreshed) live.querySelectorAll(":scope > .msg:not(.failed), :scope > .approval-line, :scope > .agent-line[data-kind=\"local_bash\"]" + (ev.ok ? ", :scope > .q-done" : "")).forEach(m => m.remove());
                     else live.prepend(el("div", "live-line denied", "말풍선을 다시 받지 못했습니다 — 새로고침하면 보입니다."));
@@ -2012,7 +2012,7 @@
             $("#attach-btn").addEventListener("click", () => input.click());
             input.addEventListener("change", () => { upload([...input.files]); input.value = ""; });
         }
-        // ---- + 메뉴 · 외부 에이전트 요청 (계획서 2026-10-29_모델-선택창 3번) ----
+        // ---- + 메뉴 · 외부 에이전트 요청 ----
         // 요청 창에서 모드 · 에이전트 · 강도를 정하면 입력칸 위 칩으로 남고, 보내기(끼어들기도)가 ModeRequest로 간다 — 서버가 머리 줄을 붙이고 다음 run_mode 카드에 미리 채운다.
         const plusBtn = $("#plus-btn"), plusMenu = $("#plus-menu");
         const setMenu = (open) => { if (!plusMenu) return; plusMenu.hidden = !open; plusBtn.setAttribute("aria-expanded", open ? "true" : "false"); };
@@ -2260,7 +2260,7 @@
         };
     }
 
-    // ---- 단톡방 (계획서 2026-10-29_HB_Chat-단톡방, 1단계) ----
+    // ---- 단톡방 (1단계) ----
     // 앱이 가진 대화 줄로 그린다: 구성원 답이 올라오면(group 알림) 새 줄만 받아 붙이고, 구성원 상태(member 알림)는 머리 칩에 보인다.
     // 구성원 도구 · 승인 · 질문 카드는 그 구성원 자식 방("과정 보기")에서 본다 — 이 칸에는 진행 줄 · 답만.
     function mountGroup(root) {
@@ -2355,7 +2355,7 @@
                 if (!res.ok || disposed) return;
                 for (const s of await res.json()) setMember(s.member, s.state);
             } catch { }
-            // 머리의 구성원 비용 합계 (계획서 2026-10-29_사용량-한도-표시) — 답이 오면 바뀐다
+            // 머리의 구성원 비용 합계 — 답이 오면 바뀐다
             try {
                 const res = await fetch(self + "?handler=GroupCost", { cache: "no-store" });
                 const cost = $("#group-cost");
@@ -2413,7 +2413,7 @@
 
         decorate(root);
         toBottom();
-        // 검색 결과로 열면 그 말로 (2026-10-29_단톡방-보류-성능-검색): 단톡방은 대화 전부를 그리므로 앞 쪽을 받을 일은 없다 —
+        // 검색 결과로 열면 그 말로: 단톡방은 대화 전부를 그리므로 앞 쪽을 받을 일은 없다 —
         // 화면이 처음 맨 아래로 내리는 것보다 뒤에 오도록 잠깐 기다렸다가, 아직 없으면(새 말 받기 중) 몇 번 다시 본다
         function reveal(line) {
             let tries = 0;

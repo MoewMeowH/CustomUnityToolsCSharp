@@ -9,7 +9,7 @@ using Microsoft.Extensions.AI;
 namespace HB.Orchestration.Agents.Providers;
 
 /// <summary>
-/// OpenAI Codex CLI(<c>codex exec --json -s read-only</c>)를 읽기 전용 리뷰 에이전트로 띄운다 (계획서 2026-10-29_Codex-외부-리뷰어).
+/// OpenAI Codex CLI(<c>codex exec --json -s read-only</c>)를 읽기 전용 리뷰 에이전트로 띄운다.
 /// 과금은 API 키가 아니라 ChatGPT 구독 로그인(CODEX_HOME의 auth.json)이다 — 키 변수는 자식 환경에서 지운다.
 /// 에이전트는 작업 폴더(<see cref="ReviewWorkFolder"/>, 저장소 추적 파일 사본)에서 셸 명령(rg · Get-Content)으로 직접 찾아 읽는다.
 /// 읽기 전용 샌드박스는 쓰기만 막는다 — 디스크 전체를 읽을 수는 있다 (HB_Chat 실측). 그래서 웹 검색 · 앱 · 플러그인 · 브라우저를 끄고, 사용자 설정을 읽지 않는다.

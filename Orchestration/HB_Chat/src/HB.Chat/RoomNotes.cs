@@ -5,7 +5,7 @@ using Microsoft.Extensions.Options;
 
 namespace HB.Chat;
 
-/// <summary>방 기록 줄 하나 — 승인 결과 · 백그라운드 정리 표시 (계획서 2026-10-29_HB_Chat-진행줄-자리-정리표시). Denied면 거절 · 시간 초과처럼 흐린 색.</summary>
+/// <summary>방 기록 줄 하나 — 승인 결과 · 백그라운드 정리 표시. Denied면 거절 · 시간 초과처럼 흐린 색.</summary>
 public sealed record RoomNote(DateTimeOffset At, string Text, bool Denied)
 {
     /// <summary>지휘자 브라우저 스크린샷 파일 이름 (그 방 browser-shots 폴더) — 기록 화면이 작은 그림으로 그린다.</summary>
@@ -39,13 +39,13 @@ public sealed class RoomNotes(Func<string> dataFolder)
     /// <summary>정리 표시를 쓸 때의 도구 이름 (승인 기록 tool 칸).</summary>
     public const string BackgroundTool = "백그라운드";
 
-    /// <summary>터미널 시작 · 끝 줄의 도구 이름 (계획서 2026-10-29_HB_Chat-터미널-곁칸). 시작 카드 결과는 "터미널"로 따로 남는다.</summary>
+    /// <summary>터미널 시작 · 끝 줄의 도구 이름. 시작 카드 결과는 "터미널"로 따로 남는다.</summary>
     public const string TerminalTool = "터미널 상태";
 
-    /// <summary>지휘자 브라우저 스크린샷 줄 (계획서 2026-10-29_HB_Chat-지휘자-브라우저, 결정 "기록에 그림으로 남김") — 요약 칸 = 그림 파일 이름.</summary>
+    /// <summary>지휘자 브라우저 스크린샷 줄 (결정 "기록에 그림으로 남김") — 요약 칸 = 그림 파일 이름.</summary>
     public const string BrowserShotTool = "브라우저 스크린샷";
 
-    /// <summary>Unity 캡처 그림 줄 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결 결정 3) — 브라우저 스크린샷과 같은 모양.</summary>
+    /// <summary>Unity 캡처 그림 줄 — 브라우저 스크린샷과 같은 모양.</summary>
     public const string UnityShotTool = "Unity 스크린샷";
 
     private readonly Lock _gate = new();

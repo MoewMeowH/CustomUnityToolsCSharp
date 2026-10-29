@@ -14,7 +14,7 @@ Claude Code ──MCP──▶ HB.Orchestration.Mcp   (도구 5개)
                       └─ 시도마다 기록 ──▶ %LOCALAPPDATA%\HB_Orchestration\calls.jsonl ◀── Dashboard (.cshtml)
 ```
 
-> 본문의 `docs/plans/…` · `docs/worklog/…` 링크는 이 PC에만 있는 작업 기록이다 (`docs/`는 git 제외).
+> 계획서 · 작업 기록(`docs/`)은 이 PC에만 있다 (git 제외).
 
 ## 구조
 
@@ -119,7 +119,7 @@ dotnet test tests/HB.Orchestration.Tests
 | `Providers.<이름>.ImageDetail` | 이미지 부분에 실을 `detail` 값 (OpenAI: `auto`·`low`·`high`·`original`). 비우면 보내지 않음 (= 제공사 기본값). Gemini OpenAI 호환 엔드포인트는 이 필드를 문서화하지 않아 제공사 단위로 둔다 |
 | `Agents[].Vision` | 이미지 입력을 받는 모델인지 (기본 `true`). `false`인 에이전트가 낀 모드에 `images`가 오면 실행 전에 거절 |
 | `Agents[].StructuredOutput` · `Providers.<이름>.StructuredOutput` | 구조화 출력(역할 `Output`) 요청 방식. **에이전트 → 제공사 → `Prompt`** 순. `Prompt` = 시스템 프롬프트에만 JSON 형식을 적음. `Schema` = 거기에 `response_format: json_schema`(strict)까지 보내 강제. 모델이 미지원이면 400 → 그 단계 실패 (자동으로 `Prompt`로 다시 보내지 않음, 이 값을 `Prompt`로 바꿀 것). 기본 설정은 제공사 단위로 `openai`만 `Schema`이고, 에이전트 단위로 `gemini_high_argon` · `deepseek_main_flash`도 `Schema` (아래 "구조화 출력") |
-| `Agents[].ReasoningEffort` | 추론 강도 `none` · `low` · `medium` · `high` · `xhigh` (대소문자 무시). **에이전트 전용** (같은 제공사라도 모델마다 받는 값이 달라 제공사 기본값은 없음). 비우면 보내지 않음 = 제공사·모델 기본값. 다른 값이면 그 에이전트를 건너뛴다. Chat Completions는 `reasoning_effort`, Responses(openai-web)는 `reasoning.effort`로 나간다. 실행마다 `run_mode`의 `reasoning`(`"에이전트=강도"` · `"*=강도"`, 에이전트는 `agents` 교체 뒤 이름) · 골든 `--reasoning`으로 덮어쓴다. followUp은 원래 호출 값을 그대로 쓴다. 추론 토큰도 `MaxOutputTokens` 안에 들어가므로 강도를 올리면 상한에 닿아 본문 없이 끝날 수 있다 (2026-10-20 sol·argon·deepseek 64,000으로 올림). 호출 기록 `ReasoningEffort`에 실제로 보낸 값이 남고, `list_modes` 에이전트 줄에 설정 값이 보인다. 대시보드 에이전트 편집에서도 고친다. 제공사별 받는 값: OpenAI gpt-6.1-sol은 low~xhigh(none·minimal 400, 기본 medium) · Gemini OpenAI 호환은 low~high(xhigh 매핑 없음, 3.x·4는 끌 수 없음) · Fireworks는 low~xhigh·none (모델별 기본값 문서 없음). **Gemini OpenAI 호환은 강도를 비우면 추론을 거의 하지 않고**(2026-10-21 실측: argon 기본 21초 · total = prompt + completion, high 명시 201초), 추론 토큰을 usage의 `total_tokens`에만 넣는다 → 서버가 Gemini 제공사(엔드포인트 generativelanguage.googleapis.com)에서만 추론 칸이 없고 total > prompt + completion이면 그 차이를 `ReasoningTokens`로 기록하고 `OutputTokens`에 더한다(비용이 출력 단가로 잡힘). **`gemini_high_argon`은 ReasoningEffort가 비어 있어 호환 경로 기본값(추론 거의 없음)으로 동작한다** — 이 에이전트를 쓰는 crash_main · preflight_* 모두 해당 (review_high · perf_high는 2026-10-22부터 DeepSeek, 계획서 `docs/plans/2026-10-22_argon-모드-유지-검토.md`). high를 명시하면 비용 약 6배·시간 약 10배인데 골든 rec-4942 찾음은 1→2/11뿐이라 바꾸지 않았다 (2026-10-21 사용자 결정, 에이전트 이름은 provenance와 연결돼 그대로). appsettings 에이전트의 `Note` 칸에도 같은 설명 (서버가 읽지 않는 메모 칸 — 주석과 달리 대시보드 저장 때 지워지지 않음). 계획서 `docs/plans/2026-10-20_추론강도-설정.md` |
+| `Agents[].ReasoningEffort` | 추론 강도 `none` · `low` · `medium` · `high` · `xhigh` (대소문자 무시). **에이전트 전용** (같은 제공사라도 모델마다 받는 값이 달라 제공사 기본값은 없음). 비우면 보내지 않음 = 제공사·모델 기본값. 다른 값이면 그 에이전트를 건너뛴다. Chat Completions는 `reasoning_effort`, Responses(openai-web)는 `reasoning.effort`로 나간다. 실행마다 `run_mode`의 `reasoning`(`"에이전트=강도"` · `"*=강도"`, 에이전트는 `agents` 교체 뒤 이름) · 골든 `--reasoning`으로 덮어쓴다. followUp은 원래 호출 값을 그대로 쓴다. 추론 토큰도 `MaxOutputTokens` 안에 들어가므로 강도를 올리면 상한에 닿아 본문 없이 끝날 수 있다 (2026-10-20 sol·argon·deepseek 64,000으로 올림). 호출 기록 `ReasoningEffort`에 실제로 보낸 값이 남고, `list_modes` 에이전트 줄에 설정 값이 보인다. 대시보드 에이전트 편집에서도 고친다. 제공사별 받는 값: OpenAI gpt-6.1-sol은 low~xhigh(none·minimal 400, 기본 medium) · Gemini OpenAI 호환은 low~high(xhigh 매핑 없음, 3.x·4는 끌 수 없음) · Fireworks는 low~xhigh·none (모델별 기본값 문서 없음). **Gemini OpenAI 호환은 강도를 비우면 추론을 거의 하지 않고**(2026-10-21 실측: argon 기본 21초 · total = prompt + completion, high 명시 201초), 추론 토큰을 usage의 `total_tokens`에만 넣는다 → 서버가 Gemini 제공사(엔드포인트 generativelanguage.googleapis.com)에서만 추론 칸이 없고 total > prompt + completion이면 그 차이를 `ReasoningTokens`로 기록하고 `OutputTokens`에 더한다(비용이 출력 단가로 잡힘). **`gemini_high_argon`은 ReasoningEffort가 비어 있어 호환 경로 기본값(추론 거의 없음)으로 동작한다** — 이 에이전트를 쓰는 crash_main · preflight_* 모두 해당 (review_high · perf_high는 2026-10-22부터 DeepSeek). high를 명시하면 비용 약 6배·시간 약 10배인데 골든 rec-4942 찾음은 1→2/11뿐이라 바꾸지 않았다 (2026-10-21 사용자 결정, 에이전트 이름은 provenance와 연결돼 그대로). appsettings 에이전트의 `Note` 칸에도 같은 설명 (서버가 읽지 않는 메모 칸 — 주석과 달리 대시보드 저장 때 지워지지 않음). |
 | `ResponseChecks.ExpectedLanguage` | 기대하는 응답 언어. 지금은 `ko`만 지원. **키가 없으면 `ko`(검사 켬), `""`이면 끔** (아래 "응답 검사기") |
 | `ResponseChecks.ForeignScriptRatio` | 코드 블록을 뺀 본문에서 일본어 가나 비율, 또는 한자 비율(중국어)이 이 값 이상이면 경고 (기본 0.02 = 2%) |
 | `Debug.DumpToolResults` | `true`면 `run_mode`가 반환하는 문자열을 그대로 `%LOCALAPPDATA%/HB_Orchestration/dumps/`에 남긴다 (조사용, 기본 `false`). 결과가 Claude에게 가는 동안 바뀌는지 가를 때 쓰고, 끝나면 끈다 |
@@ -130,7 +130,7 @@ dotnet test tests/HB.Orchestration.Tests
 | `Pricing.KrwPerUsd` | 1달러당 원. 비우면 대시보드는 달러만 표시 |
 | `Pricing.Models.<모델 ID>` | `InputPerMillion`, `CachedInputPerMillion`(비우면 입력과 같음), `CacheWritePerMillion`(캐시 쓰기, 비우면 입력과 같음 — OpenAI GPT-5.6 이후는 입력의 1.25배, 쓰기 토큰은 호출 기록 `CacheWriteTokens`), `OutputPerMillion` — USD / 1M 토큰. 웹검색 단계를 쓰는 모델에는 `WebSearchPerThousand`(1,000회당 USD)도 넣는다. 키는 에이전트 이름이 아니라 **모델 ID**(기록에 남는 값). 지금 안 쓰는 예전 모델도 남겨 두면 예전 기록의 비용이 계속 계산됨. 위 칸은 **처음 단가**이고, 단가가 바뀌면 칸을 고치지 말고 `Changes[]`에 `{ "From": "yyyy-MM-dd"(UTC 0시부터), 바뀌는 칸만, "Note" }`을 더한다 — 기록 시각 기준으로 그때 단가가 적용된다 (고치면 지난 호출 비용까지 새 단가로 다시 계산됨). 날짜 형식 오류 · 같은 날짜 중복 · 단가 칸 없음 · 음수는 서버가 설정을 읽을 때 경고만 한다. 대시보드 모드 화면은 처음 단가만 고치고 `Changes`는 파일에서 직접 고친다. 단가는 **실효 단가**(할인 후 실제로 내는 값)로 둔다 — 예: `gemini-4-argon`은 $2 / 캐시 $0.10 / $10(11-30까지 소개 가격, 12-01부터 $4/$20). Gemini 콘솔 SKU 금액은 정가($4/$20)로 집계되고 50% 할인이 '절감'에서 상계되므로, 청구 대조는 SKU 금액이 아니라 할인 후 금액이나 크레딧 사용분과 한다 (2026-10-21 크레딧 대조, 모델 항목의 `Note`). 서버는 비용 계산에 쓰지 않고(설정을 읽을 때 `Changes` 문제만 경고) 대시보드 비용 · 골든 실행 전 비용 추정이 쓴다 |
 
-### claude-cli 제공사 (`sub_*` 모드 — 계획서 `docs/plans/2026-10-27_검토형-서브에이전트-API-전환.md`)
+### claude-cli 제공사 (`sub_*` 모드)
 
 검토형 서브에이전트(self-reviewer 등)를 Claude Code 구독 대신 **Anthropic API 키**로 돌린다. 서버가 `claude --bare --restricted -p`를 읽기 전용 에이전트로 띄워, 에이전트가 작업 폴더의 파일을 통째로 직접 읽는다 (지휘자가 고른 범위만 받는 외부 에이전트와 다름). **이 PC의 Claude Code 2.1.311(Windows)은 `--tools`에 Grep · Glob을 줘도 Read만 준다** (2026-10-27 확인) — 검색은 못 하고, 프롬프트의 파일 목록에서 골라 읽는다.
 - 실행: `claude --bare --restricted -p --no-session-persistence --output-format json --model <Model> --effort <ReasoningEffort> --max-turns <MaxTurns> [--max-budget-usd <MaxBudgetUsd>] --permission-mode dontAsk --tools Read,Glob,Grep --settings <폴더 밖 읽기 막음> --append-system-prompt-file <역할 + 출력 형식 + 공통 규칙 + 지침>`, 사용자 프롬프트는 stdin, 작업 폴더 = 아래.
@@ -143,9 +143,9 @@ dotnet test tests/HB.Orchestration.Tests
 - 모드 `sub_self` · `sub_perf` · `sub_security` · `sub_direction` (역할 `SubSelf` · `SubPerf` · `SubSecurity` · `SubDirection` = 각 검토형 서브에이전트 정의 본문, 읽는 것만 작업 폴더 · Read 기준 / 에이전트 `claude_cli_opus` 공용 = claude-opus-5-5 · effort high · MaxTurns 40 · MaxBudgetUsd 2 · 재시도 없음, 제공사도 MaxAttempts 1). **검토형 리뷰의 기본**이다 — `/self-review` · `/cross-review` 2단계 · `perf_*` ownReview (서브에이전트는 `/self-review sub …` 또는 크레딧 소진 때).
 - **크레딧 소진 대체**: claude-cli 단계는 그 제공사의 최근 판정 가능한 기록(성공 또는 Quota)이 1시간 안의 Quota면 호출 없이 `[실패] Quota (최근) …`를 돌려준다 (지휘자는 서브에이전트로 대신한다). 1시간 뒤에는 한 번 시도한다 — 계속 막으면 성공 기록이 생기지 않아 크레딧을 채워도 풀리지 않는다 (크레딧이 없을 때 실패 호출은 비용 0, 충전 뒤 최대 1시간이면 풀린다). 대시보드 첫 화면에 `API 리뷰(sub_*) 이번 달 N회 · $X`(claude-cli 제공사 기준, 단가 없는 기록은 건수로)와, 마지막 판정 가능한 기록이 Quota면 `크레딧 소진 — 서브에이전트로 대체 중`(1시간이 지났으면 `다음 호출에서 다시 시도`). 시범 1호(2026-10-27, 이 기능 자체 리뷰): 17턴 · 274초 · $1.26, self-reviewer 서브에이전트와 지적 9건 겹침. 절차는 `/self-review` 명령 파일 "API 리뷰".
 - **ownReview로 쓸 때** (`/cross-review` 2단계 · `perf_*`): 응답 본문(`## 지적`부터)만 넣고 reason 태그는 `[ownReview:sub_self]` · `[ownReview:sub_perf]` · `[ownReview:sub_self+sub_security]`. H4 훅이 읽은 파일을 작업 폴더 기준 상대 경로로 검사한다.
-- **정의 색인** (계획서 `docs/plans/2026-10-27_작업폴더-정의-색인.md`): 이 PC의 claude -p는 Read만 주므로, 작업 폴더 절의 파일 목록에 줄 수와 `정의: class X 12 · Run() 40 · …`(C# · Python · Markdown · JSON 얕은 키 · PowerShell, 줄 단위 정규식 — 대략의 위치)를 붙인다. 파일당 80개 · 전체 2만 자 · 1MB 이하 UTF-8 파일만 (`DefinitionIndex`).
+- **정의 색인**: 이 PC의 claude -p는 Read만 주므로, 작업 폴더 절의 파일 목록에 줄 수와 `정의: class X 12 · Run() 40 · …`(C# · Python · Markdown · JSON 얕은 키 · PowerShell, 줄 단위 정규식 — 대략의 위치)를 붙인다. 파일당 80개 · 전체 2만 자 · 1MB 이하 UTF-8 파일만 (`DefinitionIndex`).
 
-### codex-cli 제공사 (`review_main` — 계획서 `docs/plans/2026-10-29_Codex-외부-리뷰어.md`)
+### codex-cli 제공사 (`review_main`)
 
 외부 리뷰(`review_main`)를 OpenAI API 대신 **Codex CLI + ChatGPT 구독 로그인**으로 돌린다. 리뷰어가 저장소 사본에서 정의 · 호출부를 직접 찾아 읽는다 (지휘자가 고른 첨부에 갇히지 않게).
 - 실행: `codex exec --json --ephemeral --ignore-user-config -c windows.sandbox="unelevated" -c web_search="disabled" -c forced_login_method="chatgpt" -s read-only --skip-git-repo-check -C <작업 폴더> -m <Model> --disable apps · plugins · remote_plugin · browser_use · browser_use_external · computer_use · in_app_browser · multi_agent · image_generation -c model_reasoning_effort=… -c developer_instructions=<시스템 프롬프트> [--output-schema <구조화 출력 스키마>] -`, 사용자 프롬프트는 stdin. 한 턴만 (followUp · 토론은 거절).
@@ -180,7 +180,7 @@ SDK 자동 재시도(기본 3회, 기록에 안 남음)는 끄고 서버가 직�
 
 ### 끊긴 호출 비용 추정
 
-요청이 나간 뒤 끊긴 호출(`Timeout` · `Network` · `Canceled` · `Lost`)은 청구되지만 usage를 받지 못해 토큰이 비어 있다. 대시보드가 기록을 읽을 때 추정 사용량을 채운다 (`UsageEstimator`, 기록 파일은 그대로). 계획서 `docs/plans/2026-10-24_끊긴-호출-비용-추정.md`.
+요청이 나간 뒤 끊긴 호출(`Timeout` · `Network` · `Canceled` · `Lost`)은 청구되지만 usage를 받지 못해 토큰이 비어 있다. 대시보드가 기록을 읽을 때 추정 사용량을 채운다 (`UsageEstimator`, 기록 파일은 그대로).
 
 - 같은 `RunId` · `Step` · 에이전트에 성공한 시도가 있으면 그 입력을 쓴다 (캐시 적중 0). `Timeout` · `Network`은 서버가 끝까지 생성해 청구했다고 보고 출력도 쓴다 (2026-10-20 GLM). `Canceled` · `Lost`는 연결을 닫아 생성이 멈췄다고 보고 입력만 (2026-10-21 Gemini).
 - 성공한 시도가 없으면 입력만 어림한다: (프롬프트 + 지침 UTF-8 바이트) × 0.3 (2026-10-24 실측 중앙값 0.27~0.31). `Timeout` · `Network`은 "출력 미상"으로 표시한다 (실제 청구는 더 클 수 있음). 웹검색 호출은 검색 결과가 입력에 붙어 어림이 하한이 된다.
@@ -298,7 +298,7 @@ dotnet <publish 폴더>\HB.Orchestration.Mcp.dll --compact-log [calls.jsonl 경�
 내장 역할 `Reviewer`, `Critic`은 코드에 들어 있고, 같은 이름으로 정의하면 덮어쓴다. `Prompt` · `PromptFile` 없이 내장 역할 이름에 `Output` · `UseGuidelines`만 적으면 내장 프롬프트는 두고 그 두 값만 바뀐다. 내장 `Reviewer`는 `Output: findings`다 (modes.json에서 덮어쓰면 그쪽 `Output`을 따른다). `PerfReviewer`는 modes.json에 `Output: perf_findings`로 둔다.
 
 ### 모델별 덧붙임 (`prompts/<역할>/<에이전트>.md`)
-역할 프롬프트를 모델마다 복사하지 않고, `prompts/<역할>/<에이전트 이름>.md`를 시스템 프롬프트 **맨 끝**(지침 뒤)에 `## 모델별 덧붙임`으로 붙인다 (계획서 `docs/plans/2026-10-23_모델별-프롬프트-덧붙임.md`). 그 (역할, 에이전트)가 자주 하는 실수 · 모델 버릇을 적는 자리다 (계획서 `docs/plans/2026-10-27_실수목록-분리.md`).
+역할 프롬프트를 모델마다 복사하지 않고, `prompts/<역할>/<에이전트 이름>.md`를 시스템 프롬프트 **맨 끝**(지침 뒤)에 `## 모델별 덧붙임`으로 붙인다. 그 (역할, 에이전트)가 자주 하는 실수 · 모델 버릇을 적는 자리다.
 * 원본은 저장소 `project-files/prompts/`이고, 서버는 appsettings `Orchestration:PromptsPath`로 읽는다 (상대 경로는 서버 폴더 기준, 예: `../HB_Orchestration/project-files/prompts`). 지정했는데 폴더가 없으면 `[모델별 덧붙임 폴더 오류]`으로 실행하지 않는다. 비우면 **실제로 쓰는** modes.json 옆 `prompts/` (세션 폴더의 `hb-modes.json`을 쓰면 그 프로젝트 폴더).
 * 에이전트는 `agents` 교체 **뒤** 실제 이름으로 찾는다 — 전용 모드가 필요 없다. 실행마다 다시 읽고, 파일이 없거나 HTML 주석(`<!-- -->`)을 뺀 본문이 공백뿐이면 붙이지 않는다 (시스템 프롬프트는 바이트 그대로). 기본 파일은 서식 안내 주석뿐이다. 주석 짝이 맞지 않으면(중첩 · 닫지 않음) 안내문이 새지 않게 `[모델별 덧붙임 읽기 실패]`로 실행하지 않는다.
 * Debate 토론자도 토론 규칙 **뒤** 맨 끝에 붙는다. 역할·에이전트 이름이 영문·숫자·`_`·`-` 밖의 글자를 가지면 덧붙임을 둘 수 없다(실행은 됨). 파일이 있는데 못 읽으면 `[모델별 덧붙임 읽기 실패]`로 실행하지 않는다. 골든 `--no-guidelines`여도 붙인다 (모델 버릇이지 프로젝트 지침이 아님).
@@ -308,7 +308,7 @@ dotnet <publish 폴더>\HB.Orchestration.Mcp.dll --compact-log [calls.jsonl 경�
 
 ### 기본 모드와 이름 규칙
 
-이름은 고를 수 있는 모드면 `{종류}_{등급}`(lite · main · high — high는 비싸거나 두 회사 동시), 단계 모드면 `{종류}_{단계}`다 (계획서 `docs/plans/2026-10-20_모드이름-통일-세션한도-제거.md`).
+이름은 고를 수 있는 모드면 `{종류}_{등급}`(lite · main · high — high는 비싸거나 두 회사 동시), 단계 모드면 `{종류}_{단계}`다.
 예전 이름(review · panel · perf_sol · perf_argon · critique · debate · deliberate · research · parallel · work_order · crash · crash_review)으로 부르면 실행하지 않고 새 이름을 알려 준다.
 호출 기록·골든 사례·세션 기록에 남은 예전 이름은 **읽을 때만** 새 이름으로 바꿔 읽는다 (`ModeNames`, 파일은 그대로). 없앤 `perf_astra`는 기록에 그대로 보인다.
 구성이 바뀐 모드(`perf_argon` argon 단독 → `perf_high` sol | argon, 2026-10-22부터 `review_high` · `perf_high` sol | argon → sol | DeepSeek)는 예전 실행과 **한 모드로 합쳐 집계**된다. 구성별로 보려면 판정 화면의 에이전트 축을 본다.
@@ -424,14 +424,14 @@ runId: dfa393514b
 <에이전트 응답>
 ```
 - `runId`는 `save_result`에 넘기는 값이다. 대시보드와 calls.jsonl에서도 같은 값으로 찾을 수 있다. 첫 줄은 늘 runId만이다 (세션 기록이 첫 줄로 실행을 잇는다).
-- 둘째 줄 첨부 여유: 그 모드의 입력 상한(`MaxInputChars`) 대비 이번 입력 (퍼센트는 내림). 절반을 넘으면 `· followUp 여유 적음 …`이 붙는다 — followUp은 원래 프롬프트 + 응답 + 보충이 같은 상한 안에 들어가야 한다. 지휘자가 다음 호출에서 정의 · 호출부 · 설정 · 테스트를 더 붙여도 되는지 본다 (계획서 `docs/plans/2026-10-27_외부-첨부-범위-규칙.md`). followUp 결과에는 없다. 판정 화면 "자료 요청 처리"의 주별 표로 규칙 전후의 실행당 요청을 비교한다.
+- 둘째 줄 첨부 여유: 그 모드의 입력 상한(`MaxInputChars`) 대비 이번 입력 (퍼센트는 내림). 절반을 넘으면 `· followUp 여유 적음 …`이 붙는다 — followUp은 원래 프롬프트 + 응답 + 보충이 같은 상한 안에 들어가야 한다. 지휘자가 다음 호출에서 정의 · 호출부 · 설정 · 테스트를 더 붙여도 되는지 본다. followUp 결과에는 없다. 판정 화면 "자료 요청 처리"의 주별 표로 규칙 전후의 실행당 요청을 비교한다.
 - 구조화 출력 역할이면 `<에이전트 응답>` 자리에 서버가 그린 지적 목록이 온다 (아래 "구조화 출력").
 - 토큰은 성공한 시도의 값, 시간은 재시도와 대기를 포함한 단계 전체 시간이다.
 - `Return: Last`도 runId와 마지막 단계 제목 줄을 붙인다. 출력에서 빠지는 단계의 재시도·경고는 결과 끝에 `단계 N …`으로 모은다.
 - 실행 전에 거절된 경우(`[모드 설정 오류]`, `[입력이 너무 깁니다]` 등)는 아직 runId가 없으므로 기존처럼 `[`로 시작하는 한 줄이다.
 
 ### 구조화 출력 (역할 `Output`)
-review 계열(`Reviewer` · `PerfReviewer`)의 응답을 JSON으로 받아 지적마다 ID를 매긴다. 계획서 `docs/plans/2026-10-19_리뷰-구조화-출력.md`.
+review 계열(`Reviewer` · `PerfReviewer`)의 응답을 JSON으로 받아 지적마다 ID를 매긴다.
 
 - 형식 (코드 내장 `FindingFormat`, 스키마 버전은 기록의 `Structured.Format`에 `findings@2`처럼 남음)
   - `findings`: `findings[]`(`severity` critical·major·minor·nit, `file`, `line`, `problem`, `detail`, `suggestion`, `confidence` high·medium·low) + `needsInfo[]`
@@ -463,7 +463,7 @@ review 계열(`Reviewer` · `PerfReviewer`)의 응답을 JSON으로 받아 지�
 - 대시보드 호출 상세: 형식·요청 방식·상태 한 줄, 그린 목록, 접힌 원문.
 
 ### 자료 보충 재질문 (`run_mode`의 `followUp`)
-계획서 `docs/plans/2026-10-19_자료요청-왕복.md`. 에이전트가 직접 코드를 읽는 도구는 두지 않는다 (경로 검사를 통과해도 외부 전송 허가는 아니다 — critique bd33879c06). 대신 지휘자가 요청을 보고 로컬에서 찾아 **승인한 범위만** 보낸다.
+에이전트가 직접 코드를 읽는 도구는 두지 않는다 (경로 검사를 통과해도 외부 전송 허가는 아니다 — critique bd33879c06). 대신 지휘자가 요청을 보고 로컬에서 찾아 **승인한 범위만** 보낸다.
 
 `run_mode(mode, input, context, reason, followUp: { runId, step, requests: ["1-N1", …] })`
 - 그 단계의 에이전트(원래 실행에서 바꿨으면 바꾼 에이전트)에게 `[원래 프롬프트, 원래 응답]`을 앞 대화로 두고, 보충 자료(`context`)·지휘자 메모(`input`)·보충 지시를 이어 보낸다. 앞부분이 원래 호출과 같아 제공사 프롬프트 캐시에 걸린다.
@@ -665,7 +665,7 @@ unity skill install --help
 - 대시보드 설정 키: `Dashboard:LogPath`(calls.jsonl 경로, 비우면 2절 데이터 폴더) · `Dashboard:Prices`(예전 방식 단가, MCP 단가에 없는 모델만 채움) · `Dashboard:FileLinkTemplate` · `Dashboard:RiderProjects` · `Dashboard:ClaudeProjectsDir` · `Dashboard:Billing:AdminKeyEnv` · `Dashboard:ModesPath` · `Dashboard:RiderRecentSolutionsPath` · `Dashboard:ClaudeSessionLimit`. 단가 파일은 250ms에 한 번만 다시 확인한다.
 - 직접 지정이 없으면 서버와 같은 찾는 순서로 편집할 modes.json을 정한다: MCP appsettings `Orchestration:ModesPath` → **대시보드 프로세스의** `HB_MODES_PATH` → publish 폴더 `modes.json`. 세션 폴더의 `hb-modes.json`은 대시보드가 알 수 없어 뺀다. 화면 머리에 "편집 중: 경로 (근거)"가 보인다.
 - 서버의 `HB_MODES_PATH`(프로세스마다 다름)나 Unity 프로젝트의 `hb-modes.json`은 대시보드가 알 수 없다. 그래서 호출 기록(provenance)에서 **최근 7일 실행이 실제로 쓴 modes.json**을 모아, 편집 중인 파일과 다르면 경고로 보인다. 같은 파일인데 그 뒤 내용이 바뀌었으면 "그 뒤 수정됨"으로 표시한다.
-- 그 아래에 **최근 7일 실행이 붙인 리뷰 지침**(provenance.guidelines)을 보인다. 프로젝트마다 자기 지침을 고쳐 쓰므로 내용은 비교하지 않고 **경로 규칙**으로만 경고한다: 경로가 `review_tmp/` 아래이거나 파일 이름이 `REVIEW_GUIDELINES.md`가 아니면 경고(하네스 임시 지침 · `REVIEW_GUIDELINES_PATH` 지정 실수). "지침 파일 없음"으로 돈 실행도 프로젝트 폴더별로 경고한다 (역할 `UseGuidelines=false` · 골든 `--no-guidelines`는 일부러 끈 것이라 뺀다). 나머지는 경로 · 해시 앞 12자리 · 실행 수 · 마지막 사용을 접힌 목록으로 — 이름이 같은 오래된 사본은 해시로 눈으로 확인한다 (계획서 `docs/plans/2026-10-22_지침-파일-경고.md`).
+- 그 아래에 **최근 7일 실행이 붙인 리뷰 지침**(provenance.guidelines)을 보인다. 프로젝트마다 자기 지침을 고쳐 쓰므로 내용은 비교하지 않고 **경로 규칙**으로만 경고한다: 경로가 `review_tmp/` 아래이거나 파일 이름이 `REVIEW_GUIDELINES.md`가 아니면 경고(하네스 임시 지침 · `REVIEW_GUIDELINES_PATH` 지정 실수). "지침 파일 없음"으로 돈 실행도 프로젝트 폴더별로 경고한다 (역할 `UseGuidelines=false` · 골든 `--no-guidelines`는 일부러 끈 것이라 뺀다). 나머지는 경로 · 해시 앞 12자리 · 실행 수 · 마지막 사용을 접힌 목록으로 — 이름이 같은 오래된 사본은 해시로 눈으로 확인한다.
 
 **Claude 세션** (`/ClaudeSessions`) — 지휘자가 무엇을 알고 있었나
 - Claude Code 세션 기록(`~/.claude/projects/<경로 인코딩>/<sessionId>.jsonl`)을 **읽기만** 해서, 세션마다 시작 시각(로컬) · 버전 · 프로젝트 · 불러온 지침 파일 · 부른 `run_mode`를 보여준다. **대화 본문은 보여주지 않는다.**
@@ -676,7 +676,7 @@ unity skill install --help
 - 설정: `Dashboard:ClaudeProjectsDir` (비우면 `CLAUDE_CONFIG_DIR/projects` → `%USERPROFILE%\.claude\projects`), `Dashboard:ClaudeSessionLimit` (목록에 보일 최근 세션 수, 기본 50. 연결은 전체 세션으로 계산).
 - `/Sessions`(살아 있는 MCP 서버)와는 다른 화면이다.
 
-**서브에이전트 결과** (`/Subagents`) — 검토형 서브에이전트가 넘긴 원문과 서버 기록 여부 (계획서 `docs/plans/2026-10-27_서브에이전트-결과-보존.md`)
+**서브에이전트 결과** (`/Subagents`) — 검토형 서브에이전트가 넘긴 원문과 서버 기록 여부
 - `/cross-review` · `perf_*`에서 서브에이전트 결과는 `run_mode`의 `ownReview`로만 남는다. 외부 호출이 실행되지 않으면(안전 필터 · 실패) 결과가 어디에도 안 남았다 → Claude Code가 남기는 서브에이전트 기록(`~/.claude/projects/<프로젝트>/<세션>/subagents/agent-<id>.jsonl` + `.meta.json`의 `SubagentHandback`)에서 **원문을 그대로 복사**해 데이터 폴더 `subagents/`에 보관한다. Claude Code가 세션 기록을 지워도(`cleanupPeriodDays`) 남는다.
 - 보관은 MCP 서버 시작 때(백그라운드, 실패해도 서버는 뜸)와 이 화면 · 첫 화면을 열 때(30초에 한 번) 한다. 바뀐 세션 기록만 다시 읽는다. 이어 부른 서브에이전트는 넘길 때마다 따로 남는다. 대상은 검토형 4종만 (`SubagentArchive.ReviewerTypes` = `record_verdicts selfReview.agent` 목록).
 - 서버 기록 칸: 원문이 `self_review` 기록 응답이거나 `run_mode` ownReview 안에 그대로 있으면 그 runId(줄바꿈 · 줄 끝 공백만 정리해 비교, 200자 미만 원문은 통째로 같을 때만). 글자는 다르지만 20자 이상인 줄(`## 읽은 파일` 절 제외)의 80% 이상이 한 기록에 있으면 **거의 같음 n%**(지휘자가 형식을 맞추며 고쳐 넣은 경우). 아니면 **기록 없음** + 가장 비슷한 기록 · 일치율(참고).
@@ -689,7 +689,7 @@ unity skill install --help
 
 **채팅방** (`/Rooms` · `/Room/{세션}`) — 세션 하나를 대화방 하나로
 - 사용자 · 지휘자 대화(세션 기록의 text 블록)와 그 세션의 외부 에이전트 · API 리뷰 · 서브에이전트 · 판정을 시간순 말풍선으로. 스티커(`[[icon:태그]]`) 설정은 `src/HB.Orchestration.Dashboard/STICKERS.md`.
-- 실시간 갱신: 열어 둔 방 · 방 목록은 `Dashboard:RoomPollSeconds`(기본 3, 0이면 끔)초마다 파일 크기 · 수정 시각만 확인하고, 바뀌었을 때만 말풍선 · 목록 부분을 다시 받는다. 탭이 안 보이면 멈추고, 화면의 "끄기"는 그 브라우저에만 기억된다. 진행 중인 세션은 기록 끝에 붙은 줄만 이어 읽는다. 서브에이전트 결과는 보관 주기(30초) 때문에 늦게 뜬다. 계획서 `docs/plans/2026-10-27_채팅방-실시간-갱신.md`.
+- 실시간 갱신: 열어 둔 방 · 방 목록은 `Dashboard:RoomPollSeconds`(기본 3, 0이면 끔)초마다 파일 크기 · 수정 시각만 확인하고, 바뀌었을 때만 말풍선 · 목록 부분을 다시 받는다. 탭이 안 보이면 멈추고, 화면의 "끄기"는 그 브라우저에만 기억된다. 진행 중인 세션은 기록 끝에 붙은 줄만 이어 읽는다. 서브에이전트 결과는 보관 주기(30초) 때문에 늦게 뜬다.
 - 세션 대화 본문이 그대로 보이므로 대시보드는 localhost로만 연다 (`AllowedHosts`도 localhost만).
 
 **청구 대조** (`/Billing`) — OpenAI 실제 청구와 기록 기준 계산 비교
@@ -776,7 +776,7 @@ dotnet <publish 폴더>\HB.Orchestration.Mcp.dll --golden score <사례> --from 
 | `expected.json` | 기대 지적 `[{ id, summary, files, lines: [시작, 끝], locations?, required?, keywords, severity, origin? }]` — `locations`는 `[{ file, from, to }]` 여러 곳(원인·증상 지점, 하나라도 맞으면 위치 일치, 비우면 files × lines), `required`는 그 결함에만 맞는 말(동의어 묶음, 하나라도 맞으면 됨, 있으면 `keywords`는 보조), `severity` critical·major·minor·nit, `origin`은 정답 출처(record · later-commit · self-review · conductor · common · ds · sol · seeded — 모델 비교 집합용) |
 | `traps.json` | (선택) 과거에 기각된 지적, 같은 형식 + `why`(기각 이유) |
 
-**채점 규칙** (`GoldenScorer`, `golden-scorer@2` — 결과 줄 `scorerVersion`, LLM 판정자 없음. 계획서 `docs/plans/2026-10-22_채점기-구조-개선.md`)
+**채점 규칙** (`GoldenScorer`, `golden-scorer@2` — 결과 줄 `scorerVersion`, LLM 판정자 없음.)
 - 짝 후보: (같은 **파일 이름** + 줄이 위치 중 하나의 범위 ±5) 또는 (**필수 키워드**가 문제·상세에 있음, 단 지적이 다른 파일을 가리키면 제외). 둘 다면 강도 3, 필수 키워드만 2, 줄만 또는 보조 키워드만 1. `required`가 비면 `keywords`가 필수 역할 (예전 형식).
 - 키워드 검사: 대소문자 무시 부분 문자열. 키워드 첫 글자가 영숫자면 그 앞, 끝 글자가 영숫자면 그 뒤도 영숫자가 아니어야 한다 (`NUL`이 `null`에 걸리지 않게). 끝의 `*`는 **항상** 앞부분 일치 (`ArgumentOutOfRange*` → `ArgumentOutOfRangeException`) — `char*`처럼 `*`로 끝나는 말 자체는 쓸 수 없다 (`char`의 앞부분 일치가 됨, 이스케이프 없음). 한국어는 그대로 부분 문자열. 빈 말 · 앞뒤 공백이 있는 키워드는 형식 오류 (공백이 경계 검사를 없앰). crash 사례는 예전 검사(왼쪽 경계만) 그대로이고 `required`·`locations`는 형식 오류.
 - **찾음은 강도 2 이상만** 센다. 줄만 맞은 짝(강도 1)은 같은 줄 범위의 다른 결함과 구분하지 못해 "줄만 맞음 — 확인 필요"로만 보인다 (맞는 지적이면 정답지 키워드를 보강).
@@ -786,7 +786,7 @@ dotnet <publish 폴더>\HB.Orchestration.Mcp.dll --golden score <사례> --from 
 - 결과: 화면 표 + `<골든 폴더>/results/<날짜>_<라벨>.jsonl` (사례별 점수·짝 근거·runId·모델·토큰·입력 해시·정답지 해시 `keySha256`(expected+traps)·`scorerVersion`·provenance). 자동 짝은 틀릴 수 있으니 근거를 보고 확인한다.
 - **정답지 묶음 해시** (동결 표시, `GoldenCaseLoader.SetKeyHash`, 합계 줄에 보임): 사례 폴더 이름 순으로 사례마다 `<사례>/expected.json\n` + 원본 바이트, traps.json이 있으면 `<사례>/traps.json\n` + 원본 바이트를 이어 붙인 SHA-256 앞 16자리. **2026-10-22 동결 `b5cb66d4e82ecfb0`부터 expected+traps 기준** — 그 전 동결(`aab21c2e23ed4e5a` · `61c79cbf9388aba5`)은 expected.json만 이어 붙인 값이라 함정 변경을 잡지 못했다. 동결은 묶음 해시 + `scorerVersion`으로 표시한다.
 
-**replay 사례** (`kind: replay`, `mode: sub_self` · `sub_perf` · `sub_security` · `sub_direction` — 계획서 `docs/plans/2026-10-27_리플레이-골든.md`)
+**replay 사례** (`kind: replay`, `mode: sub_self` · `sub_perf` · `sub_security` · `sub_direction`)
 - 과거 검토형 서브에이전트 리뷰를 당시 코드 · 위임 메시지 그대로 복원해 API 리뷰(claude-cli)로 다시 돌린다. **역할 프롬프트(Sub*) · 정의 색인 · 모델 · effort를 바꾸면 replay 세트를 1회** 돌려 기준점과 비교한다 (1회 약 $6, 사례당 $0.1~1.2).
 - 만들기: `--golden replay-build [runId|all] [--exclude 글자 ...] [--dir 폴더] [--yes]` (외부 호출 없음, `--yes` 없으면 후보와 건너뛸 이유만). 보관된 결과 원문이 selfReview 실행과 같은 것만 잇는다 (cross-review ownReview는 아직 안 함). 세션 기록의 첫 사용자 메시지 = `input.md`(위임 폴더 경로는 상대로), Read 결과 = `files/`(위임 폴더 기준, 나눠 읽은 범위가 전체를 덮으면 이어 붙임), `context.json` = 파일마다 전체 범위. 일부만 읽은 파일 · 위임 폴더 밖 파일 · 이어 부른 결과 · 같은 원문의 판정 있는 실행이 여럿이면 건너뛴다. 이미 있는 사례 폴더는 건드리지 않는다.
 - 정답지: 리뷰어 지적 채택 · 부분 = expected(origin self-review), 기각 = traps(why = 기각 이유), 지휘자 추가 채택 = expected(origin conductor). 위치는 지적 머리의 모든 `파일:줄`(locations), required는 지적 문장의 코드 이름 자동 추출 — **사례를 만든 뒤 한국어 개념어 · 구체 이름으로 보강해야** 찾음이 제대로 잡힌다 (2026-10-27 보강 전 3/8 → 보강 후 5/8, 지휘자가 읽은 값 5/8 + 부분 1).
@@ -794,7 +794,7 @@ dotnet <publish 폴더>\HB.Orchestration.Mcp.dll --golden score <사례> --from 
 - 사례는 GoldenSet(로컬, push 훅이 막음)에 남는다 — 회사 코드는 `--exclude MoJak`처럼 뺀다 (프로젝트 폴더 · 위임 폴더 · 위임 메시지에 그 글자가 있으면 제외).
 - 기준점 2026-10-27 (`results/2026-10-27_replay-baseline.jsonl`, sub_self · sub_perf · sub_security · sub_direction = claude-opus-5-5 high): 사례 11개 찾음 47/75 (63%) — 리뷰어 출처 47/70 · 지휘자 출처 0/5, 줄만 맞음 8, 함정 1, $6.07.
 
-**crash 사례** (`kind: crash`, `mode: crash` — 계획서 `2026-10-19_골든-crash사례`)
+**crash 사례** (`kind: crash`, `mode: crash`)
 - 모드 전체(Sequential, 분류 → 웹검색)를 run_mode와 같은 프롬프트 조립으로 돌린다. `input.md`는 run_mode의 `input`이다 (서버가 `## 요청`으로 감쌈, 첨부 없음). `score` 명령은 안 된다 (검색 기록이 필요).
 - 모드는 단계 2개 이상 + 마지막 단계에 WebSearch가 있어야 한다 (1단계 = 분류, 마지막 = 검색으로 채점). 아니면 실행 전 거절 — case.json에 `mode: crash`를 꼭 적는다 (빠뜨리면 기본값 review라 거절됨). 실행 전 확인과 단계 수 · 에이전트 · 지침이 달라지면 그 사례부터 멈춘다.
 - `expected.json` 항목: `{ id, step: triage|search, summary, keywords, urls?, severity }` (files·lines 없음, urls에 빈 조각 금지). `traps.json`은 `step`을 비우면 두 단계 모두.

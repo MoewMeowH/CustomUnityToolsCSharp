@@ -42,7 +42,7 @@ public sealed record CallRecord
     public required string Prompt { get; init; }
 
     /// <summary>
-    /// 프롬프트 원문을 blobs에 둔 경우 그 해시 (4KB 이상, 계획서 2026-10-23_호출기록-blobs-분리와-첫화면-쪽나누기).
+    /// 프롬프트 원문을 blobs에 둔 경우 그 해시 (4KB 이상).
     /// 골든 반복 등으로 같은 프롬프트가 여러 번 남아 기록 파일의 3분의 2를 차지했다.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

@@ -6,7 +6,7 @@ using Microsoft.Extensions.AI;
 
 namespace HB.Orchestration.Tests;
 
-/// <summary>골든 crash 사례 (계획서 2026-10-19_골든-crash사례): 사례 형식 · 2단계 채점 · 다단계 실행.</summary>
+/// <summary>골든 crash 사례: 사례 형식 · 2단계 채점 · 다단계 실행.</summary>
 public sealed class GoldenCrashTests
 {
     private const string CrashCase = """{ "id": "c1", "kind": "crash", "mode": "c" }""";

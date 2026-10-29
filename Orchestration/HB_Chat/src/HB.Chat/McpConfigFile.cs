@@ -67,9 +67,9 @@ public static class McpConfigFile
     public const string UnityServer = "unity";
 
     /// <summary>
-    /// 방마다 고른 연결로 만든 --mcp-config 파일 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결): 작업 폴더 .mcp.json에서 servers 이름들을 옮기고,
+    /// 방마다 고른 연결로 만든 --mcp-config 파일: 작업 폴더 .mcp.json에서 servers 이름들을 옮기고,
     /// unity가 있으면 <c>unity.exe mcp --project-path 경로</c> 항목을 더한다. 방 ID 이름의 파일이라 실행이 끝나면 <see cref="DeleteRoom"/>로 지운다.
-    /// .mcp.json에 없는 이름은 appServer(앱에서 더한 서버, 계획서 2026-10-29_HB_Chat-앱-MCP-서버-더하기)에서 찾고 — 작업 폴더 것이 먼저(결정 1) —
+    /// .mcp.json에 없는 이름은 appServer(앱에서 더한 서버)에서 찾고 — 작업 폴더 것이 먼저 —
     /// 둘 다 없으면 빼고 missing으로 돌려준다 (방 칸이 알린다). servers가 비고 unity도 없으면 빈 mcpServers. .mcp.json이 없으면 앱 서버만.
     /// </summary>
     public static (string Path, IReadOnlyList<string> Missing) WriteRoom(string workspaceDir, IEnumerable<string> servers,

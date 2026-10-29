@@ -19,7 +19,7 @@ public sealed record ProbeResult(bool Ok, IReadOnlyList<(string Name, string? De
 }
 
 /// <summary>
-/// 곁칸 "연결" 탭의 "확인" 단추 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결): 앱이 MCP 클라이언트로 그 서버를 직접 띄워 tools/list만 받고 닫는다
+/// 곁칸 "연결" 탭의 "확인" 단추: 앱이 MCP 클라이언트로 그 서버를 직접 띄워 tools/list만 받고 닫는다
 /// (0단계 실측: unity mcp 연결 149ms · 도구 186개 62ms, 설명 포함 — init에는 이름만). 띄우는 명령은 그 방 실행이 승인 없이 띄우는 것과 같다.
 /// 결과는 방 · 서버 이름마다 기억한다 (앱을 다시 켜면 비어 있음). 한 방 · 서버에 한 번에 하나만.
 /// </summary>

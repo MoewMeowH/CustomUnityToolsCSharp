@@ -4,7 +4,7 @@ using HB.Orchestration.Tests.Fakes;
 
 namespace HB.Orchestration.Tests;
 
-/// <summary>모델별 프롬프트 덧붙임 prompts/&lt;역할&gt;/&lt;에이전트&gt;.md (계획서 2026-10-23_모델별-프롬프트-덧붙임).</summary>
+/// <summary>모델별 프롬프트 덧붙임 prompts/&lt;역할&gt;/&lt;에이전트&gt;.md.</summary>
 public sealed class PromptAppendTests : IDisposable
 {
     private readonly ModeRunnerHarness _h = new();
@@ -166,7 +166,7 @@ public sealed class PromptAppendTests : IDisposable
         Assert.Contains("모델별 덧붙임", runError);
         Assert.Empty(g.Client.Received);
 
-        // 실행 전 확인에 덧붙임이 있었으면 같은 해시로 호출까지 간다 — --no-guidelines여도 덧붙임은 붙는다 (결정 2)
+        // 실행 전 확인에 덧붙임이 있었으면 같은 해시로 호출까지 간다 — --no-guidelines여도 덧붙임은 붙는다
         var (again, _) = g.Runner.PreviewFixedPrompt("rv", null, 10, withoutGuidelines: true);
         Assert.NotNull(again!.Value.AppendSha256);
         var (_, _, okError) = await g.Runner.RunFixedPromptAsync("rv", "입력", null, "golden", "r", CancellationToken.None,
@@ -180,7 +180,7 @@ public sealed class PromptAppendTests : IDisposable
     [Fact]
     public async Task Comment_only_default_file_leaves_system_prompt_byte_identical()
     {
-        // 기본 파일은 서식 안내 주석뿐 (계획서 2026-10-27_실수목록-분리 결정 4)
+        // 기본 파일은 서식 안내 주석뿐
         await _h.Run("seq");
         var before = ScriptedChatClient.SystemText(_h.Client.Received[0]);
         WriteAppend("<!--\n서식: - 실수 / 대신 / 날짜·출처\n-->\n\n");

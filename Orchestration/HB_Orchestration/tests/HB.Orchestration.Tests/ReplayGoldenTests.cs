@@ -4,7 +4,7 @@ using HB.Orchestration.Shared;
 
 namespace HB.Orchestration.Tests;
 
-/// <summary>리플레이 골든 사례 만들기 · 읽기 (계획서 2026-10-27_리플레이-골든).</summary>
+/// <summary>리플레이 골든 사례 만들기 · 읽기.</summary>
 public sealed class ReplayGoldenTests : IDisposable
 {
     private readonly string _dir = Directory.CreateTempSubdirectory("hb-replay-").FullName;

@@ -158,7 +158,7 @@ public sealed class RoomHubTests : IDisposable
         Assert.Null(_hub.Send(room.Id, "hello there"));
         var seen = await Until(ch, e => e.Kind == "idle", withRooms: true);
 
-        // 생각 중 → 도구(Read) → 답 쓰는 중, 끝은 end에 실린다 (계획서 2-2 b). 도구 표정은 이름을 싣는다 (83b453653b C1)
+        // 생각 중 → 도구(Read) → 답 쓰는 중, 끝은 end에 실린다. 도구 표정은 이름을 싣는다 (83b453653b C1)
         Assert.Equal(["Thinking", "Tool", "Writing"], seen.Where(e => e.Kind == "face").Select(e => e.Face));
         Assert.Equal("Read", seen.Single(e => e.Kind == "face" && e.Face == "Tool").Text);
         Assert.NotNull(_hub.EndFaceLeft(room.Id)); // 끝난 직후 — 화면 타이머용 남은 시간
@@ -643,7 +643,7 @@ public sealed class RoomHubTests : IDisposable
         Assert.DoesNotContain("evil", text);
     }
 
-    // ---- 방별 연결 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결) ----
+    // ---- 방별 연결 ----
 
     [Fact]
     public async Task RoomExtraServer_WritesRoomConfig_AllowsIt_AndDeletesAfterRun()
@@ -745,7 +745,7 @@ public sealed class RoomHubTests : IDisposable
     [Fact]
     public async Task ChangedRules_ArePrependedOnce_WhenResuming()
     {
-        // 이어 쓰는 세션은 CLI가 처음 시스템 프롬프트를 쓴다 (0단계 실측) — 규칙이 바뀌면 말 앞에 system-reminder로 새 규칙 (계획서 2026-10-29_HB_Chat-2-2-작은-한계-정리)
+        // 이어 쓰는 세션은 CLI가 처음 시스템 프롬프트를 쓴다 (0단계 실측) — 규칙이 바뀌면 말 앞에 system-reminder로 새 규칙
         var room = NewRoom();
         var projectDir = Path.Combine(_dir, "projects", "F--ws");
         Directory.CreateDirectory(projectDir);

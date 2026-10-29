@@ -37,7 +37,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         IReadOnlyList<string>? reasoningOverrides = null, string? rootDir = null, string? tool = null, string? fallbackNote = null)
     {
         // fallbackNote: 대체 에이전트로 다시 부른 실행이면 그 이유 (결과 끝에 붙고, 다시 대체하지 않는다).
-        // rootDir: context · images 경로의 기준 (기본 = 현재 폴더). 골든 리플레이는 사례의 files/ 폴더를 준다 (계획서 2026-10-27_리플레이-골든).
+        // rootDir: context · images 경로의 기준 (기본 = 현재 폴더). 골든 리플레이는 사례의 files/ 폴더를 준다.
         // tool: 호출 기록의 Tool (기본 run_mode). 골든은 GoldenCli.Tool로 남겨 대시보드 집계와 구분한다.
         var root = rootDir ?? Environment.CurrentDirectory;
         // ── 1. 실행 전 검증: 여기서 걸리면 토큰을 한 개도 쓰지 않는다 ──────────────
@@ -106,8 +106,8 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
                 return $"[모드 '{modeName}'] {cliType} 에이전트와 다른 제공사 에이전트를 한 모드에 섞을 수 없습니다.";
             if (loadedImages.Count > 0)
                 return $"[모드 '{modeName}'] {cliType} 단계는 images를 받지 않습니다.";
-            // 크레딧 · 한도 소진 대체 규칙 (계획서 2026-10-27_검토형-서브에이전트-API-전환 "2차 설계" 2b): 직전 판정 가능한 기록이 가까운 Quota면 부르지 않는다.
-            // 단계에 대체 에이전트가 있으면 그 에이전트로 실행하고 (계획서 2026-10-29_Codex-외부-리뷰어 결정), 없으면 지휘자가 대신한다 (self-review.md).
+            // 크레딧 · 한도 소진 대체 규칙: 직전 판정 가능한 기록이 가까운 Quota면 부르지 않는다.
+            // 단계에 대체 에이전트가 있으면 그 에이전트로 실행하고, 없으면 지휘자가 대신한다 (self-review.md).
             if (RecentQuota(plan.Select(p => p.Agent.Provider).Distinct(), runner.LogPath, ClaudeCliQuotaHold, DateTimeOffset.Now) is { } quotaAt)
             {
                 if (fallbackNote is null && FallbackOverrides(plan, agentOverrides) is { } fallback)
@@ -205,7 +205,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     /// <summary>
     /// claude-cli Quota 뒤 호출을 쉬는 시간. 계속 막으면 성공 기록이 생길 수 없어 크레딧을 채워도 풀리지 않는다 —
     /// 이 시간이 지나면 한 번 시도한다 (크레딧이 없으면 실패 호출 비용은 0). 충전한 뒤 풀릴 때까지의 최대 대기라 짧게 둔다
-    /// (12시간 → 1시간, 계획서 2026-10-27_검토형-서브에이전트-API-전환 '결정 (2차 리뷰 9ea51e562a 뒤)').
+    /// (12시간 → 1시간, 2차 리뷰 9ea51e562a 뒤 결정).
     /// </summary>
     public static readonly TimeSpan ClaudeCliQuotaHold = TimeSpan.FromHours(1);
 
@@ -341,7 +341,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             if (role.Output is not null && step.WebSearch is not null)
                 return (null, $"[모드 '{modeName}'] {step.Role}@{agentName}: 구조화 출력(Output)과 WebSearch는 함께 쓸 수 없습니다 (웹검색 경로는 구조화 출력을 지원하지 않음).");
 
-            // 모델별 덧붙임 (교체 뒤 에이전트 이름). 골든 --no-guidelines여도 붙인다 — 프로젝트 지침이 아니라 모델 버릇 (계획서 2026-10-23_모델별-프롬프트-덧붙임 결정 2).
+            // 모델별 덧붙임 (교체 뒤 에이전트 이름). 골든 --no-guidelines여도 붙인다 — 프로젝트 지침이 아니라 모델 버릇.
             PromptAppendLoader.Result? append;
             try { append = PromptAppendLoader.Load(appendRoot!, step.Role, agent.Name); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
@@ -414,7 +414,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     }
 
     /// <summary>
-    /// --golden의 crash 사례: Sequential 모드 전체를 run_mode와 같은 계획·프롬프트 조립(Sees)으로 돌린다 (계획서 2026-10-19_골든-crash사례).
+    /// --golden의 crash 사례: Sequential 모드 전체를 run_mode와 같은 계획·프롬프트 조립(Sees)으로 돌린다.
     /// input은 run_mode의 input과 같고 첨부(context)·이미지는 없다. ownReview는 쓰지 않는다. 기록 Tool은 tool.
     /// expected를 주면 단계 수 · 단계마다 에이전트와 지침(붙음·해시)을 실행 전 확인과 비교해 다르면 호출하지 않는다
     /// (사례를 차례로 도는 사이 modes.json·지침이 바뀌면 결과 줄의 에이전트·모델과 실제 실행이 어긋나므로).
@@ -498,7 +498,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     }
 
     /// <summary>
-    /// 자료 보충 재질문 (run_mode followUp, 계획서 2026-10-19_자료요청-왕복): 원래 단계의 에이전트에게
+    /// 자료 보충 재질문 (run_mode followUp): 원래 단계의 에이전트에게
     /// [원래 프롬프트, 원래 응답]을 앞 대화로 두고 지휘자가 찾은 보충 자료(context + input)를 이어 보낸다.
     /// - 같은 runId에 성공한 보충 1회만 (실패·취소는 다시 할 수 있음, 동시 호출은 예약으로 막음). reason은 필수, ownReview는 받지 않는다.
     /// - 결과는 같은 runId의 새 단계 번호로 남는다 (지적·요청 ID와 save_result가 원래 응답과 섞이지 않게).

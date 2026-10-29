@@ -15,7 +15,7 @@ if (args.Length > 0 && args[0] == ConfigDriftReport.Flag)
 }
 
 // 호출 기록 압축 (사람이 가끔 돌림): 예전 기록의 큰 프롬프트를 blobs로 옮기고 원래 파일은 백업으로 남긴다. 서버를 띄우지 않는다.
-// 사용: HB.Orchestration.Mcp.exe --compact-log [calls.jsonl 경로] (계획서 2026-10-23_호출기록-blobs-분리와-첫화면-쪽나누기)
+// 사용: HB.Orchestration.Mcp.exe --compact-log [calls.jsonl 경로]
 if (args.Length > 0 && args[0] == "--compact-log")
 {
     Console.OutputEncoding = new System.Text.UTF8Encoding(false);
@@ -97,7 +97,7 @@ var sessions = app.Services.GetRequiredService<SessionTracker>();
 app.Services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping.Register(sessions.Remove);
 
 // 검토형 서브에이전트 결과를 호출 기록 옆으로 보관한다 (Claude Code가 세션 기록을 지우기 전에). 시작을 막지 않고, 실패해도 서버는 돈다.
-// 계획서 2026-10-27_서브에이전트-결과-보존 — 대시보드도 읽을 때 같은 Sync를 하므로 여기는 대시보드를 안 켜는 날의 보험이다.
+// 대시보드도 읽을 때 같은 Sync를 하므로 여기는 대시보드를 안 켜는 날의 보험이다.
 var archiveLog = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("SubagentArchive");
 var archiveStopping = app.Services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping;
 _ = Task.Run(() =>

@@ -35,10 +35,10 @@ public sealed record ApprovalRequest(string Tool, string Summary, string? Descri
     /// <summary>서브에이전트가 낸 요청 (request의 agent_id — Claude 앱 기능 D). 카드에 "서브에이전트"로 보인다. 허용 · 규칙은 같다.</summary>
     public bool FromAgent { get; init; }
 
-    /// <summary>백그라운드 실행 명령 (input의 run_in_background = true) — 답이 끝난 뒤에도 계속 돈다는 줄을 카드에 보인다 (계획서 2026-10-29_HB_Chat-백그라운드-명령).</summary>
+    /// <summary>백그라운드 실행 명령 (input의 run_in_background = true) — 답이 끝난 뒤에도 계속 돈다는 줄을 카드에 보인다.</summary>
     public bool Background { get; init; }
 
-    /// <summary>run_mode 모델 선택 카드 (계획서 2026-10-29_모델-선택창) — 허가하면 고른 교체 · 강도로 입력을 다시 쓴다. 아니면 null.</summary>
+    /// <summary>run_mode 모델 선택 카드 — 허가하면 고른 교체 · 강도로 입력을 다시 쓴다. 아니면 null.</summary>
     public ModeCard? Mode { get; init; }
 
     /// <summary>계획 모드에서 지휘자가 계획 승인을 묻는 도구.</summary>

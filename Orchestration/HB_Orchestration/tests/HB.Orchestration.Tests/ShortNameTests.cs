@@ -4,7 +4,7 @@ using HB.Orchestration.Agents;
 namespace HB.Orchestration.Tests;
 
 /// <summary>
-/// 8.3 짧은 이름(CREDEN~1.JSO)으로 DenyPatterns를 피할 수 있다는 지적(골든 sol, 2026-10-20)을 확인한 고정 테스트 (계획서 2026-10-23_SafePath-짧은이름-우회).
+/// 8.3 짧은 이름(CREDEN~1.JSO)으로 DenyPatterns를 피할 수 있다는 지적(골든 sol, 2026-10-20)을 확인한 고정 테스트.
 /// 실제로는 SafePath의 Path.GetFullPath가 짧은 이름을 긴 이름으로 풀어 우회되지 않았다 — .NET 동작이 바뀌면 여기서 드러난다.
 /// 짧은 이름은 볼륨 설정에 따라 생기지 않을 수 있어, 만들어지지 않았으면 그 검사는 건너뛴다.
 /// </summary>

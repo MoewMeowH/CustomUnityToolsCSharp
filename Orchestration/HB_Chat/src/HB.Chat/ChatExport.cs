@@ -5,7 +5,7 @@ using HB.Orchestration.Shared;
 namespace HB.Chat;
 
 /// <summary>
-/// 방 대화를 Markdown 파일로 (계획서 2-2 c). 화자 · 시각 · 본문(세션 기록 글 그대로, 스티커 태그도 글자 그대로) · 도구 이름,
+/// 방 대화를 Markdown 파일로. 화자 · 시각 · 본문(세션 기록 글 그대로, 스티커 태그도 글자 그대로) · 도구 이름,
 /// 그리고 이 방에서 부른 run_mode 실행 말풍선 (2-2 e, 화면과 같은 자리).
 /// </summary>
 public static class ChatExport

@@ -5,7 +5,7 @@ using Microsoft.Extensions.Options;
 namespace HB.Chat.Tests;
 
 /// <summary>
-/// 화면 스크립트(chat.js) 시험 (계획서 2026-10-29_HB_Chat-화면-스크립트-시험-틀): 실제 앱 + 실제 Chrome(없으면 Edge)으로 DOM 결과만 본다 — chat.js는 그대로.
+/// 화면 스크립트(chat.js) 시험: 실제 앱 + 실제 Chrome(없으면 Edge)으로 DOM 결과만 본다 — chat.js는 그대로.
 /// 위젯 대상 말풍선 · 20만 자 상한 · 높이 자르기 · 보낸 창 확인 (f 리뷰 803e5f13eb R7), 턴 끝 새 말 받기(이어 붙이기 · 쪽 바꾸기 · 기록이 줄면 전체),
 /// 맨 뒤 줄(run-trailing) 바꿔 끼우기 (/self-review a9e6066519 C1). 모든 시험은 끝에 페이지 오류(예외 · console.error · 오류 로그)가 없어야 한다.
 /// 브라우저가 없는 PC에서는 건너뛴다(통과로 보인다).
@@ -18,7 +18,7 @@ public sealed class ChatScriptTests(ChatApp app, ChatBrowser browser) : IClassFi
 
     private static string Widget(string html) => "```widget\n" + html + "\n```";
 
-    /// <summary>단톡방 칸 (계획서 2026-10-29_HB_Chat-단톡방): 구성원 칩 · @이름 넣기 · 부른 구성원 답 말풍선 · 방 목록에 자식 방 없음.</summary>
+    /// <summary>단톡방 칸: 구성원 칩 · @이름 넣기 · 부른 구성원 답 말풍선 · 방 목록에 자식 방 없음.</summary>
     [Fact]
     public async Task Group_CallMember_ShowsAnswerBubble()
     {

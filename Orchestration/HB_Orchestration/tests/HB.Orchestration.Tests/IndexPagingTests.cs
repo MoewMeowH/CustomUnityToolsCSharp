@@ -5,7 +5,7 @@ using Microsoft.Extensions.Options;
 
 namespace HB.Orchestration.Tests;
 
-/// <summary>첫 화면 표 쪽 나누기: 합계는 전체, 표만 쪽 (계획서 2026-10-23_호출기록-blobs-분리와-첫화면-쪽나누기).</summary>
+/// <summary>첫 화면 표 쪽 나누기: 합계는 전체, 표만 쪽.</summary>
 public sealed class IndexPagingTests : IDisposable
 {
     private readonly string _dir = Directory.CreateTempSubdirectory("hb-index-page-").FullName;

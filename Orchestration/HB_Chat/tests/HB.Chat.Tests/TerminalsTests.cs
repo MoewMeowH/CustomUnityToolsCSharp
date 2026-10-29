@@ -7,7 +7,7 @@ using Microsoft.Extensions.Options;
 namespace HB.Chat.Tests;
 
 /// <summary>
-/// 터미널 곁칸 (계획서 2026-10-29_HB_Chat-터미널-곁칸, 결정 3): 지휘자 프로세스(파이프 · 줄 글 · 읽기 전용)와 내 셸(ConPTY · 입력 · Ctrl+C),
+/// 터미널 곁칸: 지휘자 프로세스(파이프 · 줄 글 · 읽기 전용)와 내 셸(ConPTY · 입력 · Ctrl+C),
 /// 방 상한 · 종류 나누기, 실행 토큰 · 승인 표, 앱 MCP 도구 · 토큰 검사, 설정 · 인자 · 같은 출처 예외.
 /// </summary>
 public sealed class TerminalsTests : IDisposable

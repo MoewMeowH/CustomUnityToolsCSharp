@@ -4,7 +4,7 @@ using HB.Orchestration.Shared;
 
 namespace HB.Orchestration.Tests;
 
-/// <summary>record_verdicts 검사·기록과 판정 집계 (계획서 2026-10-19_지적-채택-기각-기록).</summary>
+/// <summary>record_verdicts 검사·기록과 판정 집계.</summary>
 public sealed class VerdictTests : IDisposable
 {
     private readonly string _dir = Directory.CreateTempSubdirectory("hb-orch-verdict-").FullName;
@@ -209,7 +209,7 @@ public sealed class VerdictTests : IDisposable
         Assert.Empty(VerdictStats.ForRun(verdicts, [], "r1"));
     }
 
-    // ── /self-review (계획서 2026-10-20_리뷰조건-self-reviewer) ─────────────────
+    // ── /self-review ─────────────────
 
     private const string SelfReviewText = "## 지적\n- C1 [minor] a.cs:1 — x\n\n## 자료 부족\n- 없음\n\n## 읽은 파일\n- subagent_in/x/a.cs:1-10\n";
 
@@ -243,7 +243,7 @@ public sealed class VerdictTests : IDisposable
     [Fact]
     public async Task SelfReview_agent_name_is_recorded_and_counted_separately()
     {
-        // 검토형 서브에이전트 추가 (계획서 2026-10-23_서브에이전트-종류-추가): 에이전트별 채택률
+        // 검토형 서브에이전트 추가: 에이전트별 채택률
         await VerdictRecorder.RecordSelfReviewAsync(Info() with { Agent = "Security-Reviewer" }, [new VerdictItem("C1", "x", "rejected", Steps: [1], Reason: "오탐")], 500, Log);
         await VerdictRecorder.RecordSelfReviewAsync(Info(SelfReviewText + "\n## 비고\n- 둘째\n"), [new VerdictItem("C1", "x", "adopted", Steps: [1])], 500, Log);
 

@@ -4,7 +4,7 @@ using Microsoft.Extensions.Options;
 
 namespace HB.Chat.Tests;
 
-/// <summary>외부 에이전트 말풍선 (계획서 2-2 e): 이 방 세션의 확정 runId만 · 시각으로 끼우기 · 내보내기.</summary>
+/// <summary>외부 에이전트 말풍선: 이 방 세션의 확정 runId만 · 시각으로 끼우기 · 내보내기.</summary>
 public sealed class RoomRunsTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "hbchat-runs-" + Guid.NewGuid().ToString("N"));

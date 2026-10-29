@@ -35,7 +35,7 @@ public sealed record TranscriptSummary
 
     /// <summary>
     /// record_verdicts로 이 세션에 이어진 실행 (입력 runId · /self-review가 만든 "기록 runId: …"), 정렬됨.
-    /// 채팅방이 실행 → 세션을 본문을 읽지 않고 찾는 데 쓴다 (계획서 2026-10-27_채팅방-실행연결-색인).
+    /// 채팅방이 실행 → 세션을 본문을 읽지 않고 찾는 데 쓴다.
     /// </summary>
     public IReadOnlyList<string> VerdictRunIds { get; init; } = [];
 

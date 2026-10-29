@@ -6,7 +6,7 @@ using Microsoft.Extensions.AI;
 
 namespace HB.Orchestration.Tests;
 
-/// <summary>자료 요청 왕복 (계획서 2026-10-19_자료요청-왕복): followUp · 요청 처리 판정 · 대시보드 집계.</summary>
+/// <summary>자료 요청 왕복: followUp · 요청 처리 판정 · 대시보드 집계.</summary>
 public sealed class FollowUpTests
 {
     private const string Modes = """
@@ -267,7 +267,7 @@ public sealed class FollowUpTests
     }
 
     [Fact]
-    public void Weekly_request_rate_counts_review_runs_only()   // 계획서 2026-10-27_외부-첨부-범위-규칙, sub_self 11b9c52eba C1 · C2 · C5 · C6
+    public void Weekly_request_rate_counts_review_runs_only()   // sub_self 11b9c52eba C1 · C2 · C5 · C6
     {
         var sunday = new DateTimeOffset(new DateTime(2026, 10, 25, 12, 0, 0, DateTimeKind.Local));
         var monday = sunday.AddDays(1);

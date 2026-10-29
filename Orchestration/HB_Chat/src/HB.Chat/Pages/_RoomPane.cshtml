@@ -1,7 +1,7 @@
 @model RoomModel
 @inject ProfileView Profiles
 @*
-    오른쪽 방 칸 (계획서 2-2 a). 첫 화면(Room.cshtml)과 방 전환(?handler=Pane)이 같이 쓴다. 동작은 wwwroot/chat.js의 mountRoom.
+    오른쪽 방 칸. 첫 화면(Room.cshtml)과 방 전환(?handler=Pane)이 같이 쓴다. 동작은 wwwroot/chat.js의 mountRoom.
 *@
 @{
     var room = Model.Room;
@@ -14,7 +14,7 @@
     <div class="room-main">
     <section class="room-head">
         <a class="back" href="/" title="방 목록" aria-label="방 목록">@Icons.Svg("back")</a>
-        @* 지휘자 표정 (계획서 2-2 b): 상태마다 스티커 그림, 그림이 없으면 글자 아바타 *@
+        @* 지휘자 표정: 상태마다 스티커 그림, 그림이 없으면 글자 아바타 *@
         <div class="avatar face" id="face">
             <img id="face-img" alt="" src="@faceUrl" @(faceUrl is null ? "hidden" : null) />
             <span id="face-letter" @(faceUrl is null ? null : "hidden")>@Profiles.Letter(ProfileStore.Conductor, Profiles.ConductorName)</span>
@@ -43,7 +43,7 @@
         }
         @* 곁칸 열고 닫기 (3차 c) — 열림 · 고른 탭은 브라우저 저장 *@
         <button type="button" class="btn" id="side-toggle" title="오른쪽 곁칸: 단계 · 방 정보 · 외부 실행 · 첨부" aria-controls="side" aria-expanded="false">@Icons.Svg("panel") 정보</button>
-        @* 방 메뉴 (계획서 2-2 c) — 메뉴 단추는 아이콘만, 항목은 아이콘 + 글 (4차 D3) *@
+        @* 방 메뉴 — 메뉴 단추는 아이콘만, 항목은 아이콘 + 글 (4차 D3) *@
         <details class="menu">
             <summary class="btn icon-only" title="방 메뉴" aria-label="방 메뉴">@Icons.Svg("more")</summary>
             <div class="menu-items">
@@ -62,7 +62,7 @@
     <div class="scroll">
         @if (Model.ParentGroup is { } parentGroup)
         {
-            @* 단톡방 구성원의 과정 보기 (계획서 2026-10-29_HB_Chat-단톡방): 말은 단톡방에서 — 여기서는 도구 · 승인 · 질문 카드만 *@
+            @* 단톡방 구성원의 과정 보기: 말은 단톡방에서 — 여기서는 도구 · 승인 · 질문 카드만 *@
             <div class="panel banner muted" id="group-child-banner">
                 단톡방 <a href="/Room/@parentGroup.Id">@parentGroup.Title</a>의 구성원 방(과정 보기)입니다 — 말은 단톡방에서 @@이름으로 보내세요. 여기서는 도구 사용 · 승인 · 질문 카드를 보고 답합니다.
             </div>
@@ -157,7 +157,7 @@
                         계획 먼저
                     </label>
                 }
-                @* 모델 선택창 (계획서 2026-10-29_모델-선택창, 결정 "방 설정 스위치"): 다음 실행부터 run_mode를 카드로 묻는다 *@
+                @* 모델 선택창 (결정 "방 설정 스위치"): 다음 실행부터 run_mode를 카드로 묻는다 *@
                 @if (Model.CanModeRequest)
                 {
                     <label class="switch" title="켜면 지휘자가 외부 에이전트(run_mode)를 부를 때마다 카드로 묻습니다 — 에이전트 · 추론 강도를 바꿔 허가하거나 거절합니다. 다음 실행부터 적용됩니다.">
@@ -168,7 +168,7 @@
                 }
             </div>
         }
-        @* + 요청 창에서 고른 외부 요청 (계획서 3번) — 보낼 때 머리 줄을 붙여 보낸다. 화면이 그린다 *@
+        @* + 요청 창에서 고른 외부 요청 — 보낼 때 머리 줄을 붙여 보낸다. 화면이 그린다 *@
         <div class="quote mode-chip" id="mode-chip" hidden>
             <span class="quote-text" id="mode-chip-text"></span>
             <button class="btn icon-only quote-x" type="button" id="mode-chip-x" title="외부 요청 빼기" aria-label="외부 요청 빼기">@Icons.Svg("x")</button>
@@ -176,7 +176,7 @@
         <div class="mode-pick" id="mode-pick" hidden></div>
         <form id="send-form" autocomplete="off">
             @Html.AntiForgeryToken()
-            @* + 메뉴 (계획서 2026-10-29_모델-선택창 3번): 파일 첨부 · 외부 에이전트 요청 *@
+            @* + 메뉴: 파일 첨부 · 외부 에이전트 요청 *@
             @if (canAttach || Model.CanModeRequest)
             {
                 <div class="plus-wrap">
@@ -228,7 +228,7 @@
             <p class="muted" id="side-steps-empty">지휘자가 할 일 도구로 단계를 만들면 여기에 보입니다.</p>
             <ol class="side-steps" id="side-steps"></ol>
         </section>
-        @* 터미널 (계획서 2026-10-29_HB_Chat-터미널-곁칸, 결정 3): 내 셸("+" PowerShell · ▾ 고르기, 입력 받음)과 지휘자 프로세스(명령 방, 읽기 전용).
+        @* 터미널: 내 셸("+" PowerShell · ▾ 고르기, 입력 받음)과 지휘자 프로세스(명령 방, 읽기 전용).
            화면이 terminals · term-out 알림으로 그리고, 탭을 열 때 xterm.js를 불러온다 *@
         <section class="side-sec side-term" data-tab="term" id="side-sec-term" role="tabpanel" aria-labelledby="side-tab-term" hidden>
             <div class="term-top">
@@ -247,7 +247,7 @@
             <div class="term-bar" id="term-bar" hidden><span class="term-state" id="term-state"></span><button type="button" class="btn" id="term-stop">중지</button><button type="button" class="btn" id="term-close">닫기</button></div>
             <div class="term-host" id="term-host"></div>
         </section>
-        @* 지휘자 브라우저 (계획서 2026-10-29_HB_Chat-지휘자-브라우저, 결정 "보기만"): 명령 방만. browser · browser-frame 알림으로 그린다 *@
+        @* 지휘자 브라우저 (결정 "보기만"): 명령 방만. browser · browser-frame 알림으로 그린다 *@
         @if (room.Level == PermissionLevel.Command)
         {
             <section class="side-sec side-browser" data-tab="browser" id="side-sec-browser" role="tabpanel" aria-labelledby="side-tab-browser" hidden>

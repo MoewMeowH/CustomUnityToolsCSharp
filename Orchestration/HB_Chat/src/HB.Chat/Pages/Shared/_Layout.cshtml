@@ -6,7 +6,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>@(ViewData["Title"] ?? "HB Chat")</title>
-    @* 색 변수는 대시보드 _Layout과 같은 값 (말풍선 CSS _ChatStyles가 이 변수를 쓴다). 화면 틀 · 방 CSS는 wwwroot/chat.css (계획서 2-2 a). *@
+    @* 색 변수는 대시보드 _Layout과 같은 값 (말풍선 CSS _ChatStyles가 이 변수를 쓴다). 화면 틀 · 방 CSS는 wwwroot/chat.css. *@
     @* 어두운 색은 디코 색 (5차 a): 배경 #313338 · 곁 #2b2d31 · 가장 진한 칸 #1e1f22 · 강조 #5865f2 — 대시보드 _Layout의 어두운 색과 같은 값.
        밝게(light)는 늘 밝은 색, 디코(discord)는 늘 어두운 색, 시스템(system)은 Windows 설정을 따른다. *@
     <style>
@@ -29,7 +29,7 @@
             }
         }
     </style>
-    @* 회사 모드 (계획서 2-2 c, 브라우저 저장): 그리기 전에 켜 둔다 — 스티커가 잠깐 보였다 사라지지 않게 *@
+    @* 회사 모드 (브라우저 저장): 그리기 전에 켜 둔다 — 스티커가 잠깐 보였다 사라지지 않게 *@
     <script>try { if (localStorage.getItem("hbchat.company") === "1") document.documentElement.classList.add("company"); } catch { }</script>
     <partial name="_ChatStyles" />
     <link rel="stylesheet" href="~/chat.css" asp-append-version="true" />

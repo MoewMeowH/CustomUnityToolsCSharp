@@ -29,8 +29,11 @@ argument-hint: [sub] [perf|security|direction] [파일/커밋 범위 또는 계�
 1. diff가 있으면 대상 diff와 변경 의도를 파악한다. 의도가 불분명하면 커밋 메시지·주변 코드로 추론하고, 그래도 모르면 한 줄로 질문한다. / diff가 없으면(기존 코드 점검) 변경 의도 대신 "이 코드의 역할과 점검 목적"을 쓴다.
 2. **자체 검토** — `/cross-review` 2단계와 같다. 순서를 바꾸지 않는다.
    - 2-1. **지휘자 검토를 먼저 저장**: REVIEW_GUIDELINES.md 기준으로 너의 리뷰를 완성해 작업 로그에 다 쓴다. self-reviewer 결과를 본 뒤에 고치지 않는다.
-   - 2-2. **입력 복사**: `subagent_in/<날짜>_<주제>/`를 만들고 diff 파일(변경이면, CLAUDE.md "diff는 파일로") · 대상 파일(판단에 필요한 주변 코드 포함)과 `REVIEW_GUIDELINES.md`를 명령으로 복사한다. 원본과 사본의 SHA-256이 같은지 확인한다. self-reviewer는 이 폴더 밖을 읽지 못한다 (훅). 부르는 서브에이전트의 `.claude/mistakes/<이름>.md`에 항목(주석 밖 `- ` 줄)이 있으면 `_SUBAGENT_MISTAKES.md`로 함께 복사한다 (CLAUDE.md "서브에이전트").
-   - 2-3. **self-reviewer 호출**: 위임 메시지에는 그 폴더 경로, 대상 파일·줄 범위, 변경 의도, 제약(사용자 결정 원문 포함)만 쓴다. 너의 의견·의심 지점·결론은 넣지 않는다.
+   - 2-2. **입력 복사**: `subagent_in/<날짜>_<주제>/`를 만들고 diff 파일(변경이면, CLAUDE.md "diff는 파일로")과 `REVIEW_GUIDELINES.md`를 명령으로 복사한다. 원본과 사본의 SHA-256이 같은지 확인한다. self-reviewer는 이 폴더 밖을 읽지 못한다 (훅). 부르는 서브에이전트의 `.claude/mistakes/<이름>.md`에 항목(주석 밖 `- ` 줄)이 있으면 `_SUBAGENT_MISTAKES.md`로 함께 복사한다 (CLAUDE.md "서브에이전트").
+     - **저장소 사본** (diff + 직접 찾기): `python -I .claude/scripts/subagent_copy_tracked.py --root <저장소 루트> --out subagent_in/<날짜>_<주제>/repo [--path <대상 프로젝트 폴더>]... [--diff <diff 파일>]`로 대상 저장소의 git 추적 파일 사본을 만든다. 지휘자 지시 · 실수 · 프로젝트 규칙 파일, `.claude` 등, 리뷰 임시 폴더, 계획서 · 작업 로그, 비밀 모양 · 이진 · 큰 파일 · 링크는 스크립트가 뺀다. 유니티 저장소(`Assets/` + `ProjectSettings/`)는 코드 파일만 + diff에 든 파일이다. 프로젝트가 여럿인 저장소는 `--path`로 대상 프로젝트 폴더만 (PROJECT.md 목록). 출력 요약(사본 수 · 뺀 것)을 작업 로그에 적는다.
+     - 출력에 `[주의] diff에 든 파일 N개가 사본에 없음`이 있으면 그 파일 중 리뷰 대상을 `subagent_in/<날짜>_<주제>/target/`에 따로 복사한다 (SHA-256 확인). `.claude/` 아래는 `.claude-files/`처럼 폴더 이름을, `CLAUDE.md`는 `CLAUDE.md.txt`로 바꾼다 (H6). 비밀 모양 파일은 넣지 않는다. 위임 메시지에 `target/`의 원래 경로를 적는다.
+     - 스크립트가 실패하면(git 없음 · 상한 2만 개 · 64MB 넘음) 대상 파일(판단에 필요한 정의 · 호출부 · 설정 · 시험 포함)을 골라 복사하는 예전 방식으로 한다.
+   - 2-3. **self-reviewer 호출**: 위임 메시지에는 그 폴더 경로, 대상 파일·줄 범위, 변경 의도, 제약(사용자 결정 원문 포함)만 쓴다. 너의 의견·의심 지점·결론은 넣지 않는다. 사본이 있으면 "`repo/`는 대상 저장소 추적 파일 사본 — 중심은 diff, 판단에 필요한 정의 · 호출부 · 설정 · 시험은 `repo/` 안에서 Grep · Glob으로 직접 찾는다"를 한 줄 쓴다.
    - 2-4. 결과가 형식(`## 지적` · `## 자료 부족` · `## 읽은 파일`, `## 비고`는 선택)을 어겼거나, 중단됐거나, 비어 있거나, `## 읽은 파일`에 그 폴더 밖 경로가 있으면 **여기서 멈추고** 사용자에게 알린다. 다시 부르거나 네가 대신 쓸지는 사용자가 정한다.
 3. 결과를 종합한다.
    - **공통**: self-reviewer와 지휘자가 같이 찾은 것 — 우선 처리.
@@ -57,6 +60,7 @@ argument-hint: [sub] [perf|security|direction] [파일/커밋 범위 또는 계�
   * 모델: 맥락 편향 없이 봐야 하는 자리는 `opus`, 지휘자 컨텍스트 보호·반복 작업(조사·수집·추출)은 `sonnet`.
   * 정의 파일에는 `tools` 허용 목록이 반드시 있어야 한다 (생략하면 MCP 도구까지 상속 → `run_mode`를 부를 수 있음). `python -I .claude/scripts/check_agents.py`로 검사한다. `permissionMode` bypass 계열 금지.
 * 입력: 대상 파일을 `subagent_in/<날짜>_<주제>/`에 **명령으로 복사**하고 SHA-256을 확인한 뒤 그 경로만 넘긴다. 리뷰 대상이 변경이면 diff 파일(CLAUDE.md "diff는 파일로")도 함께 복사한다. 리뷰 지침이 필요하면 `REVIEW_GUIDELINES.md`도 복사한다 (`omitClaudeMd`라 CLAUDE.md·지침이 자동으로 들어가지 않음).
+  * 검토형(self · perf · security)은 대상 파일을 고르는 대신 저장소 추적 사본 `repo/`를 준다 (`subagent_copy_tracked.py`, 위 2-2 — diff + 직접 찾기). direction은 그대로 요청 원문 · 계획서만.
   * 읽기 차단 훅(`.claude/scripts/subagent_read_guard.py`)이 `subagent_in/` 밖을 막는다. 이전 리뷰·작업 로그·호출 기록을 넣지 않는다.
   * `CLAUDE.md`가 검토 대상이면 `CLAUDE.md.txt`처럼 이름을 바꿔 복사한다 (그대로 두면 지휘자 규칙이 서브에이전트에 자동으로 실린다 — H6이 막음). 링크가 아니라 내용을 복사한다. 부르기 전에 복사를 끝내고, 서브에이전트가 도는 동안에는 `subagent_in/`에 복사하지 않는다 (H6은 부르는 순간만 본다).
   * 그 서브에이전트의 `.claude/mistakes/<이름>.md`에 항목(주석 밖 `- ` 줄)이 있으면 `_SUBAGENT_MISTAKES.md`로 함께 복사한다 (검토 대상인 프로젝트 `MISTAKES.md`와 겹치지 않는 이름). web-searcher는 파일을 못 읽으므로 주석 밖 `- ` 줄만 위임 메시지 끝 `## 자주 하는 실수` 절로 붙인다 (CLAUDE.md "실수 기록").

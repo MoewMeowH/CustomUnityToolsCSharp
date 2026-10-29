@@ -12,7 +12,7 @@ using Microsoft.Extensions.Options;
 namespace HB.Chat.Tests;
 
 /// <summary>
-/// 화면 · 통합 시험용 실제 앱 (계획서 2026-10-29_HB_Chat-화면-스크립트-시험-틀): WebApplicationFactory + Kestrel 임의 포트 · 임시 데이터 폴더 · 가짜 claude.
+/// 화면 · 통합 시험용 실제 앱: WebApplicationFactory + Kestrel 임의 포트 · 임시 데이터 폴더 · 가짜 claude.
 /// 0단계 실측의 함정 — appsettings.json의 Urls(5290)가 UseKestrel(0)보다 이기므로 Urls를 덮는다(안 덮으면 사용자 앱 포트에 뜬다).
 /// Workspaces는 사전이라 시험 이름을 더해도 실제 저장소 이름(ToolWithCS)이 남는다 — 그것까지 덮고, 켠 뒤 모든 경로가 시험 폴더 안인지 본다(아니면 실패).
 /// 쓰는 법: <see cref="Room"/>으로 방 + 세션 기록을 만들고 <see cref="User"/> · <see cref="Conductor"/>로 기록 줄을 만든다.

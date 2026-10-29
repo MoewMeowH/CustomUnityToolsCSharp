@@ -1,5 +1,5 @@
 """PreToolUse 훅 H6 (Agent · Task · SendMessage): 서브에이전트 입력 폴더 subagent_in/에 하네스가 자동으로 불러오는 파일이 있으면 호출을 막는다
-(계획서 2026-10-27_H6-서브에이전트-입력-자동로드-차단, /self-review security 78e1a3aaca 반영).
+(/self-review security 78e1a3aaca 반영).
 
 - 서브에이전트가 폴더의 파일을 읽으면 하네스가 그 폴더의 CLAUDE.md를 컨텍스트에 붙인다 (nested_memory, 카나리아로 확정).
   도구 호출이 아니라 subagent_read_guard(Read·Grep·Glob)로는 볼 수 없다 → 부르는 순간(이어 부르는 SendMessage 포함) 폴더 상태를 본다.

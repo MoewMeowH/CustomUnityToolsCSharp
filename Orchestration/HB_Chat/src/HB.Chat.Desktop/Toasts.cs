@@ -11,8 +11,8 @@ namespace HB.Chat.Desktop;
 public sealed record ToastSpec(string? RoomId, string Title, string Text);
 
 /// <summary>
-/// Windows 토스트 알림 (계획서 2026-10-28 알림-토스트): 트레이 풍선 대신 앱 이름 · 아이콘 · 지휘자 프로필 그림 · "방 열기" 단추가 있는 알림.
-/// 방마다 하나(Tag = 방 ID — 같은 방의 새 알림이 앞 것을 바꾼다), 그 방을 열면 알림 센터에서도 지운다. 바로 답장 입력칸은 없다(결정).
+/// Windows 토스트 알림: 트레이 풍선 대신 앱 이름 · 아이콘 · 지휘자 프로필 그림 · "방 열기" 단추가 있는 알림.
+/// 방마다 하나(Tag = 방 ID — 같은 방의 새 알림이 앞 것을 바꾼다), 그 방을 열면 알림 센터에서도 지운다. 바로 답장 입력칸은 없다.
 /// 글은 풍선과 같은 <see cref="Notices.Balloon"/> (알림 본문 설정 · 승인 · 질문은 제목만 그대로).
 /// </summary>
 public static partial class Toasts

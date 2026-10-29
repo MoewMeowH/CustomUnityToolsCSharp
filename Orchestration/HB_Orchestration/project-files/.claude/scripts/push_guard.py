@@ -1,10 +1,10 @@
 """PreToolUse 훅 H2 (Bash · PowerShell의 git push): 공개 저장소로 나가기 전에 비밀 값과 무시해야 할 폴더를 막는다
-(계획서 2026-10-19_훅-규칙-강제, 사용자 제약 "공개 저장소에 푸시하기 전에 비밀 값을 검사한다", /cross-review 10bfc8de41 반영).
+(사용자 제약 "공개 저장소에 푸시하기 전에 비밀 값을 검사한다", /cross-review 10bfc8de41 반영).
 
 - 형식 제한: push는 **단독 명령**으로 `git [-C 경로] push [--dry-run|-n] [-u|--set-upstream] [-v|-q] [원격 [소스[:대상]]]`만 받는다.
   다른 명령과 묶음(훅은 실행 전에 돌아 같은 명령의 commit을 못 본다) · cd류 · 명령 치환 · git 전역 옵션 · --all·--tags·강제 푸시 등은
   해석하지 않고 막는다 → "단순 형식으로 따로" 다시 하게 한다. heredoc · here-string 본문에 git push가 있으면 받는 명령이
-  데이터 전용(cat · tee · git commit 등, hook_common.data_only)일 때만 통과 (계획서 2026-10-23_H1-H2-heredoc-본문과-rm-옵션).
+  데이터 전용(cat · tee · git commit 등, hook_common.data_only)일 때만 통과.
 - 범위: 대상 원격에 없는 커밋 `<소스> --not --remotes=<원격>` (소스 기본 HEAD, 원격 기본 upstream → origin).
   merge 커밋은 첫 부모 기준 diff까지 본다. 경로는 -z(한글 경로가 인용·이스케이프되지 않게).
 - 비밀 패턴: BUILT_IN(맞은 값에 FAKE_MARKERS가 있으면 시험용 가짜로 건너뜀) + 개인 값 파일 `$CLAUDE_PROJECT_DIR/.claude/push_guard.local.txt`
@@ -201,7 +201,7 @@ def check(data: dict) -> None:
     rough = ROUGH.search(stripped + '\n' + '\n'.join(inner))
     if rough and has_substitution(stripped, inner, shell):  # 따옴표 검사보다 먼저 — 이쪽 안내가 더 정확하다
         deny('git push가 명령 치환($( ) · 백틱) 안이나 함께 있다. ' + SIMPLE)
-    # 따옴표 문자열 속 git push (bash -c "…" · iex "…" 등): 글을 실행하지 않는 명령만 받는다 (계획서 2026-10-23_따옴표-명령-허용목록과-perf-ownReview)
+    # 따옴표 문자열 속 git push (bash -c "…" · iex "…" 등): 글을 실행하지 않는 명령만 받는다
     # 따옴표 · 백틱을 지운 글 전체도 본다 — 겹친 따옴표(bash -c "git -C "$R" push") · 쪼갠 이름(gi""t push) (/self-review security ddb47044d1 C1 · C5)
     joined = not rough and ROUGH.search(lx.unquoted(raw))
     if (joined or any(ROUGH.search(re.sub(r'[\'"`]', ' ', q)) for q in lx.quoted)) and not data_only(stripped, inner, shell, readers=True):

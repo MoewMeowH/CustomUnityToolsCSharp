@@ -23,7 +23,7 @@ public sealed record ModeList(IReadOnlyList<ModeInfo> Modes, IReadOnlyList<ModeA
 }
 
 /// <summary>
-/// 모델 선택창 (계획서 2026-10-29_모델-선택창 1번): 방 작업 폴더 .mcp.json의 MCP 서버 항목 → 서버 폴더(dll 옆)의 appsettings.json · modes.json을 읽는다.
+/// 모델 선택창: 방 작업 폴더 .mcp.json의 MCP 서버 항목 → 서버 폴더(dll 옆)의 appsettings.json · modes.json을 읽는다.
 /// modes.json 찾는 순서는 서버와 같다 (HB.Orchestration.Agents ModesPathResolver): 설정 ModesPath(서버 폴더 기준) → 항목 env의 HB_MODES_PATH
 /// → 작업 폴더 hb-modes.json → 서버 폴더 modes.json. 읽기만 하고, 세 파일의 시각 · 크기가 같으면 캐시를 쓴다.
 /// 이 앱은 HB.Orchestration.Agents를 참조하지 않는다 — 공급자 SDK까지 끌려오므로 필요한 칸만 직접 읽는다.

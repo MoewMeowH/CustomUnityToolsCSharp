@@ -1,7 +1,7 @@
 @model IReadOnlyList<SearchHit>
 @inject ProfileView Profiles
 @*
-    검색 결과 (계획서 2-2 c). 누르면 그 방을 열고(chat.js) 그 말이 보일 때까지 앞 쪽을 받아 강조한다. 글 조각은 Razor 인코딩.
+    검색 결과. 누르면 그 방을 열고(chat.js) 그 말이 보일 때까지 앞 쪽을 받아 강조한다. 글 조각은 Razor 인코딩.
 *@
 <div class="search-list">
     @foreach (var h in Model)

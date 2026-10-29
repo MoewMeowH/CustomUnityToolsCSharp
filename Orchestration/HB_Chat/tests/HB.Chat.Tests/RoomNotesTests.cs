@@ -4,7 +4,7 @@ using HB.Orchestration.Shared;
 
 namespace HB.Chat.Tests;
 
-/// <summary>방 기록 줄 (계획서 2026-10-29_HB_Chat-진행줄-자리-정리표시): 승인 기록에서 그 방 줄만 · 덧붙은 줄 · 시각으로 끼우기 · 정리 표시 글.</summary>
+/// <summary>방 기록 줄: 승인 기록에서 그 방 줄만 · 덧붙은 줄 · 시각으로 끼우기 · 정리 표시 글.</summary>
 public sealed class RoomNotesTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "hbchat-notes-" + Guid.NewGuid().ToString("N"));

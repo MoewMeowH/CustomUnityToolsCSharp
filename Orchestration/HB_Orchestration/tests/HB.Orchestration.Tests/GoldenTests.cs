@@ -6,7 +6,7 @@ using HB.Orchestration.Tests.Fakes;
 
 namespace HB.Orchestration.Tests;
 
-/// <summary>골든 세트 (계획서 2026-10-19_골든세트-회귀평가): 채점 규칙 · 사례 형식 · CLI.</summary>
+/// <summary>골든 세트: 채점 규칙 · 사례 형식 · CLI.</summary>
 public sealed class GoldenTests
 {
     // ── 채점 ─────────────────────────────────────────────────────────────

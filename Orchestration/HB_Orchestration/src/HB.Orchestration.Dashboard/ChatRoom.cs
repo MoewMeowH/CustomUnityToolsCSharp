@@ -61,7 +61,7 @@ public sealed record ChatRoom
 }
 
 /// <summary>
-/// 세션 기록 · 호출 기록 · 서브에이전트 결과 · 판정을 시간순 말풍선으로 엮는다 (계획서 2026-10-27_에이전트-채팅방).
+/// 세션 기록 · 호출 기록 · 서브에이전트 결과 · 판정을 시간순 말풍선으로 엮는다.
 /// 읽기만 하고 파일을 건드리지 않는다. auto는 상황 → 스티커 태그 (설정이 없으면 null).
 /// </summary>
 public static class ChatRoomBuilder
@@ -222,7 +222,7 @@ public sealed record RunRoom(string SessionId, bool IsEstimated);
 
 /// <summary>
 /// 채팅방 목록 · 방 하나 · 실행 → 방 찾기. 실행 → 방은 세션 요약(run_mode 연결 · record_verdicts runId)만 보고 본문은 읽지 않는다.
-/// 본문은 방을 그릴 때만 읽고, 최근 쓴 것부터 Dashboard:ClaudeSessionLimit + 20개만 들고 있는다 (계획서 2026-10-27_채팅방-실행연결-색인).
+/// 본문은 방을 그릴 때만 읽고, 최근 쓴 것부터 Dashboard:ClaudeSessionLimit + 20개만 들고 있는다.
 /// </summary>
 public sealed class ChatRoomService(
     CallLogCache log,
@@ -267,7 +267,7 @@ public sealed class ChatRoomService(
     }
 
     /// <summary>
-    /// 방 하나의 바뀜 표시 (실시간 갱신, 계획서 2026-10-27_채팅방-실시간-갱신): 세션 파일 + 호출 · 판정 기록 + 서브에이전트 보관 폴더의
+    /// 방 하나의 바뀜 표시 (실시간 갱신): 세션 파일 + 호출 · 판정 기록 + 서브에이전트 보관 폴더의
     /// (크기 · 수정 시각)만. 파일을 읽지 않는다. 세션이 없으면 null.
     /// </summary>
     public string? RoomStamp(string sessionId)
@@ -397,7 +397,7 @@ public sealed class ChatRoomService(
 
 /// <summary>
 /// 세션 본문 캐시. (경로 · 크기 · 수정 시각)이 같으면 다시 읽지 않고, 파일이 커졌으면 붙은 줄만 이어 읽는다
-/// (진행 중인 세션, 계획서 2026-10-27_채팅방-실시간-갱신). 상한을 넘으면 가장 오래 안 쓴 것부터 뺀다.
+/// (진행 중인 세션). 상한을 넘으면 가장 오래 안 쓴 것부터 뺀다.
 /// 상한은 넣을 때마다 limit()으로 묻는다 (대시보드는 IOptions라 켤 때 값 그대로). 읽기에 실패한 본문(FormatError)은 넣지 않는다 —
 /// 잠금 같은 일시적 실패가 파일이 바뀔 때까지 빈 방으로 남지 않게 (/self-review 20b90a0a65 C4).
 /// 같은 파일은 항목 잠금으로 한 번에 하나만 읽는다 (이어 읽기 위치를 함께 고쳐 쓰므로).

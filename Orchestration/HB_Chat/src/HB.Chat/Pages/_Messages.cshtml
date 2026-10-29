@@ -1,7 +1,7 @@
 @model RoomModel
 @inject ProfileView Profiles
 @*
-    말풍선 한 쪽 (세션 기록의 사용자 · 지휘자 글, 계획서 2-2 b). 첫 화면 · 방 전환 · ?handler=Messages가 같이 쓴다.
+    말풍선 한 쪽 (세션 기록의 사용자 · 지휘자 글). 첫 화면 · 방 전환 · ?handler=Messages가 같이 쓴다.
     data-first-line: 이 쪽 첫 말의 줄 번호 (위로 불러오기의 before), data-has-more: 그 앞에 더 있는지,
     data-last-line: 세션 기록 마지막 말 줄 번호 (새 말 받기의 after · 읽음 표시). 말풍선 data-line은 같은 줄 번호.
     Fragment(before · after 응답)면 빈 방 안내 · 읽기 실패 줄을 그리지 않는다 — 화면이 안의 말풍선만 옮겨 붙인다.
@@ -9,7 +9,7 @@
 @{
     var items = Model.Messages.Items;
 
-    // 외부 에이전트 · API 리뷰 말풍선 (계획서 2-2 e): 이 방에서 부른 run_mode 실행의 시작 줄과 단계 응답. 시각으로 끼운 자리에 (RoomRuns).
+    // 외부 에이전트 · API 리뷰 말풍선: 이 방에서 부른 run_mode 실행의 시작 줄과 단계 응답. 시각으로 끼운 자리에 (RoomRuns).
     // 답장 · data-line은 달지 않는다 (지휘자 · 사용자 말이 아니고, 줄 번호는 다음 말 것이라 쪽 경계를 흐린다).
     // trailing: 마지막 말 뒤 말풍선 — run-trailing 클래스를 달아 새 말 받기 조각이 바꿔 끼운다 (/self-review a9e6066519 C1).
     void RunBubbleList(IReadOnlyList<RunBubble> bubbles, bool trailing = false)
@@ -71,7 +71,7 @@
         }
     }
 
-    // 같은 말 앞(· 맨 뒤)의 외부 실행 말풍선 · 질문 답 · 방 기록 줄(승인 결과 · 정리 표시)을 시각 차례로 (e8091295fe C1, 계획서 2026-10-29_HB_Chat-진행줄-자리-정리표시)
+    // 같은 말 앞(· 맨 뒤)의 외부 실행 말풍선 · 질문 답 · 방 기록 줄(승인 결과 · 정리 표시)을 시각 차례로 (e8091295fe C1)
     void Placed(IReadOnlyList<RunBubble> runs, IReadOnlyList<ChatAnswer> answers, IReadOnlyList<RoomNote> notes, bool trailing = false)
     {
         var waiting = new Queue<RoomNote>(notes);

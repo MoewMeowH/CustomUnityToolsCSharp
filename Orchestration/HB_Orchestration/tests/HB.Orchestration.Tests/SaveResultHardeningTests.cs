@@ -3,7 +3,7 @@ using HB.Orchestration.Shared;
 
 namespace HB.Orchestration.Tests;
 
-/// <summary>save_result 쓰기 보강 (계획서 2026-10-19_save_result-쓰기-보강): 쓰기 전용 금지 목록 · 원자적 쓰기 · 닫히지 않은 펜스 표시.</summary>
+/// <summary>save_result 쓰기 보강: 쓰기 전용 금지 목록 · 원자적 쓰기 · 닫히지 않은 펜스 표시.</summary>
 public sealed class SaveResultHardeningTests : IDisposable
 {
     private readonly string _root = Directory.CreateTempSubdirectory("hb-orch-save-").FullName;

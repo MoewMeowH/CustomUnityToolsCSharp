@@ -4,7 +4,7 @@ using Microsoft.Extensions.Options;
 
 namespace HB.Chat;
 
-/// <summary>지휘자 표정 상태 (계획서 2-2 b, 시안 B에서 가져옴). 실행 중 단계 · 끝난 턴 · 쉼.</summary>
+/// <summary>지휘자 표정 상태 (시안 B에서 가져옴). 실행 중 단계 · 끝난 턴 · 쉼.</summary>
 public enum Face
 {
     Idle,

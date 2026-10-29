@@ -4,7 +4,7 @@ using HB.Orchestration.Tests.Fakes;
 
 namespace HB.Orchestration.Tests;
 
-/// <summary>모드 이름 통일 · 세션 실행 한도 제거 (계획서 2026-10-20_모드이름-통일-세션한도-제거).</summary>
+/// <summary>모드 이름 통일 · 세션 실행 한도 제거.</summary>
 public sealed class ModeNamesTests : IDisposable
 {
     // 예전 키 MaxRunsPerSession이 남은 설정: 무시되어야 한다.

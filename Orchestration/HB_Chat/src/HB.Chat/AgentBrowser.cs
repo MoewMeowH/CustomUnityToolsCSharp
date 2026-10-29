@@ -9,7 +9,7 @@ namespace HB.Chat;
 public sealed record BrowserView(bool Open, string? Url, string? Title, string? Blocked);
 
 /// <summary>
-/// 지휘자 전용 브라우저 (계획서 2026-10-29_HB_Chat-지휘자-브라우저): 방마다 Chrome(없으면 Edge)을 화면 없이 · 별도 프로필로 띄워 CDP로 조종한다 —
+/// 지휘자 전용 브라우저: 방마다 Chrome(없으면 Edge)을 화면 없이 · 별도 프로필로 띄워 CDP로 조종한다 —
 /// 사용자의 브라우저 · 클릭과 섞이지 않는다. 처음 쓸 때 띄우고, 30분 안 쓰면 닫는다(프로필은 남김, 결정 "30분 미사용 시 닫기").
 /// 문서 요청은 모두 가로채 localhost · 127.0.0.1 · [::1]과 그 방에서 카드로 허용한 사이트만 통과시킨다(결정 "localhost만 묻지 않음") —
 /// 페이지 안의 이동 · 링크 · iframe도 같은 길(0단계 실측 ④, 사이트 격리를 꺼 iframe도 같은 프로세스). 새 탭은 바로 닫는다.

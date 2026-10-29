@@ -30,7 +30,7 @@ public sealed record InitEvent(string? SessionId, string? Version, IReadOnlyList
 /// </summary>
 public sealed record TaskEvent(string Phase, string TaskId, string? Agent, string? Description, string? Status, int? ToolUses) : StreamEvent
 {
-    /// <summary>task_type — "local_bash"면 지휘자가 Bash 백그라운드 실행으로 띄운 명령 (실측, 계획서 2026-10-29_HB_Chat-백그라운드-명령). 서브에이전트는 local_agent 등.</summary>
+    /// <summary>task_type — "local_bash"면 지휘자가 Bash 백그라운드 실행으로 띄운 명령 (실측). 서브에이전트는 local_agent 등.</summary>
     public string? Kind { get; init; }
 
     /// <summary>끝 알림(task_notification)의 출력 파일 경로.</summary>
@@ -75,7 +75,7 @@ public sealed record UsageEvent(long ContextTokens) : StreamEvent
 /// <summary>도구 호출 하나: 이름 · 화면에 보일 짧은 대상(파일 이름 · 명령 첫 줄 · 검색어 · 모드 — 없으면 null, 3차 b).</summary>
 public sealed record ToolUse(string Name, string? Detail)
 {
-    /// <summary>tool_use id — 결과(tool_result)와 잇는다 (Unity 그림 기록, 계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결).</summary>
+    /// <summary>tool_use id — 결과(tool_result)와 잇는다 (Unity 그림 기록).</summary>
     public string? Id { get; init; }
 }
 
@@ -129,7 +129,7 @@ public sealed record ControlCancelEvent(string RequestId) : StreamEvent;
 
 /// <summary>
 /// rate_limit_event: 구독 한도 창별 사용률 (2026-10-29 실측 — <c>rate_limit_info.unifiedWindows.{five_hour|seven_day}.{utilization 0~1, resetsAt 유닉스 초, status}</c>,
-/// 그 밖에 status · isUsingOverage). 계획서 2026-10-29_사용량-한도-표시.
+/// 그 밖에 status · isUsingOverage).
 /// </summary>
 public sealed record RateLimitEvent(IReadOnlyList<LimitWindow> Windows, string? Status, bool? UsingOverage) : StreamEvent;
 

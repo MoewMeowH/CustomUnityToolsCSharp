@@ -1,5 +1,5 @@
 """PreToolUse 훅: 맥락 편향 없이 검토해야 하는 서브에이전트(self-reviewer, evidence-collector)는
-<프로젝트>/subagent_in/ 안만 읽게 한다 (계획서 2026-10-19_서브에이전트-도입-검토, 공통 규칙 6).
+<프로젝트>/subagent_in/ 안만 읽게 한다 (공통 규칙 6).
 
 - 허용 목록 방식: subagent_in/ 밖은 전부 거절 (막을 목록을 관리하지 않는다).
 - 경로는 realpath로 바꾼 뒤 비교한다 (.., 링크, 대소문자 우회 차단).

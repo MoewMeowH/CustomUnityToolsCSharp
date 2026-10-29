@@ -3,7 +3,7 @@ using Microsoft.Web.WebView2.WinForms;
 namespace HB.Chat.Desktop;
 
 /// <summary>
-/// 미니 창 (계획서 2-3 c, 시안 C): 화면 구석 항상 위 작은 창. 같은 방 화면을 `?view=mini` 작은 배치로 띄운다 —
+/// 미니 창 (시안 C): 화면 구석 항상 위 작은 창. 같은 방 화면을 `?view=mini` 작은 배치로 띄운다 —
 /// 표정 · 상태 글 · 말풍선 · 승인 카드 · 입력칸이 그대로 동작한다 (서버 로직 없음). WebView2 규칙은 큰 창과 같다(MainForm이 설정).
 /// 위 줄: 방 고르기("자동" = 승인 기다림 방 → 가장 최근 활동 방, 아니면 고정) · 큰 창에서 열기. 닫기(X)는 숨김.
 /// </summary>
@@ -123,7 +123,7 @@ public sealed class MiniForm : Form
     {
         var mark = r.IsQuestion ? "● 질문 · " : r.IsApproval ? "● 승인 · " : r.IsBusy ? "… " : "";
         var title = r.Title.Length > 40 ? r.Title[..40] + "…" : r.Title;
-        // 단톡방 구성원 (2026-10-29_단톡방-차례-알림) — 승인 · 질문을 기다리는 구성원만: 실행 · 답 끝 이름은 답마다 바뀌어 고르기 칸을 자꾸 다시 채웠다 (C4)
+        // 단톡방 구성원 — 승인 · 질문을 기다리는 구성원만: 실행 · 답 끝 이름은 답마다 바뀌어 고르기 칸을 자꾸 다시 채웠다 (C4)
         if (r.IsApproval && !string.IsNullOrWhiteSpace(r.Member)) title += $" ({(r.Member.Length > 30 ? r.Member[..30] + "…" : r.Member)})";
         return mark + (title.Length > 0 ? title : r.Id);
     }
@@ -173,7 +173,7 @@ public sealed class MiniForm : Form
     }
 
     /// <summary>
-    /// 펫을 눌렀을 때 (계획서 2026-10-29_바탕화면-펫): 보이면 숨기고, 아니면 펫 옆(그 화면 안)에 roomId 방으로 연다. 크기는 지금 크기 그대로.
+    /// 펫을 눌렀을 때: 보이면 숨기고, 아니면 펫 옆(그 화면 안)에 roomId 방으로 연다. 크기는 지금 크기 그대로.
     /// </summary>
     public void ToggleNear(Rectangle pet, string? roomId)
     {

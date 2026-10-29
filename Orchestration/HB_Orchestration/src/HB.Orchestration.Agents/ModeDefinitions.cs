@@ -32,7 +32,7 @@ public sealed class RoleDefinition
 
     /// <summary>
     /// 자유 텍스트 출력 형식의 절 개수 (예: preflight P3는 7). 있으면 응답 검사기가 1..N 절 제목이 모두 있는지 보고, 빠지면 경고한다
-    /// (모델이 상한 전에 스스로 멈춘 응답 — 계획서 2026-10-27_한국어-응답-지시-강화). 비우면 검사하지 않는다.
+    /// (모델이 상한 전에 스스로 멈춘 응답). 비우면 검사하지 않는다.
     /// </summary>
     public int? OutputSections { get; set; }
 }
@@ -81,7 +81,7 @@ public sealed class StepDefinition
 
     /// <summary>
     /// 이 단계 에이전트가 Quota(구독 한도 · 크레딧 소진)로 실패하거나 최근 Quota 기록으로 쉬는 중이면 같은 입력으로 대신 부를 에이전트.
-    /// 비우면 대체 없이 실패한다. run_mode agents로 바꾼 실행에는 쓰지 않는다 (계획서 2026-10-29_Codex-외부-리뷰어 결정).
+    /// 비우면 대체 없이 실패한다. run_mode agents로 바꾼 실행에는 쓰지 않는다.
     /// </summary>
     public string? FallbackAgent { get; set; }
 

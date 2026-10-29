@@ -6,7 +6,7 @@ namespace HB.Orchestration.Dashboard;
 /// <summary>
 /// 호출 기록 전체 (최신순). 파일이 바뀌었을 때만 다시 읽는다 (자동 새로고침마다 전체를 다시 읽지 않게).
 /// 기록은 불변 record라 여러 요청이 같은 목록을 함께 봐도 된다.
-/// 끊긴 호출에는 추정 사용량을 채운다 (<see cref="UsageEstimator.Apply"/>, 계획서 2026-10-24_끊긴-호출-비용-추정).
+/// 끊긴 호출에는 추정 사용량을 채운다 (<see cref="UsageEstimator.Apply"/>).
 /// </summary>
 public sealed class CallLogCache(IOptions<DashboardOptions> options, ILogger<CallLogCache> logger)
 {

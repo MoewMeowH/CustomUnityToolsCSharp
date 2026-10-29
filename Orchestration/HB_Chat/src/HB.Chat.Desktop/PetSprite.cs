@@ -5,7 +5,7 @@ using Wic = System.Windows.Media.Imaging;
 namespace HB.Chat.Desktop;
 
 /// <summary>
-/// 읽은 스프라이트 시트 (계획서 2026-10-29_바탕화면-펫): WebP를 WIC로 읽어 미리 곱한 ARGB 비트맵으로 들고, 칸마다 보이는 점이 있는지(빈 칸 건너뛰기 —
+/// 읽은 스프라이트 시트: WebP를 WIC로 읽어 미리 곱한 ARGB 비트맵으로 들고, 칸마다 보이는 점이 있는지(빈 칸 건너뛰기 —
 /// CodePet frameOccupancy)를 한 번 센다.
 /// </summary>
 public sealed class PetSprite : IDisposable

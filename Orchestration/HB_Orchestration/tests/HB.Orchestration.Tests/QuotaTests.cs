@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace HB.Orchestration.Tests;
 
-/// <summary>크레딧·한도 소진(Quota) 재시도·연속 실행 방지 (계획서 2026-10-19_크레딧소진-재시도방지).</summary>
+/// <summary>크레딧·한도 소진(Quota) 재시도·연속 실행 방지.</summary>
 public sealed class QuotaTests
 {
     /// <summary>2026-10-19 실제 오류 문구 그대로.</summary>

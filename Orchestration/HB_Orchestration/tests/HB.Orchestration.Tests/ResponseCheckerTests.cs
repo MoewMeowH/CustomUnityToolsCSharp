@@ -237,7 +237,7 @@ public class ResponseCheckerTests
         Assert.Null(ResponseChecker.EmptyFailure("내용", ChatFinishReason.Stop, 10, agent));
     }
 
-    // ── 영어 문장 섞임 (계획서 2026-10-27_한국어-응답-지시-강화: sol 5e81a2ed47의 작업 메모) ──
+    // ── 영어 문장 섞임 (sol 5e81a2ed47의 작업 메모) ──
 
     private static bool HasEnglishWarning(IReadOnlyList<string> warnings) =>
         warnings.Any(w => w.StartsWith("[경고] 영어 문장 섞임", StringComparison.Ordinal));

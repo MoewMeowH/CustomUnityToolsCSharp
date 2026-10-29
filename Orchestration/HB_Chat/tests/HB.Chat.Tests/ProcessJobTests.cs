@@ -5,7 +5,7 @@ namespace HB.Chat.Tests;
 
 /// <summary>
 /// Job Object: 앱(여기서는 테스트 호스트)을 넣으면 띄운 자식도 같은 Job에 들어간다.
-/// "앱이 죽으면 자식이 끝난다"는 테스트 호스트를 죽일 수 없어 실제 확인(작업 로그)으로 본다.
+/// "앱이 죽으면 자식이 끝난다"는 테스트 호스트를 죽일 수 없어 손으로 확인한다.
 /// </summary>
 public sealed class ProcessJobTests
 {

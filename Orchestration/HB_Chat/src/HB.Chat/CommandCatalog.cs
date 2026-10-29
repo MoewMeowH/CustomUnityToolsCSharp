@@ -6,7 +6,7 @@ namespace HB.Chat;
 public sealed record CommandInfo(string Name, string? Description, string? Hint, string Kind);
 
 /// <summary>
-/// 입력칸 '/' 명령 · 스킬 목록 (Claude 앱 기능 A, 계획서 2026-10-28 명령-자동완성).
+/// 입력칸 '/' 명령 · 스킬 목록 (Claude 앱 기능 A).
 /// 정답 목록은 그 방 마지막 실행의 init(slash_commands — CLI가 플러그인 · 관리형 스킬까지 정한 것)이고, 설명은 아는 파일 위치에서 읽는다
 /// (작업 폴더 · 사용자 `.claude/commands` · `.claude/skills`, init이 알려 준 플러그인 경로). init이 없으면(앱을 켠 뒤 첫 실행 전) 파일에서 찾은 것만.
 /// 기본 명령도 넣는다(결정 "전부") — 설명은 init에 없어 잘 알려진 것만 앱이 짧게 단다. 밑줄 두 개로 시작하는 내부 이름은 뺀다.

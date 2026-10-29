@@ -8,7 +8,7 @@ using HB.Orchestration.Shared;
 namespace HB.Orchestration.Agents;
 
 /// <summary>
-/// 리플레이 골든 사례 만들기 (계획서 2026-10-27_리플레이-골든). 보관된 검토형 서브에이전트 결과를 그 리뷰의 세션 기록에서 복원한다:
+/// 리플레이 골든 사례 만들기. 보관된 검토형 서브에이전트 결과를 그 리뷰의 세션 기록에서 복원한다:
 /// 위임 메시지 = 첫 사용자 메시지, 파일 = Read 결과(toolUseResult.file — 원문 · 시작 줄 · 읽은 줄 수 · 전체 줄 수).
 /// 정답지 = 당시 판정 (그 리뷰어 지적 중 채택 · 부분 = expected, 기각 = traps, 지휘자 추가 채택 = expected origin conductor).
 /// 읽은 파일을 하나라도 통째로 읽지 않았으면 사례로 만들지 않는다 (모르는 줄을 비워 두면 리뷰어가 그 빈 줄을 코드로 본다).

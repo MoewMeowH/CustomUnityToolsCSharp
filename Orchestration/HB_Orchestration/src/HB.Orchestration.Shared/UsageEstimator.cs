@@ -10,7 +10,7 @@ public enum EstimateBasis { Sibling, Bytes }
 public sealed record UsageEstimate(EstimateBasis Basis, bool OutputUnknown);
 
 /// <summary>
-/// 끊긴 호출(Timeout · Network · Canceled · Lost)은 청구되지만 usage를 받지 못해 토큰이 비어 있다 (계획서 2026-10-24_끊긴-호출-비용-추정).
+/// 끊긴 호출(Timeout · Network · Canceled · Lost)은 청구되지만 usage를 받지 못해 토큰이 비어 있다.
 /// 대시보드가 읽은 기록에 추정 토큰을 채운다. 기록 파일은 바꾸지 않는다 — 지난 기록에도 적용되고, 규칙을 바꾸면 바로 다시 계산된다.
 /// </summary>
 public static class UsageEstimator

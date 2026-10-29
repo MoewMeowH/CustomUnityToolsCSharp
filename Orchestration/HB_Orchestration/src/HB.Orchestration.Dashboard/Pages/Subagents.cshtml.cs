@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 namespace HB.Orchestration.Dashboard.Pages;
 
 /// <summary>
-/// 검토형 서브에이전트 결과 원문과 서버 기록 연결 상태 (계획서 2026-10-27_서브에이전트-결과-보존).
+/// 검토형 서브에이전트 결과 원문과 서버 기록 연결 상태.
 /// 외부 호출이 안 돌아 ownReview로 남지 못한 결과도 여기서 볼 수 있다. 읽기 전용 — 기록(판정)은 지휘자가 한다.
 /// </summary>
 public sealed class SubagentsModel(CallLogCache log, SubagentResultsService service) : PageModel

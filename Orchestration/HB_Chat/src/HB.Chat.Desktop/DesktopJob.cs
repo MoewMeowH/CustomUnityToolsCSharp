@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 namespace HB.Chat.Desktop;
 
 /// <summary>
-/// 앱이 띄운 서버를 넣는 Job Object (KILL_ON_JOB_CLOSE, 계획서 2-3): 앱이 끝나거나 죽으면 OS가 핸들을 닫으면서 서버와 그 아래 claude 트리를 끝낸다.
+/// 앱이 띄운 서버를 넣는 Job Object (KILL_ON_JOB_CLOSE): 앱이 끝나거나 죽으면 OS가 핸들을 닫으면서 서버와 그 아래 claude 트리를 끝낸다.
 /// 서버도 켤 때 자기를 자기 Job에 넣는다 (HB.Chat ProcessJob) — 중첩 Job은 Windows 8부터 되고 0번 실측에서 확인했다.
 /// 붙기만 한 서버(배치로 띄운 것)는 넣지 않는다.
 /// </summary>

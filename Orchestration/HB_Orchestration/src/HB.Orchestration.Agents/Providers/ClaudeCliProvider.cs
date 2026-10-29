@@ -8,7 +8,7 @@ using Microsoft.Extensions.AI;
 namespace HB.Orchestration.Agents.Providers;
 
 /// <summary>
-/// Claude Code 헤드리스(<c>claude --bare --restricted -p</c>)를 읽기 전용 검토 에이전트로 띄운다 (계획서 2026-10-27_검토형-서브에이전트-API-전환).
+/// Claude Code 헤드리스(<c>claude --bare --restricted -p</c>)를 읽기 전용 검토 에이전트로 띄운다.
 /// 에이전트는 작업 폴더(<see cref="ReviewWorkFolder"/>) 안의 파일을 직접 읽는다. 이 PC의 Claude Code 2.1.311(Windows)은 --tools에 Grep · Glob을 줘도
 /// Read만 준다 (2026-10-27 확인) — 그래서 작업 폴더가 프롬프트에 파일 목록을 넣는다.
 /// 과금은 제공사 키 환경 변수의 API 키로만 한다: <c>--bare</c>는 구독 로그인(OAuth)을 읽지 않고, 키가 없으면 구독으로 넘어가지 않고 실패한다.

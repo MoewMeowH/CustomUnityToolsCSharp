@@ -8,7 +8,7 @@ using Microsoft.AspNetCore.Routing;
 namespace HB.Orchestration.ChatUi;
 
 /// <summary>
-/// 채팅방 스티커 설정 (계획서 2026-10-27_에이전트-채팅방). appsettings.json의 Dashboard:Stickers에 기본값,
+/// 채팅방 스티커 설정. appsettings.json의 Dashboard:Stickers에 기본값,
 /// 개인 값(폴더 경로)은 appsettings.local.json(git 제외)에 둔다. 두 파일 모두 고치면 다시 켜지 않아도 반영된다.
 /// </summary>
 public sealed class StickerOptions
@@ -52,7 +52,7 @@ public sealed class StickerOptions
 
     /// <summary>
     /// 기본 팩: 스티커 폴더(FallbackDir가 있으면 그것, 없으면 Dir) 아래 폴더 이름. 앞 폴더들에 그림이 없으면 여기서 찾는다
-    /// (스티커 폴더 바로 아래에 그림 없이 팩 폴더만 둘 때 — 계획서 HB_Chat 2026-10-29_스티커-GIF-지원). 폴더 이름만 받는다 (구분자 · '..' 없음).
+    /// (스티커 폴더 바로 아래에 그림 없이 팩 폴더만 둘 때). 폴더 이름만 받는다 (구분자 · '..' 없음).
     /// </summary>
     public string? DefaultPack { get; set; }
 }
@@ -105,7 +105,7 @@ public sealed class StickerCatalog(Func<StickerOptions> options)
     /// <summary>
     /// 태그의 그림 파일 (폴더 안의 실제 파일, 허용 확장자). 폴더가 없거나 파일 이름이 폴더 밖을 가리키면 null.
     /// Dir → FallbackDir(HB_Chat 4차 D2) → 기본 팩 차례로, 폴더마다 설정 이름 그대로 먼저, 없으면 확장자만 다른 같은 이름
-    /// (팩마다 png · gif가 섞여도 설정 목록 하나로 — 계획서 HB_Chat 2026-10-29_스티커-GIF-지원). 형식은 찾은 파일의 확장자로 정한다.
+    /// (팩마다 png · gif가 섞여도 설정 목록 하나로). 형식은 찾은 파일의 확장자로 정한다.
     /// </summary>
     public (string Path, string ContentType)? FileFor(string tag)
     {

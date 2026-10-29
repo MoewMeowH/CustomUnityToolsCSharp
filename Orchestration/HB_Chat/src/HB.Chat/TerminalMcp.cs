@@ -9,7 +9,7 @@ using ModelContextProtocol.Server;
 namespace HB.Chat;
 
 /// <summary>
-/// 앱 MCP — 터미널 도구 (계획서 2026-10-29_HB_Chat-터미널-곁칸). 명령 방 실행에만 붙인다: 실행마다 토큰을 내고
+/// 앱 MCP — 터미널 도구. 명령 방 실행에만 붙인다: 실행마다 토큰을 내고
 /// 그 실행의 mcp-config 파일(데이터 폴더)에 이 주소 · 토큰 헤더를 쓴다. 0단계 실측(2.1.312): http 서버가 --strict-mcp-config 아래서도 붙고,
 /// 모든 요청에 헤더가 오고, 도구 승인 요청은 stdio 호스트로 온다.
 /// </summary>
@@ -20,7 +20,7 @@ public static class TerminalMcp
     /// <summary>mcp-config의 서버 이름 — 도구 이름이 mcp__hb-chat__terminal_* 가 된다.</summary>
     public const string Server = "hb-chat";
     public const string StartTool = "mcp__" + Server + "__terminal_start";
-    /// <summary>지휘자 브라우저 열기 — 호스트가 사이트를 보고 정한다(로컬 · 허용한 사이트는 바로, 그 밖은 카드, 계획서 2026-10-29_HB_Chat-지휘자-브라우저).</summary>
+    /// <summary>지휘자 브라우저 열기 — 호스트가 사이트를 보고 정한다(로컬 · 허용한 사이트는 바로, 그 밖은 카드).</summary>
     public const string BrowserOpenTool = "mcp__" + Server + "__browser_open";
     /// <summary>묻지 않는 도구 (--allowedTools). 터미널 시작 · 브라우저 열기만 호스트가 본다.</summary>
     public static readonly IReadOnlyList<string> QuietTools =
@@ -170,7 +170,7 @@ public sealed class TerminalTools(Terminals terminals, RoomStore store, IOptions
     public string List()
     {
         if (CurrentRoom is not { } room) return "[거절] 명령 방 실행에서만 쓸 수 있습니다.";
-        var list = terminals.List(room.Id, TerminalKind.Agent); // 사용자의 셸은 보이지 않는다 (결정 3)
+        var list = terminals.List(room.Id, TerminalKind.Agent); // 사용자의 셸은 보이지 않는다
         if (list.Count == 0) return "터미널 없음.";
         return string.Join('\n', list.Select(t =>
             $"- {t.Name} (id {t.Id}): {(t.Running ? "실행 중" : t.StoppedBy is { } by ? $"중지됨({by})" : $"끝남(코드 {t.ExitCode})")} · {t.StartedAt:HH:mm:ss} 시작 · {t.Command}"));

@@ -6,7 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace HB.Chat.Tests;
 
-/// <summary>위젯 (계획서 2-2 f): 서버 쪽 약속 — 코드 블록은 이스케이프된 글로만 오고, 방 규칙에 형식 안내, 페이지 CSP, 목록 미리보기.</summary>
+/// <summary>위젯: 서버 쪽 약속 — 코드 블록은 이스케이프된 글로만 오고, 방 규칙에 형식 안내, 페이지 CSP, 목록 미리보기.</summary>
 public sealed class WidgetTests
 {
     [Fact]
@@ -86,7 +86,7 @@ public sealed class WidgetTests
         Assert.DoesNotContain("<img", html);
     }
 
-    // 앱이 내주는 라이브러리 (npm 배포 파일 그대로, 계획서 2026-10-29_HB_Chat-차트-시안 · 슬라이드-시안) — 바뀌면 SHA를 계획서 · 작업 로그와 같이 갱신
+    // 앱이 내주는 라이브러리 (npm 배포 파일 그대로, 슬라이드-시안) — 바뀌면 SHA를 같이 갱신
     [Theory]
     [InlineData("chart.umd.min.js", "87364cc2b2a76a6684929e7d6b80b18a897794db38400caff1fcf1791c6925d2", "chart.js.LICENSE.md", "MIT License")]
     [InlineData("reveal.js", "aa1bbbf2617b23a623b23612cb3c5bdb63de512e652bf20fcfa832b045d37844", "reveal.js.LICENSE", "Permission is hereby granted")]

@@ -2,7 +2,7 @@ using HB.Orchestration.Agents;
 
 namespace HB.Orchestration.Tests;
 
-/// <summary>작업 폴더 정의 색인 (계획서 2026-10-27_작업폴더-정의-색인).</summary>
+/// <summary>작업 폴더 정의 색인.</summary>
 public sealed class DefinitionIndexTests : IDisposable
 {
     private readonly string _dir = Directory.CreateTempSubdirectory("hb-defindex-").FullName;

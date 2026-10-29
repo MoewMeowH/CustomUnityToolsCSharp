@@ -40,7 +40,7 @@ public static class GoldenCli
     internal sealed record Args(string Verb, string Which, string? Mode, IReadOnlyList<string>? Agents, string? Dir, string? Label, string? From, bool Yes,
         bool NoGuidelines = false, IReadOnlyList<string>? Reasoning = null, IReadOnlyList<string>? Exclude = null);
 
-    /// <summary>리플레이 사례 만들기 (계획서 2026-10-27_리플레이-골든).</summary>
+    /// <summary>리플레이 사례 만들기.</summary>
     public const string ReplayBuildVerb = "replay-build";
 
     internal static (Args? Parsed, string? Error) Parse(string[] args)
@@ -405,7 +405,7 @@ public static class GoldenCli
     }
 
     /// <summary>
-    /// replay 사례 하나 (계획서 2026-10-27_리플레이-골든): run_mode와 같은 경로(ModeRunner.RunAsync)로 사례의 files/를 작업 폴더 원본 삼아 돌리고,
+    /// replay 사례 하나: run_mode와 같은 경로(ModeRunner.RunAsync)로 사례의 files/를 작업 폴더 원본 삼아 돌리고,
     /// 응답의 '## 지적'(self-reviewer 형식)을 읽어 채점한다. 기록 Tool은 golden. Quota(서버의 최근 Quota 빠른 실패 포함)면 남은 사례를 멈춘다.
     /// </summary>
     private static async Task<(GoldenScore? Score, bool Stop, bool Quota)> RunReplayCaseAsync(Args a, GoldenCase c, string mode, PlanStep step, ModeRunner runner,
@@ -457,7 +457,7 @@ public static class GoldenCli
         return (score, false, false);
     }
 
-    /// <summary>지침이 실행 전 확인과 달라짐: 남은 사례도 다른 조건으로 돈다. (하루 비용·토큰 상한은 없앴다 — 계획서 2026-10-20_하루상한-제거)</summary>
+    /// <summary>지침이 실행 전 확인과 달라짐: 남은 사례도 다른 조건으로 돈다. (하루 비용·토큰 상한은 없앴다)</summary>
     private static bool StopsRemaining(string? runError) =>
         runError is not null && runError.StartsWith(ModeRunner.GuidelinesChanged, StringComparison.Ordinal);
 

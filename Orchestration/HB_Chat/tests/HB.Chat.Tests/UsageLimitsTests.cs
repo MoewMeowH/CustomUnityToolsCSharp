@@ -2,7 +2,7 @@ using HB.Chat;
 
 namespace HB.Chat.Tests;
 
-/// <summary>구독 한도 (계획서 2026-10-29_사용량-한도-표시): Claude rate_limit_event 파싱 · 저장, Codex 세션 기록 읽기, 지난 값, Codex 구성원 토큰 합계.</summary>
+/// <summary>구독 한도: Claude rate_limit_event 파싱 · 저장, Codex 세션 기록 읽기, 지난 값, Codex 구성원 토큰 합계.</summary>
 public sealed class UsageLimitsTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "hbchat-limits-" + Guid.NewGuid().ToString("N"));

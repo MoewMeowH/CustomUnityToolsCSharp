@@ -19,7 +19,7 @@
             <li class="codex-step @s.Kind"><span class="muted">@(s.Kind switch { "user" => "보낸 말", "answer" => "답", "command" => "명령", "error" => "오류", _ => "턴" })</span>
                 @if (s.Kind == "user" && RoomModel.SplitGuide(s.Text) is { Guide.Length: > 0 } split)
                 {
-                    @* 앞에 붙은 단톡방 · 앱 안내 블록은 접어서 — 평소엔 사용자 말만, 누르면 보낸 그대로 (2026-10-29_단톡방-보류-나머지 D11) *@
+                    @* 앞에 붙은 단톡방 · 앱 안내 블록은 접어서 — 평소엔 사용자 말만, 누르면 보낸 그대로 *@
                     <details class="codex-guide" data-key="@(split.Text.Length)-@(split.Guide.Length)-@(split.Text.GetHashCode())"><summary class="muted">단톡방 안내 (보낸 그대로)</summary>
                         <div style="white-space:pre-wrap">@(split.Guide.Length > 4000 ? split.Guide[..4000] + "…" : split.Guide)</div>
                     </details>

@@ -14,7 +14,7 @@ builder.Configuration.Sources.Insert(commandLineIndex < 0 ? builder.Configuratio
 
 builder.Services.AddRazorPages();
 builder.Services.Configure<DashboardOptions>(builder.Configuration.GetSection("Dashboard"));
-// 스티커 폴더가 상대 경로면 content root 기준 (기본 "IconPack" — csproj가 exe 옆으로도 복사, HB_Chat 계획서 2026-10-29_바탕화면-펫)
+// 스티커 폴더가 상대 경로면 content root 기준 (기본 "IconPack" — csproj가 exe 옆으로도 복사)
 builder.Services.PostConfigure<DashboardOptions>(o => o.Stickers.Dir = StickerOptions.Resolve(o.Stickers.Dir, builder.Environment.ContentRootPath));
 builder.Services.AddSingleton<ModesConfigService>();
 builder.Services.AddSingleton<CallLogCache>();

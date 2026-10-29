@@ -4,7 +4,7 @@ using HB.Orchestration.Shared;
 namespace HB.Chat;
 
 /// <summary>
-/// 방 목록 한 줄 (계획서 2-2 a): 제목 · 마지막 말 미리보기 · 마지막 활동 시각 · 안 읽은 지휘자 말 수 · 실행 상태.
+/// 방 목록 한 줄: 제목 · 마지막 말 미리보기 · 마지막 활동 시각 · 안 읽은 지휘자 말 수 · 실행 상태.
 /// Failed는 쉬는 중이고 마지막 실행이 실패한 방 (실행 중이면 실행 상태가 먼저).
 /// </summary>
 public sealed record RoomSummary(
@@ -27,23 +27,23 @@ public sealed record RoomSummary(
     public string? StickerPack { get; init; }
 
     /// <summary>
-    /// 단톡방의 구성원 이름 (알림 · 미니 창, 계획서 2026-10-29_단톡방-차례-알림): 승인 · 질문을 기다리는 구성원, 실행 중이면 도는 구성원,
+    /// 단톡방의 구성원 이름 (알림 · 미니 창): 승인 · 질문을 기다리는 구성원, 실행 중이면 도는 구성원,
     /// 쉬면 마지막 사용자 말에 답한 구성원들 (", "로). 보통 방 · 없으면 null.
     /// </summary>
     public string? Member { get; init; }
 }
 
-/// <summary>말풍선 한 쪽: 보일 말들과 그 앞에 더 있는지 (계획서 2-2 b, 50개씩 위로 불러오기).</summary>
+/// <summary>말풍선 한 쪽: 보일 말들과 그 앞에 더 있는지 (50개씩 위로 불러오기).</summary>
 public sealed record MessagePage(IReadOnlyList<ChatEntry> Items, bool HasMore)
 {
     /// <summary>새 말 받기(after)인데 너무 많아 맨 끝 쪽으로 바꿨다 — 화면은 붙이지 않고 쪽 전체를 바꾼다 (/self-review 95e8b1c242 C3).</summary>
     public bool Reset { get; init; }
 }
 
-/// <summary>검색 결과 하나 (계획서 2-2 c). Line이 없으면 방 제목에서 찾은 것.</summary>
+/// <summary>검색 결과 하나. Line이 없으면 방 제목에서 찾은 것.</summary>
 public sealed record SearchHit(string RoomId, string Title, int? Line, ChatSpeaker? Speaker, DateTimeOffset? At, string Snippet)
 {
-    /// <summary>말한 사람 이름 (단톡방 구성원 답 — 2026-10-29_단톡방-보류-성능-검색). 없으면 Speaker로 나 · 지휘자 이름.</summary>
+    /// <summary>말한 사람 이름 (단톡방 구성원 답). 없으면 Speaker로 나 · 지휘자 이름.</summary>
     public string? Name { get; init; }
 }
 
@@ -63,7 +63,7 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
     /// <summary>미리보기 글자 수 상한.</summary>
     public const int PreviewChars = 80;
 
-    /// <summary>최근 활동 순. 단톡방 구성원의 숨은 자식 방은 빼고 단톡방 한 줄로 (계획서 2026-10-29_HB_Chat-단톡방).</summary>
+    /// <summary>최근 활동 순. 단톡방 구성원의 숨은 자식 방은 빼고 단톡방 한 줄로.</summary>
     public IReadOnlyList<RoomSummary> All() =>
         [.. store.All().Where(r => r.DeletedAt is null && r.GroupId is null).Select(Summarize).OrderByDescending(s => s.LastAt)];
 
@@ -158,7 +158,7 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return []; }
     }
 
-    /// <param name="groupRooms">단톡방과 그 대화 줄 — 사용자 말 · 구성원 답을 찾는다 (안내 줄은 뺌, 결정 2026-10-29_단톡방-보류-성능-검색).</param>
+    /// <param name="groupRooms">단톡방과 그 대화 줄 — 사용자 말 · 구성원 답을 찾는다 (안내 줄은 뺌).</param>
     public static IReadOnlyList<SearchHit> Search(IEnumerable<(Room Room, ChatTranscript? Transcript)> rooms, string query,
         IEnumerable<(Room Group, IReadOnlyList<GroupEntry> Entries)>? groupRooms = null)
     {

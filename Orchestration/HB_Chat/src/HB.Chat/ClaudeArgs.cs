@@ -17,15 +17,15 @@ public sealed record RunSpec(
     string? AppendSystemPrompt,
     IReadOnlyList<string>? AllowRules = null)
 {
-    /// <summary>갈래 방의 첫 실행: 이어받을 원래 세션 ID (Resume이 아닐 때만 쓴다, 계획서 2-2 c).</summary>
+    /// <summary>갈래 방의 첫 실행: 이어받을 원래 세션 ID (Resume이 아닐 때만 쓴다).</summary>
     public string? ForkFrom { get; init; }
 
-    /// <summary>그 방 첨부 폴더 (절대 경로, 계획서 2-2 d). 대화 단계가 아니면 --add-dir로 더해 Read로 열 수 있게 한다.</summary>
+    /// <summary>그 방 첨부 폴더 (절대 경로). 대화 단계가 아니면 --add-dir로 더해 Read로 열 수 있게 한다.</summary>
     public string? AttachDir { get; init; }
 
     /// <summary>
     /// 갈래 방이 이어받은 방들의 첨부 폴더 (절대 경로). AttachDir와 같이 --add-dir로 읽게 하고, 편집 · 명령 방은 편집을 막는다
-    /// (계획서 2026-10-29_HB_Chat-2-2-작은-한계-정리 — 2-2 리뷰 C6이 보류한 "다른 방 폴더에 쓸 수 있게 됨"을 Edit 금지로).
+    /// (2-2 리뷰 C6이 보류한 "다른 방 폴더에 쓸 수 있게 됨"을 Edit 금지로).
     /// </summary>
     public IReadOnlyList<string> InheritedAttachDirs { get; init; } = [];
 
@@ -36,7 +36,7 @@ public sealed record RunSpec(
     public bool Plan { get; init; }
 
     /// <summary>
-    /// 외부 요청 전에 묻기 (계획서 2026-10-29_모델-선택창): 기본 서버 도구 중 run_mode만 미리 허용하지 않는다 — CLI가 앱에 물어 모델 선택 카드가 뜬다.
+    /// 외부 요청 전에 묻기: 기본 서버 도구 중 run_mode만 미리 허용하지 않는다 — CLI가 앱에 물어 모델 선택 카드가 뜬다.
     /// </summary>
     public bool AskRunMode { get; init; }
 
@@ -44,7 +44,7 @@ public sealed record RunSpec(
     public string? TerminalMcpConfigPath { get; init; }
 
     /// <summary>
-    /// McpConfigPath 파일에 기본 서버 말고 더 든 서버 이름 (방이 더한 .mcp.json 서버 · unity, 계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결).
+    /// McpConfigPath 파일에 기본 서버 말고 더 든 서버 이름 (방이 더한 .mcp.json 서버 · unity).
     /// --allowedTools에 넣지 않는다 — 호출마다 앱(stdio 호스트)이 지금 방 단계 · 연결을 다시 보고 허용한다 (결정 4: 실행 중 내리기가 바로 막히게).
     /// 여기서는 이름 모양만 검사한다.
     /// </summary>
@@ -52,7 +52,7 @@ public sealed record RunSpec(
 }
 
 /// <summary>
-/// 권한 단계 → claude 인자 (계획서 4번 표 + 0번 실측: 읽기 · 편집도 --strict-mcp-config로 claude.ai 커넥터 · 사용자 MCP를 막는다).
+/// 권한 단계 → claude 인자 (+ 0번 실측: 읽기 · 편집도 --strict-mcp-config로 claude.ai 커넥터 · 사용자 MCP를 막는다).
 /// 인자는 이 표에서만 만든다. 위험 우회 인자(dangerously · bypass)가 생기면 예외 (CodePet assertSafeArgv와 같은 장치).
 /// </summary>
 public static partial class ClaudeArgs
@@ -102,12 +102,12 @@ public static partial class ClaudeArgs
             if (!RoomEffort.Levels.Contains(effort, StringComparer.Ordinal)) throw new ArgumentException($"알 수 없는 추론 강도: {effort}");
             args.AddRange(["--effort", effort]);
         }
-        // 첨부 폴더: 작업 폴더 밖이라 없으면 Read가 거절된다 (2-2 0번 실측). 대화 단계는 도구가 없어 넣지 않는다 (사용자 결정 2).
+        // 첨부 폴더: 작업 폴더 밖이라 없으면 Read가 거절된다 (2-2 0번 실측). 대화 단계는 도구가 없어 넣지 않는다 (사용자 결정).
         // --add-dir는 여러 값을 받으므로 바로 뒤에 다른 플래그가 온다.
         var attachDeny = new List<string>();
         if (spec.Level != PermissionLevel.Chat)
         {
-            // 그 방 첨부 폴더 + 갈래 방이 이어받은 방들의 첨부 폴더 (계획서 2026-10-29_HB_Chat-2-2-작은-한계-정리)
+            // 그 방 첨부 폴더 + 갈래 방이 이어받은 방들의 첨부 폴더
             var dirs = (spec.AttachDir is { } own ? [own] : Array.Empty<string>()).Concat(spec.InheritedAttachDirs).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             foreach (var dir in dirs)
             {
@@ -244,7 +244,7 @@ public static partial class ClaudeArgs
     /// </summary>
     public const string AgentTool = "Agent";
 
-    /// <summary>모델 선택 카드 (<see cref="RunSpec.AskRunMode"/>)일 때 묻지 않는 기본 서버 도구. 서버에 도구가 늘면 목록에 없어 카드 없이 거절된다 (계획서 위험).</summary>
+    /// <summary>모델 선택 카드 (<see cref="RunSpec.AskRunMode"/>)일 때 묻지 않는 기본 서버 도구. 서버에 도구가 늘면 목록에 없어 카드 없이 거절된다.</summary>
     public static readonly IReadOnlyList<string> QuietOrchestrationTools = ["list_modes", "save_result", "record_verdicts", "server_info"];
 
     /// <summary>모델 선택 카드로 묻는 도구 이름 (기본 서버의 run_mode).</summary>
@@ -254,7 +254,7 @@ public static partial class ClaudeArgs
     {
         if (string.IsNullOrWhiteSpace(spec.McpConfigPath))
             throw new ArgumentException($"{spec.Level} 단계에는 MCP 설정 파일이 필요하다");
-        // 명령 방은 앱 MCP(터미널)도 붙인다 — --mcp-config는 여러 파일을 받는다. 목록 · 읽기 · 중지는 묻지 않고, 시작은 승인 카드로 (계획서 2026-10-29_HB_Chat-터미널-곁칸)
+        // 명령 방은 앱 MCP(터미널)도 붙인다 — --mcp-config는 여러 파일을 받는다. 목록 · 읽기 · 중지는 묻지 않고, 시작은 승인 카드로
         var terminal = spec.Level == PermissionLevel.Command && !string.IsNullOrWhiteSpace(spec.TerminalMcpConfigPath);
         args.AddRange(["--strict-mcp-config", "--mcp-config", spec.McpConfigPath]);
         if (terminal) args.Add(spec.TerminalMcpConfigPath!);

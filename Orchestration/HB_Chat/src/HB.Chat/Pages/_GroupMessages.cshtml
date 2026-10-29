@@ -1,7 +1,7 @@
 @model RoomModel
 @inject ProfileView Profiles
 @*
-    단톡방 말풍선 (계획서 2026-10-29_HB_Chat-단톡방): 앱이 가진 대화 줄(GroupLog)로 그린다 — 사용자 말 · 구성원 답 · 앱 안내 줄.
+    단톡방 말풍선: 앱이 가진 대화 줄(GroupLog)로 그린다 — 사용자 말 · 구성원 답 · 앱 안내 줄.
     data-last-line: 대화 줄 마지막 줄 번호 (새 말 받기의 after). 첫 화면 · 방 전환 · ?handler=Messages가 같이 쓴다.
 *@
 <div class="chat" id="chat" data-title="@Model.Title" data-last-line="@Model.GroupLastLine" data-first-line="0" data-has-more="0">
@@ -50,7 +50,7 @@
                     {
                         <span class="detail" title="@member.Role">@(member.Role.Length > 30 ? member.Role[..30] + "…" : member.Role)</span>
                     }
-                    @* 이어 부르기 (④ 결정 3): 이 답이 부른 구성원. 차례를 기다리던 구성원(⑤ Merged)은 "(차례에)" — 따로 돌지 않고 자기 차례 답으로 갈음 *@
+                    @* 이어 부르기: 이 답이 부른 구성원. 차례를 기다리던 구성원(⑤ Merged)은 "(차례에)" — 따로 돌지 않고 자기 차례 답으로 갈음 *@
                     @if (e.To.Count > 0 || e.Merged.Count > 0)
                     {
                         <span class="detail chain">→ @string.Join(", ", e.To.Select(Model.MemberOf).Where(m => m is not null).Select(m => "@" + m!.Name)

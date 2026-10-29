@@ -11,7 +11,7 @@ namespace HB.Orchestration.Dashboard;
 /// 거기에 없는 모델은 대시보드 appsettings.json의 Dashboard:Prices(예전 방식)로 보완한다.
 /// 같은 파일의 Orchestration:Budget(일일 상한)도 함께 읽는다. 파일이 바뀌었을 때만 다시 읽는다.
 /// 파일 확인은 <see cref="RecheckInterval"/>에 한 번만 한다 — 기록마다 stat 세 번이 비용 계산 시간의 94%였다
-/// (계획서 2026-10-23_대시보드-비용계산-성능: 767건 6.3ms · 10배 60ms). 모드 화면에서 저장하면 간격과 상관없이 바로 다시 본다.
+/// (767건 6.3ms · 10배 60ms). 모드 화면에서 저장하면 간격과 상관없이 바로 다시 본다.
 /// 파일을 못 읽으면(안 보임 · 빈 파일 · 깨진 내용 · 잠김) 마지막 정상 값을 쓴다.
 /// </summary>
 /// <param name="time">시계 (테스트에서 바꾼다). null이면 TimeProvider.System.</param>

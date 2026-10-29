@@ -1,7 +1,7 @@
 namespace HB.Chat.Desktop;
 
 /// <summary>
-/// 바탕화면 펫 묶음 (계획서 2026-10-29_바탕화면-펫): 설정(desktop-pet.json) · 펫 고르기 · 시트 읽기 · 표정 그림 받기 · 오른쪽 메뉴 · 말풍선.
+/// 바탕화면 펫 묶음: 설정(desktop-pet.json) · 펫 고르기 · 시트 읽기 · 표정 그림 받기 · 오른쪽 메뉴 · 말풍선.
 /// 큰 창(MainForm)이 방 목록이 올 때마다 <see cref="Update"/>, 끊기면 <see cref="Disconnected"/>를 부른다. UI 스레드에서만 쓴다.
 /// </summary>
 public sealed class PetController : IDisposable

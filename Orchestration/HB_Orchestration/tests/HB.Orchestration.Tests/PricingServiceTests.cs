@@ -3,7 +3,7 @@ using Microsoft.Extensions.Options;
 
 namespace HB.Orchestration.Tests;
 
-/// <summary>PricingService의 파일 다시 확인 간격 · 저장 직후 반영 · 읽기 실패 때 마지막 정상 값 (계획서 2026-10-23_대시보드-비용계산-성능, /self-review eb025da67b).</summary>
+/// <summary>PricingService의 파일 다시 확인 간격 · 저장 직후 반영 · 읽기 실패 때 마지막 정상 값 (/self-review eb025da67b).</summary>
 public sealed class PricingServiceTests : IDisposable
 {
     /// <summary>밀리초 단위로 직접 움직이는 시계.</summary>

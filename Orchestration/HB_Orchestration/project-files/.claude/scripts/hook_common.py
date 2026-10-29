@@ -1,10 +1,10 @@
-"""PreToolUse 훅 공용: 입력 읽기 · 셸 명령 해석 (계획서 2026-10-19_훅-규칙-강제, /cross-review 10bfc8de41 반영).
+"""PreToolUse 훅 공용: 입력 읽기 · 셸 명령 해석 (/cross-review 10bfc8de41 반영).
 
 훅은 명령을 완전히 해석하지 않는다. 판정은 두 단계다:
 1. 거친 탐지: heredoc·here-string 본문과 따옴표 안 글자를 비운 텍스트(+ 명령 치환 안의 텍스트)에서 대상 명령을 찾는다.
 2. 대상이면 "단순한 단독 명령"인지 엄격히 본다 — 묶음·cd·명령 치환이 있으면 해석하지 않고 막는다 (안전한 쪽).
 따옴표 짝 · 주석 · heredoc 경계는 한 해석기(_Lexer)가 셸과 같게 맞춘다: bash $'…' · 낱말 시작의 # · 따옴표 안의 << ·
-PowerShell 굽은 따옴표를 몰라 뒤 명령이 따옴표 안으로 숨던 빈틈 (계획서 2026-10-23_H5-셸-문법-우회, 실측 exit 0).
+PowerShell 굽은 따옴표를 몰라 뒤 명령이 따옴표 안으로 숨던 빈틈 (실측 exit 0).
 """
 import json
 import os
@@ -67,7 +67,7 @@ class Lexed:
 
 
 class _Lexer:
-    """명령 하나를 문자 단위로 읽는다 (계획서 2026-10-23_H5-셸-문법-우회). 셸 문법을 다 해석하지 않고, 따옴표 짝 ·
+    """명령 하나를 문자 단위로 읽는다. 셸 문법을 다 해석하지 않고, 따옴표 짝 ·
     주석 · heredoc 경계만 셸과 같게 맞춘다 — 짝이 어긋나면 뒤 명령이 따옴표 안으로 숨기 때문이다."""
 
     def __init__(self, cmd: str, shell: str):
@@ -468,8 +468,7 @@ def tokenize(cmd: str, shell: str) -> list[str]:
 
 
 # heredoc · here-string 본문(글자 그대로의 데이터)에 막을 명령 글자가 있을 때 받아도 되는 명령 — 본문을 실행하지 않는 것만
-# (허용 목록: 거부 목록은 tclsh · perl처럼 빠진 실행기로 통과했다. 계획서 2026-10-23_H5-셸-문법-우회 결정, H1 · H2도 같이 —
-# 2026-10-23_H1-H2-heredoc-본문과-rm-옵션).
+# (허용 목록: 거부 목록은 tclsh · perl처럼 빠진 실행기로 통과했다. H1 · H2도 같이).
 DATA_RECEIVERS = {'cat', 'tee', 'set-content', 'add-content', 'out-file'}
 HERESTRING_SLOT = re.compile(r'@(?:\'\'|"")@')
 # 범위 · 공급자 접두($env: · $global: 등)는 받지 않는다 — $env:GIT_EDITOR에 넣으면 같은 묶음의 git이 본문을 실행한다
@@ -481,7 +480,7 @@ WRITERS = {'tee', 'set-content', 'add-content', 'out-file'}
 NESTED = re.compile(r'[(){}`]')
 
 
-# 따옴표 안 글자를 실행하지 않는 읽기 명령 — 따옴표 문자열 검사(readers=True)에서만 받는다 (계획서 2026-10-23_따옴표-명령-허용목록과-perf-ownReview).
+# 따옴표 안 글자를 실행하지 않는 읽기 명령 — 따옴표 문자열 검사(readers=True)에서만 받는다.
 # rg --pre는 외부 명령을 실행하므로 뺀다. git grep은 -O(페이저 명령 실행)를 묶음 · 줄임으로도 받아 아예 뺀다 (/self-review security ddb47044d1 C3).
 READERS = {'grep', 'egrep', 'fgrep', 'rg', 'select-string', 'sls', 'echo', 'printf', 'write-output', 'write-host'}
 # git 읽기 명령도 설정(.git/config의 fsmonitor · diff.external · textconv 등)에 적힌 명령을 실행할 수 있다 — 같은 묶음에 쓰기가 있으면 막는다 (같은 C4)

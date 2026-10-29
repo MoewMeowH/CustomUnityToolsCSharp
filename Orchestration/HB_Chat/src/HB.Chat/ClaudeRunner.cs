@@ -22,7 +22,7 @@ public sealed record RunResult(
 
     /// <summary>
     /// 답 뒤 백그라운드 기다림을 무엇으로 정리했는지 — "wrapup"(지금 끝내기) · "cap"(기다림 상한) · "stop"(기다리는 중 중지 · 끼어들기). 기다림이 없었거나
-    /// 작업이 다 끝나 스스로 닫혔으면 null. BackgroundLeft는 그때 남았던 작업 수 (방 기록 줄 — 계획서 2026-10-29_HB_Chat-진행줄-자리-정리표시).
+    /// 작업이 다 끝나 스스로 닫혔으면 null. BackgroundLeft는 그때 남았던 작업 수 (방 기록 줄).
     /// </summary>
     public string? BackgroundClosedBy { get; init; }
     public int BackgroundLeft { get; init; }
@@ -122,7 +122,7 @@ public static class ClaudeRunner
             // (2.1.312 실제 확인). 그 사이 stdin을 닫으면 서브에이전트의 승인 요청이 "Stream closed"로 실패했다 — 모두 끝난 뒤의 result에서 닫는다.
             // 서브에이전트(subagent_type 있는) task만 센다 · 끝난 ID는 다시 넣지 않는다 · 메인 result 뒤 기다림은 상한까지 (/self-review security 42f9d47dc4 C2)
             // 백그라운드 명령(task_type local_bash)도 센다 — 끝나면 CLI가 끝 알림 뒤 지휘자가 이어서 두 번째 답을 쓴다 (실측). 안 세면 그 답을 놓치고,
-            // 서버처럼 안 끝나는 명령이면 stdin을 닫아도 CLI가 끝나지 않아 방이 멈췄다 (계획서 2026-10-29_HB_Chat-백그라운드-명령)
+            // 서버처럼 안 끝나는 명령이면 stdin을 닫아도 CLI가 끝나지 않아 방이 멈췄다
             var runningTasks = new HashSet<string>(StringComparer.Ordinal);
             var agentTasks = new HashSet<string>(StringComparer.Ordinal);
             var finishedTasks = new HashSet<string>(StringComparer.Ordinal);
@@ -289,7 +289,7 @@ public static class ClaudeRunner
 
     /// <summary>
     /// stdin 한 줄 상한 (UTF-8 바이트). 한 번에 써도 약 300KB 줄에서는 CLI가 init조차 내지 않았다 (131KB 정상, 2.1.312 실측 —
-    /// 계획서 2026-10-29_HB_Chat-2-2-작은-한계-정리, /self-review 70170a8801 C4). 넘는 말은 띄우기 전에 막는다 (RoomHub).
+    /// /self-review 70170a8801 C4). 넘는 말은 띄우기 전에 막는다 (RoomHub).
     /// </summary>
     public const int MaxStdinLineBytes = 120 * 1024;
 
@@ -386,7 +386,7 @@ public static class ClaudeRunner
                 if (_closed) return;
                 // 한 줄은 한 번에 쓴다: StreamWriter로 쓰면 버퍼(4KB) 단위로 나뉘어 파이프에 들어가는데, 약 8KB를 넘는 줄이 여러 번에 나뉘어
                 // 들어오면 stdin을 열어 둔 CLI가 그 줄을 처리하지 않고 멈췄다 (2.1.312 실측 — 9KB 줄: 나눠 쓰면 멈춤 · 한 번에 쓰면 20KB도 됨,
-                // 계획서 2026-10-29_HB_Chat-2-2-작은-한계-정리). 긴 말 · 한글(\uXXXX로 6배)이 걸린다. \r\n 대신 \n — 줄 끝 모양을 실측과 같게.
+                //). 긴 말 · 한글(\uXXXX로 6배)이 걸린다. \r\n 대신 \n — 줄 끝 모양을 실측과 같게.
                 await writer.FlushAsync();
                 var bytes = writer.Encoding.GetBytes(line + "\n");
                 await writer.BaseStream.WriteAsync(bytes);

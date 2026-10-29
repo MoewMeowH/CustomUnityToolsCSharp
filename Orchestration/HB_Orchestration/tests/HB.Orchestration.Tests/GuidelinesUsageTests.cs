@@ -3,7 +3,7 @@ using HB.Orchestration.Shared;
 
 namespace HB.Orchestration.Tests;
 
-/// <summary>대시보드 "최근 호출이 붙인 리뷰 지침" 경고 (계획서 2026-10-22_지침-파일-경고, 경로 규칙).</summary>
+/// <summary>대시보드 "최근 호출이 붙인 리뷰 지침" 경고 (경로 규칙).</summary>
 public sealed class GuidelinesUsageTests
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 22, 12, 0, 0, TimeSpan.FromHours(9));

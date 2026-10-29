@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 namespace HB.Orchestration.Agents.Providers;
 
 /// <summary>
-/// 실행 하나의 자손 프로세스까지 끝내는 Job Object (HB_Chat ProcessJob.Turn에서 옮김 — 계획서 2026-10-29_Codex-외부-리뷰어).
+/// 실행 하나의 자손 프로세스까지 끝내는 Job Object (HB_Chat ProcessJob.Turn에서 옮김).
 /// Codex는 셸 명령을 자식으로 띄운다. Kill(entireProcessTree)는 부모가 이미 끝났으면 자손을 찾지 못하고,
 /// 남은 자손이 출력 파이프를 물고 있으면 읽기가 시간 상한까지 막힌다. 띄운 직후 넣고 <see cref="Terminate"/>나 Dispose(KILL_ON_JOB_CLOSE)로 모두 끝낸다.
 /// 넣지 못하면(Windows가 아님 · 실패) null — 그때는 트리 종료만 남는다.

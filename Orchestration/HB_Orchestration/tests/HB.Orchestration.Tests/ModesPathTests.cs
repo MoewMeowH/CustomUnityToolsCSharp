@@ -6,7 +6,7 @@ using Microsoft.Extensions.Options;
 
 namespace HB.Orchestration.Tests;
 
-/// <summary>modes.json 찾는 순서(서버·대시보드 공용)와 대시보드의 "최근 호출이 쓴 modes.json" (계획서 2026-10-21_대시보드-modes-경로-서버와-맞춤).</summary>
+/// <summary>modes.json 찾는 순서(서버·대시보드 공용)와 대시보드의 "최근 호출이 쓴 modes.json".</summary>
 public sealed class ModesPathTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "hb-modespath-" + Guid.NewGuid().ToString("N")[..8]);

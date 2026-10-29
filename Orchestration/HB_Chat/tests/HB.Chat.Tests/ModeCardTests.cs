@@ -3,7 +3,7 @@ using HB.Chat;
 
 namespace HB.Chat.Tests;
 
-/// <summary>모델 선택창 (계획서 2026-10-29_모델-선택창): 모드 목록 읽기 · 카드 처음 값 · 허가 입력 다시 쓰기 · 요청 창 머리 줄.</summary>
+/// <summary>모델 선택창: 모드 목록 읽기 · 카드 처음 값 · 허가 입력 다시 쓰기 · 요청 창 머리 줄.</summary>
 public sealed class ModeCardTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "hbchat-modes-" + Guid.NewGuid().ToString("N"));
@@ -123,7 +123,7 @@ public sealed class ModeCardTests : IDisposable
         var card = ModeCard.Build("""{"mode":"design_high","input":"x","reason":"why","agents":["gemini_main_flash=codex_cli_sol"],"reasoning":["*=low","codex_cli_sol=high"]}""", list, null)!;
         Assert.Equal("design_high", card.Mode);
         Assert.Equal("why", card.Reason);
-        Assert.Equal(2, card.Rows.Count); // gpt_main_sol을 두 역할이 같이 쓴다 — 에이전트 단위 (결정)
+        Assert.Equal(2, card.Rows.Count); // gpt_main_sol을 두 역할이 같이 쓴다 — 에이전트 단위
         Assert.Equal(["Rebuttal", "Judge"], card.Rows[0].Roles);
         Assert.Equal(("gpt_main_sol", "low"), (card.Rows[0].Pick, card.Rows[0].Effort));
         Assert.Equal(("codex_cli_sol", "high"), (card.Rows[1].Pick, card.Rows[1].Effort)); // 강도는 교체 뒤 이름 기준

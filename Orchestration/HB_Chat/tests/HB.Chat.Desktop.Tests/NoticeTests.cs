@@ -42,7 +42,7 @@ public sealed class NoticeTests
     [Fact]
     public void GroupMember_ShownInNoticesAndRoomName()
     {
-        // 2026-10-29_단톡방-차례-알림 (결정 "늘 보이기"): 단톡방 줄의 member를 제목 뒤에 — 승인 · 질문은 기다리는 구성원, 답 끝은 답한 구성원들
+        // 늘 보이기: 단톡방 줄의 member를 제목 뒤에 — 승인 · 질문은 기다리는 구성원, 답 끝은 답한 구성원들
         var rooms = RoomStates.Parse("[{\"id\":\"g\",\"title\":\"단톡\",\"activity\":\"Approval\",\"failed\":false,\"unread\":0,\"face\":\"Question\",\"member\":\"A\"}]")!;
         Assert.Equal("A", rooms[0].Member);
         var asked = Notices.Diff(Map(R("g", "Busy", title: "단톡")), rooms, null);
@@ -121,7 +121,7 @@ public sealed class NoticeTests
     [Fact]
     public void Balloon_WithBody_AddsPreviewToDoneAndFailedOnly()
     {
-        // 알림에 답 앞부분 보이기 (설정 켜짐): 답 끝 · 실패만, 승인 · 질문은 제목만 (결정). 미리보기가 없으면 제목만.
+        // 알림에 답 앞부분 보이기 (설정 켜짐): 답 끝 · 실패만, 승인 · 질문은 제목만. 미리보기가 없으면 제목만.
         var done = new Notice(NoticeKind.Done, "a", "방 하나", Preview: "요약: 끝났습니다");
         Assert.Equal(("답 끝 · 방 하나", "요약: 끝났습니다"), Notices.Balloon([done], withBody: true));
         Assert.Equal(("답 끝", "방 하나"), Notices.Balloon([done]));                       // 꺼짐이면 지금과 같다

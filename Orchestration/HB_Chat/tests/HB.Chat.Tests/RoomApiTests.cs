@@ -2,7 +2,7 @@ using HB.Chat;
 
 namespace HB.Chat.Tests;
 
-/// <summary>`/api/rooms` 줄 (계획서 2-3): 데스크톱 앱이 읽는 모양.</summary>
+/// <summary>`/api/rooms` 줄: 데스크톱 앱이 읽는 모양.</summary>
 public sealed class RoomApiTests
 {
     [Fact]
@@ -18,7 +18,7 @@ public sealed class RoomApiTests
         Assert.Equal(("Idle", true, "Idle"), (rows[1].Activity, rows[1].Failed, rows[1].Face));
         Assert.All(rows, r => Assert.Null(r.Preview)); // 기본(알림 본문 끔)은 본문을 싣지 않는다
         Assert.All(rows, r => Assert.Null(r.FaceUrl));
-        // 바탕화면 펫 (계획서 2026-10-29_바탕화면-펫): 방마다 표정 그림 주소를 함수로 받아 싣는다
+        // 바탕화면 펫: 방마다 표정 그림 주소를 함수로 받아 싣는다
         var withFace = RoomApi.Rows(rooms, faceUrl: s => s.Face == Face.Approval ? "/sticker-pack/p/" + s.Id : null);
         Assert.Equal(["/sticker-pack/p/0123456789ab", null], withFace.Select(r => r.FaceUrl));
 

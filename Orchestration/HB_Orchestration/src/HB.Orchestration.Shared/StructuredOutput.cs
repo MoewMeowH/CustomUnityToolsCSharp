@@ -37,7 +37,7 @@ public sealed record StructuredOutputRecord
     /// <summary>요청 방식: "schema"(response_format 강제) 또는 "prompt"(프롬프트로만 요청).</summary>
     public required string RequestedBy { get; init; }
 
-    /// <summary>원문을 고쳐서 읽었으면 그 내용 (예: "여는 { 누락"). 고치지 않았으면 null (계획서 2026-10-23_DeepSeek-응답-앞부분-깨짐).</summary>
+    /// <summary>원문을 고쳐서 읽었으면 그 내용 (예: "여는 { 누락"). 고치지 않았으면 null.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Repaired { get; init; }
 
@@ -63,7 +63,7 @@ public sealed record StructuredOutputRecord
 }
 
 /// <summary>
-/// 에이전트의 자료 요청 하나 (계획서 2026-10-19_자료요청-왕복). Id는 서버가 매긴 "단계-N순번" (예: 1-N1).
+/// 에이전트의 자료 요청 하나. Id는 서버가 매긴 "단계-N순번" (예: 1-N1).
 /// 위치를 모르면 Path·Symbol이 비어 있다 — 지휘자가 로컬에서 찾아 승인한 범위만 followUp으로 보충한다.
 /// </summary>
 public sealed record InfoRequest

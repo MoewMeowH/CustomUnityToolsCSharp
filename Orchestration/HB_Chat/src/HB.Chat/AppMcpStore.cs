@@ -9,8 +9,8 @@ namespace HB.Chat;
 public sealed record ImportableMcp(string Scope, string Name, JsonObject Entry);
 
 /// <summary>
-/// 앱에서 더한 MCP 서버 (계획서 2026-10-29_HB_Chat-앱-MCP-서버-더하기): 데이터 폴더 mcp-servers.json에 이름 → .mcp.json 모양 항목.
-/// 모든 방 연결 탭에 "앱 서버"로 보이고 방마다 켠다(Room.McpExtra). 이름은 작업 폴더 .mcp.json에 같은 것이 있으면 그쪽을 쓴다(결정 1).
+/// 앱에서 더한 MCP 서버: 데이터 폴더 mcp-servers.json에 이름 → .mcp.json 모양 항목.
+/// 모든 방 연결 탭에 "앱 서버"로 보이고 방마다 켠다(Room.McpExtra). 이름은 작업 폴더 .mcp.json에 같은 것이 있으면 그쪽을 쓴다.
 /// 원자적으로 쓰고(RoomStore와 같은 규칙), 깨졌으면 덮지 않고 쓰기를 거절한다. 받는 칸만 받는다 — 그 밖의 칸 · 잘못된 모양은 거절.
 /// </summary>
 public sealed partial class AppMcpStore
@@ -111,7 +111,7 @@ public sealed partial class AppMcpStore
         return null;
     }
 
-    /// <summary>빼기. 쓰는 방이 있어도 뺀다 — 그 방 실행은 "없는 연결은 빼고 돕니다" 알림(계획서). 오류 문구 — null이면 뺌.</summary>
+    /// <summary>빼기. 쓰는 방이 있어도 뺀다 — 그 방 실행은 "없는 연결은 빼고 돕니다" 알림. 오류 문구 — null이면 뺌.</summary>
     public string? Remove(string? name)
     {
         var n = name?.Trim() ?? "";

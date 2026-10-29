@@ -22,7 +22,7 @@ public sealed record GoldenCase(GoldenCaseInfo Info, string Folder, string Input
 
 /// <summary>
 /// case.json. Kind는 "record"(판정 기록에서 옴) · "seeded"(고친 결함을 되돌린 코드) · "crash"(원인이 알려진 크래시, 다단계 모드 전체를 돌림)
-/// · "replay"(과거 검토형 서브에이전트 리뷰를 복원, API 리뷰 sub_* 모드로 돌림 — 계획서 2026-10-27_리플레이-골든).
+/// "replay"(과거 검토형 서브에이전트 리뷰를 복원, API 리뷰 sub_* 모드로 돌림).
 /// crash · replay 사례의 input.md는 run_mode input (서버가 "## 요청"으로 감쌈), 리뷰 사례는 보낼 프롬프트 원문이다.
 /// </summary>
 public sealed record GoldenCaseInfo

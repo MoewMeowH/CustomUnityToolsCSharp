@@ -8,7 +8,7 @@ using Microsoft.Extensions.AI;
 namespace HB.Orchestration.Tests;
 
 /// <summary>
-/// codex-cli 제공사 (codex exec 읽기 전용, ChatGPT 구독) · 저장소 사본 작업 폴더 · 한도 소진 대체 에이전트 (계획서 2026-10-29_Codex-외부-리뷰어).
+/// codex-cli 제공사 (codex exec 읽기 전용, ChatGPT 구독) · 저장소 사본 작업 폴더 · 한도 소진 대체 에이전트.
 /// 실제 Codex는 부르지 않는다 — 실행기는 가짜, 이벤트는 2026-10-29 0단계 출력(codex-cli 0.165.0) 모양을 줄인 합성 데이터.
 /// </summary>
 public sealed class CodexCliTests : IDisposable

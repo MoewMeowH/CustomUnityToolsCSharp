@@ -19,7 +19,7 @@
         <input type="text" id="side-title" maxlength="200" value="@(room.Title ?? "")" placeholder="비우면 첫 말 (@Model.Title)" />
         <button class="btn" type="submit">@Icons.Svg("check") 바꾸기</button>
     </form>
-    @* 모델 · 추론 강도 · 권한 단계 (Claude 앱 기능 B): 다음 말부터 반영. 단계는 올리기 · 내리기 모두 (결정) *@
+    @* 모델 · 추론 강도 · 권한 단계 (Claude 앱 기능 B): 다음 말부터 반영. 단계는 올리기 · 내리기 모두 *@
     <form class="side-settings" id="side-settings">
         @* 그릴 때의 단계 — 서버가 지금 값과 다르면 거절한다 (옛 곁칸이 방금 내린 단계를 다시 올리지 않게, 8ccecae84d C2) *@
         <input type="hidden" name="expectedLevel" value="@room.Level" />
@@ -150,7 +150,7 @@
         }
     </ul>
 </section>
-@* 연결 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결 — Claude 앱 커넥터처럼): 종류 · 켬 · 상태 · 도구 · 확인. 다음 실행부터 반영 *@
+@* 연결 (Claude 앱 커넥터처럼): 종류 · 켬 · 상태 · 도구 · 확인. 다음 실행부터 반영 *@
 <section class="side-sec" data-tab="mcp" id="side-sec-mcp" role="tabpanel" aria-labelledby="side-tab-mcp">
     @* 결정 4: 더한 서버는 단계와 상관없이 묻지 않는다 — 단계 설명과 다른 점을 적는다 (/self-review security 00d712e2c7 C2) *@
     <p class="muted side-settings-note">다음 말부터 적용됩니다. 켠 연결의 도구는 지휘자가 <b>묻지 않고</b> 씁니다 — 방 권한 단계와 상관없이 (읽기 방이어도 그 서버의 쓰기 도구는 돕니다). 끄거나 권한을 내리면 실행 중인 턴에서도 바로 막힙니다. 상태는 이 방 마지막 실행 · '확인' 결과입니다.</p>
@@ -177,7 +177,7 @@
                 {
                     <div class="mcp-cmd mono muted" title="@cmd">@cmd</div>
                 }
-                @* 앱 서버 (계획서 2026-10-29_HB_Chat-앱-MCP-서버-더하기): 이름 겹침 · OAuth 로그인 안내 *@
+                @* 앱 서버: 이름 겹침 · OAuth 로그인 안내 *@
                 @if (c.Shadowed)
                 {
                     <div class="muted side-settings-note">앱 서버 목록에도 같은 이름이 있습니다 — 이 작업 폴더 .mcp.json 것을 씁니다.</div>

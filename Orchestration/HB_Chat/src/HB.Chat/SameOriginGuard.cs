@@ -1,7 +1,7 @@
 namespace HB.Chat;
 
 /// <summary>
-/// GET · HEAD · OPTIONS 밖의 요청은 같은 출처에서 온 것만 받는다 (계획서 5번 보안).
+/// GET · HEAD · OPTIONS 밖의 요청은 같은 출처에서 온 것만 받는다 (보안).
 /// 이 앱은 편집 권한으로 claude를 띄우므로, 다른 웹 페이지가 localhost로 POST해 지휘자를 움직이는 것을 막는다.
 /// Razor Pages의 antiforgery 검사와 겹쳐 둔다. Origin이 없으면 Referer로, 둘 다 없으면 거절한다.
 /// </summary>

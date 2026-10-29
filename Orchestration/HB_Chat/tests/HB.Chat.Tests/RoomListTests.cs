@@ -3,7 +3,7 @@ using HB.Orchestration.Shared;
 
 namespace HB.Chat.Tests;
 
-/// <summary>방 목록 줄 (계획서 2-2 a): 제목 · 미리보기 · 안 읽은 수 · 상태, 새 방 색인 필드.</summary>
+/// <summary>방 목록 줄: 제목 · 미리보기 · 안 읽은 수 · 상태, 새 방 색인 필드.</summary>
 public sealed class RoomListTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "hbchat-list-" + Guid.NewGuid().ToString("N"));

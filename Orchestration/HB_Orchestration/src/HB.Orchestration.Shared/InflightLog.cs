@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 namespace HB.Orchestration.Shared;
 
 /// <summary>
-/// 호출 중 표시 (계획서 2026-10-24_끊긴-호출-비용-추정). 요청을 보내기 직전에 호출 기록 옆 inflight/&lt;기록 Id&gt;.json을 쓰고, 시도 기록을 남긴 뒤 지운다.
+/// 호출 중 표시. 요청을 보내기 직전에 호출 기록 옆 inflight/&lt;기록 Id&gt;.json을 쓰고, 시도 기록을 남긴 뒤 지운다.
 /// 프로세스가 강제 종료되면(작업 중지 · 세션 종료) 표시가 남는다 → 다음 정리(<see cref="SweepAsync"/>)가 Lost 기록으로 옮긴다.
 /// 표시 쓰기 · 지우기 · 정리 실패는 호출을 막지 않는다.
 /// </summary>

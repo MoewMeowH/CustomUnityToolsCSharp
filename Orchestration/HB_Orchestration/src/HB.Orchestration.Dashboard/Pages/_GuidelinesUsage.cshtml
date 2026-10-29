@@ -1,5 +1,5 @@
 @model ModesModel
-@* 최근 7일 리뷰 지침 경고 (계획서 2026-10-22_지침-파일-경고). modes.json을 못 읽어도 보이도록 부분 뷰로 둔다. *@
+@* 최근 7일 리뷰 지침 경고. modes.json을 못 읽어도 보이도록 부분 뷰로 둔다. *@
 @{
     var warnedGuidelines = Model.RecentGuidelines.Where(u => u.Warning is not null).ToList();
     var normalGuidelines = Model.RecentGuidelines.Where(u => u.Warning is null).ToList();

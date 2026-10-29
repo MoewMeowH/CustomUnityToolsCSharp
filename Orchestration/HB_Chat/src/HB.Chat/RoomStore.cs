@@ -5,7 +5,7 @@ using System.Text.Json.Serialization;
 namespace HB.Chat;
 
 /// <summary>
-/// 방 하나 = 앱이 만든 Claude 세션 하나 (계획서 3번). 말 본문은 여기 두지 않는다 — 세션 기록이 저장소다.
+/// 방 하나 = 앱이 만든 Claude 세션 하나. 말 본문은 여기 두지 않는다 — 세션 기록이 저장소다.
 /// KnownSize: 앱이 마지막 실행 뒤 본 세션 기록 크기. 다음 말 때 다르면 이 앱 밖에서 이어 썼다는 뜻이라 경고한다.
 /// TotalCostUsd: 마지막 result의 total_cost_usd (resume한 세션은 앞 실행까지 합친 클라이언트 추정).
 /// </summary>
@@ -33,17 +33,17 @@ public sealed record Room
     public IReadOnlyList<string> AllowRules { get; init; } = [];
 
     /// <summary>
-    /// 사용자가 본 마지막 말의 세션 기록 줄 번호 (<see cref="HB.Orchestration.Shared.ChatEntry.Line"/>). 안 읽은 수 = 이 줄 뒤의 지휘자 말 수 (계획서 2-2 a).
+    /// 사용자가 본 마지막 말의 세션 기록 줄 번호 (<see cref="HB.Orchestration.Shared.ChatEntry.Line"/>). 안 읽은 수 = 이 줄 뒤의 지휘자 말 수.
     /// 새 방은 0(아무것도 안 읽음). null은 이 필드 전에 만든 방뿐이고, 켤 때 마지막 줄까지 읽음으로 옮긴다 (<see cref="RoomList.MarkLegacyRead"/>,
     /// /self-review 5225b1ffaf C4 — 안 그러면 업그레이드 직후 기존 방이 전부 안 읽음으로 뜬다).
     /// </summary>
     public int? ReadUpTo { get; init; }
 
-    /// <summary>휴지통에 넣은 시각 (계획서 2-2 c). 있으면 목록에서 빠지고 말을 보내지 않는다.</summary>
+    /// <summary>휴지통에 넣은 시각. 있으면 목록에서 빠지고 말을 보내지 않는다.</summary>
     public DateTimeOffset? DeletedAt { get; init; }
 
     /// <summary>
-    /// 갈래 방(계획서 2-2 c 방 복제): 이어받을 원래 세션 ID. 첫 실행을 <c>--resume 원래 --fork-session --session-id 이 방</c>으로 하고,
+    /// 갈래 방(방 복제): 이어받을 원래 세션 ID. 첫 실행을 <c>--resume 원래 --fork-session --session-id 이 방</c>으로 하고,
     /// 성공하면 비운다 (2-2 0번 실측: fork-session에 session-id를 주면 그 ID로 갈라진다).
     /// </summary>
     public string? ForkOf { get; init; }
@@ -51,7 +51,7 @@ public sealed record Room
     /// <summary>갈래를 만들 때 원래 세션 기록의 크기. 첫 말 전에 원래 방이 더 진행됐는지 방 칸에 알리는 기준 (/self-review 95e8b1c242 C2).</summary>
     public long? ForkSourceSize { get; init; }
 
-    /// <summary>마지막 실행이 끝날 때의 컨텍스트 크기 · 창 (토큰, 계획서 2-2 b 컨텍스트 표시). 첫 턴 전에는 없다.</summary>
+    /// <summary>마지막 실행이 끝날 때의 컨텍스트 크기 · 창 (토큰, 컨텍스트 표시). 첫 턴 전에는 없다.</summary>
     public long? ContextTokens { get; init; }
     public int? ContextWindow { get; init; }
 
@@ -68,12 +68,12 @@ public sealed record Room
     public bool PlanNext { get; init; }
 
     /// <summary>
-    /// "외부 요청 전에 묻기" (계획서 2026-10-29_모델-선택창, 결정 "방 설정 스위치"): 켜면 다음 실행부터 run_mode를 미리 허용하지 않고 모델 선택 카드로 묻는다.
+    /// "외부 요청 전에 묻기" (결정 "방 설정 스위치"): 켜면 다음 실행부터 run_mode를 미리 허용하지 않고 모델 선택 카드로 묻는다.
     /// </summary>
     public bool AskRunMode { get; init; }
 
     /// <summary>
-    /// 이 방에 더 붙일 작업 폴더 .mcp.json의 MCP 서버 이름 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결 — Notion E). 읽기 이상 단계에서만 붙는다.
+    /// 이 방에 더 붙일 작업 폴더 .mcp.json의 MCP 서버 이름 (Notion E). 읽기 이상 단계에서만 붙는다.
     /// 기본 서버(hb-orchestration)는 여기 넣지 않는다 — 늘 붙고, 끄려면 <see cref="McpOff"/>.
     /// </summary>
     public IReadOnlyList<string> McpExtra { get; init; } = [];
@@ -94,18 +94,18 @@ public sealed record Room
 
     /// <summary>
     /// 지휘자가 마지막으로 받은 방 규칙의 지문 (<see cref="RoomRules.Hash"/>). 이어 쓰는 세션은 CLI가 처음 시스템 프롬프트를 계속 쓰므로,
-    /// 지금 규칙과 다르면 다음 말 앞에 새 규칙을 붙인다 (계획서 2026-10-29_HB_Chat-2-2-작은-한계-정리). null이면 이 칸 전에 만든 방 — 한 번 받는다.
+    /// 지금 규칙과 다르면 다음 말 앞에 새 규칙을 붙인다. null이면 이 칸 전에 만든 방 — 한 번 받는다.
     /// </summary>
     public string? RulesHash { get; init; }
 
     /// <summary>
     /// 갈래 방이 이어받은 방들의 ID (조상 먼저 · 원래 방 마지막). 그 방들의 첨부 폴더도 읽게 한다 — 이어받은 대화의 [첨부] 줄은 원래 방 폴더를 가리킨다
-    /// (계획서 2026-10-29_HB_Chat-2-2-작은-한계-정리, 2-2 리뷰 C6). <see cref="ForkOf"/>는 첫 실행 뒤 지워지므로 따로 둔다.
+    /// (2-2 리뷰 C6). <see cref="ForkOf"/>는 첫 실행 뒤 지워지므로 따로 둔다.
     /// </summary>
     public IReadOnlyList<string> AttachFrom { get; init; } = [];
 
     /// <summary>
-    /// 단톡방 구성원 (계획서 2026-10-29_HB_Chat-단톡방). 있으면 이 방은 단톡방 — 자기 세션으로는 돌지 않고, 구성원마다 숨은 자식 방(<see cref="GroupId"/>)이 돈다.
+    /// 단톡방 구성원. 있으면 이 방은 단톡방 — 자기 세션으로는 돌지 않고, 구성원마다 숨은 자식 방(<see cref="GroupId"/>)이 돈다.
     /// 화면은 앱이 가진 대화 줄(<see cref="GroupLog"/>)로 그린다.
     /// </summary>
     public IReadOnlyList<GroupMember> Members { get; init; } = [];
@@ -124,7 +124,7 @@ public sealed record Room
 
     /// <summary>
     /// Codex 구성원이 쓴 토큰 누적 (턴마다 turn.completed usage를 더함 — 입력은 캐시 포함, OpenAI 뜻). 단톡방 머리 비용 합계용
-    /// (계획서 2026-10-29_사용량-한도-표시, /self-review b40d9efb00 C3 — 과정 기록을 다시 세지 않게).
+    /// (/self-review b40d9efb00 C3 — 과정 기록을 다시 세지 않게).
     /// </summary>
     public long CodexInputTokens { get; init; }
     public long CodexOutputTokens { get; init; }

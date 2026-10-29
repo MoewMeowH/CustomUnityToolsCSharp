@@ -12,7 +12,7 @@ public sealed class SettingsModel(
     RoomStore store, RoomHub hub, RoomList list, ChatTranscripts transcripts, IOptions<ChatOptions> options,
     ProfileView profiles, FaceCatalog faces, RoomRuns runs, StickerPacks packs, CodexSettings codexSettings) : PageModel
 {
-    // ---- Codex 구성원 (계획서 2026-10-29_HB_Chat-단톡방 ② 결정 5): 켤 수 있는 작업 폴더 · 실행 파일 · 이 계정 모델 ----
+    // ---- Codex 구성원: 켤 수 있는 작업 폴더 · 실행 파일 · 이 계정 모델 ----
 
     public IReadOnlyList<string> CodexWorkspaces => codexSettings.Workspaces();
     public IReadOnlyList<WorkspaceEntry> AllWorkspaceList => options.Value.AllWorkspaces;
@@ -195,7 +195,7 @@ public sealed class SettingsModel(
 
     public IReadOnlyList<WorkspaceRow> Workspaces { get; private set; } = [];
 
-    // ---- Unity 프로젝트 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결) ----
+    // ---- Unity 프로젝트 ----
 
     public sealed record UnityRow(WorkspaceEntry Entry, bool Exists, int Rooms, string? Unusable);
 
@@ -217,7 +217,7 @@ public sealed class SettingsModel(
         return Page();
     }
 
-    // ---- 앱에서 더한 MCP 서버 (계획서 2026-10-29_HB_Chat-앱-MCP-서버-더하기) ----
+    // ---- 앱에서 더한 MCP 서버 ----
 
     /// <summary>목록 줄: 이름 · 종류 · 명령/URL(env · headers 값은 안 보임) · 켠 방 수 · 평문 비밀 값으로 보이는 칸.</summary>
     public sealed record McpRow(string Name, string Transport, string Command, int Rooms, IReadOnlyList<string> Secrets);
@@ -296,7 +296,7 @@ public sealed class SettingsModel(
         return Page();
     }
 
-    /// <summary>그 방 작업 폴더 .mcp.json에 그 이름이 있는지 — 있으면 앱 서버가 아니라 그쪽을 쓴다 (결정 1).</summary>
+    /// <summary>그 방 작업 폴더 .mcp.json에 그 이름이 있는지 — 있으면 앱 서버가 아니라 그쪽을 쓴다.</summary>
     private bool InWorkspace(Room room, string name) =>
         options.Value.WorkspacePath(room.Workspace) is { } ws && McpConfigFile.ServerNames(ws).Contains(name);
 

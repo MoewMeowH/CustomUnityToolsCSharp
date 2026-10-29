@@ -1,5 +1,5 @@
 """PreToolUse 훅 H5 (Bash · PowerShell의 slackplan 올리기): 계획서 · 글이 Slack으로 나가기 전에 비밀 값 · 개인 값 · 로컬 경로를 막는다
-(계획서 2026-10-23_plan-share-명령과-share_guard, 상위 SlackPlanBot 2026-10-23_오케스트레이션-연결 계획 12 · 13 · 15, /cross-review 32ab98a8a9 반영).
+(/cross-review 32ab98a8a9 반영).
 
 - 대상: 명령 자리의 slackplan(.exe · .dll, 따옴표로 감싼 경로 포함) · `dotnet [exec] …slackplan.dll …` ·
   `dotnet run … -- <하위 명령>`(명령이나 셸 현재 폴더에 SlackPlanBot이 있을 때) · 다른 셸을 거친 호출(cmd /c 등 — 해석하지 않고 막음).
@@ -20,7 +20,7 @@
   예외: 단독 읽기 명령 하나(grep · rg(--pre 없이) · git log/show/diff/status · Select-String — 묶음 · 파이프 · & · 리다이렉트 · 괄호 ·
   중괄호 · 명령 치환 없음). git commit -m 속 낱말도 막힌다 (사용자 결정 2026-10-23: git은 크게 신경 쓰지 않음).
   heredoc · here-string 본문: 셸이 펼치지 않는 것(<<'EOF' · @'…'@)만 대상 판정에서 뺀다. 그 본문에 slackplan이 있으면 묶음의 모든 조각이
-  데이터 전용(cat · tee · git commit · Set-Content · Add-Content · Out-File · 변수 대입)일 때만 통과 — 허용 목록 (계획서 2026-10-23_H5-셸-문법-우회).
+  데이터 전용(cat · tee · git commit · Set-Content · Add-Content · Out-File · 변수 대입)일 때만 통과 — 허용 목록.
   따옴표 없는 heredoc · @"…"@ 안의 $( )는 명령 치환으로 본다.
 - 올리는 명령의 따옴표 밖 ~(낱말 시작) · bash 글롭(* ? [)은 막는다 — 셸이 사용자 경로 · 파일 이름으로 펼친다.
 - H5는 지휘자의 실수를 막는 안전망이다 (봇 자체 검사가 첫 겹). 셸 문법을 다 해석하지 않으므로 못 보는 것: 변수에 담은 실행 파일(& $exe ·
@@ -43,7 +43,7 @@ UPLOAD = {'new', 'revise', 'update-summary', 'reply', 'ask-consent'}
 # 밖으로 글을 내지 않는 하위 명령 (SlackPlanBot App.cs 2026-10-23 기준: react는 이모지만, inbox --note는 로컬 작업 로그만)
 READ = {'find', 'thread', 'status', 'inbox', 'files', 'react', 'listen', 'probe-ratelimit', 'list', 'approval-record', '-h', '--help'}
 # 로컬 기록을 지우는 하위 명령 (READ에 넣지 않는다): 글자 그대로의 인자로 된 미리보기만 통과, --yes는 사람의 `!` 명령으로만
-# (계획서 2026-10-23_H5-새-하위-명령과-지우는-명령, /self-review 8c1412729e — 셸이 펼쳐 --yes가 되는 인자도 막는다)
+# (/self-review 8c1412729e — 셸이 펼쳐 --yes가 되는 인자도 막는다)
 DESTRUCTIVE = {'purge', 'unlink'}
 LITERAL_ARG = re.compile(r'^[A-Za-z0-9._:-]+$')
 DRY_RUN_AWARE = {'new', 'revise'}
@@ -56,7 +56,7 @@ SHELL_VAR = re.compile(r'\$|%[A-Za-z_][A-Za-z0-9_()]*%')
 EXE = re.compile(r'(?i)^slackplan(?:\.exe|\.dll)?$')
 # 실행 파일 이름 낱말 (SlackPlanBot · SLACKPLAN_ROOT처럼 뒤에 글자가 이어지면 아님). 따옴표 · 백틱 · $를 지운 글에서 찾는다
 # — 'slack''plan' · slack$''plan 같은 쪼개기도 잡도록. 백슬래시는 지운 글(slack\plan)과 '/'로 바꾼 글(C:\bot\slackplan.exe) 둘 다 본다
-# (계획서 2026-10-23_H5-앞-낱말-우회 결정, /self-review e256053430 · 3efd4d0922).
+# (/self-review e256053430 · 3efd4d0922).
 # 앞쪽 경계는 두지 않는다: 따옴표를 지우면 -O'slackplan …'이 -Oslackplan이 된다 (git grep -O 실측 2026-10-23).
 SLACKPLAN_WORD = re.compile(r'(?i)slackplan(?:\.exe|\.dll)?(?![\w-])')
 # PowerShell 굽은 따옴표도 지운다 — sl‘’ackplan으로 쪼갠 이름 (/cross-review 8722c947f7 1-F4)
@@ -121,7 +121,7 @@ def is_target(cmd: str, stripped: str, inner: list[str], toks: list[str], cwd: s
     if 'slackplan' in low and WRAPPER.search(stripped):
         return True
     # 앞 낱말(env · X=1 · nice · xargs · eval · PowerShell '.' 등)이 붙거나 따옴표 · 줄 이음으로 감싸도, slackplan 낱말이 어디든 있으면
-    # 대상 — slackplan_args가 해석하지 못해 막는다. 단독 읽기 명령의 인자로만 나온 경우만 뺀다 (계획서 2026-10-23_H5-앞-낱말-우회).
+    # 대상 — slackplan_args가 해석하지 못해 막는다. 단독 읽기 명령의 인자로만 나온 경우만 뺀다.
     if has_slackplan_word(cmd) and not reader_only(stripped, inner, toks):
         return True
     dotnet_run = re.search(r'(?i)\bdotnet(?:\.exe)?\b[^\n;&|]*?\brun\b', visible)

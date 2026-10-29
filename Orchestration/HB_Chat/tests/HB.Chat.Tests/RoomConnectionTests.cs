@@ -4,7 +4,7 @@ using HB.Chat;
 namespace HB.Chat.Tests;
 
 /// <summary>
-/// 방별 연결 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결): 방 설정 파일 · 묻지 않을 서버 인자 · tool_result 그림 · Unity 프로젝트 목록 ·
+/// 방별 연결: 방 설정 파일 · 묻지 않을 서버 인자 · tool_result 그림 · Unity 프로젝트 목록 ·
 /// 기록 그림 파일 · 자리표시 풀기 · 앱 도구 목록 · 방 규칙.
 /// </summary>
 public sealed class RoomConnectionTests : IDisposable

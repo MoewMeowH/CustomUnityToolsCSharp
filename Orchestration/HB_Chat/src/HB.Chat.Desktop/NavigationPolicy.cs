@@ -17,7 +17,7 @@ public enum NavAction
 public readonly record struct NavDecision(NavAction Action, AppTab Tab, string? Url);
 
 /// <summary>
-/// 큰 틀 이동 · 새 창 요청 규칙 (계획서 2-3): 채팅 출처는 채팅 탭, 대시보드 출처는 대시보드 탭, 그 밖의 http(s)는 기본 브라우저, 나머지는 막음.
+/// 큰 틀 이동 · 새 창 요청 규칙: 채팅 출처는 채팅 탭, 대시보드 출처는 대시보드 탭, 그 밖의 http(s)는 기본 브라우저, 나머지는 막음.
 /// 하위 틀(위젯 iframe)은 about:srcdoc · about:blank만 — 위젯이 스스로 밖으로 이동하는 길을 페이지 CSP frame-src 'none'과 이중으로 막는다.
 /// </summary>
 public sealed class NavigationPolicy(Uri chat, Uri dashboard)

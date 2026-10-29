@@ -2,7 +2,7 @@ using HB.Chat;
 
 namespace HB.Chat.Tests;
 
-/// <summary>첨부 (계획서 2-2 d): 이름 거르기 · 저장 · 보기 경로 검사 · 본문의 [첨부] 줄 · 실행 인자.</summary>
+/// <summary>첨부: 이름 거르기 · 저장 · 보기 경로 검사 · 본문의 [첨부] 줄 · 실행 인자.</summary>
 public sealed class AttachmentTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "hbchat-attach-" + Guid.NewGuid().ToString("N"));
@@ -183,7 +183,7 @@ public sealed class AttachmentTests : IDisposable
     [Fact]
     public void CleanUnsent_RemovesOnlyOldUnmentionedFiles()
     {
-        // 보내지 않은 첨부 정리 (계획서 2026-10-29_HB_Chat-2-2-작은-한계-정리 4번)
+        // 보내지 않은 첨부 정리
         var data = Path.Combine(_dir, "data");
         var store = new RoomStore(Path.Combine(data, "rooms.json"));
         var room = store.Create("ws", PermissionLevel.Read, "opus", null);
@@ -292,7 +292,7 @@ public sealed class AttachmentTests : IDisposable
     [Fact]
     public void Args_ForkReadsInheritedAttachFolders_EditDenied()
     {
-        // 갈래 방: 원래 방들의 첨부 폴더도 --add-dir, 편집 · 명령 방은 편집 금지 (계획서 2026-10-29_HB_Chat-2-2-작은-한계-정리)
+        // 갈래 방: 원래 방들의 첨부 폴더도 --add-dir, 편집 · 명령 방은 편집 금지
         var own = Path.Combine(_dir, "attachments", "0123456789ab");
         var parent = Path.Combine(_dir, "attachments", "aaaaaaaaaaaa");
         var grand = Path.Combine(_dir, "attachments", "bbbbbbbbbbbb");

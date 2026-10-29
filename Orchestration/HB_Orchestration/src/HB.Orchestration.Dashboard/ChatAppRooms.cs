@@ -7,7 +7,7 @@ namespace HB.Orchestration.Dashboard;
 public sealed record ChatAppRoom(string RoomId, string? Title, string? Link);
 
 /// <summary>
-/// 채팅 앱의 방 색인(rooms.json)을 읽어 세션 → 앱 방을 찾는다 (계획서 2026-10-27_대화형-채팅-앱 "대시보드와의 경계": 대시보드는 읽기만, 링크만).
+/// 채팅 앱의 방 색인(rooms.json)을 읽어 세션 → 앱 방을 찾는다 (대시보드는 읽기만, 링크만).
 /// 앱 세션도 보통 세션 기록이라 방 목록 · 채팅방에는 이미 나온다 — 여기서는 "채팅 앱 방" 표시와 앱으로 가는 링크만 더한다.
 /// 파일 크기 · 수정 시각이 같으면 다시 읽지 않는다. 없거나 깨졌거나 모양이 다른 항목은 건너뛴다 (예외를 던지지 않는다).
 /// </summary>

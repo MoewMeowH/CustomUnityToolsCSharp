@@ -1,4 +1,4 @@
-"""서브에이전트 정의 파일 검사 (계획서 2026-10-19_서브에이전트-도입-검토, 공통 규칙 8).
+"""서브에이전트 정의 파일 검사 (공통 규칙 8).
 tools가 없거나(→ MCP 도구까지 상속) 허용 목록 밖 도구(MCP 포함)가 있으면 실패(exit 1). 경고가 아니다.
 
 사용: python -I .claude/scripts/check_agents.py [agents 폴더 ...]  (기본: 스크립트 기준 ../agents)
@@ -42,10 +42,10 @@ def check(path: str) -> list:
     return errors
 
 
-REQUIRED_HOOKS = {  # 계획서 2026-10-19_훅-규칙-강제: matcher → 반드시 걸려 있어야 하는 스크립트
-    'Bash|PowerShell': ['cleanup_guard.py', 'push_guard.py', 'share_guard.py'],  # share_guard: 2026-10-23_plan-share-명령과-share_guard
+REQUIRED_HOOKS = {  # matcher → 반드시 걸려 있어야 하는 스크립트
+    'Bash|PowerShell': ['cleanup_guard.py', 'push_guard.py', 'share_guard.py'],
     'mcp__hb-orchestration__run_mode': ['run_mode_guard.py'],
-    'Agent|Task|SendMessage': ['subagent_input_guard.py'],  # H6: 2026-10-27_H6-서브에이전트-입력-자동로드-차단
+    'Agent|Task|SendMessage': ['subagent_input_guard.py'],  # H6: 서브에이전트 입력의 CLAUDE.md 자동 로드 막기
 }
 
 

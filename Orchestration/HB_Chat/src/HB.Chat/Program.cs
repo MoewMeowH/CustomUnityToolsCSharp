@@ -24,7 +24,7 @@ builder.Services.Configure<ChatOptions>(builder.Configuration.GetSection("Chat")
 
 // 스티커 설정은 대시보드 설정 파일(Dashboard:Stickers)을 그대로 읽는다 — 목록 · 그림 폴더를 두 벌 두지 않게.
 // 이 앱 설정과 섞이지 않게 따로 읽는다 (대시보드의 Urls 같은 값이 들어오지 않게).
-// 대시보드 폴더 · 그 안의 스티커 폴더는 상대 경로도 받는다 — 이 앱 content root 기준, 스티커 폴더는 그 대시보드 폴더 기준 (계획서 2026-10-29_바탕화면-펫 결정)
+// 대시보드 폴더 · 그 안의 스티커 폴더는 상대 경로도 받는다 — 이 앱 content root 기준, 스티커 폴더는 그 대시보드 폴더 기준
 var stickerConfig = new ConfigurationBuilder();
 var stickerBase = StickerOptions.Resolve(builder.Configuration["Chat:StickerSettingsDir"], builder.Environment.ContentRootPath);
 if (stickerBase is { Length: > 0 } stickerDir && Directory.Exists(stickerDir))
@@ -39,15 +39,15 @@ builder.Services.AddSingleton(sp => new StickerCatalog(() => sp.GetRequiredServi
 
 builder.Services.AddSingleton(sp => new RoomStore(Path.Combine(sp.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder, "rooms.json")));
 builder.Services.AddSingleton(sp => new ChatTranscripts(() => sp.GetRequiredService<IOptions<ChatOptions>>().Value.ProjectsRoot));
-// 터미널 곁칸 (계획서 2026-10-29_HB_Chat-터미널-곁칸): 지휘자가 띄운 서버를 앱이 ConPTY로 붙잡는다 + 앱 MCP(명령 방 실행만, 실행 토큰)
+// 터미널 곁칸: 지휘자가 띄운 서버를 앱이 ConPTY로 붙잡는다 + 앱 MCP(명령 방 실행만, 실행 토큰)
 builder.Services.AddSingleton<Terminals>();
-builder.Services.AddSingleton<McpProbe>(); // 곁칸 연결 탭 "확인" (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결)
+builder.Services.AddSingleton<McpProbe>(); // 곁칸 연결 탭 "확인"
 builder.Services.AddHttpContextAccessor();
-// 지휘자 브라우저 (계획서 2026-10-29_HB_Chat-지휘자-브라우저): 방마다 화면 없는 Chrome(없으면 Edge) · 별도 프로필 — 같은 앱 MCP
+// 지휘자 브라우저: 방마다 화면 없는 Chrome(없으면 Edge) · 별도 프로필 — 같은 앱 MCP
 builder.Services.AddSingleton(sp => new AgentBrowser(() => sp.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder,
     blockedPorts: () => TerminalMcp.BlockedPorts(sp.GetRequiredService<Microsoft.AspNetCore.Hosting.Server.IServer>(), sp.GetRequiredService<IOptions<ChatOptions>>().Value)));
 builder.Services.AddMcpServer().WithHttpTransport(o => o.Stateless = true).WithTools<TerminalTools>().WithTools<BrowserTools>();
-// 구독 한도 (계획서 2026-10-29_사용량-한도-표시): Claude는 실행 때 받은 값을 데이터 폴더에, Codex는 ~/.codex 세션 기록에서
+// 구독 한도: Claude는 실행 때 받은 값을 데이터 폴더에, Codex는 ~/.codex 세션 기록에서
 builder.Services.AddSingleton(sp => new UsageLimits(() => sp.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder));
 builder.Services.AddSingleton(sp =>
 {
@@ -61,7 +61,7 @@ builder.Services.AddSingleton(sp =>
         SelfUrl = () => TerminalMcp.LoopbackUrl(sp.GetRequiredService<Microsoft.AspNetCore.Hosting.Server.IServer>()),
     };
 });
-builder.Services.AddSingleton<GroupLog>(); // 단톡방 (계획서 2026-10-29_HB_Chat-단톡방): 대화 줄 · 구성원 실행
+builder.Services.AddSingleton<GroupLog>(); // 단톡방: 대화 줄 · 구성원 실행
 // Codex 구성원을 켤 수 있는 작업 폴더 (단톡방 ② 결정 5 — 기본 없음, 설정 화면에서 고름)
 builder.Services.AddSingleton(sp =>
 {
@@ -116,12 +116,12 @@ if (builder.Configuration["Chat:StickerSettingsDir"] is { Length: > 0 } configur
     foreach (var warning in chat.AppWorkspaces.LoadWarnings)
         app.Logger.LogWarning("앱에서 더한 작업 폴더를 쓰지 않습니다: {Warning}", warning);
 
-    // Unity 프로젝트 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결): 작업 폴더와 같은 검사 + Unity 프로젝트 모양. 방은 UnityProject 칸으로 가리킨다.
+    // Unity 프로젝트: 작업 폴더와 같은 검사 + Unity 프로젝트 모양. 방은 UnityProject 칸으로 가리킨다.
     chat.AppUnityProjects = new WorkspaceStore(Path.Combine(chat.DataFolder, "unity-projects.json"), chat.UnityProjects, guarded,
         usedBy: r => r.UnityProject,
         extraCheck: p => File.Exists(Path.Combine(p, "ProjectSettings", "ProjectVersion.txt")) ? null : "Unity 프로젝트 폴더가 아닙니다 (ProjectSettings/ProjectVersion.txt 없음).",
         noun: "Unity 프로젝트");
-    // 앱에서 더한 MCP 서버 (계획서 2026-10-29_HB_Chat-앱-MCP-서버-더하기) — 기본 서버 · 앱 MCP · unity 이름은 쓸 수 없다
+    // 앱에서 더한 MCP 서버 — 기본 서버 · 앱 MCP · unity 이름은 쓸 수 없다
     chat.AppMcp = new AppMcpStore(Path.Combine(chat.DataFolder, "mcp-servers.json"), [chat.McpServer, TerminalMcp.Server, McpConfigFile.UnityServer]);
     if (chat.AppMcp.LoadError is { } mcpError)
         app.Logger.LogWarning("앱에서 더한 MCP 서버(mcp-servers.json)를 읽지 못했습니다: {Error}", mcpError);
@@ -137,7 +137,7 @@ if (builder.Configuration["Chat:StickerSettingsDir"] is { Length: > 0 } configur
 if (ProcessJob.AttachCurrentProcess() is { } jobError)
     app.Logger.LogWarning("Job Object에 넣지 못했습니다 — 앱이 비정상 종료되면 claude 프로세스가 남을 수 있습니다: {Error}", jobError);
 
-// 단톡방: 처음부터 만들어 둔다 — 구성원 자식 방의 턴 끝 · 활동 알림을 구독해야 답이 단톡방에 올라간다 (계획서 2026-10-29_HB_Chat-단톡방)
+// 단톡방: 처음부터 만들어 둔다 — 구성원 자식 방의 턴 끝 · 활동 알림을 구독해야 답이 단톡방에 올라간다
 app.Services.GetRequiredService<GroupChat>();
 
 // 이 필드 전에 만든 방은 마지막 줄까지 읽음으로 (안 그러면 업그레이드 직후 기존 방이 전부 안 읽음 — /self-review 5225b1ffaf C4).
@@ -151,7 +151,7 @@ catch (Exception ex) when (ex is InvalidOperationException or IOException or Una
     app.Logger.LogWarning("읽음 표시를 옮기지 못했습니다 — 기존 방의 안 읽은 수가 0으로 보입니다: {Error}", ex.Message);
 }
 
-// 휴지통 30일 (계획서 2-2 c): 켤 때 한 번, 그 뒤 하루마다. 세션 기록은 남긴다 (Trash).
+// 휴지통 30일: 켤 때 한 번, 그 뒤 하루마다. 세션 기록은 남긴다 (Trash).
 void PurgeTrash()
 {
     try
@@ -173,7 +173,7 @@ void PurgeTrash()
     }
 }
 
-// 보내지 않은 첨부 (하루 넘고 기록에 안 나온 것, 계획서 2026-10-29_HB_Chat-2-2-작은-한계-정리) — 휴지통 정리와 같은 때, 뒤에서.
+// 보내지 않은 첨부 (하루 넘고 기록에 안 나온 것) — 휴지통 정리와 같은 때, 뒤에서.
 // 세션 기록 폴더가 없으면(설정이 바뀜 등) 하지 않고, 예상 밖 예외도 로그로만 — 시작 · 타이머가 죽지 않게 (/self-review security 4c300badae C1 · C2, 70170a8801 C5)
 void CleanAttachments()
 {
@@ -274,8 +274,8 @@ app.MapGet("/profile-image/{file}", IResult (string file, ProfileStore profiles,
 // 방 실시간 알림 (SSE). 흘림 글 · 도구 상태 · 거절 · 끝. 끝나면 화면이 세션 기록으로 말풍선을 다시 받는다.
 var sseJson = new JsonSerializerOptions(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
 
-// 데스크톱 앱 (계획서 2-3): 방 상태 요약 — 서버 확인 · 알림 · 트레이 상태용. 읽기만.
-// faceUrl: 그 방 팩의 표정 그림 주소 — 데스크톱 펫 (계획서 2026-10-29_바탕화면-펫), 방 목록 아바타와 같은 식
+// 데스크톱 앱: 방 상태 요약 — 서버 확인 · 알림 · 트레이 상태용. 읽기만.
+// faceUrl: 그 방 팩의 표정 그림 주소 — 데스크톱 펫, 방 목록 아바타와 같은 식
 app.MapGet("/api/rooms", (RoomList list, ProfileStore profiles, FaceCatalog faces, StickerPacks packs, HttpContext ctx) =>
 {
     ctx.Response.Headers.CacheControl = "no-store";
@@ -308,7 +308,7 @@ app.MapGet("/events/{id}", async (string id, RoomStore store, RoomHub hub, HttpC
     }
 });
 
-// 앱 전체 알림 (SSE, 계획서 2-2 a): 방 목록 줄이 바뀌었을 수 있는 방 ID. 화면은 받으면 목록을 다시 받는다.
+// 앱 전체 알림 (SSE): 방 목록 줄이 바뀌었을 수 있는 방 ID. 화면은 받으면 목록을 다시 받는다.
 // 붙자마자 hello를 보낸다 — 끊긴 사이에 바뀐 것이 있을 수 있어 화면이 목록을 한 번 다시 받는다.
 app.MapGet("/events", async (RoomHub hub, HttpContext ctx) =>
 {
