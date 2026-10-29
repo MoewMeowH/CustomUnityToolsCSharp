@@ -133,7 +133,7 @@ public static class GoldenCli
 
     /// <summary>
     /// 보관된 검토형 결과에서 replay 사례를 만든다. --yes가 없으면 후보와 건너뛸 이유만 보인다. 외부 호출 없음.
-    /// --exclude는 프로젝트 폴더 경로에 그 글자가 든 결과를 뺀다 (예: --exclude MoJak — 회사 코드, 사용자 결정 2026-10-27).
+    /// --exclude는 프로젝트 폴더 경로에 그 글자가 든 결과를 뺀다 (예: --exclude <회사 프로젝트 폴더 이름> — 회사 코드를 사례에 넣지 않을 때).
     /// </summary>
     private static int ReplayBuild(Args a, string root, string logPath, TextWriter output, TextWriter error)
     {
