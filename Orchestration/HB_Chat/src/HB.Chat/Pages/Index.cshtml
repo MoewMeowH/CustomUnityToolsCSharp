@@ -132,11 +132,13 @@
                         </label>
                         <input type="text" name="title" placeholder="단톡방 이름" maxlength="200" required style="flex:1;min-width:160px" />
                     </div>
-                    @for (var i = 0; i < GroupChat.MinMembers; i++)
+                    @* 구성원 칸 (단톡방 ③ — 2~4명): 앞 두 칸은 필수, 뒤 칸은 이름을 비우면 빠진다. 칸마다 모든 입력을 보내 배열 순서가 맞는다 *@
+                    @for (var i = 0; i < GroupChat.MaxMembers; i++)
                     {
+                        var optional = i >= GroupChat.MinMembers;
                         <div class="group-member-row" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
-                            <input type="text" name="names" placeholder="구성원 이름 (예: @(i == 0 ? "A" : "B"))" maxlength="20" required style="width:140px" />
-                            <input type="text" name="roles" placeholder="역할 (예: @(i == 0 ? "내 코드의 위험을 찾는다" : "A의 의견에 반박한다"))" maxlength="@GroupChat.RoleMaxChars" style="flex:1;min-width:200px" />
+                            <input type="text" name="names" placeholder="@(optional ? "구성원 이름 (선택)" : "구성원 이름 (예: " + (i == 0 ? "A" : "B") + ")")" maxlength="20" required="@(!optional)" style="width:140px" />
+                            <input type="text" name="roles" placeholder="@(i switch { 0 => "역할 (예: 내 코드의 위험을 찾는다)", 1 => "역할 (예: A의 의견에 반박한다)", _ => "역할" })" maxlength="@GroupChat.RoleMaxChars" style="flex:1;min-width:200px" />
                             @* 엔진 (단톡방 ②): Codex는 설정에서 고른 작업 폴더에서만 · 읽기 전용 *@
                             <select name="engines" title="이 구성원이 도는 CLI">
                                 <option value="claude" selected>Claude</option>
@@ -161,7 +163,7 @@
                     <button class="btn primary" type="submit" style="margin-top:8px">@Icons.Svg("plus") 단톡방 만들기</button>
                 </form>
                 <p class="muted" style="margin:6px 0 0;font-size:12.5px">
-                    부른 구성원만 답합니다 (@@이름, 지금은 한 번에 한 명). 구성원마다 세션이 따로 돌고, 단톡방 대화를 함께 받습니다.
+                    부른 구성원만 답합니다 (@@이름 · 여러 명 · @@All은 동시에, 같은 대화를 받고). 구성원마다 세션이 따로 돌고, 단톡방 대화를 함께 받습니다.
                     Codex 구성원은 <a href="/Settings">설정</a>에서 고른 작업 폴더에서만 됩니다 (지금: @(Model.CodexWorkspaces.Count == 0 ? "없음" : string.Join(", ", Model.CodexWorkspaces))) — 읽기 전용이지만 디스크 전체를 읽을 수 있습니다.
                 </p>
             </section>

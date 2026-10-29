@@ -40,6 +40,15 @@ public sealed class ChatScriptTests(ChatApp app, ChatBrowser browser) : IClassFi
         Assert.Equal("", await page.EvalAsync<string>("document.querySelector('#text').value"));
         page.AssertNoErrors();
 
+        // ③ @All: 둘 다 동시에 답한다 — 사용자 말 머리에 둘, 말풍선 A · B
+        await page.SendAsync("@All 다들");
+        await page.WaitForAsync("[...document.querySelectorAll('#chat .msg.group-member')].filter(m => m.querySelector('.body').textContent.trim() === 'Hello').length === 3",
+            "@All 답 둘", ChatPage.TurnWait);
+        Assert.Equal("→ @A, @B", await page.EvalAsync<string>("[...document.querySelectorAll('#chat .msg.user .detail')].pop().textContent.trim()"));
+        Assert.Equal(["A", "B"], (await page.EvalAsync<string>("[...document.querySelectorAll('#chat .msg.group-member .who b')].slice(-2).map(b => b.textContent).sort().join(',')")).Split(','));
+        Assert.Equal(0, await page.EvalAsync<int>("[...document.querySelectorAll('#chat .note.denied')].length")); // 답이 없다는 줄 없음
+        page.AssertNoErrors();
+
         // 과정 보기(자식 방): 안내 줄 · 입력칸 숨김, 단계 바꾸기는 서버가 거절 (b8697252eb C1 · Codex 리뷰)
         await using var child = await browser.OpenAsync(app.RoomUrl(app.Store.Get(group.Members[0].RoomId)!));
         Assert.True(await child.EvalAsync<bool>("!!document.querySelector('#group-child-banner') && document.querySelector('.composer').hidden"));

@@ -274,11 +274,11 @@ public sealed class CodexTests : IDisposable
         Assert.Equal(thread, _store.Get(x.RoomId)!.CodexThread);
 
         // 말이 가지 않았으니 본 줄 수를 되돌린다 — 다음 말에 그 말(crash)과 실패 줄을 다시 붙인다 (Codex sol 리뷰 C1)
-        Assert.Equal(one.Line + 1, _store.Get(group.Id)!.Members[1].SeenUpTo);
+        Assert.Equal(one.ReplyTo + 1, _store.Get(group.Id)!.Members[1].SeenUpTo);
         Assert.Null(_groups.Send(group.Id, "@X 셋"));
         var next = await AnswerAsync(group.Id, "X", crashed.Line);
         Assert.Contains("resume=True", next.Text);
-        Assert.Contains("delta=2 ", next.Text);
+        Assert.Contains("delta=1 ", next.Text); // 실패한 말(crash) — 자기 답 · 실패 줄은 빠짐 (③)
     }
 
     /// <summary>

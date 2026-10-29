@@ -112,6 +112,37 @@ public sealed class GroupTests : IDisposable
         Assert.False(Mentions.IsName(new string('x', 21)));
     }
 
+    /// <summary>All로 시작하는 구성원 이름은 그 구성원 — @All이 아님 (③ 리뷰: 셋이 같이 지적).</summary>
+    [Fact]
+    public void Mentions_MemberNameStartingWithAll_IsThatMember()
+    {
+        var r = Mentions.Parse("@All검토 봐 줘", ["All검토", "B"]);
+        Assert.Equal(["All검토"], r.Names);
+        Assert.False(r.All);
+        Assert.Equal(["All검토"], Mentions.Parse("@All검토야 봐", ["All검토", "B"]).Names); // 조사 붙은 구성원 이름
+        Assert.True(Mentions.Parse("@All 다들", ["All검토", "B"]).All);
+        Assert.True(Mentions.Parse("@All이 봐", ["A", "B"]).All); // 조사 붙은 All
+    }
+
+    /// <summary>"답이 없습니다" 판정 표: 구성원 답 줄 · 그 말 뒤 그 구성원의 실패 안내 줄만, 구성원마다 (③ 리뷰 sub_self C3 · C4).</summary>
+    [Fact]
+    public void AnsweredBy_PerMember_ReplyOrFailedNote()
+    {
+        GroupEntry[] log =
+        [
+            new(0, DateTimeOffset.Now, GroupEntryKind.User, null, "@All") { To = ["a", "b", "c"] },
+            new(1, DateTimeOffset.Now, GroupEntryKind.Note, "b", "b에게 보내지 못했습니다") { Failed = true },
+            new(2, DateTimeOffset.Now, GroupEntryKind.Member, "a", "답") { ReplyTo = 0 },
+            new(3, DateTimeOffset.Now, GroupEntryKind.User, null, "@c") { To = ["c"] },
+            new(4, DateTimeOffset.Now, GroupEntryKind.Note, "c", "c에게 보내지 못했습니다") { Failed = true },
+        ];
+        var answered = GroupChat.AnsweredBy(log);
+        Assert.Contains((0, "a"), answered);
+        Assert.Contains((0, "b"), answered);
+        Assert.DoesNotContain((0, "c"), answered); // c는 첫 말에 답이 없음 — 둘째 말 뒤 안내는 둘째 말 것
+        Assert.Contains((3, "c"), answered);
+    }
+
     [Fact]
     public void Log_AppendsWithLineNumbers_SkipsBrokenLines()
     {
@@ -164,12 +195,14 @@ public sealed class GroupTests : IDisposable
     }
 
     [Fact]
-    public void Create_RejectsThirdMember_InStage1()
+    public void Create_TwoToFourMembers()
     {
-        // 결정 ①은 2명 — 화면을 거치지 않은 요청도 서버가 막는다 (Codex 리뷰)
-        var (group, error) = _groups.Create("ws", PermissionLevel.Chat, "opus", null, "팀", [("A", ""), ("B", ""), ("C", "")]);
+        // ③ 결정은 2~4명 — 화면을 거치지 않은 요청도 서버가 막는다 (Codex 리뷰). 빈 이름 칸은 빠진다
+        var (group, error) = _groups.Create("ws", PermissionLevel.Chat, "opus", null, "팀", [("A", ""), ("B", ""), ("C", ""), ("D", ""), ("E", "")]);
         Assert.Null(group);
-        Assert.Contains("2명까지", error);
+        Assert.Contains("4명까지", error);
+        var (four, _) = _groups.Create("ws", PermissionLevel.Chat, "opus", null, "팀", [("A", ""), ("B", ""), ("C", ""), ("D", ""), ("", "")]);
+        Assert.Equal(4, four!.Members.Count);
     }
 
     [Fact]
@@ -212,10 +245,58 @@ public sealed class GroupTests : IDisposable
         Assert.Contains("A: Hello", second.Text);
         Assert.Contains("사용자: @A 안녕", second.Text);
 
-        // 본 줄 수가 올라감 — A는 다음에 B의 답부터 받는다
+        // 본 줄 수는 보낼 때만 올라감(사용자 말 다음 줄) — 자기 답 줄은 다음 보내기에서 뺀다 (③)
         var after = _store.Get(group.Id)!;
-        Assert.Equal(answer.Line + 1, after.Members.First(m => m.Id == a.Id).SeenUpTo);
-        Assert.Equal(second.Line + 1, after.Members.First(m => m.Id == b.Id).SeenUpTo);
+        Assert.Equal(1, after.Members.First(m => m.Id == a.Id).SeenUpTo);
+        Assert.Equal(second.ReplyTo + 1, after.Members.First(m => m.Id == b.Id).SeenUpTo);
+    }
+
+    /// <summary>③ @All · 여러 이름: 모두 동시에, 같은 대화 범위(이 말 앞까지) · 다음 말에는 다른 구성원의 답을 순서와 상관없이 받음 · 자기 답은 빠짐.</summary>
+    [Fact]
+    public async Task Send_All_RunsEveryone_SameScope_ThenOthersAnswers()
+    {
+        var group = NewGroup();
+        var a = group.Members.First(m => m.Name == "A");
+        var b = group.Members.First(m => m.Name == "B");
+        Assert.Null(_groups.Send(group.Id, "@A 하나"));
+        var first = await AnswerAsync(group.Id, "A", -1);
+
+        // @All: 둘 다 돈다. echo라 받은 프롬프트가 답(실패 결과)으로 돌아온다
+        Assert.Null(_groups.Send(group.Id, "echo @All 둘 다"));
+        var allLine = _log.Read(group.Id).Last(e => e.Kind == GroupEntryKind.User).Line;
+        Assert.Equal([a.Id, b.Id], _log.Read(group.Id).Single(e => e.Line == allLine).To);
+        Assert.Contains("답하는 중", _groups.Send(group.Id, "@A 끼어들기")); // 사용자 말은 한 번에 하나
+        var toA = await AnswerAsync(group.Id, "A", allLine);
+        var toB = await AnswerAsync(group.Id, "B", allLine);
+        Assert.Equal((allLine, allLine), (toA.ReplyTo, toB.ReplyTo));
+        // 같은 대화 범위: 이번 턴에 먼저 끝난 상대 답은 받지 않는다. A는 자기 답(Hello)을 빼서 받을 것이 없음, B는 앞 대화 전부
+        Assert.False(toA.Text.Contains("단톡방 안내"), toA.Text);
+        Assert.Contains("A: Hello", toB.Text);
+        Assert.DoesNotContain("B: ", toB.Text);
+        lock (_specs) Assert.Equal(3, _specs.Count);
+
+        // 다음 말: A는 B의 이번 답을 받고(답 순서와 상관없이) 자기 답은 받지 않는다
+        Assert.Null(_groups.Send(group.Id, "echo @A @Z 셋"));
+        var third = await AnswerAsync(group.Id, "A", Math.Max(toA.Line, toB.Line));
+        // B의 답(echo라 그 안에 B가 받은 대화도 들어 있음) 줄은 있고, A 자신의 답 줄은 없다
+        Assert.Contains("] B: (실패", third.Text);
+        Assert.DoesNotContain("] A: (실패", third.Text);
+        Assert.Contains(_log.Read(group.Id), e => e.Kind == GroupEntryKind.Note && e.Text.Contains("없는 구성원은 빼고"));
+        Assert.True(first.Line < allLine);
+    }
+
+    /// <summary>구성원 4명 @All — 넷 다 돌고 넷 다 그 말에 답한다 (③ 리뷰 sub_self C4).</summary>
+    [Fact]
+    public async Task Send_All_FourMembers()
+    {
+        var (group, error) = _groups.Create("ws", PermissionLevel.Chat, "opus", null, "넷", [("A", ""), ("B", ""), ("C", ""), ("D", "")]);
+        Assert.Null(error);
+        Assert.Null(_groups.Send(group!.Id, "@All 다들"));
+        var line = _log.Read(group.Id).Single(e => e.Kind == GroupEntryKind.User).Line;
+        foreach (var name in new[] { "A", "B", "C", "D" })
+            Assert.Equal(line, (await AnswerAsync(group.Id, name, line)).ReplyTo);
+        lock (_specs) Assert.Equal(4, _specs.Count);
+        Assert.Equal(4, GroupChat.AnsweredBy(_log.Read(group.Id)).Count(p => p.UserLine == line));
     }
 
     [Fact]
@@ -230,11 +311,7 @@ public sealed class GroupTests : IDisposable
         Assert.Contains("없는 구성원", (_groups.Send(group.Id, "@Z 누구") is null ? _log.Read(group.Id)[^1].Text : ""));
         lock (_specs) Assert.Empty(_specs);
 
-        // 여럿 · @All은 아직 안 됨 (말은 남기지 않음)
         var count = _log.Read(group.Id).Count;
-        Assert.Contains("한 명만", _groups.Send(group.Id, "@A @B 둘 다"));
-        Assert.Contains("한 명만", _groups.Send(group.Id, "@All"));
-        Assert.Equal(count, _log.Read(group.Id).Count);
 
         // 한 번에 하나: A가 도는 동안 B를 부르면 거절
         Assert.Null(_groups.Send(group.Id, "sleep @A"));

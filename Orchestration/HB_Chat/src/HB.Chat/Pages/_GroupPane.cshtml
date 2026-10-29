@@ -57,7 +57,7 @@
     <div class="composer">
         <form id="send-form" autocomplete="off">
             @Html.AntiForgeryToken()
-            <textarea id="text" name="text" placeholder="@@이름으로 구성원 부르기 (Enter 보내기 · Shift+Enter 줄바꿈) — 지금은 한 번에 한 명" maxlength="@RoomHub.MaxPromptChars"></textarea>
+            <textarea id="text" name="text" placeholder="@("@이름 · @All로 구성원 부르기 (Enter 보내기 · Shift+Enter 줄바꿈) — 여러 명은 동시에")" maxlength="@RoomHub.MaxPromptChars"></textarea>
             <button class="btn primary" type="submit" id="send">@Icons.Svg("send") 보내기</button>
             <button class="btn" type="button" id="stop" disabled="@(!room.Members.Any(Model.AnyMemberBusy))">@Icons.Svg("stop") 중지</button>
         </form>

@@ -33,26 +33,34 @@ public sealed class RoomModel(
     /// <summary>구성원 상태 한 줄 (생각 중 · 답을 기다림 — 과정 보기 · null).</summary>
     public string? MemberState(GroupMember m) => GroupChat.StateLabel(hub.ActivityOf(m.RoomId));
 
-    /// <summary>답을 기다리는 구성원 (그 사용자 말에 아직 답이 없고 실행 중) — 없으면 "답이 없음"으로 보인다.</summary>
-    public bool Answered(GroupEntry user, IReadOnlyList<GroupEntry> all) =>
-        user.To.Count == 0 || all.Any(e => e.ReplyTo == user.Line || e.Kind == GroupEntryKind.Note && e.Line == user.Line + 1 && e.Failed);
+    /// <summary>
+    /// 그 구성원이 그 사용자 말에 답했는지 (답 줄 · 보내지 못함 안내 줄) — 아니고 실행 중도 아니면 "답이 없음"으로 보인다.
+    /// 구성원마다 본다 — 여러 명을 부른 말(③)에서 한 명만 답해도 나머지의 끊김이 가려지지 않게.
+    /// </summary>
+    public bool Answered(GroupEntry user, string memberId) => _answered.Contains((user.Line, memberId));
+
+    private HashSet<(int UserLine, string MemberId)> _answered = [];
 
     public bool AnyMemberBusy(GroupMember m) => hub.IsBusy(m.RoomId);
 
     /// <summary>그 구성원이 답하는 중인지 (실행 중이거나 단톡방이 답을 기다림).</summary>
-    public bool Waiting(GroupMember m) => hub.IsBusy(m.RoomId) || groups.Waiting(m.RoomId);
+    public bool Waiting(GroupMember m) => _waiting?.Contains(m.Id) ?? (hub.IsBusy(m.RoomId) || groups.Waiting(m.RoomId));
+
+    /// <summary>대화 줄을 읽기 전에 찍어 둔 기다림 상태 (LoadGroup).</summary>
+    private HashSet<string>? _waiting;
 
     private void LoadGroup(int? after)
     {
+        // 기다림 상태를 대화 줄보다 먼저 찍는다 — 줄을 읽은 뒤 답이 올라오고 기다림이 풀리면 "답 없음 + 쉼"으로 보여 정상 답에도 "답이 없습니다"가
+        // 그려졌고, 화면은 새 줄만 덧붙여 그 안내가 남았다 (③ 리뷰 6b7921ae50 1-F1 · Codex). 먼저 찍으면: 그때 쉬던 구성원의 답은 이미 줄에 있다
+        // (답 줄을 쓴 뒤에 기다림을 지움 — Posting), 기다리던 구성원은 이번에 안내를 그리지 않는다.
+        _waiting = [.. Room.Members.Where(m => hub.IsBusy(m.RoomId) || groups.Waiting(m.RoomId)).Select(m => m.Id)];
         var all = groups.Log.Read(Room.Id);
+        _answered = GroupChat.AnsweredBy(all);
         GroupLastLine = all.Count > 0 ? all[^1].Line : -1;
         GroupEntries = after is { } a ? [.. all.Where(e => e.Line > a)] : all;
         GroupFragment = after is not null;
-        AllGroupEntries = all;
     }
-
-    /// <summary>답 표시 판단용 전체 대화 줄.</summary>
-    public IReadOnlyList<GroupEntry> AllGroupEntries { get; private set; } = [];
 
     /// <summary>단톡방 구성원 말풍선 본문 (지휘자 말과 같은 규칙) · 사용자 말(줄바꿈 유지).</summary>
     public HtmlString RenderGroup(GroupEntry e) => e.Kind == GroupEntryKind.User
