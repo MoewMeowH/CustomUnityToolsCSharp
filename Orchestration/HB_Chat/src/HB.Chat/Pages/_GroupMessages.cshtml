@@ -1,0 +1,64 @@
+@model RoomModel
+@inject ProfileView Profiles
+@*
+    단톡방 말풍선 (계획서 2026-10-29_HB_Chat-단톡방): 앱이 가진 대화 줄(GroupLog)로 그린다 — 사용자 말 · 구성원 답 · 앱 안내 줄.
+    data-last-line: 대화 줄 마지막 줄 번호 (새 말 받기의 after). 첫 화면 · 방 전환 · ?handler=Messages가 같이 쓴다.
+*@
+<div class="chat" id="chat" data-title="@Model.Title" data-last-line="@Model.GroupLastLine" data-first-line="0" data-has-more="0">
+    @foreach (var e in Model.GroupEntries)
+    {
+        if (e.Kind == GroupEntryKind.Note)
+        {
+            <div class="system note@(e.Failed ? " denied" : "")" data-line="@e.Line"><span class="body">@e.Text</span> <span class="when">@e.At.ToLocalTime().ToString("HH:mm")</span></div>
+            continue;
+        }
+        if (e.Kind == GroupEntryKind.User)
+        {
+            var to = e.To.Select(Model.MemberOf).Where(m => m is not null).Select(m => "@" + m!.Name).ToList();
+            <div class="msg user" data-line="@e.Line" data-speaker="user">
+                @Profiles.Avatar(ProfileStore.User, Profiles.UserName)
+                <div class="bubble">
+                    <div class="who">
+                        <b>@Profiles.UserName</b>
+                        @if (to.Count > 0)
+                        {
+                            <span class="detail">→ @string.Join(", ", to)</span>
+                        }
+                        <span class="when">@e.At.ToLocalTime().ToString("MM-dd HH:mm:ss")</span>
+                    </div>
+                    <div class="body">@Model.RenderGroup(e)</div>
+                </div>
+            </div>
+            @* 부른 구성원이 답하지 않았고 실행 중도 아니면(앱을 다시 켬 · 실행 전 실패) 한 줄로 알린다 *@
+            if (Model.MemberOf(e.To.FirstOrDefault()) is { } called && !Model.Answered(e, Model.AllGroupEntries) && !Model.Waiting(called))
+            {
+                <div class="system note denied" data-line="@e.Line"><span class="body">@(called.Name)의 답이 없습니다 (실행이 끊김) — 다시 불러 주세요.</span></div>
+            }
+            continue;
+        }
+        var member = Model.MemberOf(e.MemberId);
+        var name = member?.Name ?? "구성원";
+        <div class="msg conductor group-member@(e.Failed ? " error" : "")" data-line="@e.Line" data-speaker="conductor" data-member="@e.MemberId">
+            @Profiles.Avatar(ProfileStore.AgentKey(name), name)
+            <div class="bubble">
+                <div class="who">
+                    <b>@name</b>
+                    @if (member is { Role.Length: > 0 })
+                    {
+                        <span class="detail" title="@member.Role">@(member.Role.Length > 30 ? member.Role[..30] + "…" : member.Role)</span>
+                    }
+                    <span class="when">@e.At.ToLocalTime().ToString("MM-dd HH:mm:ss")</span>
+                    @if (member is not null)
+                    {
+                        <a href="/Room/@member.RoomId" target="_blank" class="icon-link" title="이 구성원의 과정 (도구 · 승인 · 세션 기록)" aria-label="과정 보기">@Icons.Svg("external")</a>
+                    }
+                </div>
+                <div class="body">@Model.RenderGroup(e)</div>
+            </div>
+        </div>
+    }
+    @if (!Model.GroupFragment && Model.GroupEntries.Count == 0)
+    {
+        <p class="muted empty" style="text-align:center">아직 대화가 없습니다. 아래에서 @@이름으로 구성원을 불러 보세요.</p>
+    }
+</div>

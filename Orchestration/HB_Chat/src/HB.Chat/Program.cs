@@ -55,6 +55,8 @@ builder.Services.AddSingleton(sp =>
         SelfUrl = () => TerminalMcp.LoopbackUrl(sp.GetRequiredService<Microsoft.AspNetCore.Hosting.Server.IServer>()),
     };
 });
+builder.Services.AddSingleton<GroupLog>(); // 단톡방 (계획서 2026-10-29_HB_Chat-단톡방): 대화 줄 · 구성원 실행
+builder.Services.AddSingleton<GroupChat>();
 builder.Services.AddSingleton<RoomList>();
 // 주체별 프로필 (3차 e): 데이터 폴더 profiles.json + profiles/ 그림
 builder.Services.AddSingleton(sp => new ProfileStore(sp.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder));
@@ -117,6 +119,9 @@ var app = builder.Build();
 // 앱이 비정상 종료돼도 claude 프로세스 트리가 남지 않게 (ProcessJob). 실패해도 켜기는 한다 — 정상 종료 · 중지의 트리 종료는 그대로 돈다.
 if (ProcessJob.AttachCurrentProcess() is { } jobError)
     app.Logger.LogWarning("Job Object에 넣지 못했습니다 — 앱이 비정상 종료되면 claude 프로세스가 남을 수 있습니다: {Error}", jobError);
+
+// 단톡방: 처음부터 만들어 둔다 — 구성원 자식 방의 턴 끝 · 활동 알림을 구독해야 답이 단톡방에 올라간다 (계획서 2026-10-29_HB_Chat-단톡방)
+app.Services.GetRequiredService<GroupChat>();
 
 // 이 필드 전에 만든 방은 마지막 줄까지 읽음으로 (안 그러면 업그레이드 직후 기존 방이 전부 안 읽음 — /self-review 5225b1ffaf C4).
 try

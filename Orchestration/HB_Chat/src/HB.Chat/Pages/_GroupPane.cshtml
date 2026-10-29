@@ -1,0 +1,66 @@
+@model RoomModel
+@inject ProfileView Profiles
+@*
+    단톡방 칸 (계획서 2026-10-29_HB_Chat-단톡방, 1단계): 머리(구성원 · 상태 · 과정 보기) + 대화 줄 말풍선 + 입력칸. 동작은 wwwroot/chat.js의 mountGroup.
+    구성원 도구 · 승인 · 질문 카드는 그 구성원 자식 방("과정 보기")에서 보고 답한다.
+*@
+@{
+    var room = Model.Room;
+}
+<div class="room group" data-room="@room.Id" data-group="1" data-title="@Model.Title">
+    <div class="room-main">
+    <section class="room-head">
+        <a class="back" href="/" title="방 목록" aria-label="방 목록">@Icons.Svg("back")</a>
+        <div class="head-title">
+            <h2 id="room-title">@Model.Title</h2>
+            <span class="muted">단톡방 · @RoomRules.LevelName(room.Level) · @room.Model</span>
+        </div>
+        <div class="members" id="members">
+            @foreach (var m in room.Members)
+            {
+                var state = Model.MemberState(m);
+                <span class="member@(state is null ? "" : " active")" data-member="@m.Id" title="@(m.Role.Length > 0 ? m.Role : "역할 없음")">
+                    <button type="button" class="btn member-call" data-name="@m.Name" title="입력칸에 @@@m.Name 넣기">@@@m.Name</button>
+                    <span class="member-state muted">@state</span>
+                    <a href="/Room/@m.RoomId" target="_blank" class="icon-link" title="@(m.Name)의 과정 (도구 · 승인 · 질문 카드)" aria-label="@(m.Name) 과정 보기">@Icons.Svg("external")</a>
+                </span>
+            }
+        </div>
+        <span class="muted" id="conn" style="margin-left:auto"></span>
+        <details class="menu">
+            <summary class="btn icon-only" title="방 메뉴" aria-label="방 메뉴">@Icons.Svg("more")</summary>
+            <div class="menu-items">
+                @if (room.DeletedAt is null)
+                {
+                    <button type="button" class="menu-trash">@Icons.Svg("trash") 휴지통으로</button>
+                }
+            </div>
+        </details>
+    </section>
+
+    <div class="scroll">
+        @if (room.DeletedAt is not null)
+        {
+            <div class="panel banner" id="trash-banner">
+                휴지통에 있는 단톡방입니다 — @Trash.DaysLeft(room, DateTimeOffset.Now)일 뒤 완전히 지웁니다. 말을 보내려면 되살리세요.
+                <button type="button" class="btn menu-restore">@Icons.Svg("restore") 되살리기</button>
+            </div>
+        }
+        <partial name="_GroupMessages" model="Model" />
+        <div id="live"></div>
+    </div>
+
+    <div class="composer">
+        <form id="send-form" autocomplete="off">
+            @Html.AntiForgeryToken()
+            <textarea id="text" name="text" placeholder="@@이름으로 구성원 부르기 (Enter 보내기 · Shift+Enter 줄바꿈) — 지금은 한 번에 한 명" maxlength="@RoomHub.MaxPromptChars"></textarea>
+            <button class="btn primary" type="submit" id="send">@Icons.Svg("send") 보내기</button>
+            <button class="btn" type="button" id="stop" disabled="@(!room.Members.Any(Model.AnyMemberBusy))">@Icons.Svg("stop") 중지</button>
+        </form>
+        <details class="hint"><summary>단톡방: @RoomRules.LevelName(room.Level)</summary>
+            부른 구성원만 답합니다. 구성원은 마지막으로 본 뒤의 단톡방 대화를 함께 받습니다. 구성원이 승인 · 질문을 기다리면 그 구성원의 "과정 보기"에서 답하세요.
+            @RoomRules.Describe(room.Level)
+        </details>
+    </div>
+    </div>
+</div>

@@ -1059,6 +1059,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                     Prompt = result.NotStarted ? text : null, // 보내지 못한 말 (4차 C2) — 화면이 남기고 입력칸에 돌려준다
                 });
             }
+            try { TurnEnded?.Invoke(roomId, result); } catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException) { }
             cts.Dispose();
             wrapUp.Dispose();
         }
@@ -1287,7 +1288,8 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         }
 
         var rules = RoomRules.For(room.Level, terminal: terminalConfig is not null, unity: unityName,
-            extras: [.. extraServers.Where(s => s != McpConfigFile.UnityServer)]);
+            extras: [.. extraServers.Where(s => s != McpConfigFile.UnityServer)])
+            + GroupRules.For(store, room); // 단톡방 구성원 방이면 역할 · 다른 구성원 (계획서 2026-10-29_HB_Chat-단톡방) — 바뀌면 지문이 바뀌어 다음 말에 다시 붙는다
         // 이어 쓰는 세션은 CLI가 압축 전까지 처음 시스템 프롬프트를 쓴다 (계획서 2026-10-29_HB_Chat-2-2-작은-한계-정리 0단계 실측: resume에 넣은 새 규칙은 안 보임).
         // 지휘자가 마지막으로 받은 규칙과 다르면 이번 말 앞에 새 규칙을 붙인다 — 갈래 첫 실행 · 이 칸 전에 만든 방도 한 번 받는다.
         // '/명령'은 앞에 글이 붙으면 CLI가 명령으로 알아보지 못한다 — 그 말에는 붙이지 않고 다음 말로 미룬다 (/self-review 70170a8801 C2).
@@ -1507,7 +1509,29 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     private void Broadcast(Live live, LiveEvent ev)
     {
         foreach (var ch in live.Subscribers) ch.Writer.TryWrite(ev);
-        if (ListKinds.Contains(ev.Kind)) Touch(live.Id);
+        if (ListKinds.Contains(ev.Kind))
+        {
+            Touch(live.Id);
+            try { ActivityChanged?.Invoke(live.Id, ev.Kind); } catch (Exception ex) when (ex is InvalidOperationException or IOException) { }
+        }
+    }
+
+    /// <summary>
+    /// 방 실행 상태가 바뀜 (시작 · 끝 · 승인 · 질문 …, 방 목록 신호와 같은 때) — 단톡방이 구성원 진행 줄을 갱신한다 (계획서 2026-10-29_HB_Chat-단톡방).
+    /// 방 잠금 안에서 부르므로 받는 쪽은 오래 걸리는 일을 넘겨서 할 것.
+    /// </summary>
+    public event Action<string, string>? ActivityChanged;
+
+    /// <summary>한 턴이 끝남 (end 알림 뒤, 잠금 밖) — 단톡방이 구성원 답을 대화 줄에 올린다.</summary>
+    public event Action<string, RunResult>? TurnEnded;
+
+    /// <summary>실행 없는 방(단톡방)에 알림을 흘린다 — 그 방을 열어 둔 화면이 받는다.</summary>
+    public void Announce(string roomId, LiveEvent ev)
+    {
+        if (_disposed) return;
+        var live = _rooms.GetOrAdd(roomId, id => new Live(id));
+        lock (live.Gate)
+            foreach (var ch in live.Subscribers) ch.Writer.TryWrite(ev);
     }
 
     /// <summary>

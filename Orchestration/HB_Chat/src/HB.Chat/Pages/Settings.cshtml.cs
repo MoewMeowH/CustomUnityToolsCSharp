@@ -351,7 +351,7 @@ public sealed class SettingsModel(
     private void Fill()
     {
         var all = store.All();
-        Sidebar = new SidebarView(list.All(), null) { TrashCount = all.Count(r => r.DeletedAt is not null) };
+        Sidebar = new SidebarView(list.All(), null) { TrashCount = all.Count(r => r.DeletedAt is not null && r.GroupId is null) };
         Workspaces =
         [
             .. options.Value.AllWorkspaces.Select(w => new WorkspaceRow(w,

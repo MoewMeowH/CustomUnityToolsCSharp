@@ -199,6 +199,13 @@ select, input[type=text], textarea { background: var(--panel); border: 1px solid
              border-bottom: 1px solid var(--line); background: var(--panel); }
 .room-head h2 { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
 .head-title { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+/* 단톡방 (계획서 2026-10-29_HB_Chat-단톡방): 머리의 구성원 칩 — 이름(누르면 입력칸에 @이름) · 상태 · 과정 보기 */
+.members { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.member { display: inline-flex; gap: 4px; align-items: center; padding: 2px 6px; border: 1px solid var(--line); border-radius: 999px; }
+.member.active { border-color: var(--accent); }
+.member .member-call { padding: 2px 8px; }
+.member-state { font-size: 12px; }
+.member-state:empty { display: none; }
 .head-title #face-label { font-size: 12px; }
 
 /* 지휘자 표정 (2-2 b): 스티커 그림이 있으면 그림, 없으면 글자 */

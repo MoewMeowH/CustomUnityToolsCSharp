@@ -8,6 +8,6 @@
 <div class="app in-room@(Model.Mini ? " mini" : "")">
     <partial name="_Sidebar" model="Model.Sidebar" />
     <section class="pane" id="pane">
-        <partial name="_RoomPane" model="Model" />
+        <partial name="@(Model.Room.IsGroup ? "_GroupPane" : "_RoomPane")" model="Model" />
     </section>
 </div>

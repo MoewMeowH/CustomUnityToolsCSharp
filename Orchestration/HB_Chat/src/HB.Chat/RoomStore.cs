@@ -98,6 +98,21 @@ public sealed record Room
     /// (계획서 2026-10-29_HB_Chat-2-2-작은-한계-정리, 2-2 리뷰 C6). <see cref="ForkOf"/>는 첫 실행 뒤 지워지므로 따로 둔다.
     /// </summary>
     public IReadOnlyList<string> AttachFrom { get; init; } = [];
+
+    /// <summary>
+    /// 단톡방 구성원 (계획서 2026-10-29_HB_Chat-단톡방). 있으면 이 방은 단톡방 — 자기 세션으로는 돌지 않고, 구성원마다 숨은 자식 방(<see cref="GroupId"/>)이 돈다.
+    /// 화면은 앱이 가진 대화 줄(<see cref="GroupLog"/>)로 그린다.
+    /// </summary>
+    public IReadOnlyList<GroupMember> Members { get; init; } = [];
+
+    /// <summary>단톡방 구성원의 자식 방이면 그 단톡방 ID — 방 목록 · 검색 · 휴지통 목록에 보이지 않고, 단톡방과 함께 지워진다.</summary>
+    public string? GroupId { get; init; }
+
+    /// <summary>자식 방이 맡은 구성원의 고정 ID (<see cref="GroupMember.Id"/>).</summary>
+    public string? MemberId { get; init; }
+
+    [JsonIgnore]
+    public bool IsGroup => Members.Count > 0;
 }
 
 /// <summary>MCP 서버 하나의 실행 상태 (init mcp_servers 한 항목: connected · failed · needs-auth …).</summary>
@@ -166,7 +181,7 @@ public sealed class RoomStore
     private static Room Clean(Room r) => r with
     {
         AllowRules = r.AllowRules ?? [], McpExtra = r.McpExtra ?? [], McpOff = r.McpOff ?? [], McpStatus = r.McpStatus ?? [],
-        McpTools = r.McpTools ?? [], AttachFrom = r.AttachFrom ?? [],
+        McpTools = r.McpTools ?? [], AttachFrom = r.AttachFrom ?? [], Members = r.Members ?? [],
     };
 
     public IReadOnlyList<Room> All()
@@ -182,8 +197,9 @@ public sealed class RoomStore
     /// <summary>
     /// 새 방. forkOf가 있으면 그 세션의 대화를 이어받는 갈래 방 — 읽음 위치는 null(이어받은 말은 읽은 것으로, 켤 때 마지막 줄로 옮겨짐).
     /// </summary>
+    /// <param name="shape">저장 전에 칸을 더 채운다 (단톡방 구성원 · 자식 방 표시 — 목록에 잠깐이라도 보통 방으로 보이지 않게).</param>
     public Room Create(string workspace, PermissionLevel level, string model, string? title, string? forkOf = null, long? forkSourceSize = null,
-        string? effort = null)
+        string? effort = null, Func<Room, Room>? shape = null)
     {
         var room = new Room
         {
@@ -199,6 +215,7 @@ public sealed class RoomStore
             ForkOf = forkOf,
             ForkSourceSize = forkOf is null ? null : forkSourceSize,
         };
+        if (shape is not null) room = shape(room) with { Id = room.Id, SessionId = room.SessionId };
         lock (_lock)
         {
             ThrowIfBroken();

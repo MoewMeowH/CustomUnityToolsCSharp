@@ -18,6 +18,41 @@ public sealed class ChatScriptTests(ChatApp app, ChatBrowser browser) : IClassFi
 
     private static string Widget(string html) => "```widget\n" + html + "\n```";
 
+    /// <summary>단톡방 칸 (계획서 2026-10-29_HB_Chat-단톡방): 구성원 칩 · @이름 넣기 · 부른 구성원 답 말풍선 · 방 목록에 자식 방 없음.</summary>
+    [Fact]
+    public async Task Group_CallMember_ShowsAnswerBubble()
+    {
+        if (!browser.Available) return;
+        var (group, error) = app.Services.GetRequiredService<GroupChat>()
+            .Create("ws", PermissionLevel.Read, "opus", null, "팀", [("A", "위험을 찾는다"), ("B", "A에 반박한다")]);
+        Assert.Null(error);
+        await using var page = await browser.OpenAsync(app.RoomUrl(group!));
+        Assert.Equal(2, await page.EvalAsync<int>("document.querySelectorAll('.room.group .member').length"));
+        foreach (var m in group!.Members)
+            Assert.Equal(0, await page.EvalAsync<int>($"document.querySelectorAll('.sidebar a[href=\"/Room/{m.RoomId}\"]').length"));
+        Assert.Equal(1, await page.EvalAsync<int>($"document.querySelectorAll('.sidebar a[href=\"/Room/{group.Id}\"]').length"));
+
+        await page.EvalAsync("document.querySelector('.member-call[data-name=\"A\"]').click()");
+        Assert.StartsWith("@A", await page.EvalAsync<string>("document.querySelector('#text').value"));
+        await page.SendAsync("@A 안녕"); // 가짜 claude 기본 모드 → "Hello"
+        await page.WaitForAsync("[...document.querySelectorAll('#chat .msg.group-member .body')].some(b => b.textContent.trim() === 'Hello')", "A의 답", ChatPage.TurnWait);
+        Assert.Contains("@A", await page.EvalAsync<string>("document.querySelector('#chat .msg.user .detail').textContent"));
+        Assert.Equal("", await page.EvalAsync<string>("document.querySelector('#text').value"));
+        page.AssertNoErrors();
+
+        // 과정 보기(자식 방): 안내 줄 · 입력칸 숨김, 단계 바꾸기는 서버가 거절 (b8697252eb C1 · Codex 리뷰)
+        await using var child = await browser.OpenAsync(app.RoomUrl(app.Store.Get(group.Members[0].RoomId)!));
+        Assert.True(await child.EvalAsync<bool>("!!document.querySelector('#group-child-banner') && document.querySelector('.composer').hidden"));
+        var refused = await child.EvalAsync<string>(
+            "(() => { const d = new FormData(); d.append('__RequestVerificationToken', document.querySelector('input[name=__RequestVerificationToken]').value); " +
+            "d.append('model', 'opus'); d.append('level', 'Command'); d.append('expectedLevel', 'Read'); " +
+            "return fetch(location.pathname + '?handler=Settings', { method: 'POST', body: d }).then(async r => r.status + ' ' + await r.text()); })()");
+        Assert.StartsWith("400", refused);
+        Assert.Contains("구성원 방", refused);
+        Assert.Equal(PermissionLevel.Read, app.Store.Get(group.Members[0].RoomId)!.Level);
+        Assert.All(child.Errors, e => Assert.Contains("handler=Settings", e)); // 일부러 낸 400 말고는 오류 없음
+    }
+
     /// <summary>
     /// 좁은 창(미니 창 등)에서도 보통 슬라이드로 그려진다 (/self-review 832f22f583 C1). 고치기 전 실측(2026-10-29): 틀 406 · 306px에서 reveal이
     /// 스크롤 보기로 바뀌어(scrollActivationWidth 기본 435) sessionStorage SecurityError, loading-scroll-mode 클래스가 남고 화살표 · 쪽 번호 없는

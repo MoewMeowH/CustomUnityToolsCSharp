@@ -14,9 +14,51 @@ namespace HB.Chat.Pages;
 /// </summary>
 public sealed class RoomModel(
     RoomStore store, RoomHub hub, RoomList list, ChatTranscripts transcripts, StickerPacks packs, FaceCatalog faces, RoomRuns runs,
-    RoomNotes notes, Terminals terminals, AgentBrowser browser, McpProbe probe, IOptions<ChatOptions> options)
+    RoomNotes notes, Terminals terminals, AgentBrowser browser, McpProbe probe, IOptions<ChatOptions> options, GroupChat groups)
     : PageModel
 {
+    // ---- 단톡방 (계획서 2026-10-29_HB_Chat-단톡방): 같은 방 주소, 칸 · 말풍선 · 보내기만 다르다 ----
+
+    /// <summary>단톡방 대화 줄 (after가 있으면 그 줄 뒤만 — 새 말 받기).</summary>
+    public IReadOnlyList<GroupEntry> GroupEntries { get; private set; } = [];
+
+    /// <summary>새 말 받기 조각인지 (빈 단톡방 안내를 그리지 않음).</summary>
+    public bool GroupFragment { get; private set; }
+
+    /// <summary>대화 줄 마지막 줄 번호 (없으면 -1) — 화면의 data-last-line.</summary>
+    public int GroupLastLine { get; private set; } = -1;
+
+    public GroupMember? MemberOf(string? memberId) => Room.Members.FirstOrDefault(m => m.Id == memberId);
+
+    /// <summary>구성원 상태 한 줄 (생각 중 · 답을 기다림 — 과정 보기 · null).</summary>
+    public string? MemberState(GroupMember m) => GroupChat.StateLabel(hub.ActivityOf(m.RoomId));
+
+    /// <summary>답을 기다리는 구성원 (그 사용자 말에 아직 답이 없고 실행 중) — 없으면 "답이 없음"으로 보인다.</summary>
+    public bool Answered(GroupEntry user, IReadOnlyList<GroupEntry> all) =>
+        user.To.Count == 0 || all.Any(e => e.ReplyTo == user.Line || e.Kind == GroupEntryKind.Note && e.Line == user.Line + 1 && e.Failed);
+
+    public bool AnyMemberBusy(GroupMember m) => hub.IsBusy(m.RoomId);
+
+    /// <summary>그 구성원이 답하는 중인지 (실행 중이거나 단톡방이 답을 기다림).</summary>
+    public bool Waiting(GroupMember m) => hub.IsBusy(m.RoomId) || groups.Waiting(m.RoomId);
+
+    private void LoadGroup(int? after)
+    {
+        var all = groups.Log.Read(Room.Id);
+        GroupLastLine = all.Count > 0 ? all[^1].Line : -1;
+        GroupEntries = after is { } a ? [.. all.Where(e => e.Line > a)] : all;
+        GroupFragment = after is not null;
+        AllGroupEntries = all;
+    }
+
+    /// <summary>답 표시 판단용 전체 대화 줄.</summary>
+    public IReadOnlyList<GroupEntry> AllGroupEntries { get; private set; } = [];
+
+    /// <summary>단톡방 구성원 말풍선 본문 (지휘자 말과 같은 규칙) · 사용자 말(줄바꿈 유지).</summary>
+    public HtmlString RenderGroup(GroupEntry e) => e.Kind == GroupEntryKind.User
+        ? new(StickerRenderer.Replace(SafeMarkdown.ToHtml(e.Text, SafeMarkdown.KeepLineBreaks), Stickers))
+        : new(StickerRenderer.Replace(SafeMarkdown.ToHtml(e.Text, SafeMarkdown.Default), Stickers));
+
     // ---- 연결 탭 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결 — Claude 앱 커넥터처럼) ----
 
     /// <summary>
@@ -114,6 +156,7 @@ public sealed class RoomModel(
     public IActionResult OnPostMcpToggle(string id, string? name, bool on)
     {
         if (!RoomStore.IsRoomId(id) || store.Get(id) is not { } room) return NotFound();
+        if (GroupSettingsRefusal(room) is { } refusal) return BadRequest(refusal);
         var o = options.Value;
         if (string.IsNullOrWhiteSpace(name) || !ClaudeArgs.IsServerName(name) || name == McpConfigFile.UnityServer) return BadRequest("알 수 없는 연결입니다.");
         if (name == o.McpServer || name == TerminalMcp.Server)
@@ -133,6 +176,7 @@ public sealed class RoomModel(
     public IActionResult OnPostUnity(string id, string? project)
     {
         if (!RoomStore.IsRoomId(id) || store.Get(id) is not { } room) return NotFound();
+        if (GroupSettingsRefusal(room) is { } refusal) return BadRequest(refusal);
         var p = string.IsNullOrWhiteSpace(project) ? null : project.Trim();
         if (p is not null)
         {
@@ -226,7 +270,7 @@ public sealed class RoomModel(
     public Face Face => hub.FaceOf(Room);
 
     /// <summary>왼쪽 방 목록 (첫 화면에서만 만든다 — 방 전환 · 말풍선 다시 받기에는 쓰지 않음).</summary>
-    public SidebarView Sidebar => new(list.All(), Room.Id) { TrashCount = store.All().Count(r => r.DeletedAt is not null) };
+    public SidebarView Sidebar => new(list.All(), Room.Id) { TrashCount = store.All().Count(r => r.DeletedAt is not null && r.GroupId is null) };
     /// <summary>대시보드 채팅방 (세션 기록이 생긴 뒤부터 보인다 — 첫 말 전에는 대시보드가 404).</summary>
     public string? DashboardLink =>
         options.Value.DashboardUrl is { Length: > 0 } url ? $"{url.TrimEnd('/')}/Room/{Room.SessionId}" : null;
@@ -311,7 +355,7 @@ public sealed class RoomModel(
     {
         Response.Headers.CacheControl = "no-store";
         if (!Load(id)) return NotFound();
-        return Partial("_RoomPane", this);
+        return Partial(Room.IsGroup ? "_GroupPane" : "_RoomPane", this);
     }
 
     /// <summary>
@@ -341,6 +385,11 @@ public sealed class RoomModel(
     {
         Response.Headers.CacheControl = "no-store";
         if (!Load(id)) return NotFound();
+        if (Room.IsGroup)
+        {
+            LoadGroup(after);
+            return Partial("_GroupMessages", this);
+        }
         // 읽기 실패는 실패로 돌려준다: 화면이 앞 말풍선을 그대로 둔다 (대시보드 채팅방과 같은 처리).
         if (Transcript?.FormatError is not null) return StatusCode(StatusCodes.Status503ServiceUnavailable);
         Messages = RoomList.Page(Transcript?.Entries ?? [], before, after);
@@ -380,6 +429,7 @@ public sealed class RoomModel(
     public IActionResult OnPostSettings(string id, string? model, string? effort, PermissionLevel? level, PermissionLevel? expectedLevel)
     {
         if (!RoomStore.IsRoomId(id)) return NotFound();
+        if (store.Get(id) is { } target && GroupSettingsRefusal(target) is { } refusal) return BadRequest(refusal);
         if (model is null || !options.Value.ModelList.Contains(model, StringComparer.Ordinal) || !ClaudeArgs.IsSafeName(model))
             return BadRequest("허용 목록에 없는 모델입니다.");
         var (cleanEffort, effortError) = RoomEffort.Clean(effort);
@@ -434,6 +484,9 @@ public sealed class RoomModel(
     public IActionResult OnPostTrash(string id)
     {
         if (!RoomStore.IsRoomId(id)) return NotFound();
+        if (store.Get(id) is { IsGroup: true })
+            return groups.SetDeleted(id, DateTimeOffset.Now) is { } groupError ? BadRequest(groupError) : ChangedGroup(id);
+        if (store.Get(id) is { GroupId: not null }) return BadRequest("단톡방 구성원 방은 단톡방과 함께 휴지통에 넣습니다.");
         if (hub.IsBusy(id)) return BadRequest("실행 중인 방입니다 — 중지한 뒤 휴지통에 넣으세요.");
         hub.ForgetCommands(id);
         terminals.StopRoom(id, "방 삭제"); // 그 방 터미널도 끝낸다 (계획서 2026-10-29_HB_Chat-터미널-곁칸)
@@ -445,7 +498,15 @@ public sealed class RoomModel(
     public IActionResult OnPostRestore(string id)
     {
         if (!RoomStore.IsRoomId(id)) return NotFound();
+        if (store.Get(id) is { IsGroup: true })
+            return groups.SetDeleted(id, null) is { } groupError ? BadRequest(groupError) : ChangedGroup(id);
         return Change(id, r => r with { DeletedAt = null }, "되살리지 못했습니다");
+    }
+
+    private JsonResult ChangedGroup(string id)
+    {
+        hub.Touch(id);
+        return new JsonResult(new { ok = true });
     }
 
     /// <summary>
@@ -508,13 +569,40 @@ public sealed class RoomModel(
     {
         if (!RoomStore.IsRoomId(id)) return NotFound();
         if (TooManyAttachments(text)) return BadRequest($"첨부는 한 말에 {Attachments.MaxPerMessage}개까지입니다.");
+        if (store.Get(id) is { IsGroup: true }) return groups.Send(id, text ?? "") is { } groupError ? BadRequest(groupError) : new JsonResult(new { ok = true });
+        if (ChildRefusal(id) is { } refusal) return BadRequest(refusal);
         return hub.Send(id, text ?? "") is { } error ? BadRequest(error) : new JsonResult(new { ok = true });
     }
+
+    /// <summary>
+    /// 단톡방 · 구성원 자식 방의 단계 · 모델 · 연결은 바꾸지 않는다 — 1단계는 만들 때 정한 대화 · 읽기 단계로만 돈다(결정 ①). 과정 보기 화면의 곁칸에서
+    /// 자식 방을 명령 단계로 올릴 수 있었다 (b8697252eb C1 · Codex 리뷰).
+    /// </summary>
+    private static string? GroupSettingsRefusal(Room room) =>
+        room.GroupId is not null ? "단톡방 구성원 방의 단계 · 모델 · 연결은 바꿀 수 없습니다 (지금은 만들 때 정한 값으로만 돕니다)."
+        : room.IsGroup ? "단톡방의 단계 · 모델 · 연결은 바꿀 수 없습니다 (지금은 만들 때 정한 값으로만 돕니다)."
+        : null;
+
+    /// <summary>단톡방 구성원 상태 (화면이 다시 붙을 때 · 대화 줄을 받을 때 칩을 맞춘다 — b8697252eb C4).</summary>
+    public IActionResult OnGetGroupState(string id)
+    {
+        Response.Headers.CacheControl = "no-store";
+        if (!RoomStore.IsRoomId(id) || store.Get(id) is not { IsGroup: true } group) return NotFound();
+        return new JsonResult(groups.States(group).Select(s => new { member = s.MemberId, state = s.State }));
+    }
+
+    /// <summary>과정 보기(자식 방)의 단톡방 — 화면 안내 줄에 이름을 보인다.</summary>
+    public Room? ParentGroup => Room.GroupId is { } g ? store.Get(g) : null;
+
+    /// <summary>단톡방 구성원 자식 방에는 직접 보내지 않는다 — 답이 단톡방 대화 줄과 어긋나지 않게 (과정 보기에서 승인 · 질문 카드만 답함).</summary>
+    private string? ChildRefusal(string id) =>
+        store.Get(id) is { GroupId: not null } ? "단톡방 구성원 방입니다 — 단톡방에서 @이름으로 부르세요." : null;
 
     public IActionResult OnPostStop(string id)
     {
         if (!RoomStore.IsRoomId(id)) return NotFound();
-        hub.Stop(id);
+        if (store.Get(id) is { IsGroup: true }) groups.Stop(id);
+        else hub.Stop(id);
         return new JsonResult(new { ok = true });
     }
 
@@ -658,6 +746,8 @@ public sealed class RoomModel(
     {
         if (!RoomStore.IsRoomId(id)) return NotFound();
         if (TooManyAttachments(text)) return BadRequest($"첨부는 한 말에 {Attachments.MaxPerMessage}개까지입니다.");
+        if (store.Get(id) is { IsGroup: true }) return BadRequest("단톡방에는 끼어들기가 없습니다 — 중지한 뒤 보내세요.");
+        if (ChildRefusal(id) is { } refusal) return BadRequest(refusal);
         return hub.Interrupt(id, text ?? "") is { } error ? BadRequest(error) : new JsonResult(new { ok = true });
     }
 
@@ -728,6 +818,7 @@ public sealed class RoomModel(
         _runs = null;
         _answers = null;
         _stickers = null;
+        if (room.IsGroup) LoadGroup(null);
         return true;
     }
 

@@ -8,8 +8,35 @@ namespace HB.Chat.Pages;
 /// 방을 고르지 않은 첫 화면: 왼쪽 방 목록 + 오른쪽 새 방 만들기.
 /// ?handler=RoomList: 앱 전체 알림을 받은 화면이 목록 부분만 다시 받는다 (계획서 2-2 a).
 /// </summary>
-public sealed class IndexModel(RoomStore store, RoomHub hub, RoomList list, ChatTranscripts transcripts, IOptions<ChatOptions> options) : PageModel
+public sealed class IndexModel(RoomStore store, RoomHub hub, RoomList list, ChatTranscripts transcripts, IOptions<ChatOptions> options, GroupChat groups) : PageModel
 {
+    /// <summary>
+    /// 새 단톡방 (계획서 2026-10-29_HB_Chat-단톡방, 1단계): 구성원 이름 · 역할 줄들, 대화 · 읽기 단계만. 구성원마다 숨은 자식 방이 생긴다.
+    /// </summary>
+    public IActionResult OnPostCreateGroup(string workspace, PermissionLevel level, string model, string? title, string? effort,
+        string[]? names, string[]? roles)
+    {
+        var o = options.Value;
+        var (cleanEffort, effortError) = RoomEffort.Clean(effort);
+        Error = o.WorkspacePath(workspace) is null ? "허용 목록에 없는 작업 폴더입니다."
+            : !o.ModelList.Contains(model, StringComparer.Ordinal) ? "허용 목록에 없는 모델입니다."
+            : !Enum.IsDefined(level) ? "알 수 없는 권한 단계입니다."
+            : effortError;
+        if (Error is null)
+        {
+            var members = (names ?? []).Select((n, i) => (n, roles is not null && i < roles.Length ? roles[i] ?? "" : "")).ToList();
+            var (group, error) = groups.Create(workspace, level, model, cleanEffort, title, members);
+            if (group is not null)
+            {
+                hub.Touch(group.Id);
+                return Redirect($"/Room/{group.Id}");
+            }
+            Error = error;
+        }
+        OnGet();
+        return Page();
+    }
+
     /// <summary>휴지통 목록의 방 제목 — 화면 다른 곳과 같은 규칙 (이름 없으면 첫 말, /self-review 95e8b1c242 C6).</summary>
     public string TitleOf(Room room) => RoomList.TitleOf(room, transcripts.Read(room.SessionId));
 
@@ -25,9 +52,9 @@ public sealed class IndexModel(RoomStore store, RoomHub hub, RoomList list, Chat
     /// <summary>trash는 문자열로 받는다 — bool 바인딩은 "1"을 받지 않아 휴지통이 안 보였다 (2-2 c 실제 확인).</summary>
     public void OnGet(string? trash = null)
     {
-        Sidebar = new SidebarView(list.All(), null) { TrashCount = store.All().Count(r => r.DeletedAt is not null) };
+        Sidebar = new SidebarView(list.All(), null) { TrashCount = store.All().Count(r => r.DeletedAt is not null && r.GroupId is null) };
         ShowTrash = trash is "1" or "true";
-        if (ShowTrash) TrashRooms = [.. store.All().Where(r => r.DeletedAt is not null).OrderByDescending(r => r.DeletedAt)];
+        if (ShowTrash) TrashRooms = [.. store.All().Where(r => r.DeletedAt is not null && r.GroupId is null).OrderByDescending(r => r.DeletedAt)];
     }
 
     public IActionResult OnGetRoomList(string? current)
@@ -35,7 +62,7 @@ public sealed class IndexModel(RoomStore store, RoomHub hub, RoomList list, Chat
         Response.Headers.CacheControl = "no-store";
         return Partial("_RoomList", new SidebarView(list.All(), RoomStore.IsRoomId(current) ? current : null)
         {
-            TrashCount = store.All().Count(r => r.DeletedAt is not null),
+            TrashCount = store.All().Count(r => r.DeletedAt is not null && r.GroupId is null),
         });
     }
 
@@ -52,7 +79,9 @@ public sealed class IndexModel(RoomStore store, RoomHub hub, RoomList list, Chat
         if (!RoomStore.IsRoomId(id)) return NotFound();
         try
         {
-            store.Update(id, r => r with { DeletedAt = null });
+            // 단톡방이면 구성원 자식 방도 함께 (계획서 2026-10-29_HB_Chat-단톡방)
+            if (store.Get(id) is { IsGroup: true }) { if (groups.SetDeleted(id, null) is { } groupError) throw new InvalidOperationException(groupError); }
+            else store.Update(id, r => r with { DeletedAt = null });
         }
         catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
         {

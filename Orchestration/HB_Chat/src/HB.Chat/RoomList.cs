@@ -48,17 +48,19 @@ public sealed record SidebarView(IReadOnlyList<RoomSummary> Rooms, string? Curre
 /// 방 목록 만들기. 세션 기록은 <see cref="ChatTranscripts"/>의 이어 읽기 캐시로 읽는다 (붙은 줄만).
 /// 휴지통에 있는 방은 넣지 않는다.
 /// </summary>
-public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscripts transcripts)
+public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscripts transcripts, GroupLog? groups = null)
 {
     /// <summary>미리보기 글자 수 상한.</summary>
     public const int PreviewChars = 80;
 
-    /// <summary>최근 활동 순.</summary>
+    /// <summary>최근 활동 순. 단톡방 구성원의 숨은 자식 방은 빼고 단톡방 한 줄로 (계획서 2026-10-29_HB_Chat-단톡방).</summary>
     public IReadOnlyList<RoomSummary> All() =>
-        [.. store.All().Where(r => r.DeletedAt is null).Select(Summarize).OrderByDescending(s => s.LastAt)];
+        [.. store.All().Where(r => r.DeletedAt is null && r.GroupId is null).Select(Summarize).OrderByDescending(s => s.LastAt)];
 
-    public RoomSummary Summarize(Room room) =>
-        Build(room, transcripts.Read(room.SessionId), hub.ActivityOf(room.Id)) with
+    public RoomSummary Summarize(Room room)
+    {
+        if (room.IsGroup) return SummarizeGroup(room);
+        return Build(room, transcripts.Read(room.SessionId), hub.ActivityOf(room.Id)) with
         {
             Face = hub.FaceOf(room, transient: false),
             Steps = hub.StepProgress(room.Id),
@@ -66,6 +68,28 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
             Workspace = room.Workspace,
             StickerPack = room.StickerPack,
         };
+    }
+
+    /// <summary>단톡방 한 줄: 구성원 중 하나라도 실행 · 답 기다림이면 그 상태, 미리보기 · 시각은 대화 줄 마지막 말.</summary>
+    private RoomSummary SummarizeGroup(Room room)
+    {
+        IReadOnlyList<GroupEntry> log;
+        try { log = groups?.Read(room.Id) ?? []; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { log = []; }
+        var last = log.LastOrDefault();
+        var who = last is null ? null
+            : last.Kind == GroupEntryKind.User ? "나"
+            : room.Members.FirstOrDefault(m => m.Id == last.MemberId)?.Name;
+        var preview = last is null ? "[단톡방] " + string.Join(", ", room.Members.Select(m => m.Name))
+            : Preview((who is null ? "" : who + ": ") + last.Text);
+        var lastAt = new[] { last?.At, room.CreatedAt }.Max() ?? room.CreatedAt;
+        return new RoomSummary(room.Id, room.Title ?? "단톡방", preview, lastAt, 0, GroupChat.ActivityOf(room, hub), false, room.Level, room.Model)
+        {
+            Face = Face.Idle,
+            Workspace = room.Workspace,
+            StickerPack = room.StickerPack,
+        };
+    }
 
     /// <summary>
     /// 방 목록 묶음 (3차 d — 노션 "채팅방 세션 폴더 별 묶음"): 작업 폴더가 둘 이상이면 폴더별로, 묶음은 가장 최근 방 순 · 안은 받은 순 그대로.
@@ -83,7 +107,7 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
 
     /// <summary>휴지통 밖 모든 방에서 찾기 (제목 + 말 본문, 대소문자 무시). 최근 것부터 <see cref="SearchMax"/>개.</summary>
     public IReadOnlyList<SearchHit> Search(string query) =>
-        Search(store.All().Where(r => r.DeletedAt is null).Select(r => (r, transcripts.Read(r.SessionId))), query);
+        Search(store.All().Where(r => r.DeletedAt is null && r.GroupId is null && !r.IsGroup).Select(r => (r, transcripts.Read(r.SessionId))), query);
 
     public static IReadOnlyList<SearchHit> Search(IEnumerable<(Room Room, ChatTranscript? Transcript)> rooms, string query)
     {

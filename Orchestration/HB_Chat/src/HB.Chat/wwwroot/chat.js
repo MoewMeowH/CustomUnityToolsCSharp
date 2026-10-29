@@ -152,7 +152,7 @@
         markActive(id);
         const root = pane.querySelector(".room");
         if (root) {
-            room = mountRoom(root);
+            room = root.dataset.group ? mountGroup(root) : mountRoom(root);
             appEvents?.close(); // 이제 방 SSE가 목록 신호를 싣는다
             appEvents = null;
             if (line != null) room.reveal(line);
@@ -1990,6 +1990,117 @@
         };
     }
 
+    // ---- 단톡방 (계획서 2026-10-29_HB_Chat-단톡방, 1단계) ----
+    // 앱이 가진 대화 줄로 그린다: 구성원 답이 올라오면(group 알림) 새 줄만 받아 붙이고, 구성원 상태(member 알림)는 머리 칩에 보인다.
+    // 구성원 도구 · 승인 · 질문 카드는 그 구성원 자식 방("과정 보기")에서 본다 — 이 칸에는 진행 줄 · 답만.
+    function mountGroup(root) {
+        const roomId = root.dataset.room;
+        const self = "/Room/" + roomId;
+        const $ = (sel) => root.querySelector(sel);
+        const scroller = $(".scroll"), form = $("#send-form"), textBox = $("#text"), stopBtn = $("#stop"), conn = $("#conn");
+        const token = form.querySelector("input[name=__RequestVerificationToken]").value;
+        let disposed = false, chain = Promise.resolve(), sending = false;
+        document.title = "HB Chat · " + (root.dataset.title || "");
+        const atBottom = () => scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 120;
+        const toBottom = () => { scroller.scrollTop = scroller.scrollHeight; };
+
+        async function post(handler, data) {
+            data.append("__RequestVerificationToken", token);
+            try {
+                const res = await fetch(self + "?handler=" + handler, { method: "POST", body: data });
+                if (!res.ok) { alert(await res.text() || ("요청 실패 " + res.status)); return false; }
+                return true;
+            } catch (e) { alert("요청 실패: " + e); return false; }
+        }
+        // 새 줄만 받아 붙인다 (대화 줄은 덧붙이기만 — 마지막 줄 번호가 줄었으면 전체를 다시 받는다)
+        async function refresh() {
+            const chat = $("#chat");
+            const follow = atBottom();
+            try {
+                const res = await fetch(self + "?handler=Messages&after=" + encodeURIComponent(chat.dataset.lastLine), { cache: "no-store" });
+                if (!res.ok || disposed) return;
+                const fresh = parseChat(await res.text());
+                if (!fresh || disposed || $("#chat") !== chat) return;
+                if (Number(fresh.dataset.lastLine) < Number(chat.dataset.lastLine)) {
+                    const all = await fetch(self + "?handler=Messages", { cache: "no-store" });
+                    const whole = all.ok && !disposed ? parseChat(await all.text()) : null;
+                    if (!whole || disposed) return;
+                    decorate(whole);
+                    chat.replaceWith(whole);
+                } else if (fresh.firstElementChild) {
+                    chat.querySelector(".empty")?.remove();
+                    decorate(fresh);
+                    while (fresh.firstChild) chat.append(fresh.firstChild);
+                }
+                if ($("#chat") === chat) chat.dataset.lastLine = fresh.dataset.lastLine;
+                if (follow) toBottom();
+            } catch { }
+        }
+        function setMember(id, label) {
+            const chip = root.querySelector(`.member[data-member="${CSS.escape(id || "")}"]`);
+            if (chip) {
+                chip.querySelector(".member-state").textContent = label || "";
+                chip.classList.toggle("active", !!label);
+            }
+            stopBtn.disabled = !root.querySelector(".member.active");
+        }
+        // 구성원 상태를 서버에서 다시 받아 맞춘다 — 다시 붙었을 때 · 대화 줄이 바뀔 때 (끊긴 사이 놓친 member 알림, b8697252eb C4)
+        async function syncMembers() {
+            try {
+                const res = await fetch(self + "?handler=GroupState", { cache: "no-store" });
+                if (!res.ok || disposed) return;
+                for (const s of await res.json()) setMember(s.member, s.state);
+            } catch { }
+        }
+
+        const es = new EventSource("/events/" + roomId);
+        es.onopen = () => { conn.textContent = ""; };
+        es.onerror = () => { if (!disposed) conn.textContent = "연결 끊김 · 다시 시도 중"; };
+        es.onmessage = (msg) => {
+            const ev = JSON.parse(msg.data);
+            switch (ev.kind) {
+                case "rooms": scheduleList(); break; // 방 목록 신호 (탭당 SSE 하나)
+                case "profiles": reopenRoom(roomId); break;
+                case "snapshot":
+                case "group": chain = chain.then(() => disposed ? null : refresh()).then(() => disposed ? null : syncMembers()).catch(() => { }); break;
+                case "member": setMember(ev.detail, ev.text); break;
+            }
+        };
+
+        // 구성원 칩을 누르면 입력칸 앞에 @이름
+        root.querySelectorAll(".member-call").forEach(b => b.addEventListener("click", () => {
+            const tag = "@" + b.dataset.name;
+            if (!textBox.value.includes(tag)) textBox.value = tag + " " + textBox.value;
+            textBox.focus();
+        }));
+        form.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const text = textBox.value;
+            if (!text.trim() || sending) return;
+            sending = true;
+            const data = new FormData();
+            data.append("text", text);
+            if (await post("Send", data) && textBox.value === text) { textBox.value = ""; toBottom(); }
+            sending = false;
+        });
+        // 한글 조합 중 Enter는 글자 확정이다 — 보내지 않는다.
+        textBox.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); form.requestSubmit(); }
+        });
+        stopBtn.addEventListener("click", () => post("Stop", new FormData()));
+        root.querySelector(".menu-trash")?.addEventListener("click", async () => {
+            if (!confirm("이 단톡방을 휴지통에 넣을까요? 구성원 방도 함께 들어갑니다.")) return;
+            if (await post("Trash", new FormData())) location.href = "/";
+        });
+        root.querySelector(".menu-restore")?.addEventListener("click", async () => {
+            if (await post("Restore", new FormData())) reopenRoom(roomId);
+        });
+
+        decorate(root);
+        toBottom();
+        return { id: roomId, reveal() { }, dispose() { disposed = true; es.close(); } };
+    }
+
     // 설정 · 프로필 그림 (4차 B2): 고른 그림을 올리기 전에 브라우저에서 줄인다 (긴 변 256px, webp) — 아바타는 작게만 보이고
     // 큰 원본은 본문 상한(1MB)에 걸린다. 줄이지 못하면(그림이 아님 · 캔버스 실패) 원본 그대로 보내 서버가 형식 · 크기를 본다.
     const AvatarMaxPx = 256, AvatarKeepBytes = 256 * 1024;
@@ -2029,6 +2140,6 @@
     });
 
     const first = pane?.querySelector(".room");
-    if (first) room = mountRoom(first);
+    if (first) room = first.dataset.group ? mountGroup(first) : mountRoom(first);
     else openAppEvents();
 })();

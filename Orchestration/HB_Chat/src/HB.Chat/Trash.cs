@@ -30,7 +30,9 @@ public static class Trash
     private static IReadOnlyList<string> Remove(RoomStore store, string dataFolder, Func<Room, bool> which)
     {
         if (store.LoadError is not null) return [];
-        var removed = store.RemoveWhere(which);
+        var removed = store.RemoveWhere(which).ToList();
+        // 단톡방을 지우면 구성원 자식 방도 (계획서 2026-10-29_HB_Chat-단톡방) — 자식 방만 따로 지우지는 않는다(휴지통 목록에 없음)
+        if (removed.Count > 0) removed.AddRange(store.RemoveWhere(r => r.GroupId is { } g && removed.Contains(g)));
         foreach (var id in removed.Where(RoomStore.IsRoomId))
         {
             // 첨부 · 지휘자 브라우저 프로필(쿠키 · 로그인) · 스크린샷 (/self-review security 8b11177bd5 C6). 브라우저는 휴지통에 넣을 때 닫았다
@@ -44,6 +46,7 @@ public static class Trash
             }
             // 실행 도중 앱이 죽어 남은 방별 MCP 설정 파일 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결, 지휘자 검토 K7)
             McpConfigFile.DeleteRoom(McpConfigFile.RoomPath(dataFolder, id));
+            new GroupLog(() => dataFolder).Delete(id); // 단톡방 대화 줄 (없으면 아무것도 안 함)
         }
         return removed;
     }

@@ -103,6 +103,48 @@
                     방의 세션은 이 앱 전용입니다 — Claude 앱 · CLI에서 이어 쓰지 마세요.
                 </p>
             </section>
+            @* 새 단톡방 (계획서 2026-10-29_HB_Chat-단톡방, 1단계): 구성원 2명 · 대화/읽기 · @이름으로 한 명씩 부름 *@
+            <section class="panel" style="padding:12px 14px;margin-top:12px">
+                <h2 style="margin:0 0 10px;font-size:16px">새 단톡방</h2>
+                <form method="post" asp-page-handler="CreateGroup" class="group-create">
+                    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+                        <label>작업 폴더
+                            <select name="workspace">
+                                @foreach (var w in Model.Options.AllWorkspaces)
+                                {
+                                    <option value="@w.Name" title="@w.Path">@w.Name</option>
+                                }
+                            </select>
+                        </label>
+                        <label>권한
+                            <select name="level">
+                                <option value="Chat">대화</option>
+                                <option value="Read" selected>읽기</option>
+                            </select>
+                        </label>
+                        <label>모델
+                            <select name="model">
+                                @foreach (var m in Model.Options.ModelList)
+                                {
+                                    <option value="@m" selected="@(m == Model.Options.DefaultModel)">@m</option>
+                                }
+                            </select>
+                        </label>
+                        <input type="text" name="title" placeholder="단톡방 이름" maxlength="200" required style="flex:1;min-width:160px" />
+                    </div>
+                    @for (var i = 0; i < GroupChat.MinMembers; i++)
+                    {
+                        <div class="group-member-row" style="display:flex;gap:8px;margin-top:8px">
+                            <input type="text" name="names" placeholder="구성원 이름 (예: @(i == 0 ? "A" : "B"))" maxlength="20" required style="width:140px" />
+                            <input type="text" name="roles" placeholder="역할 (예: @(i == 0 ? "내 코드의 위험을 찾는다" : "A의 의견에 반박한다"))" maxlength="@GroupChat.RoleMaxChars" style="flex:1" />
+                        </div>
+                    }
+                    <button class="btn primary" type="submit" style="margin-top:8px">@Icons.Svg("plus") 단톡방 만들기</button>
+                </form>
+                <p class="muted" style="margin:6px 0 0;font-size:12.5px">
+                    부른 구성원만 답합니다 (@@이름, 지금은 한 번에 한 명). 구성원마다 Claude 세션이 따로 돌고, 단톡방 대화를 함께 받습니다.
+                </p>
+            </section>
         </div>
     </section>
 </div>
