@@ -132,6 +132,15 @@ select, input[type=text], textarea { background: var(--panel); border: 1px solid
 /* 지휘자 브라우저 곁칸: 보기만, 1280×800 화면을 칸 너비에 맞춰 */
 .side-sec.side-browser { display: flex; flex-direction: column; gap: 6px; }
 .side-sec.side-browser[hidden], .browser-blocked[hidden], #browser-frame[hidden] { display: none; }
+/* 문서 탭: 프로젝트(docs 폴더)마다 목록, 본문은 같은 칸에 */
+.docs-project + .docs-project { margin-top: 14px; }
+.docs-project h3 { font-size: 13px; margin: 0 0 6px; }
+.docs-status { flex-basis: 100%; }
+.docs-bar { position: sticky; top: -10px; background: var(--panel); padding: 4px 0 8px; display: flex; gap: 8px; align-items: center; overflow-wrap: anywhere; }
+#docs-view[hidden], #docs-list[hidden] { display: none; }
+.docs-body { font-size: 13px; overflow-wrap: anywhere; }
+.docs-body table { border-collapse: collapse; display: block; overflow-x: auto; }
+.docs-body th, .docs-body td { border: 1px solid var(--line); padding: 2px 6px; vertical-align: top; }
 .browser-state { margin: 0; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .browser-blocked { margin: 0; font-size: 12px; color: var(--warn); overflow-wrap: anywhere; }
 .browser-view { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #fff; }

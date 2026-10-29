@@ -21,6 +21,23 @@
         return svg;
     }
     const pane = document.getElementById("pane");
+    // 문서 본문 속 상대 링크 → 작업 폴더 기준 문서 경로 (보고 있는 문서 자리 기준). .md가 아니면 null — 서버가 경로를 다시 검사한다
+    function docLinkTarget(base, href) {
+        const path = (href || "").split("#")[0].split("?")[0];
+        if (!base || !/\.md$/i.test(path)) return null;
+        try { return decodeURIComponent(new URL(path, "http://docs/" + base).pathname.slice(1)); } catch { return null; }
+    }
+
+    // Markdown 본문 속 #앵커(서버가 md-를 붙임): 같은 말풍선 · 문서 본문(.body) 안에서만 찾는다 — 기본 동작은 문서 전체의
+    // 첫 같은 id(위쪽 말풍선)로 가 버렸다. 그 본문에 없으면 움직이지 않는다
+    document.addEventListener("click", (e) => {
+        const a = e.target.closest?.('a[href^="#md-"]');
+        if (!a || e.defaultPrevented) return;
+        e.preventDefault();
+        let id = a.getAttribute("href").slice(1);
+        try { id = decodeURIComponent(id); } catch { }
+        a.closest(".body")?.querySelector("#" + CSS.escape(id))?.scrollIntoView({ block: "start" });
+    });
 
     // ---- 방 목록 ----
     let room = null; // 지금 붙은 방: { id, dispose }
@@ -1562,7 +1579,7 @@
         // ---- 오른쪽 곁칸 (3차 c): 단계 · 방 정보 · 외부 실행 · 첨부. 열림 · 탭은 브라우저 저장(편의만 — 못 읽으면 닫힌 채 · 단계 탭) ----
         const side = $("#side"), sideToggle = $("#side-toggle");
         const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch { } } };
-        const sideTabs = ["steps", "info", "runs", "files", "mcp", "term", "browser"];
+        const sideTabs = ["steps", "info", "runs", "files", "docs", "mcp", "term", "browser"];
         // 저장값이 모르는 탭이면 단계 탭 — 모든 칸이 숨던 문제 (c216951e79 C7)
         let sideTab = sideTabs.includes(store.get("hbchat.sideTab")) ? store.get("hbchat.sideTab") : "steps";
         if (sideTab === "term" && !$("#side-tab-term")) sideTab = "steps"; // 터미널 탭이 없는 칸(옛 화면)이면
@@ -1577,11 +1594,12 @@
             side.querySelectorAll(".side-sec").forEach(s => { s.hidden = s.dataset.tab !== tab; });
             if (tab === "term" && !side.hidden) showTerm(termActive); // xterm은 탭이 보일 때 만든다 (안 보이면 크기를 못 잰다)
             if (tab === "browser" && !side.hidden) loadBrowserFrame(); // 마지막 화면 (실시간 프레임은 바뀔 때만 온다)
+            if (tab === "docs" && !side.hidden && !docsLoaded) loadDocs(); // 턴 끝 loadSide도 이 함수를 부른다 — 목록은 한 번만 (256b92a166 C5)
         }
         function sidePlaceholder(text) {
             // 받는 중 · 실패 글은 탭과 상관없이 보인다 (c216951e79 C6 · 지휘자 K3) — 단계 탭은 화면이 그리므로 그 탭에만 가린다
             const p = el("p", "muted side-sec side-wait", text);
-            p.hidden = sideTab === "steps" || sideTab === "term" || sideTab === "browser";
+            p.hidden = sideTab === "steps" || sideTab === "term" || sideTab === "browser" || sideTab === "docs";
             $("#side-data").replaceChildren(p);
         }
         // 방 정보 · 외부 실행 · 첨부는 열 때 · 턴 끝 · 제목 · 규칙 · 첨부가 바뀔 때 서버에서 다시 받는다 (방 칸을 그릴 때는 계산하지 않음).
@@ -1655,6 +1673,61 @@
                 if (sideAgain && !disposed) { sideAgain = false; loadSide(); }
             }
         }
+        // ---- 문서 탭: 작업 폴더의 계획서 · 작업 로그 (읽기 전용). #side-data 밖이라 턴 끝 다시 받기에 닫히지 않고,
+        // 본문을 보는 동안은 목록도 다시 받지 않는다 — 읽던 자리 그대로
+        let docPath = null, docsLoading = false, docsLoaded = false, docSeq = 0;
+        const docsSec = $("#side-sec-docs"), docsList = $("#docs-list"), docsView = $("#docs-view");
+        const parseHtml = (html) => [...new DOMParser().parseFromString("<div>" + html + "</div>", "text/html").body.firstElementChild.childNodes];
+        async function loadDocs() {
+            if (!docsList || docPath !== null || docsLoading || disposed) return;
+            docsLoading = true;
+            try {
+                const res = await fetch(self + "?handler=Docs", { cache: "no-store" });
+                if (disposed || docPath !== null) return;
+                docsList.replaceChildren(...(res.ok ? parseHtml(await res.text()) : [el("p", "muted", "문서 목록을 불러오지 못했습니다 (" + res.status + ").")]));
+                docsLoaded = res.ok;
+            } catch {
+                if (!disposed) docsList.replaceChildren(el("p", "muted", "문서 목록을 불러오지 못했습니다."));
+            } finally { docsLoading = false; }
+        }
+        // 마지막에 누른 문서만 그린다 — 늦게 온 앞 응답이 덮지 않게 (256b92a166 C4)
+        async function openDoc(path) {
+            const seq = ++docSeq;
+            const res = await fetch(self + "?handler=Doc&path=" + encodeURIComponent(path), { cache: "no-store" }).catch(() => null);
+            const html = res?.ok ? await res.text().catch(() => null) : null;
+            if (disposed || seq !== docSeq) return;
+            docPath = path;
+            $("#docs-path").textContent = path;
+            $("#docs-body").replaceChildren(...(html !== null ? parseHtml(html)
+                : [el("p", "muted", "문서를 열지 못했습니다 (" + (res?.status ?? "연결 끊김") + ") — 작업 폴더 docs의 계획서 · 작업 로그만 열립니다.")]));
+            docsList.hidden = true;
+            docsView.hidden = false;
+            docsSec.scrollTop = 0;
+        }
+        docsSec?.addEventListener("click", (e) => {
+            if (e.target.closest("#docs-back")) {
+                docSeq++; // 아직 오는 본문은 버린다
+                docPath = null; docsLoaded = false; docsView.hidden = true; docsList.hidden = false; loadDocs();
+                return;
+            }
+            const a = e.target.closest("a");
+            if (!a) return;
+            if (a.dataset.doc) { e.preventDefault(); openDoc(a.dataset.doc); return; }
+            // 본문 속 링크: http · https · mailto는 새 창(데스크톱 앱은 기본 브라우저) — 앱 탭이 넘어가지 않게 (256b92a166 C2),
+            // #앵커는 본문 안에서 이동, 상대 .md(로그 첫 줄의 ../plans/…md 등)는 같은 칸에서, 그 밖은 막는다
+            const href = a.getAttribute("href") || "";
+            e.preventDefault();
+            if (/^(https?|mailto):/i.test(href)) { window.open(href, "_blank", "noopener"); return; }
+            if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return;
+            if (href.startsWith("#")) {
+                let id = href.slice(1);
+                try { id = decodeURIComponent(id); } catch { }
+                $("#docs-body").querySelector("#" + CSS.escape(id))?.scrollIntoView({ block: "start" }); // 서버가 id · 앵커에 md-를 붙여 둠
+                return;
+            }
+            const target = docLinkTarget(docPath, href);
+            if (target) openDoc(target);
+        });
         function setSide(open) {
             side.hidden = !open;
             sideToggle.setAttribute("aria-expanded", String(open));
@@ -1664,7 +1737,11 @@
         if (side && sideToggle) {
             sideToggle.addEventListener("click", () => setSide(side.hidden));
             side.querySelector(".side-x").addEventListener("click", () => setSide(false));
-            side.querySelectorAll(".side-tabs [data-tab]").forEach(b => b.addEventListener("click", () => showTab(b.dataset.tab)));
+            // 문서 탭을 누를 때는 목록을 새로 받는다 (읽는 중이면 본문 그대로 — loadDocs가 거른다)
+            side.querySelectorAll(".side-tabs [data-tab]").forEach(b => b.addEventListener("click", () => {
+                if (b.dataset.tab === "docs") docsLoaded = false;
+                showTab(b.dataset.tab);
+            }));
             // Esc로 닫기 — 좁은 폭에서는 곁칸이 "정보" 단추를 덮는다 (지휘자 K2)
             // 터미널 안의 Esc는 그 프로세스 입력이다 — 곁칸을 닫지 않는다
             side.addEventListener("keydown", (e) => { if (e.key === "Escape" && !e.target.closest?.(".term-host")) { setSide(false); sideToggle.focus(); } });

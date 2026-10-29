@@ -215,6 +215,7 @@
                 <button type="button" role="tab" data-tab="info" id="side-tab-info" aria-controls="side-sec-info">방 정보</button>
                 <button type="button" role="tab" data-tab="runs" id="side-tab-runs" aria-controls="side-sec-runs">외부 실행</button>
                 <button type="button" role="tab" data-tab="files" id="side-tab-files" aria-controls="side-sec-files">첨부</button>
+                <button type="button" role="tab" data-tab="docs" id="side-tab-docs" aria-controls="side-sec-docs">문서</button>
                 <button type="button" role="tab" data-tab="mcp" id="side-tab-mcp" aria-controls="side-sec-mcp">연결</button>
                 <button type="button" role="tab" data-tab="term" id="side-tab-term" aria-controls="side-sec-term">터미널</button>
                 @if (room.Level == PermissionLevel.Command)
@@ -246,6 +247,15 @@
             <p class="muted" id="term-empty">+ 로 작업 폴더에서 PowerShell을 엽니다 (▾로 명령 프롬프트).@(room.Level == PermissionLevel.Command ? " 지휘자가 서버를 띄우면 '지휘자' 탭으로 보입니다 (읽기 전용)." : "")</p>
             <div class="term-bar" id="term-bar" hidden><span class="term-state" id="term-state"></span><button type="button" class="btn" id="term-stop">중지</button><button type="button" class="btn" id="term-close">닫기</button></div>
             <div class="term-host" id="term-host"></div>
+        </section>
+        @* 문서: 작업 폴더의 계획서 · 작업 로그 (읽기 전용). 턴 끝의 #side-data 다시 받기와 따로 — 읽는 중인 본문이 닫히지 않게.
+           목록은 탭을 열 때 ?handler=Docs, 본문은 ?handler=Doc *@
+        <section class="side-sec side-docs" data-tab="docs" id="side-sec-docs" role="tabpanel" aria-labelledby="side-tab-docs" hidden>
+            <div id="docs-list"><p class="muted">불러오는 중…</p></div>
+            <div id="docs-view" hidden>
+                <div class="docs-bar"><button type="button" class="btn" id="docs-back">← 목록</button> <span class="muted" id="docs-path"></span></div>
+                <div class="docs-body body" id="docs-body"></div>
+            </div>
         </section>
         @* 지휘자 브라우저 (결정 "보기만"): 명령 방만. browser · browser-frame 알림으로 그린다 *@
         @if (room.Level == PermissionLevel.Command)

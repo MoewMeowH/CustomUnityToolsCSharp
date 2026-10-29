@@ -339,6 +339,32 @@ public sealed partial class RoomModel(
         return Partial("_RoomSide", this);
     }
 
+    /// <summary>곁칸 "문서" 탭 목록: 작업 폴더의 계획서 · 작업 로그 · 색인 (탭을 열 때 · 목록으로 돌아올 때).</summary>
+    public IReadOnlyList<ProjectDocs.Project> DocProjects { get; private set; } = [];
+
+    public IActionResult OnGetDocs(string id)
+    {
+        Response.Headers.CacheControl = "no-store";
+        if (!RoomStore.IsRoomId(id) || store.Get(id) is not { } room) return NotFound();
+        Room = room;
+        DocProjects = ProjectDocs.Find(WorkspacePath);
+        return Partial("_RoomDocs", this);
+    }
+
+    /// <summary>문서 하나를 SafeMarkdown으로 그린 HTML 조각 — 경로는 <see cref="ProjectDocs.Resolve"/>가 허락한 것만.</summary>
+    public IActionResult OnGetDoc(string id, string? path)
+    {
+        Response.Headers.CacheControl = "no-store";
+        Response.Headers.XContentTypeOptions = "nosniff";
+        if (!RoomStore.IsRoomId(id) || store.Get(id) is not { } room) return NotFound();
+        Room = room;
+        if (ProjectDocs.Resolve(WorkspacePath, path) is not { } file) return NotFound();
+        string text;
+        try { text = System.IO.File.ReadAllText(file); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return NotFound(); }
+        return Content(SafeMarkdown.ToHtml(text, SafeMarkdown.Default), "text/html; charset=utf-8");
+    }
+
     /// <summary>
     /// 입력칸 '/' 목록 (Claude 앱 기능 A): 그 방 마지막 실행의 init 이름 + 작업 폴더 · 사용자 · 플러그인 파일 설명 (<see cref="CommandCatalog"/>).
     /// 화면이 방을 열 때 · 턴이 끝날 때 받는다.

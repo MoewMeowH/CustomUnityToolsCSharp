@@ -1,0 +1,56 @@
+@model RoomModel
+@*
+    곁칸 "문서" 탭 목록 (?handler=Docs): 작업 폴더 docs의 색인 · 최근 계획서(짝 로그 · 색인 상태) · 짝 없는 로그.
+    줄을 누르면 화면이 ?handler=Doc으로 본문을 받아 같은 칸에 그린다 (data-doc = 작업 폴더 기준 경로). 글은 모두 Razor 인코딩.
+*@
+@{
+    static string Short(string text, int max) => text.Length <= max ? text : text[..max] + "…";
+}
+@if (Model.WorkspacePath is null)
+{
+    <p class="muted">이 방에는 작업 폴더가 없습니다.</p>
+}
+else if (Model.DocProjects.Count == 0)
+{
+    <p class="muted">이 방 작업 폴더에 docs/plans · docs/worklog가 없습니다.</p>
+}
+@foreach (var p in Model.DocProjects)
+{
+    <div class="docs-project">
+        <h3 class="side-h">@p.Name <span class="muted">@p.DocsRel</span></h3>
+        @if (p.Index is { } index)
+        {
+            <p><a href="#" data-doc="@index.Rel">작업 로그 색인</a> <span class="muted">@index.Modified.ToString("MM-dd HH:mm")</span></p>
+        }
+        @if (p.Plans.Count > 0)
+        {
+            <ul class="side-list docs-list">
+                @foreach (var row in p.Plans)
+                {
+                    <li>
+                        <a href="#" data-doc="@row.Plan.Rel">@row.Plan.Title</a>
+                        @if (row.Log is { } log)
+                        {
+                            <a href="#" class="docs-log" data-doc="@log.Rel">로그</a>
+                        }
+                        <span class="muted">@(row.Plan.Date ?? row.Plan.Modified.ToString("yyyy-MM-dd"))</span>
+                        @if (row.Status is { } status)
+                        {
+                            <div class="muted docs-status" title="@status">@Short(status, 90)</div>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+        @if (p.LooseLogs.Count > 0)
+        {
+            <p class="muted">짝 계획서가 없는 로그</p>
+            <ul class="side-list docs-list">
+                @foreach (var log in p.LooseLogs)
+                {
+                    <li><a href="#" data-doc="@log.Rel">@log.Title</a> <span class="muted">@(log.Date ?? log.Modified.ToString("yyyy-MM-dd"))</span></li>
+                }
+            </ul>
+        }
+    </div>
+}

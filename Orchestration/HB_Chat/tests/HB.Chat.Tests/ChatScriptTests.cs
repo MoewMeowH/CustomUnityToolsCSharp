@@ -18,6 +18,82 @@ public sealed class ChatScriptTests(ChatApp app, ChatBrowser browser) : IClassFi
 
     private static string Widget(string html) => "```widget\n" + html + "\n```";
 
+    /// <summary>지휘자 답의 "# text" · "# send" 제목이 입력칸 · 보내기 단추 id를 가리지 않는다 — 보내기가 그대로 된다.</summary>
+    [Fact]
+    public async Task ConductorHeadings_DoNotShadowComposerIds()
+    {
+        if (!browser.Available) return;
+        var room = app.Room("heading-ids", ChatApp.User("q", 0), ChatApp.Conductor("# text\n\n# send\n\n# send-form\n\n본문", 1));
+        await using var page = await browser.OpenAsync(app.RoomUrl(room));
+        Assert.Equal(1, await page.EvalAsync<int>("document.querySelectorAll('#text, #send, #send-form').length === 3 ? 1 : 0"));
+        Assert.Equal(0, await page.EvalAsync<int>("document.querySelectorAll('#chat #text, #chat #send, #chat #send-form').length"));
+        await page.SendAsync("say 1");
+        await page.WaitForAsync(HasConductor("say-1"), "보낸 말의 답", ChatPage.TurnWait);
+        page.AssertNoErrors();
+    }
+
+    /// <summary>두 말풍선에 같은 제목(id md-text)이 있으면 #앵커는 누른 말풍선 안의 제목으로 간다 — 위쪽 말풍선이 아니라.</summary>
+    [Fact]
+    public async Task AnchorLink_StaysInsideItsBubble()
+    {
+        if (!browser.Available) return;
+        var room = app.Room("anchor-scope", ChatApp.User("q", 0), ChatApp.Conductor("# text\n\n위 말풍선", 1),
+            ChatApp.User("q2", 2), ChatApp.Conductor("# text\n\n[제목으로](#text) [없는 곳](#nowhere)", 3));
+        await using var page = await browser.OpenAsync(app.RoomUrl(room));
+        Assert.Equal(2, await page.EvalAsync<int>("document.querySelectorAll('#chat [id=\"md-text\"]').length"));
+        // 이동 대상만 기록한다 (실제 스크롤은 창 크기에 따라 다르다)
+        await page.EvalAsync("window.__into = []; Element.prototype.scrollIntoView = function () { window.__into.push(this); }");
+        await page.EvalAsync("document.querySelector('#chat a[href=\"#md-text\"]').click()");
+        Assert.True(await page.EvalAsync<bool>(
+            "window.__into.length === 1 && window.__into[0].closest('.msg') === document.querySelector('#chat a[href=\"#md-text\"]').closest('.msg')"));
+        await page.EvalAsync("document.querySelector('#chat a[href=\"#md-nowhere\"]').click()");
+        Assert.Equal(1, await page.EvalAsync<int>("window.__into.length")); // 그 말풍선에 없으면 움직이지 않는다
+        Assert.Equal("", await page.EvalAsync<string>("location.hash"));
+        page.AssertNoErrors();
+    }
+
+    /// <summary>곁칸 문서 탭: 목록 → 로그 본문 → 본문 속 계획서 링크(같은 칸) → 목록. 턴 끝 곁칸 다시 받기에도 본문이 남는다.</summary>
+    [Fact]
+    public async Task SideDocs_ListOpenFollowLinkBack()
+    {
+        if (!browser.Available) return;
+        var docs = Path.Combine(app.Dir, "ws", "Proj", "docs");
+        Directory.CreateDirectory(Path.Combine(docs, "plans"));
+        Directory.CreateDirectory(Path.Combine(docs, "worklog"));
+        File.WriteAllText(Path.Combine(docs, "plans", "2026-10-30_곁칸-문서.md"), "# 계획 본문\n\n[아래로](#side-data)\n\n## side-data\n");
+        File.WriteAllText(Path.Combine(docs, "worklog", "2026-10-30_곁칸-문서.md"), "[계획서](../plans/2026-10-30_곁칸-문서.md)\n\n# 로그 본문\n");
+        var room = app.Room("docs-tab", ChatApp.User("q", 0), ChatApp.Conductor("first", 1));
+        await using var page = await browser.OpenAsync(app.RoomUrl(room));
+        await page.EvalAsync("document.querySelector('#side-toggle').click(); document.querySelector('#side-tab-docs').click()");
+        await page.WaitForAsync("!!document.querySelector('#docs-list a.docs-log')", "문서 목록", TimeSpan.FromSeconds(10));
+        Assert.Contains("곁칸 문서", await page.EvalAsync<string>("document.querySelector('#docs-list').textContent"));
+
+        await page.EvalAsync("document.querySelector('#docs-list a.docs-log').click()");
+        await page.WaitForAsync("document.querySelector('#docs-body h1')?.textContent === '로그 본문'", "로그 본문", TimeSpan.FromSeconds(10));
+        Assert.True(await page.EvalAsync<bool>("document.querySelector('#docs-list').hidden"));
+        Assert.Equal("Proj/docs/worklog/2026-10-30_곁칸-문서.md", await page.EvalAsync<string>("document.querySelector('#docs-path').textContent"));
+
+        await page.EvalAsync("document.querySelector('#docs-body a').click()");
+        await page.WaitForAsync("document.querySelector('#docs-body h1')?.textContent === '계획 본문'", "링크로 연 계획서", TimeSpan.FromSeconds(10));
+        Assert.EndsWith(app.RoomUrl(room).AbsolutePath, await page.EvalAsync<string>("location.pathname"));
+        // 제목 id는 md- 앞붙이기(SafeMarkdown) — 앱의 #side-data를 가리지 않고, 본문 속 #앵커는 그 제목으로 간다 (주소 · 본문 그대로)
+        Assert.Equal(0, await page.EvalAsync<int>("document.querySelectorAll('#docs-body #side-data').length"));
+        Assert.Equal(1, await page.EvalAsync<int>("document.querySelectorAll('#docs-body #md-side-data').length"));
+        await page.EvalAsync("document.querySelector('#docs-body a[href=\"#md-side-data\"]').click()");
+        Assert.Equal("계획 본문", await page.EvalAsync<string>("document.querySelector('#docs-body h1').textContent"));
+
+        // 턴이 끝나 곁칸(#side-data)을 다시 받아도 읽던 본문은 그대로 (256b92a166 C8)
+        await page.SendAsync("say 1");
+        await page.WaitForAsync(HasConductor("say-1"), "턴 끝", ChatPage.TurnWait);
+        await page.WaitForAsync("!!document.querySelector('#side-data .side-sec')", "곁칸 다시 받기", TimeSpan.FromSeconds(10));
+        Assert.False(await page.EvalAsync<bool>("document.querySelector('#docs-view').hidden"));
+        Assert.Equal("계획 본문", await page.EvalAsync<string>("document.querySelector('#docs-body h1').textContent"));
+
+        await page.EvalAsync("document.querySelector('#docs-back').click()");
+        await page.WaitForAsync("!document.querySelector('#docs-list').hidden && document.querySelector('#docs-view').hidden", "목록으로", TimeSpan.FromSeconds(10));
+        page.AssertNoErrors();
+    }
+
     /// <summary>단톡방 칸: 구성원 칩 · @이름 넣기 · 부른 구성원 답 말풍선 · 방 목록에 자식 방 없음.</summary>
     [Fact]
     public async Task Group_CallMember_ShowsAnswerBubble()
