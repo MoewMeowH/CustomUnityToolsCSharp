@@ -32,3 +32,5 @@ GoldenSet/
 Orchestration/HB_Orchestration/tools/sync-targets.local.txt
 # 대시보드 개인 설정 (스티커 폴더 경로 등, 이 PC에만)
 appsettings.local.json
+# 지휘자 실수 목록 (이 저장소 전용, 로컬에만)
+/MISTAKES.md
