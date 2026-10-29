@@ -73,5 +73,3 @@ review_tmp/  subagent_in/  docs/image/  GoldenSet/   ← 리뷰 임시 사본 ·
 - 커밋할 dll을 새로 추가하거나 이름을 바꾸면 `.gitignore`의 `!` 예외 줄도 같이 고쳐야 합니다.
 - Orchestration은 빌드 산출물을 커밋하지 않습니다. `Publish_Output/`은 배치가 매번 다시 만듭니다.
 - API 키는 어떤 파일에도 넣지 않습니다. 시스템 환경 변수로만 둡니다 (`OPENAI_API_KEY` · `GEMINI_API_KEY` · `FIREWORKS_API_KEY`, HB_Orchestration README 2장).
-- 루트의 `CLAUDE.md` · `REVIEW_GUIDELINES.md` · `PROJECT.md` · `.claude/` · `.mcp.json`은 이 PC의 Claude Code 작업 설정이라 커밋하지 않습니다 (원본은 `Orchestration/HB_Orchestration/project-files/`). **`.gitignore`에 넣지 않았으므로 `git add .` · `git add -A`를 쓰지 말고 파일을 지정해 추가합니다** — `.mcp.json`에는 이 PC 절대 경로가 들어 있고, H2 훅은 비밀 값 모양 · 지정 폴더만 막습니다. `Orchestration/HB_Orchestration/docs/`(계획서 · 작업 로그)는 `.gitignore`로 뺍니다.
-
