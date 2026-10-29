@@ -667,7 +667,12 @@
                 const msg = reply.closest(".msg");
                 const body = msg?.querySelector(".body");
                 if (!body) return;
+                // 위젯 · 차트 · 슬라이드 원문은 접힌 "코드 보기" 안이라 innerText에 안 잡힌다 — 같은 작업 안에서 잠깐 펼쳐 읽고 되돌린다
+                // (화면에 그려지기 전이라 깜빡이지 않음, 계획서 2026-10-29_HB_Chat-2-2-작은-한계-정리)
+                const folded = [...body.querySelectorAll("details.widget-code:not([open])")];
+                folded.forEach(d => { d.open = true; });
                 const text = body.innerText.trim();
+                folded.forEach(d => { d.open = false; });
                 setQuote({
                     // 보이는 이름(프로필)이 아니라 고정 이름 — 인용은 지휘자에게 가는 글이다 (3차 e /self-review security)
                     who: msg.dataset.speaker === "user" ? "나" : "지휘자",
@@ -691,6 +696,11 @@
         // ---- 지휘자 표정 (2-2 b): 상태 → 스티커 그림 (없으면 글자 아바타) + 상태 글 ----
         const faces = JSON.parse(root.dataset.faces || "{}");
         const faceImg = $("#face-img"), faceLetter = $("#face-letter"), faceLabel = $("#face-label");
+        // 표정 그림은 스티커 원본(장당 약 1.4MB)이라 처음 바뀔 때 늦게 보인다 — 화면이 한가할 때 미리 받아 둔다 (하루 캐시,
+        // 계획서 2026-10-29_HB_Chat-2-2-작은-한계-정리 결정 "미리 받기"). 같은 그림은 한 번만.
+        const preloadFaces = () => [...new Set(Object.values(faces).map(f => f && f.url).filter(Boolean))]
+            .forEach(url => { if (!disposed) new Image().src = url; });
+        if (window.requestIdleCallback) requestIdleCallback(preloadFaces, { timeout: 5000 }); else setTimeout(preloadFaces, 2000);
         // 끝난 턴의 표정을 보이는 시간은 서버(RoomHub.EndFaceFor)가 준다. 처음 그린 끝 표정은 남은 시간만 (83b453653b C11).
         const endFaceMs = Number(root.dataset.endFaceMs || 10000);
         let faceTimer = null;

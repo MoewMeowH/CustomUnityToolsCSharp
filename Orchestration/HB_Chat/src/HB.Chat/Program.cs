@@ -144,8 +144,35 @@ void PurgeTrash()
         app.Logger.LogWarning("휴지통을 비우지 못했습니다: {Error}", ex.Message);
     }
 }
+
+// 보내지 않은 첨부 (하루 넘고 기록에 안 나온 것, 계획서 2026-10-29_HB_Chat-2-2-작은-한계-정리) — 휴지통 정리와 같은 때, 뒤에서.
+// 세션 기록 폴더가 없으면(설정이 바뀜 등) 하지 않고, 예상 밖 예외도 로그로만 — 시작 · 타이머가 죽지 않게 (/self-review security 4c300badae C1 · C2, 70170a8801 C5)
+void CleanAttachments()
+{
+    try
+    {
+        var o = app.Services.GetRequiredService<IOptions<ChatOptions>>().Value;
+        if (!Directory.Exists(o.ProjectsRoot))
+        {
+            app.Logger.LogWarning("세션 기록 폴더가 없어 보내지 않은 첨부 정리를 건너뜁니다: {Root}", o.ProjectsRoot);
+            return;
+        }
+        var cleaned = Attachments.CleanUnsent(o.DataFolder, app.Services.GetRequiredService<RoomStore>().All(),
+            app.Services.GetRequiredService<ChatTranscripts>().Find, DateTimeOffset.Now, app.Services.GetRequiredService<RoomHub>().IsBusy);
+        if (cleaned > 0) app.Logger.LogInformation("보내지 않은 첨부 {Count}개를 지웠습니다 (하루 넘고 대화 기록에 없는 파일)", cleaned);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning("보내지 않은 첨부를 정리하지 못했습니다: {Error}", ex.Message);
+    }
+}
 PurgeTrash();
-using var purgeTimer = new Timer(_ => PurgeTrash(), null, TimeSpan.FromDays(1), TimeSpan.FromDays(1));
+_ = Task.Run(CleanAttachments);
+using var purgeTimer = new Timer(_ =>
+{
+    PurgeTrash();
+    CleanAttachments();
+}, null, TimeSpan.FromDays(1), TimeSpan.FromDays(1));
 
 app.UseSameOriginGuard();
 app.UseTerminalMcpToken(); // 앱 MCP는 그 방 실행 토큰이 맞을 때만

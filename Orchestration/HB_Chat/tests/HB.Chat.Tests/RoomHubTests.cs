@@ -39,8 +39,9 @@ public sealed class RoomHubTests : IDisposable
                     // 방별 설정 파일은 실행이 끝나면 지워진다 — 띄울 때의 내용을 남긴다
                     _configTexts.Add(spec.McpConfigPath is { } p && File.Exists(p) ? File.ReadAllText(p) : null);
                 }
+                // echo 모드는 세션 기록에 한 줄을 덧붙인다 (진짜 CLI처럼 — 규칙 지문은 기록이 늘 때만 저장)
                 return new ProcessSpec("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, spec.SessionId,
-                    Path.Combine(_dir, "tasks")], workspace);
+                    Path.Combine(_dir, "tasks"), Path.Combine(_dir, "projects", "F--ws", spec.SessionId + ".jsonl")], workspace);
             },
         };
     }
@@ -732,6 +733,122 @@ public sealed class RoomHubTests : IDisposable
         Assert.True(mcp >= 0);
         Assert.True(mcp < seen.FindIndex(e => e.Kind == "end")); // 턴 끝 전에
         Assert.NotNull(_store.Get(room.Id)!.McpStatusAt);
+    }
+
+    /// <summary>fake echo 모드가 돌려준 받은 말 (실패 결과 글의 "실행 오류 (…): " 뒤).</summary>
+    private static async Task<string> Echoed(Channel<LiveEvent> ch)
+    {
+        var text = (await Until(ch, e => e.Kind == "idle")).Single(e => e.Kind == "end").Text!;
+        return text[(text.IndexOf("): ", StringComparison.Ordinal) + 3)..];
+    }
+
+    [Fact]
+    public async Task ChangedRules_ArePrependedOnce_WhenResuming()
+    {
+        // 이어 쓰는 세션은 CLI가 처음 시스템 프롬프트를 쓴다 (0단계 실측) — 규칙이 바뀌면 말 앞에 system-reminder로 새 규칙 (계획서 2026-10-29_HB_Chat-2-2-작은-한계-정리)
+        var room = NewRoom();
+        var projectDir = Path.Combine(_dir, "projects", "F--ws");
+        Directory.CreateDirectory(projectDir);
+        File.WriteAllText(Path.Combine(projectDir, room.SessionId + ".jsonl"), "{}\n"); // 이어 쓰는 세션
+        var ch = _hub.Subscribe(room.Id);
+
+        // 이 칸 전에 만든 방(RulesHash 없음): 한 번 받는다
+        _hub.Send(room.Id, "echo first");
+        var first = await Echoed(ch);
+        Assert.StartsWith("<system-reminder>", first);
+        Assert.Contains(RoomRules.For(PermissionLevel.Chat), first);
+        Assert.EndsWith("echo first", first);
+        Assert.Equal(RoomRules.Hash(RoomRules.For(PermissionLevel.Chat)), _store.Get(room.Id)!.RulesHash);
+
+        // 그대로면 붙이지 않는다
+        _hub.Send(room.Id, "echo second");
+        Assert.Equal("echo second", await Echoed(ch));
+
+        // 단계를 바꾸면 다시 한 번 — 새 단계의 규칙으로
+        _store.Update(room.Id, r => r with { Level = PermissionLevel.Read });
+        File.WriteAllText(Path.Combine(_dir, "ws", ".mcp.json"), """{"mcpServers":{"hb-orchestration":{"command":"dotnet"}}}""");
+        _hub.Send(room.Id, "echo third");
+        var third = await Echoed(ch);
+        Assert.Contains(RoomRules.Describe(PermissionLevel.Read), third);
+        Assert.EndsWith("echo third", third);
+    }
+
+    [Fact]
+    public async Task ChangedRules_WaitForNonCommandMessage_AndNotSavedWithoutTranscript()
+    {
+        var room = NewRoom();
+        var projectDir = Path.Combine(_dir, "projects", "F--ws");
+        Directory.CreateDirectory(projectDir);
+        File.WriteAllText(Path.Combine(projectDir, room.SessionId + ".jsonl"), "{}\n");
+        var ch = _hub.Subscribe(room.Id);
+
+        // '/명령' 앞에는 안내를 붙이지 않는다 — 명령으로 알아보지 못하게 되므로 (/self-review 70170a8801 C2). 지문도 그대로
+        _hub.Send(room.Id, "/echo now");
+        Assert.Equal("/echo now", await Echoed(ch));
+        Assert.Null(_store.Get(room.Id)!.RulesHash);
+
+        // 기록이 늘지 않은 실행(default 모드는 기록을 안 씀)은 안내를 붙여도 지문을 저장하지 않는다 (4c300badae C4 · 70170a8801 C3)
+        _hub.Send(room.Id, "hello");
+        await Until(ch, e => e.Kind == "idle");
+        Assert.Null(_store.Get(room.Id)!.RulesHash);
+
+        // 다음 보통 말에 붙는다
+        _hub.Send(room.Id, "echo later");
+        Assert.StartsWith("<system-reminder>", await Echoed(ch));
+        Assert.NotNull(_store.Get(room.Id)!.RulesHash);
+    }
+
+    [Fact]
+    public async Task TooLongLine_IsBlockedBeforeStart()
+    {
+        // stdin 한 줄 120KB 상한 (2026-10-29 실측: 한 번에 써도 약 300KB에서 CLI가 시작하지 않음, 70170a8801 C4)
+        var room = NewRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "echo " + new string('가', 50_000)); // UTF-8 약 150KB
+        var end = (await Until(ch, e => e.Kind == "idle")).Single(e => e.Kind == "end");
+        Assert.False(end.Ok);
+        Assert.Contains("말이 너무 깁니다", end.Text);
+        Assert.Empty(_specs); // claude를 띄우지 않았다
+        Assert.True(System.Text.Encoding.UTF8.GetByteCount(ClaudeRunner.UserLine(new string('가', 30_000))) < ClaudeRunner.MaxStdinLineBytes); // 한글 그대로 — 약 90KB
+        Assert.Contains("가", ClaudeRunner.UserLine("가"));
+    }
+
+    [Fact]
+    public async Task NewSession_GetsRulesBySystemPrompt_NotNote()
+    {
+        var room = NewRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "echo fresh");
+        Assert.Equal("echo fresh", await Echoed(ch));
+        Assert.NotNull(_store.Get(room.Id)!.RulesHash);
+    }
+
+    [Fact]
+    public async Task ForkRoom_ReadsInheritedAttachFolders_SkipsMissing()
+    {
+        var parent = Path.Combine(_dir, "data", "attachments", "aaaaaaaaaaaa");
+        Directory.CreateDirectory(parent);
+        File.WriteAllText(Path.Combine(_dir, "ws", ".mcp.json"), """{"mcpServers":{"hb-orchestration":{"command":"dotnet"}}}""");
+        var room = _store.Create("ws", PermissionLevel.Read, "opus", null);
+        _store.Update(room.Id, r => r with { AttachFrom = ["bbbbbbbbbbbb", "aaaaaaaaaaaa", "../x"] }); // 지워진 조상 · 이상한 값은 뺀다
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "hello");
+        await Until(ch, e => e.Kind == "idle");
+        Assert.Equal([parent], Assert.Single(_specs).InheritedAttachDirs);
+    }
+
+    [Fact]
+    public void ChangedNote_IsHiddenByTranscriptReader()
+    {
+        // 공용 기록 읽기가 system-reminder를 걷어 내므로 화면 · 미리보기 · 검색에는 사용자 글만 (ClaudeChat.CleanUserText)
+        var path = Path.Combine(_dir, "t.jsonl");
+        var content = RoomRules.ChangedNote("규칙 글") + "사용자 글";
+        File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(new
+        {
+            type = "user", timestamp = "2026-10-29T00:00:00Z", message = new { role = "user", content },
+        }) + "\n");
+        var chat = HB.Orchestration.Shared.ClaudeChatReader.ReadMore(path, null).Chat;
+        Assert.Equal("사용자 글", Assert.Single(chat.Entries).Text.Trim());
     }
 
     [Fact]

@@ -86,6 +86,18 @@ public sealed record Room
     public IReadOnlyList<McpServerState> McpStatus { get; init; } = [];
     public IReadOnlyList<string> McpTools { get; init; } = [];
     public DateTimeOffset? McpStatusAt { get; init; }
+
+    /// <summary>
+    /// 지휘자가 마지막으로 받은 방 규칙의 지문 (<see cref="RoomRules.Hash"/>). 이어 쓰는 세션은 CLI가 처음 시스템 프롬프트를 계속 쓰므로,
+    /// 지금 규칙과 다르면 다음 말 앞에 새 규칙을 붙인다 (계획서 2026-10-29_HB_Chat-2-2-작은-한계-정리). null이면 이 칸 전에 만든 방 — 한 번 받는다.
+    /// </summary>
+    public string? RulesHash { get; init; }
+
+    /// <summary>
+    /// 갈래 방이 이어받은 방들의 ID (조상 먼저 · 원래 방 마지막). 그 방들의 첨부 폴더도 읽게 한다 — 이어받은 대화의 [첨부] 줄은 원래 방 폴더를 가리킨다
+    /// (계획서 2026-10-29_HB_Chat-2-2-작은-한계-정리, 2-2 리뷰 C6). <see cref="ForkOf"/>는 첫 실행 뒤 지워지므로 따로 둔다.
+    /// </summary>
+    public IReadOnlyList<string> AttachFrom { get; init; } = [];
 }
 
 /// <summary>MCP 서버 하나의 실행 상태 (init mcp_servers 한 항목: connected · failed · needs-auth …).</summary>
@@ -139,13 +151,23 @@ public sealed class RoomStore
         try
         {
             if (File.Exists(path))
-                _rooms = JsonSerializer.Deserialize<RoomFile>(File.ReadAllText(path), Json)?.Rooms ?? [];
+                _rooms = [.. (JsonSerializer.Deserialize<RoomFile>(File.ReadAllText(path), Json)?.Rooms ?? []).Where(r => r is not null).Select(Clean)];
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or NotSupportedException)
         {
             LoadError = $"{ex.GetType().Name}: {ex.Message}";
         }
     }
+
+    /// <summary>
+    /// 파일의 목록 칸이 null이면(손으로 고침 · 다른 판이 씀) 빈 목록으로 — JSON의 null이 기본값 []를 덮으면 그 칸을 쓰는 곳마다 NullReference가 났다
+    /// (/self-review security 4c300badae C2).
+    /// </summary>
+    private static Room Clean(Room r) => r with
+    {
+        AllowRules = r.AllowRules ?? [], McpExtra = r.McpExtra ?? [], McpOff = r.McpOff ?? [], McpStatus = r.McpStatus ?? [],
+        McpTools = r.McpTools ?? [], AttachFrom = r.AttachFrom ?? [],
+    };
 
     public IReadOnlyList<Room> All()
     {

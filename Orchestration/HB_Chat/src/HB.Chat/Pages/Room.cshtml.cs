@@ -441,11 +441,12 @@ public sealed class RoomModel(
                 forkSourceSize: transcripts.Size(Room.SessionId));
             // 이 방에 고른 스티커 팩 · 추론 강도도 따라간다 (4차 D2 — ef2c83416c C6). "항상 허용" 규칙은 그대로 옮기지 않는다
             // 연결(더한 서버 · 끈 기본 연결 · Unity)도 따라간다 — 갈래가 원래 방과 다른 도구로 시작하지 않게 (/self-review 0bcf01451b C5)
-            if (Room.StickerPack is not null || Room.Effort is not null || Room.McpExtra.Count > 0 || Room.McpOff.Count > 0 || Room.UnityProject is not null)
-                store.Update(fork.Id, r => r with
-                {
-                    StickerPack = Room.StickerPack, Effort = Room.Effort, McpExtra = Room.McpExtra, McpOff = Room.McpOff, UnityProject = Room.UnityProject,
-                });
+            // 원래 방(과 그 조상)의 첨부 폴더도 읽게 — 이어받은 대화의 [첨부] 줄이 그 폴더를 가리킨다 (계획서 2026-10-29_HB_Chat-2-2-작은-한계-정리)
+            store.Update(fork.Id, r => r with
+            {
+                StickerPack = Room.StickerPack, Effort = Room.Effort, McpExtra = Room.McpExtra, McpOff = Room.McpOff, UnityProject = Room.UnityProject,
+                AttachFrom = [.. Room.AttachFrom.Where(a => a != Room.Id), Room.Id],
+            });
             hub.Touch(fork.Id);
             return new JsonResult(new { ok = true, id = fork.Id });
         }

@@ -181,6 +181,140 @@ public sealed class AttachmentTests : IDisposable
     }
 
     [Fact]
+    public void CleanUnsent_RemovesOnlyOldUnmentionedFiles()
+    {
+        // 보내지 않은 첨부 정리 (계획서 2026-10-29_HB_Chat-2-2-작은-한계-정리 4번)
+        var data = Path.Combine(_dir, "data");
+        var store = new RoomStore(Path.Combine(data, "rooms.json"));
+        var room = store.Create("ws", PermissionLevel.Read, "opus", null);
+        var fork = store.Create("ws", PermissionLevel.Read, "opus", null);
+        store.Update(fork.Id, r => r with { AttachFrom = [room.Id] });
+        var gone = store.Create("ws", PermissionLevel.Read, "opus", null);
+        store.Update(gone.Id, r => r with { DeletedAt = DateTimeOffset.Now }); // 휴지통은 Trash가 맡는다
+        var folder = Attachments.Folder(data, room.Id);
+        Directory.CreateDirectory(folder);
+        var now = DateTimeOffset.Now;
+        string Make(string name, TimeSpan age, string? inFolder = null)
+        {
+            var path = Path.Combine(inFolder ?? folder, name);
+            File.WriteAllText(path, "x");
+            File.SetLastWriteTimeUtc(path, (now - age).UtcDateTime);
+            return path;
+        }
+        var sent = Make("20261027-100000_sent.png", TimeSpan.FromDays(2));
+        var sentInFork = Make("20261027-100001_한글 이름.png", TimeSpan.FromDays(2));
+        var unsent = Make("20261027-100002_unsent.png", TimeSpan.FromDays(2));
+        var draft = Make("20261029-100003_draft.png", TimeSpan.FromHours(2));
+        var part = Make(".abc.part", TimeSpan.FromDays(2));
+        var gonePath = Make("20261027-100004_trash.png", TimeSpan.FromDays(2), Directory.CreateDirectory(Attachments.Folder(data, gone.Id)).FullName);
+
+        var transcripts = Path.Combine(_dir, "t");
+        Directory.CreateDirectory(transcripts);
+        File.WriteAllText(Path.Combine(transcripts, room.SessionId + ".jsonl"), $"{{\"x\":\"[첨부] {sent.Replace("\\", "\\\\")}\"}}\n");
+        // 갈래 기록은 JSON 이스케이프된 모양 (\uXXXX)
+        File.WriteAllText(Path.Combine(transcripts, fork.SessionId + ".jsonl"), System.Text.Json.JsonSerializer.Serialize(new { x = "[첨부] " + sentInFork }) + "\n");
+        string? Find(string sid) => File.Exists(Path.Combine(transcripts, sid + ".jsonl")) ? Path.Combine(transcripts, sid + ".jsonl") : null;
+
+        Assert.Equal(2, Attachments.CleanUnsent(data, store.All(), Find, now));
+        Assert.True(File.Exists(sent));
+        Assert.True(File.Exists(sentInFork));
+        Assert.True(File.Exists(draft)); // 하루 안 — 입력칸에 올려 둔 초안
+        Assert.False(File.Exists(unsent));
+        Assert.False(File.Exists(part));
+        Assert.True(File.Exists(gonePath));
+    }
+
+    [Fact]
+    public void CleanUnsent_SkipsRoomsWithMissingTranscript_AndBusyRooms()
+    {
+        // 기록을 못 찾으면 지우지 않는다 (4c300badae C1 · 70170a8801 C1), 실행 중인 방은 건너뛴다 (70170a8801 C6)
+        var data = Path.Combine(_dir, "data2");
+        var store = new RoomStore(Path.Combine(data, "rooms.json"));
+        var talked = store.Create("ws", PermissionLevel.Read, "opus", null);
+        store.Update(talked.Id, r => r with { LastRunAt = DateTimeOffset.Now }); // 대화했는데 기록 파일이 없다 (설정이 바뀜 · CLI가 정리)
+        var busy = store.Create("ws", PermissionLevel.Read, "opus", null);
+        var parent = store.Create("ws", PermissionLevel.Read, "opus", null);
+        var fork = store.Create("ws", PermissionLevel.Read, "opus", null);
+        store.Update(fork.Id, r => r with { AttachFrom = [parent.Id], KnownSize = 10 }); // 갈래 기록이 없으면 원래 방도 건너뜀
+        var now = DateTimeOffset.Now;
+        string Old(Room room)
+        {
+            var folder = Attachments.Folder(data, room.Id);
+            Directory.CreateDirectory(folder);
+            var path = Path.Combine(folder, "20261027-100000_x.png");
+            File.WriteAllText(path, "x");
+            File.SetLastWriteTimeUtc(path, (now - TimeSpan.FromDays(3)).UtcDateTime);
+            return path;
+        }
+        var a = Old(talked);
+        var b = Old(busy);
+        var c = Old(parent);
+        Assert.Equal(0, Attachments.CleanUnsent(data, store.All(), _ => null, now, id => id == busy.Id));
+        Assert.True(File.Exists(a));
+        Assert.True(File.Exists(b));
+        Assert.True(File.Exists(c));
+        // 바쁘지 않고 대화한 적 없는 방이면 지운다
+        Assert.Equal(1, Attachments.CleanUnsent(data, store.All(), _ => null, now));
+        Assert.False(File.Exists(b));
+    }
+
+    [Fact]
+    public void RuleUnsafePath_IsRefusedForEditAndCommand()
+    {
+        // Edit(…) 금지 규칙 괄호 안에서 뜻이 달라질 글자 (4c300badae C3) — 편집 · 명령 방은 막고, 읽기 방은 금지 규칙이 없어 연다
+        Assert.True(ClaudeArgs.IsRuleSafePath(@"C:\Users\x\AppData\Local\HB_Chat\attachments\0123456789ab"));
+        Assert.False(ClaudeArgs.IsRuleSafePath(@"C:\Users\x\HB (Work)\attachments\0123456789ab"));
+        Assert.False(ClaudeArgs.IsRuleSafePath(@"C:\data[1]\attachments\0123456789ab"));
+        var dir = @"C:\HB (Work)\attachments\0123456789ab";
+        RunSpec Spec(PermissionLevel level) =>
+            new(level, "opus", "15eb061e-7153-4c14-83ba-083385ed6945", false, "C:/data/mcp.json", "hb-orchestration", "규칙") { AttachDir = dir };
+        Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Edit), ["opus"]));
+        Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Command) with { AttachDir = null, InheritedAttachDirs = [dir] }, ["opus"]));
+        Assert.Contains(dir, ClaudeArgs.Build(Spec(PermissionLevel.Read), ["opus"]));
+    }
+
+    [Fact]
+    public void RoomStore_NullListFields_BecomeEmpty()
+    {
+        // 손으로 고친 rooms.json의 null 목록 칸 (4c300badae C2)
+        var path = Path.Combine(_dir, "rooms-null.json");
+        File.WriteAllText(path, """
+            {"version":1,"rooms":[{"id":"0123456789ab","sessionId":"15eb061e-7153-4c14-83ba-083385ed6945","workspace":"ws","level":"Read","model":"opus",
+            "createdAt":"2026-10-29T00:00:00+09:00","allowRules":null,"mcpExtra":null,"mcpOff":null,"mcpStatus":null,"mcpTools":null,"attachFrom":null}]}
+            """);
+        var room = Assert.Single(new RoomStore(path).All());
+        Assert.Empty(room.AttachFrom);
+        Assert.Empty(room.McpExtra);
+        Assert.Empty(room.AllowRules);
+        Assert.Empty(room.McpStatus);
+    }
+
+    [Fact]
+    public void Args_ForkReadsInheritedAttachFolders_EditDenied()
+    {
+        // 갈래 방: 원래 방들의 첨부 폴더도 --add-dir, 편집 · 명령 방은 편집 금지 (계획서 2026-10-29_HB_Chat-2-2-작은-한계-정리)
+        var own = Path.Combine(_dir, "attachments", "0123456789ab");
+        var parent = Path.Combine(_dir, "attachments", "aaaaaaaaaaaa");
+        var grand = Path.Combine(_dir, "attachments", "bbbbbbbbbbbb");
+        RunSpec Spec(PermissionLevel level) =>
+            new(level, "opus", "15eb061e-7153-4c14-83ba-083385ed6945", false, "C:/data/mcp.json", "hb-orchestration", "규칙")
+            {
+                AttachDir = own, InheritedAttachDirs = [grand, parent, own], // 겹친 것은 한 번만
+            };
+        var read = ClaudeArgs.Build(Spec(PermissionLevel.Read), ["opus"]).ToList();
+        var i = read.IndexOf("--add-dir");
+        Assert.Equal([own, grand, parent], read.Skip(i + 1).Take(3));
+        Assert.Single(read, "--add-dir");
+        var edit = ClaudeArgs.Build(Spec(PermissionLevel.Edit), ["opus"]);
+        foreach (var dir in new[] { own, parent, grand }) Assert.Contains($"Edit({ClaudeArgs.AbsoluteRulePath(dir)}/**)", edit);
+        Assert.Contains($"Edit({ClaudeArgs.AbsoluteRulePath(parent)}/**)", ClaudeArgs.Build(Spec(PermissionLevel.Command), ["opus"]));
+        Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Read) with { InheritedAttachDirs = ["rel/dir"] }, ["opus"]));
+        // 갈래 방에 자기 폴더가 아직 없어도 원래 방 폴더는 읽는다
+        var noOwn = ClaudeArgs.Build(Spec(PermissionLevel.Read) with { AttachDir = null, InheritedAttachDirs = [parent] }, ["opus"]).ToList();
+        Assert.Equal(parent, noOwn[noOwn.IndexOf("--add-dir") + 1]);
+    }
+
+    [Fact]
     public void RoomRules_MentionAttachmentsExceptChat()
     {
         Assert.Contains("[첨부]", RoomRules.For(PermissionLevel.Read));

@@ -23,6 +23,12 @@ public sealed record RunSpec(
     /// <summary>그 방 첨부 폴더 (절대 경로, 계획서 2-2 d). 대화 단계가 아니면 --add-dir로 더해 Read로 열 수 있게 한다.</summary>
     public string? AttachDir { get; init; }
 
+    /// <summary>
+    /// 갈래 방이 이어받은 방들의 첨부 폴더 (절대 경로). AttachDir와 같이 --add-dir로 읽게 하고, 편집 · 명령 방은 편집을 막는다
+    /// (계획서 2026-10-29_HB_Chat-2-2-작은-한계-정리 — 2-2 리뷰 C6이 보류한 "다른 방 폴더에 쓸 수 있게 됨"을 Edit 금지로).
+    /// </summary>
+    public IReadOnlyList<string> InheritedAttachDirs { get; init; } = [];
+
     /// <summary>추론 강도 (--effort, <see cref="RoomEffort.Levels"/>). null이면 넣지 않는다.</summary>
     public string? Effort { get; init; }
 
@@ -92,14 +98,27 @@ public static partial class ClaudeArgs
         }
         // 첨부 폴더: 작업 폴더 밖이라 없으면 Read가 거절된다 (2-2 0번 실측). 대화 단계는 도구가 없어 넣지 않는다 (사용자 결정 2).
         // --add-dir는 여러 값을 받으므로 바로 뒤에 다른 플래그가 온다.
-        string? attachDeny = null;
-        if (spec.AttachDir is { } attach && spec.Level != PermissionLevel.Chat)
+        var attachDeny = new List<string>();
+        if (spec.Level != PermissionLevel.Chat)
         {
-            if (!Path.IsPathFullyQualified(attach)) throw new ArgumentException($"첨부 폴더는 절대 경로여야 한다: {attach}");
-            args.AddRange(["--add-dir", attach]);
+            // 그 방 첨부 폴더 + 갈래 방이 이어받은 방들의 첨부 폴더 (계획서 2026-10-29_HB_Chat-2-2-작은-한계-정리)
+            var dirs = (spec.AttachDir is { } own ? [own] : Array.Empty<string>()).Concat(spec.InheritedAttachDirs).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            foreach (var dir in dirs)
+            {
+                if (!Path.IsPathFullyQualified(dir)) throw new ArgumentException($"첨부 폴더는 절대 경로여야 한다: {dir}");
+                // 편집 · 명령 방은 Edit(…) 금지가 걸려야 연다 — 규칙 괄호 안에서 뜻이 달라질 글자가 든 경로는 막는다 (RoomHub가 먼저 걸러 알림,
+                // /self-review security 4c300badae C3)
+                if (spec.Level is PermissionLevel.Edit or PermissionLevel.Command && !IsRuleSafePath(dir))
+                    throw new ArgumentException($"편집 금지 규칙에 쓸 수 없는 글자가 든 첨부 폴더: {dir}");
+            }
+            if (dirs.Count > 0)
+            {
+                args.Add("--add-dir");
+                args.AddRange(dirs);
+            }
             // 편집 · 명령 방은 그 폴더 편집을 막는다: 추가 폴더의 .claude/skills를 CLI가 불러와, 써 두면 다음 턴부터 실린다
             // (/self-review 0c3b7e3514 C2 실측). 편집 금지 목록 끝에 붙는다.
-            attachDeny = $"Edit({AbsoluteRulePath(attach)}/**)";
+            attachDeny.AddRange(dirs.Select(dir => $"Edit({AbsoluteRulePath(dir)}/**)"));
         }
         if (spec.Resume) args.AddRange(["--resume", spec.SessionId]);
         else if (spec.ForkFrom is { } source)
@@ -133,7 +152,7 @@ public static partial class ClaudeArgs
                 args.AddRange(["--tools", "Read,Grep,Glob,Edit,Write," + HostTools + "," + AgentTool + planTool, "--permission-mode", spec.Plan ? "plan" : "acceptEdits"]);
                 args.Add("--disallowedTools");
                 args.AddRange(EditDenied.Select(p => $"Edit({p})"));
-                if (attachDeny is not null) args.Add(attachDeny);
+                args.AddRange(attachDeny);
                 AddMcp(args, spec);
                 break;
             case PermissionLevel.Command:
@@ -145,7 +164,7 @@ public static partial class ClaudeArgs
                 if (spec.Plan) args.AddRange(["--permission-mode", "plan"]);
                 args.Add("--disallowedTools");
                 args.AddRange(EditDenied.Select(p => $"Edit({p})"));
-                if (attachDeny is not null) args.Add(attachDeny);
+                args.AddRange(attachDeny);
                 AddMcp(args, spec);
                 // --allowedTools 가변 인자(AddMcp의 MCP 규칙 뒤)에 작업 폴더 안 편집과 "항상 허용" 규칙을 이어 붙인다. 규칙 모양은 저장할 때 검사했지만 다시 거른다.
                 args.Add(CommandEditAllow);
@@ -168,6 +187,12 @@ public static partial class ClaudeArgs
     /// 권한 규칙의 절대 경로 모양: <c>C:\Users\x</c> → <c>//c/Users/x</c> (드라이브 소문자 · 콜론 없음).
     /// 2-2 d 실측(2.1.311): <c>Edit(//c/…/**)</c>는 듣고 <c>Edit(//C:/…/**)</c>는 안 듣는다. 드라이브가 없는 경로는 <c>//</c> + 경로.
     /// </summary>
+    /// <summary>
+    /// 권한 규칙 <c>Edit(경로/**)</c>에 그대로 넣어도 되는 경로인지 — 괄호 · 와일드카드 · 묶음 글자 ( ) * ? [ ] { } 가 없을 때만.
+    /// CLI 규칙 해석에서 뜻이 달라지거나 첫 ')'에서 끊길 수 있다 (실측 안 함 — 닫는 쪽으로).
+    /// </summary>
+    public static bool IsRuleSafePath(string path) => AbsoluteRulePath(path).IndexOfAny(['(', ')', '*', '?', '[', ']', '{', '}']) < 0;
+
     public static string AbsoluteRulePath(string path)
     {
         var full = Path.GetFullPath(path).Replace('\\', '/').TrimEnd('/');

@@ -107,6 +107,66 @@ public static partial class Attachments
         return IsReparse(root) || IsReparse(full) ? null : full;
     }
 
+    /// <summary>보내지 않은 첨부를 남겨 두는 시간 — 입력칸에 올려 둔 채인 초안 첨부를 지우지 않게 넉넉히.</summary>
+    public static readonly TimeSpan UnsentKeep = TimeSpan.FromDays(1);
+
+    /// <summary>
+    /// 보내지 않은 첨부 정리 (계획서 2026-10-29_HB_Chat-2-2-작은-한계-정리 4번): 휴지통 밖 방의 첨부 폴더에서 <see cref="UnsentKeep"/>보다 오래됐고
+    /// 그 방 · 그 방을 이어받은 갈래 방들의 세션 기록 어디에도 이름이 안 나오는 파일과, 끊긴 업로드의 임시 파일(.part)을 지운다.
+    /// 지우는 쪽으로 틀리지 않게: 실행 중인 방, 대화한 적 있는데(그 방 · 갈래 중 하나라도) 기록 파일을 못 찾는 방, 기록을 읽다 실패한 방은 건너뛴다
+    /// (/self-review security 4c300badae C1 · 70170a8801 C1 · C6 — 기록 폴더 설정이 바뀌거나 CLI가 오래된 기록을 지우면 보낸 첨부까지 지웠다). 지운 파일 수.
+    /// </summary>
+    public static int CleanUnsent(string dataFolder, IReadOnlyList<Room> rooms, Func<string, string?> transcriptPath, DateTimeOffset now,
+        Func<string, bool>? isBusy = null)
+    {
+        var removed = 0;
+        foreach (var room in rooms.Where(r => r.DeletedAt is null && RoomStore.IsRoomId(r.Id) && isBusy?.Invoke(r.Id) != true))
+        {
+            var folder = Folder(dataFolder, room.Id);
+            try
+            {
+                if (!Directory.Exists(folder) || IsReparse(folder)) continue;
+                var old = new DirectoryInfo(folder).EnumerateFiles()
+                    .Where(f => now - new DateTimeOffset(f.LastWriteTimeUtc, TimeSpan.Zero) > UnsentKeep).ToList();
+                if (old.Count == 0) continue;
+                // 그 방과 그 방 첨부를 이어받은 갈래 방들의 기록 (갈래 기록에도 원래 방 [첨부] 줄이 들어 있다)
+                var related = rooms.Where(r => r.Id == room.Id || r.AttachFrom.Contains(room.Id)).ToList();
+                var text = new StringBuilder();
+                var missing = false;
+                foreach (var r in related)
+                {
+                    if (transcriptPath(r.SessionId) is { } path)
+                    {
+                        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                        using var reader = new StreamReader(stream);
+                        text.Append(reader.ReadToEnd());
+                    }
+                    else if (r.LastRunAt is not null || r.KnownSize is not null) missing = true; // 대화했는데 기록이 없다 — 모르면 지우지 않는다
+                }
+                if (missing) continue;
+                var all = text.ToString();
+                foreach (var file in old)
+                {
+                    var unfinished = file.Name.StartsWith('.') && file.Name.EndsWith(".part", StringComparison.OrdinalIgnoreCase);
+                    if (!unfinished && (file.Name.StartsWith('.') || Mentioned(all, file.Name))) continue;
+                    try
+                    {
+                        file.Delete();
+                        removed++;
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException) { } // 그 방은 다음에
+        }
+        return removed;
+    }
+
+    /// <summary>기록(jsonl 원문)에 그 파일 이름이 있는지 — 그대로 또는 JSON 이스케이프(\uXXXX)된 모양.</summary>
+    private static bool Mentioned(string transcript, string name) =>
+        transcript.Contains(name, StringComparison.Ordinal)
+        || transcript.Contains(System.Text.Json.JsonSerializer.Serialize(name)[1..^1], StringComparison.Ordinal);
+
     /// <summary>곁칸 "첨부" 탭에 보일 파일 상한.</summary>
     public const int MaxListed = 200;
 

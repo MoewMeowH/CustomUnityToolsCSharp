@@ -2,7 +2,8 @@
 # (RoomHubTests · ApprovalFlowTests). 인자: 세션 ID. 줄 모양은 0번 실측(Claude Code 2.1.311 · 2.1.312)에서 본 것만 흉내 낸다.
 # approve · ask · write 모드: 3차 0번 실측의 control_request can_use_tool을 내고 stdin의 control_response를 기다려, 허용이면 성공 · 거절이면 오류 결과를 낸다.
 # 두 번째 인자: 할 일 폴더(tasks 모드가 <폴더>/<세션>/<번호>.json을 쓴다 — 3차 b, 0번 실측 B 모양).
-param([string]$Sid, [string]$TasksRoot)
+# third arg (optional): session transcript path - echo modes append one line there like the real CLI recording the user message.
+param([string]$Sid, [string]$TasksRoot, [string]$Transcript)
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 [Console]::InputEncoding = [Text.Encoding]::UTF8
 
@@ -19,7 +20,9 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         break
     }
 }
-$mode = ($prompt.Trim() -split '\s+')[0]
+# app may prepend a rules-changed note wrapped in system-reminder: strip it to read the mode, keep the full prompt for 'echo'
+$body = [regex]::Replace($prompt, '(?s)^<system-reminder>.*?</system-reminder>\s*', '')
+$mode = ($body.Trim() -split '\s+')[0]
 
 # 승인 요청을 내고 같은 request_id의 답을 기다린다. 답(response 객체) 또는 입력이 끝나면 $null.
 function Ask([string]$id, [string]$request) {
@@ -46,6 +49,11 @@ $useSid = if ($mode -eq 'other') { '00000000-0000-0000-0000-000000000000' } else
 Emit ('{"type":"system","subtype":"init","session_id":"' + $useSid + '","claude_code_version":"fake","mcp_servers":[]}')
 
 switch ($mode) {
+    { $_ -in 'echo', '/echo' } {
+        # returns the whole received prompt as an error result so the test can read it from the end event
+        if ($Transcript) { New-Item -ItemType Directory -Force (Split-Path $Transcript) | Out-Null; Add-Content -Path $Transcript -Value '{"type":"user"}' }
+        Emit ('{"type":"result","subtype":"error_during_execution","is_error":true,"result":' + (ConvertTo-Json $prompt -Compress) + ',"total_cost_usd":0.001,"permission_denials":[]}')
+    }
     'roomtools' {
         # room servers: unity editor_status (expect allow, no card), unity eval (card; test lowers the level then denies), editor_status again (expect deny)
         $r1 = Ask 'req_u1' '{"subtype":"can_use_tool","tool_name":"mcp__unity__editor_status","input":{},"tool_use_id":"toolu_u1"}'

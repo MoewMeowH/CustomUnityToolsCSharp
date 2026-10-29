@@ -287,13 +287,22 @@ public static class ClaudeRunner
     /// <summary>SDK가 처음 보내는 제어 요청 (0번 실측에서 쓴 모양 그대로 — 훅은 넘기지 않는다).</summary>
     internal const string InitializeLine = """{"type":"control_request","request_id":"hbchat_init","request":{"subtype":"initialize","hooks":null}}""";
 
+    /// <summary>
+    /// stdin 한 줄 상한 (UTF-8 바이트). 한 번에 써도 약 300KB 줄에서는 CLI가 init조차 내지 않았다 (131KB 정상, 2.1.312 실측 —
+    /// 계획서 2026-10-29_HB_Chat-2-2-작은-한계-정리, /self-review 70170a8801 C4). 넘는 말은 띄우기 전에 막는다 (RoomHub).
+    /// </summary>
+    public const int MaxStdinLineBytes = 120 * 1024;
+
+    /// <summary>사용자 말 한 줄. 한글은 \uXXXX(6바이트)로 바꾸지 않고 UTF-8 그대로 — 줄이 약 절반 (위 상한 때문).</summary>
     internal static string UserLine(string prompt) => JsonSerializer.Serialize(new
     {
         type = "user",
         message = new { role = "user", content = prompt },
         parent_tool_use_id = (string?)null,
         session_id = "",
-    });
+    }, LineJson);
+
+    private static readonly JsonSerializerOptions LineJson = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
     /// <summary>
     /// 제어 요청 하나에 답한다. can_use_tool이면 onPermission(없으면 거절), 그 밖의 종류는 오류 답 (initialize에 훅을 넘기지 않아 올 일이 없다).
@@ -375,8 +384,13 @@ public static class ClaudeRunner
             try
             {
                 if (_closed) return;
-                await writer.WriteAsync(line + "\n"); // \r\n 대신 \n — 줄 끝 모양을 실측과 같게
+                // 한 줄은 한 번에 쓴다: StreamWriter로 쓰면 버퍼(4KB) 단위로 나뉘어 파이프에 들어가는데, 약 8KB를 넘는 줄이 여러 번에 나뉘어
+                // 들어오면 stdin을 열어 둔 CLI가 그 줄을 처리하지 않고 멈췄다 (2.1.312 실측 — 9KB 줄: 나눠 쓰면 멈춤 · 한 번에 쓰면 20KB도 됨,
+                // 계획서 2026-10-29_HB_Chat-2-2-작은-한계-정리). 긴 말 · 한글(\uXXXX로 6배)이 걸린다. \r\n 대신 \n — 줄 끝 모양을 실측과 같게.
                 await writer.FlushAsync();
+                var bytes = writer.Encoding.GetBytes(line + "\n");
+                await writer.BaseStream.WriteAsync(bytes);
+                await writer.BaseStream.FlushAsync();
             }
             catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException) { _closed = true; }
             finally
