@@ -130,7 +130,7 @@
 
     if (snap.HasComments || snap.SettingsHasComments)
     {
-        <div class="notice warn">설정 파일에 주석(<span class="mono">//</span>)이 있습니다. 여기서 저장하면 그 파일의 주석은 사라집니다. 설명은 README에 정리돼 있습니다.</div>
+        <div class="notice warn">설정 파일에 주석(<span class="mono">//</span>)이 있습니다. 여기서 저장하면 그 파일의 주석은 사라집니다. 설명은 설명서(manual/agents.md · manual/modes.md)에 정리돼 있습니다.</div>
     }
     <div class="notice muted">
         저장하면 MCP 서버가 다음 호출 때 스스로 다시 읽습니다 — 재시작 불필요. 단, API 키 환경 변수를 바꿨을 때만 PC를 재시작하세요.
@@ -177,7 +177,7 @@
                 <div class="table-scroll">
                     <table class="agents edit">
                         <thead>
-                        <tr><th>이름</th><th>제공사</th><th>모델 ID</th><th>출력 상한</th><th title="요청 하나의 네트워크 타임아웃. 비우면 제공사 값 → 100초">타임아웃(초)</th><th title="추론 강도. 비우면 보내지 않음(제공사·모델 기본값). 모델마다 받는 값이 다르다 — README 에이전트 절. 실행마다 run_mode reasoning으로 덮어쓸 수 있다">추론 강도</th><th>사용</th><th title="이미지 입력을 받는지 (Vision). 표시 전용 — 바꾸려면 appsettings.json을 직접 고친다">이미지</th><th>삭제</th><th>쓰는 모드</th></tr>
+                        <tr><th>이름</th><th>제공사</th><th>모델 ID</th><th>출력 상한</th><th title="요청 하나의 네트워크 타임아웃. 비우면 제공사 값 → 100초">타임아웃(초)</th><th title="추론 강도. 비우면 보내지 않음(제공사·모델 기본값). 모델마다 받는 값이 다르다 — 설명서 manual/agents.md. 실행마다 run_mode reasoning으로 덮어쓸 수 있다">추론 강도</th><th>사용</th><th title="이미지 입력을 받는지 (Vision). 표시 전용 — 바꾸려면 appsettings.json을 직접 고친다">이미지</th><th>삭제</th><th>쓰는 모드</th></tr>
                         </thead>
                         <tbody>
                         @for (var i = 0; i <= snap.Agents.Count; i++)

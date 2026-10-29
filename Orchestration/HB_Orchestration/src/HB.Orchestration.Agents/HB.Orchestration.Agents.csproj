@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <!-- 버전 고정 (2026-10-24). 올릴 때는 버전을 바꾸고 전체 테스트를 돌린다 (README 1절) -->
+    <!-- 버전 고정 (2026-10-24). 올릴 때는 버전을 바꾸고 전체 테스트를 돌린다 (manual/setup.md) -->
     <PackageReference Include="Microsoft.Agents.AI" Version="1.25.0" />
     <PackageReference Include="Microsoft.Extensions.AI" Version="10.11.0" />
     <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.11.0" />
