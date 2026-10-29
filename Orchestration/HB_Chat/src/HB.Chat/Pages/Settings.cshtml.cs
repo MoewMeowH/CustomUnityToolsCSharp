@@ -10,8 +10,32 @@ namespace HB.Chat.Pages;
 /// </summary>
 public sealed class SettingsModel(
     RoomStore store, RoomHub hub, RoomList list, ChatTranscripts transcripts, IOptions<ChatOptions> options,
-    ProfileView profiles, FaceCatalog faces, RoomRuns runs, StickerPacks packs) : PageModel
+    ProfileView profiles, FaceCatalog faces, RoomRuns runs, StickerPacks packs, CodexSettings codexSettings) : PageModel
 {
+    // ---- Codex 구성원 (계획서 2026-10-29_HB_Chat-단톡방 ② 결정 5): 켤 수 있는 작업 폴더 · 실행 파일 · 이 계정 모델 ----
+
+    public IReadOnlyList<string> CodexWorkspaces => codexSettings.Workspaces();
+    public IReadOnlyList<WorkspaceEntry> AllWorkspaceList => options.Value.AllWorkspaces;
+    public string? CodexExe => options.Value.ResolveCodex();
+    public IReadOnlyList<CodexModels.Model> CodexModelList => CodexModels.Available();
+
+    /// <summary>Codex 구성원을 켤 작업 폴더 저장 — 허용 목록에 있는 이름만.</summary>
+    public IActionResult OnPostCodexWorkspaces(string[]? names)
+    {
+        var known = options.Value.AllWorkspaces.Select(w => w.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            codexSettings.Save((names ?? []).Where(known.Contains));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Error = $"Codex 설정을 저장하지 못했습니다: {ex.Message}";
+            OnGet();
+            return Page();
+        }
+        return Redirect("/Settings?done=codex");
+    }
+
     public ProfileView Profiles => profiles;
     public FaceCatalog Faces => faces;
     public StickerPacks Packs => packs;
@@ -139,6 +163,7 @@ public sealed class SettingsModel(
         "mcp-added" => "MCP 서버를 더했습니다. 쓸 방의 곁칸 → 연결에서 켜세요.",
         "mcp-secret" => "MCP 서버를 더했습니다 — 다만 확인할 점이 있습니다 (평문 토큰 · 원격 http · 원격으로 보내는 환경 변수 — 목록의 경고 줄). 토큰은 ${변수} 자리표시를 권합니다.",
         "mcp-removed" => "MCP 서버를 목록에서 뺐고, 켜 두었던 방에서도 껐습니다.",
+        "codex" => "Codex 구성원을 켤 작업 폴더를 저장했습니다.",
         _ => null,
     };
 

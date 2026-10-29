@@ -23,6 +23,34 @@ public sealed class ChatOptions
     /// <summary>claude 실행 파일. 비우면 PATH에서 claude.exe를 찾는다.</summary>
     public string? ClaudePath { get; set; }
 
+    /// <summary>
+    /// Codex CLI 실행 파일 (단톡방 Codex 구성원, 계획서 2026-10-29_HB_Chat-단톡방 ②). 비우면 npm 전역 설치의 codex.exe(%APPDATA%\npm\…\vendor\…\codex.exe),
+    /// 그다음 PATH의 codex.exe. 못 찾으면 null — Codex 구성원이 "Codex CLI를 찾지 못함"으로 실패한다.
+    /// </summary>
+    public string? CodexPath { get; set; }
+
+    public string? ResolveCodex()
+    {
+        if (!string.IsNullOrWhiteSpace(CodexPath)) return CodexPath.Trim();
+        // x64 · ARM64 판 (59063d4106 C11). npm이 PATH에 두는 codex.cmd는 cmd를 거쳐야 해서 쓰지 않는다
+        foreach (var (package, triple) in new[] { ("codex-win32-x64", "x86_64-pc-windows-msvc"), ("codex-win32-arm64", "aarch64-pc-windows-msvc") })
+        {
+            var npm = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "npm", "node_modules", "@openai", "codex",
+                "node_modules", "@openai", package, "vendor", triple, "bin", "codex.exe");
+            if (File.Exists(npm)) return npm;
+        }
+        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            try
+            {
+                var candidate = Path.Combine(dir.Trim(), "codex.exe");
+                if (File.Exists(candidate)) return candidate;
+            }
+            catch (ArgumentException) { }
+        }
+        return null;
+    }
+
     /// <summary>방 색인 · 만든 MCP 설정을 두는 폴더. 비우면 %LOCALAPPDATA%/HB_Chat.</summary>
     public string? DataDir { get; set; }
 

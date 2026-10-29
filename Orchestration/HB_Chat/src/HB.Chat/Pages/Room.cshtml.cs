@@ -591,6 +591,13 @@ public sealed class RoomModel(
         return new JsonResult(groups.States(group).Select(s => new { member = s.MemberId, state = s.State }));
     }
 
+    /// <summary>Codex 구성원 과정 (앱이 남긴 이벤트 기록 — 보낸 말 · 답 · 실행한 명령 · 오류 · 토큰). Claude 방이면 빈 목록.</summary>
+    public IReadOnlyList<CodexLog.Step> CodexSteps => Room.Engine == RoomEngines.Codex ? new CodexLog(() => options.Value.DataFolder).Read(Room.Id) : [];
+
+    /// <summary>단톡방 칩의 엔진 표시: Codex면 "Codex · 모델"(빈 모델 = 기본), Claude면 null.</summary>
+    public string? EngineLabel(GroupMember m) =>
+        store.Get(m.RoomId) is { Engine: RoomEngines.Codex } child ? "Codex" + (child.Model.Length > 0 ? " · " + child.Model : "") + (child.Effort is { } e ? " · " + e : "") : null;
+
     /// <summary>과정 보기(자식 방)의 단톡방 — 화면 안내 줄에 이름을 보인다.</summary>
     public Room? ParentGroup => Room.GroupId is { } g ? store.Get(g) : null;
 

@@ -56,6 +56,12 @@ builder.Services.AddSingleton(sp =>
     };
 });
 builder.Services.AddSingleton<GroupLog>(); // 단톡방 (계획서 2026-10-29_HB_Chat-단톡방): 대화 줄 · 구성원 실행
+// Codex 구성원을 켤 수 있는 작업 폴더 (단톡방 ② 결정 5 — 기본 없음, 설정 화면에서 고름)
+builder.Services.AddSingleton(sp =>
+{
+    var options = sp.GetRequiredService<IOptions<ChatOptions>>();
+    return new CodexSettings(() => options.Value.DataFolder, name => options.Value.WorkspacePath(name)); // 허용은 그때 경로에 묶임
+});
 builder.Services.AddSingleton<GroupChat>();
 builder.Services.AddSingleton<RoomList>();
 // 주체별 프로필 (3차 e): 데이터 폴더 profiles.json + profiles/ 그림

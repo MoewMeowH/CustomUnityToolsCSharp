@@ -13,9 +13,16 @@ public sealed class IndexModel(RoomStore store, RoomHub hub, RoomList list, Chat
     /// <summary>
     /// 새 단톡방 (계획서 2026-10-29_HB_Chat-단톡방, 1단계): 구성원 이름 · 역할 줄들, 대화 · 읽기 단계만. 구성원마다 숨은 자식 방이 생긴다.
     /// </summary>
+    /// <summary>Codex 구성원 모델 목록 (이 계정 — ~/.codex/models_cache.json). 비면 "Codex 기본"만.</summary>
+    public IReadOnlyList<CodexModels.Model> CodexModelList => CodexModels.Available();
+
+    /// <summary>Codex 구성원을 켤 수 있는 작업 폴더 (설정 화면).</summary>
+    public IReadOnlyList<string> CodexWorkspaces => groups.CodexSettings?.Workspaces() ?? [];
+
     public IActionResult OnPostCreateGroup(string workspace, PermissionLevel level, string model, string? title, string? effort,
-        string[]? names, string[]? roles)
+        string[]? names, string[]? roles, string[]? engines, string[]? codexModels, string[]? codexEfforts)
     {
+        static string? At(string[]? values, int i) => values is not null && i < values.Length ? values[i] : null;
         var o = options.Value;
         var (cleanEffort, effortError) = RoomEffort.Clean(effort);
         Error = o.WorkspacePath(workspace) is null ? "허용 목록에 없는 작업 폴더입니다."
@@ -24,7 +31,7 @@ public sealed class IndexModel(RoomStore store, RoomHub hub, RoomList list, Chat
             : effortError;
         if (Error is null)
         {
-            var members = (names ?? []).Select((n, i) => (n, roles is not null && i < roles.Length ? roles[i] ?? "" : "")).ToList();
+            var members = (names ?? []).Select((n, i) => new GroupMemberSpec(n, At(roles, i) ?? "", At(engines, i), At(codexModels, i), At(codexEfforts, i))).ToList();
             var (group, error) = groups.Create(workspace, level, model, cleanEffort, title, members);
             if (group is not null)
             {

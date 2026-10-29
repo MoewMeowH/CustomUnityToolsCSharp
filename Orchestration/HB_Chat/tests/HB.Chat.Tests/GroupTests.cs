@@ -243,7 +243,9 @@ public sealed class GroupTests : IDisposable
         Assert.Contains("답하는 중", _groups.Send(group.Id, "@B 하이"));
         _groups.Stop(group.Id);
         var stopped = await AnswerAsync(group.Id, "A", count);
-        Assert.Equal("(중지됨)", stopped.Text);
+        // 실행이 막 시작한 턴을 끊으면 "(중지됨)", 루프가 말을 잡기 전에 끊으면 턴 없이 쉼으로 돌아가 "(답 없이 끝남)" (b8697252eb C3) — 둘 다 막히지 않고 끝남
+        Assert.Contains(stopped.Text, new[] { "(중지됨)", "(답 없이 끝남)" });
+        Assert.Null(_groups.Send(group.Id, "@B 이제 됨")); // 기다림이 풀려 다음 말을 받는다
     }
 
     [Fact]

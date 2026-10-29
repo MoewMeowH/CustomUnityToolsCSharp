@@ -134,15 +134,35 @@
                     </div>
                     @for (var i = 0; i < GroupChat.MinMembers; i++)
                     {
-                        <div class="group-member-row" style="display:flex;gap:8px;margin-top:8px">
+                        <div class="group-member-row" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
                             <input type="text" name="names" placeholder="구성원 이름 (예: @(i == 0 ? "A" : "B"))" maxlength="20" required style="width:140px" />
-                            <input type="text" name="roles" placeholder="역할 (예: @(i == 0 ? "내 코드의 위험을 찾는다" : "A의 의견에 반박한다"))" maxlength="@GroupChat.RoleMaxChars" style="flex:1" />
+                            <input type="text" name="roles" placeholder="역할 (예: @(i == 0 ? "내 코드의 위험을 찾는다" : "A의 의견에 반박한다"))" maxlength="@GroupChat.RoleMaxChars" style="flex:1;min-width:200px" />
+                            @* 엔진 (단톡방 ②): Codex는 설정에서 고른 작업 폴더에서만 · 읽기 전용 *@
+                            <select name="engines" title="이 구성원이 도는 CLI">
+                                <option value="claude" selected>Claude</option>
+                                <option value="codex">Codex (읽기 전용)</option>
+                            </select>
+                            <select name="codexModels" title="Codex 모델 (Claude 구성원이면 무시 — 단톡방 모델을 씀)">
+                                <option value="" selected>Codex 기본 모델</option>
+                                @foreach (var cm in Model.CodexModelList)
+                                {
+                                    <option value="@cm.Slug">@cm.Name</option>
+                                }
+                            </select>
+                            <select name="codexEfforts" title="Codex 추론 강도">
+                                <option value="" selected>Codex 기본 강도</option>
+                                @foreach (var ce in GroupChat.CodexEfforts)
+                                {
+                                    <option value="@ce">@ce</option>
+                                }
+                            </select>
                         </div>
                     }
                     <button class="btn primary" type="submit" style="margin-top:8px">@Icons.Svg("plus") 단톡방 만들기</button>
                 </form>
                 <p class="muted" style="margin:6px 0 0;font-size:12.5px">
-                    부른 구성원만 답합니다 (@@이름, 지금은 한 번에 한 명). 구성원마다 Claude 세션이 따로 돌고, 단톡방 대화를 함께 받습니다.
+                    부른 구성원만 답합니다 (@@이름, 지금은 한 번에 한 명). 구성원마다 세션이 따로 돌고, 단톡방 대화를 함께 받습니다.
+                    Codex 구성원은 <a href="/Settings">설정</a>에서 고른 작업 폴더에서만 됩니다 (지금: @(Model.CodexWorkspaces.Count == 0 ? "없음" : string.Join(", ", Model.CodexWorkspaces))) — 읽기 전용이지만 디스크 전체를 읽을 수 있습니다.
                 </p>
             </section>
         </div>

@@ -14,7 +14,13 @@ namespace HB.Chat;
 public sealed record GroupMember(string Id, string Name, string Role, string RoomId)
 {
     public int SeenUpTo { get; init; }
+
+    /// <summary>엔진: null = Claude, <see cref="RoomEngines.Codex"/> (표시용 — 실행은 자식 방의 Engine).</summary>
+    public string? Engine { get; init; }
 }
+
+/// <summary>만들 때 받는 구성원 칸: 이름 · 역할 · 엔진(null/claude · codex) · Codex 모델 · Codex 추론 강도.</summary>
+public sealed record GroupMemberSpec(string Name, string Role, string? Engine = null, string? Model = null, string? Effort = null);
 
 public enum GroupEntryKind { User, Member, Note }
 
@@ -42,7 +48,8 @@ public sealed class GroupLog(Func<string> dataFolder)
         Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping, // 사람이 읽는 로컬 기록 (HTML에 넣지 않음)
     };
 
-    private readonly Lock _gate = new();
+    /// <summary>모든 인스턴스가 같은 잠금 — 휴지통 정리처럼 따로 만들어 써도 같은 파일을 막아 준다 (59063d4106 C4와 같은 이유).</summary>
+    private static readonly Lock _gate = new();
 
     public string PathOf(string groupId) =>
         RoomStore.IsRoomId(groupId) ? Path.Combine(dataFolder(), "groups", groupId + ".jsonl") : throw new ArgumentException("방 ID 모양이 아닙니다.", nameof(groupId));
@@ -193,14 +200,21 @@ public sealed partial class GroupChat
     /// <summary>답을 기다리는 자식 방 → 그 사용자 말 (단톡방에서 보낸 실행만 게시 — 앱을 다시 켜면 끊긴 실행은 게시하지 않음).</summary>
     private readonly ConcurrentDictionary<string, Pending> _pending = new(StringComparer.Ordinal);
 
-    public GroupChat(RoomStore store, RoomHub hub, GroupLog log)
+    public GroupChat(RoomStore store, RoomHub hub, GroupLog log, CodexSettings? codexSettings = null)
     {
         _store = store;
         _hub = hub;
         _log = log;
+        CodexSettings = codexSettings;
         hub.TurnEnded += OnTurnEnded;
         hub.ActivityChanged += OnActivity;
     }
+
+    /// <summary>Codex 구성원을 켤 수 있는 작업 폴더 (없으면 Codex 구성원을 만들지 않음).</summary>
+    public CodexSettings? CodexSettings { get; }
+
+    /// <summary>Codex 모델 목록을 바꿀 때 (시험). 기본은 ~/.codex/models_cache.json.</summary>
+    public Func<IReadOnlyList<CodexModels.Model>>? CodexModelList { get; init; }
 
     public GroupLog Log => _log;
 
@@ -209,10 +223,40 @@ public sealed partial class GroupChat
 
     /// <summary>단톡방 만들기 검사 + 만들기. 1단계는 대화 · 읽기 단계만 (결정 ①).</summary>
     public (Room? Group, string? Error) Create(string workspace, PermissionLevel level, string model, string? effort, string? title,
-        IReadOnlyList<(string Name, string Role)> members)
+        IReadOnlyList<(string Name, string Role)> members) =>
+        Create(workspace, level, model, effort, title, [.. members.Select(m => new GroupMemberSpec(m.Name, m.Role))]);
+
+    /// <summary>Codex 추론 강도 (codex exec model_reasoning_effort) — 빈 값은 Codex 기본.</summary>
+    public static readonly IReadOnlyList<string> CodexEfforts = ["low", "medium", "high", "xhigh", "max"];
+
+    /// <summary>
+    /// 만들기. Codex 구성원(2단계)은 설정에서 고른 작업 폴더에서만(결정 5), 모델은 이 계정 Codex 목록(<see cref="CodexModels"/>)에 있는 것 · 빈 값(Codex 기본).
+    /// </summary>
+    public (Room? Group, string? Error) Create(string workspace, PermissionLevel level, string model, string? effort, string? title,
+        IReadOnlyList<GroupMemberSpec> members)
     {
-        var clean = members.Where(m => !string.IsNullOrWhiteSpace(m.Name)).Select(m => (Name: m.Name.Trim(), Role: (m.Role ?? "").Trim())).ToList();
+        var clean = members.Where(m => !string.IsNullOrWhiteSpace(m.Name))
+            .Select(m => m with
+            {
+                Name = m.Name.Trim(), Role = (m.Role ?? "").Trim(),
+                Engine = string.IsNullOrWhiteSpace(m.Engine) || m.Engine == "claude" ? null : m.Engine.Trim(),
+                Model = string.IsNullOrWhiteSpace(m.Model) ? null : m.Model.Trim(),
+                Effort = string.IsNullOrWhiteSpace(m.Effort) ? null : m.Effort.Trim(),
+            }).ToList();
+        var codex = clean.Where(m => m.Engine == RoomEngines.Codex).ToList();
+        var codexModels = codex.Any(m => m.Model is not null) ? (CodexModelList?.Invoke() ?? CodexModels.Available()) : [];
+        // 강도는 고른 모델이 받는 것만 — 모르는 강도로 만들면 그 구성원이 매 턴 실패하고 만든 뒤에는 바꿀 수 없다 (59063d4106 C2)
+        bool EffortOk(GroupMemberSpec m) => m.Effort is not { } e
+            || (m.Model is { } slug && codexModels.FirstOrDefault(x => x.Slug == slug) is { Efforts.Count: > 0 } known
+                ? known.Efforts.Contains(e, StringComparer.Ordinal)
+                : CodexEfforts.Contains(e, StringComparer.Ordinal));
         var error = level is not (PermissionLevel.Chat or PermissionLevel.Read) ? "단톡방은 지금 대화 · 읽기 단계만 됩니다."
+            : clean.FirstOrDefault(m => m.Engine is not null and not RoomEngines.Codex) is { } unknownEngine ? $"알 수 없는 엔진입니다: {unknownEngine.Engine}"
+            // Codex는 늘 파일을 읽고 명령을 돌린다 — "도구 없이 대화만"인 대화 단계와 맞지 않는다 (59063d4106 C1)
+            : codex.Count > 0 && level != PermissionLevel.Read ? "Codex 구성원은 읽기 단계 단톡방에서만 됩니다 (Codex는 늘 파일을 읽을 수 있음)."
+            : codex.Count > 0 && CodexSettings?.Allowed(workspace) != true ? $"작업 폴더 '{workspace}'에서는 Codex 구성원을 켜지 않았습니다 — 설정 화면의 'Codex'에서 고르세요."
+            : codex.FirstOrDefault(m => m.Model is { } cm && !codexModels.Any(x => x.Slug == cm)) is { } badModel ? $"Codex 모델 '{badModel.Model}'은 이 계정 목록에 없습니다."
+            : codex.FirstOrDefault(m => !EffortOk(m)) is { } badEffort ? $"Codex 추론 강도 '{badEffort.Effort}'는 {(badEffort.Model ?? "Codex 기본 모델")}이 받지 않습니다."
             : string.IsNullOrWhiteSpace(title) ? "단톡방 이름을 쓰세요."
             : title.Length > 200 ? "이름이 너무 깁니다."
             : clean.Count < MinMembers ? $"구성원은 {MinMembers}명 이상이어야 합니다."
@@ -226,14 +270,16 @@ public sealed partial class GroupChat
         var created = new List<string>();
         try
         {
-            var list = clean.Select(m => new GroupMember(Guid.NewGuid().ToString("N")[..8], m.Name, m.Role, "")).ToList();
+            var list = clean.Select(m => new GroupMember(Guid.NewGuid().ToString("N")[..8], m.Name, m.Role, "") { Engine = m.Engine }).ToList();
             var group = _store.Create(workspace, level, model, title, effort: effort, shape: r => r with { Members = list });
             created.Add(group.Id);
             var withRooms = new List<GroupMember>();
-            foreach (var m in list)
+            foreach (var (m, spec) in list.Zip(clean))
             {
-                var child = _store.Create(workspace, level, model, $"{title!.Trim()} · {m.Name}", effort: effort,
-                    shape: r => r with { GroupId = group.Id, MemberId = m.Id });
+                // Codex 구성원은 자기 모델 · 강도(빈 모델 = Codex 기본), Claude 구성원은 단톡방 모델 · 강도
+                var isCodex = m.Engine == RoomEngines.Codex;
+                var child = _store.Create(workspace, level, isCodex ? spec.Model ?? "" : model, $"{title!.Trim()} · {m.Name}", effort: isCodex ? spec.Effort : effort,
+                    shape: r => r with { GroupId = group.Id, MemberId = m.Id, Engine = m.Engine });
                 created.Add(child.Id);
                 withRooms.Add(m with { RoomId = child.Id });
             }

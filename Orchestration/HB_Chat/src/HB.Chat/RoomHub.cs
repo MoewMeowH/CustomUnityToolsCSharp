@@ -1068,6 +1068,15 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     private async Task<RunResult> RunOneAsync(string roomId, Live live, string text, int generation, CancellationToken ct, CancellationToken wrapUp = default)
     {
         if (store.Get(roomId) is not { } room) return new RunResult(false, false, "없는 방입니다.", null, null, null, 0, 0, null);
+        // Codex 구성원 (계획서 2026-10-29_HB_Chat-단톡방 ②): claude 대신 codex exec — 승인 · MCP · 터미널 없음, 읽기 전용
+        if (room.Engine == RoomEngines.Codex)
+        {
+            try { return await RunCodexAsync(room, text, ct); }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                return new RunResult(false, false, $"내부 오류: {ex.GetType().Name}: {ex.Message}", null, null, null, 0, 0, null);
+            }
+        }
         var before = transcripts.Size(room.SessionId);
         // 터미널 곁칸: 명령 방 실행에만 앱 MCP를 붙인다 — 이 실행 동안만 듣는 토큰 (끝나면 거두고 설정 파일도 지운다)
         string? terminalToken = null, terminalConfig = null;
@@ -1103,6 +1112,67 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         return !result.Ok && !result.Cancelled && !result.NotStarted && transcripts.Size(room.SessionId) == before
             ? result with { NotStarted = true }
             : result;
+    }
+
+    /// <summary>Codex 실행기를 바꿀 때 (테스트: 가짜 codex). 기본은 Codex 실행 파일 + <see cref="CodexRunner.Args"/>.</summary>
+    public Func<Room, IReadOnlyList<string>, string, ProcessSpec>? CodexProcessFactory { get; init; }
+
+    /// <summary>
+    /// Codex 구성원 한 턴: 설정에서 고른 작업 폴더만(결정 5), 새 스레드는 규칙을 developer_instructions로, 이어 가는 스레드는 규칙이 바뀌었으면
+    /// 이번 말 앞에 "규칙 바뀜" 안내(resume에서는 바꾼 지시가 먹지 않음 — 0단계 실측 ②). 이벤트 줄은 과정 기록(CodexLog)에 그대로 남긴다.
+    /// </summary>
+    private async Task<RunResult> RunCodexAsync(Room room, string text, CancellationToken ct)
+    {
+        var o = options.Value;
+        static RunResult Blocked(string error) => new(false, false, error, null, null, null, 0, 0, null) { NotStarted = true };
+        RunResult Refused(RunResult r)
+        {
+            try { store.Update(room.Id, x => x with { LastRunAt = DateTimeOffset.Now, LastError = r.Error, RunStartedAt = null }); }
+            catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException) { }
+            return r;
+        }
+        if (o.WorkspacePath(room.Workspace) is not { } workspace || !Directory.Exists(workspace))
+            return Refused(Blocked($"작업 폴더 '{room.Workspace}'가 허용 목록에 없거나 없는 폴더입니다."));
+        if (!o.Workspaces.ContainsKey(room.Workspace) && o.AppWorkspaces?.WhyUnsafe(workspace) is { } unsafeWhy)
+            return Refused(Blocked($"작업 폴더 '{room.Workspace}'를 지금은 쓸 수 없습니다: {unsafeWhy}"));
+        if (!new CodexSettings(() => o.DataFolder, o.WorkspacePath).Allowed(room.Workspace))
+            return Refused(Blocked($"작업 폴더 '{room.Workspace}'에서는 Codex 구성원을 켜지 않았습니다 — 설정 화면의 'Codex'에서 고르세요."));
+        var exe = o.ResolveCodex();
+        if (exe is null && CodexProcessFactory is null)
+            return Refused(Blocked("Codex CLI를 찾지 못했습니다 — npm i -g @openai/codex 뒤 터미널에서 codex login (또는 설정 Chat:CodexPath)."));
+
+        var rules = CodexRunner.Rules + GroupRules.For(store, room);
+        var hash = RoomRules.Hash(rules);
+        var thread = room.CodexThread;
+        var noted = thread is not null && room.RulesHash != hash;
+        var prompt = noted ? RoomRules.ChangedNote(rules) + text : text;
+        var args = CodexRunner.Args(workspace, string.IsNullOrWhiteSpace(room.Model) ? null : room.Model, room.Effort, rules, thread);
+        var spec = CodexProcessFactory?.Invoke(room, args, workspace) ?? new ProcessSpec(exe!, args, workspace);
+        var log = new CodexLog(() => o.DataFolder);
+        log.Append(room.Id, CodexLog.PromptLine(text));
+        try { store.Update(room.Id, r => r with { RunStartedAt = DateTimeOffset.Now }); }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException) { }
+
+        var outcome = await CodexRunner.RunAsync(spec, prompt, line => log.Append(room.Id, CodexLog.Slim(line)), ct);
+        // 규칙을 받은 때: 새 스레드가 시작됐거나(developer_instructions) 안내를 붙인 턴이 성공
+        var delivered = thread is null && outcome.Thread is not null || noted && outcome.Result.Ok;
+        // 이어 가던 스레드를 Codex가 찾지 못함(세션 기록이 지워짐 · 계정 바뀜 — 실측: 이벤트 없이 "no rollout found", 종료 코드 1):
+        // 스레드를 잊고 다음 말부터 새로 시작한다 — 안 그러면 이 구성원은 계속 실패했다 (59063d4106 C3)
+        var lost = thread is not null && outcome.Thread is null && !outcome.Result.Ok && !outcome.Result.Cancelled;
+        var result = lost ? outcome.Result with { Error = outcome.Result.Error + " — 이어 가던 Codex 대화를 찾지 못해 다음 말부터 새 대화로 시작합니다." } : outcome.Result;
+        try
+        {
+            store.Update(room.Id, r => r with
+            {
+                LastRunAt = DateTimeOffset.Now,
+                LastError = result.Ok || result.Cancelled ? null : result.Error,
+                RunStartedAt = null,
+                CodexThread = lost ? null : outcome.Thread ?? r.CodexThread,
+                RulesHash = lost ? null : delivered ? hash : r.RulesHash,
+            });
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException) { }
+        return result;
     }
 
     private async Task<RunResult> RunRoomAsync(Room room, Live live, string text, int generation, CancellationToken ct, CancellationToken wrapUp, string? terminalConfig)

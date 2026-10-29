@@ -116,6 +116,32 @@
             </details>
         }
 
+        @if (room.Engine == RoomEngines.Codex)
+        {
+            @* Codex 구성원 과정 (단톡방 ②): Codex 세션 기록 대신 앱이 남긴 이벤트 — 보낸 말 · 실행한 명령 · 답 · 오류 *@
+            <div class="panel codex-log" id="codex-log" style="padding:8px 12px">
+                <b>Codex 과정</b> <span class="muted">— 읽기 전용 · 모델 @(room.Model.Length > 0 ? room.Model : "Codex 기본")@(room.Effort is { } ce ? " · " + ce : "")</span>
+                @if (Model.CodexSteps.Count == 0)
+                {
+                    <p class="muted" style="margin:6px 0 0">아직 실행이 없습니다.</p>
+                }
+                <ol style="margin:6px 0 0;padding-left:18px">
+                    @foreach (var s in Model.CodexSteps)
+                    {
+                        <li class="codex-step @s.Kind"><span class="muted">@(s.Kind switch { "user" => "보낸 말", "answer" => "답", "command" => "명령", "error" => "오류", _ => "턴" })</span>
+                            @if (s.Kind is "answer" or "user")
+                            {
+                                <div style="white-space:pre-wrap">@(s.Text.Length > 4000 ? s.Text[..4000] + "…" : s.Text)</div>
+                            }
+                            else
+                            {
+                                <code class="mono">@(s.Text.Length > 500 ? s.Text[..500] + "…" : s.Text)</code>
+                            }
+                        </li>
+                    }
+                </ol>
+            </div>
+        }
         <partial name="_Messages" model="Model" />
         @* 진행 중 턴: 보낸 말 · 흘림 글 · 도구 칩 · 승인 카드(흐름 안, 2-2 b) · 기다리는 말 *@
         <div id="live"></div>

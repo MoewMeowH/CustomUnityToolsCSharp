@@ -134,6 +134,25 @@
             </section>
 
             @* 앱에서 더한 MCP 서버 (계획서 2026-10-29_HB_Chat-앱-MCP-서버-더하기): 모든 방 연결 탭에 "앱 서버"로, 방마다 켬. 작업 폴더 .mcp.json에 같은 이름이 있으면 그쪽(결정 1) *@
+            @* Codex 구성원 (계획서 2026-10-29_HB_Chat-단톡방 ② 결정 5): 켤 수 있는 작업 폴더 — 기본 없음 *@
+            <section class="panel" style="padding:12px 14px;margin-bottom:16px">
+                <h3 style="margin:0 0 6px;font-size:15px">Codex (단톡방 구성원)</h3>
+                <p class="muted" style="margin:0 0 8px;font-size:12.5px">
+                    단톡방에 OpenAI Codex CLI 구성원을 넣을 수 있는 작업 폴더를 고릅니다(기본 없음). Codex는 ChatGPT 로그인(터미널에서 <code class="mono">codex login</code>)으로 돌고,
+                    늘 <b>읽기 전용</b>이지만 <b>디스크 전체를 읽을 수 있습니다</b> — 작업 폴더 밖 파일(사내 자료 등)도 읽어 OpenAI로 보낼 수 있으니 그런 자료가 있는 PC · 폴더에서는 켜지 마세요.
+                </p>
+                <p class="muted" style="margin:0 0 8px;font-size:12.5px">
+                    실행 파일: @(Model.CodexExe is { } exe ? exe : "찾지 못함 — npm i -g @openai/codex (또는 설정 Chat:CodexPath)") ·
+                    모델: @(Model.CodexModelList.Count == 0 ? "목록 없음 (Codex 기본만)" : string.Join(", ", Model.CodexModelList.Select(m => m.Name)))
+                </p>
+                <form method="post" asp-page-handler="CodexWorkspaces" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+                    @foreach (var w in Model.AllWorkspaceList)
+                    {
+                        <label><input type="checkbox" name="names" value="@w.Name" checked="@Model.CodexWorkspaces.Contains(w.Name, StringComparer.OrdinalIgnoreCase)" /> @w.Name</label>
+                    }
+                    <button class="btn" type="submit">저장</button>
+                </form>
+            </section>
             <section class="panel" style="padding:12px 14px;margin-bottom:16px">
                 <h3 style="margin:0 0 6px;font-size:15px">MCP 서버 (앱)</h3>
                 <p class="muted" style="margin:0 0 8px;font-size:12.5px">

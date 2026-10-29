@@ -47,6 +47,7 @@ public static class Trash
             // 실행 도중 앱이 죽어 남은 방별 MCP 설정 파일 (계획서 2026-10-29_HB_Chat-방별-MCP-Unity-연결, 지휘자 검토 K7)
             McpConfigFile.DeleteRoom(McpConfigFile.RoomPath(dataFolder, id));
             new GroupLog(() => dataFolder).Delete(id); // 단톡방 대화 줄 (없으면 아무것도 안 함)
+            new CodexLog(() => dataFolder).Delete(id); // Codex 구성원 과정 기록
         }
         return removed;
     }

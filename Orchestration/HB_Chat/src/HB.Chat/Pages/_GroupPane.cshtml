@@ -21,6 +21,10 @@
                 var state = Model.MemberState(m);
                 <span class="member@(state is null ? "" : " active")" data-member="@m.Id" title="@(m.Role.Length > 0 ? m.Role : "역할 없음")">
                     <button type="button" class="btn member-call" data-name="@m.Name" title="입력칸에 @@@m.Name 넣기">@@@m.Name</button>
+                    @if (Model.EngineLabel(m) is { } engine)
+                    {
+                        <span class="badge member-engine" title="읽기 전용 · 디스크 전체를 읽을 수 있음">@engine</span>
+                    }
                     <span class="member-state muted">@state</span>
                     <a href="/Room/@m.RoomId" target="_blank" class="icon-link" title="@(m.Name)의 과정 (도구 · 승인 · 질문 카드)" aria-label="@(m.Name) 과정 보기">@Icons.Svg("external")</a>
                 </span>

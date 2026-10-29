@@ -111,6 +111,12 @@ public sealed record Room
     /// <summary>자식 방이 맡은 구성원의 고정 ID (<see cref="GroupMember.Id"/>).</summary>
     public string? MemberId { get; init; }
 
+    /// <summary>실행 엔진: null = Claude Code, <see cref="RoomEngines.Codex"/> = Codex CLI (단톡방 구성원만, 읽기 전용). Codex면 Model은 Codex 모델(빈 값 = Codex 기본).</summary>
+    public string? Engine { get; init; }
+
+    /// <summary>Codex 구성원의 스레드 ID — 둘째 턴부터 resume으로 이어 간다.</summary>
+    public string? CodexThread { get; init; }
+
     [JsonIgnore]
     public bool IsGroup => Members.Count > 0;
 }
