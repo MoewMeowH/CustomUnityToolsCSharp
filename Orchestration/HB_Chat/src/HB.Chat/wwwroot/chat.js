@@ -1675,20 +1675,35 @@
         }
         // ---- 문서 탭: 작업 폴더의 계획서 · 작업 로그 (읽기 전용). #side-data 밖이라 턴 끝 다시 받기에 닫히지 않고,
         // 본문을 보는 동안은 목록도 다시 받지 않는다 — 읽던 자리 그대로
-        let docPath = null, docsLoading = false, docsLoaded = false, docSeq = 0;
+        // folderOpen: 접힌 "작업 폴더 최근"을 사용자가 펴거나 접은 값 — 목록을 다시 받아도 그대로 (null = 서버가 정한 대로)
+        let docPath = null, docsLoading = false, docsAgain = false, docsLoaded = false, docSeq = 0, folderOpen = null;
         const docsSec = $("#side-sec-docs"), docsList = $("#docs-list"), docsView = $("#docs-view");
         const parseHtml = (html) => [...new DOMParser().parseFromString("<div>" + html + "</div>", "text/html").body.firstElementChild.childNodes];
         async function loadDocs() {
-            if (!docsList || docPath !== null || docsLoading || disposed) return;
+            if (!docsList || docPath !== null || disposed) return;
+            // 받는 중에 또 부르면(턴 끝) 끝난 뒤 한 번 더 — 받던 목록은 그 턴의 문서가 빠졌을 수 있다
+            if (docsLoading) { docsAgain = true; return; }
             docsLoading = true;
             try {
                 const res = await fetch(self + "?handler=Docs", { cache: "no-store" });
                 if (disposed || docPath !== null) return;
                 docsList.replaceChildren(...(res.ok ? parseHtml(await res.text()) : [el("p", "muted", "문서 목록을 불러오지 못했습니다 (" + res.status + ").")]));
+                const folder = docsList.querySelector("details.docs-folder");
+                if (folder && folderOpen !== null) folder.open = folderOpen;
                 docsLoaded = res.ok;
             } catch {
                 if (!disposed) docsList.replaceChildren(el("p", "muted", "문서 목록을 불러오지 못했습니다."));
-            } finally { docsLoading = false; }
+            } finally {
+                docsLoading = false;
+                if (docsAgain && !disposed) { docsAgain = false; loadDocs(); }
+            }
+        }
+        // 턴 끝: "이 방에서 다룬 문서"는 턴마다 바뀐다 — 문서 탭이 보이고 목록 화면일 때만 다시 받는다
+        // (탭이 숨어 있으면 훑지 않고, 본문을 읽는 중이면 읽던 자리 그대로. 접힘은 folderOpen이 지킨다)
+        function refreshDocsOnTurnEnd() {
+            if (!side || side.hidden || sideTab !== "docs" || docPath !== null) return;
+            docsLoaded = false;
+            loadDocs();
         }
         // 마지막에 누른 문서만 그린다 — 늦게 온 앞 응답이 덮지 않게 (256b92a166 C4)
         async function openDoc(path) {
@@ -1705,6 +1720,10 @@
             docsSec.scrollTop = 0;
         }
         docsSec?.addEventListener("click", (e) => {
+            // 사용자가 머리를 눌렀을 때만 기억한다 — toggle은 서버 HTML의 open 속성으로도 와서 구별되지 않는다 (abc6476218 C2).
+            // click은 접고 펴기 전에 오므로 바뀔 값은 지금의 반대 (키보드 Enter · Space도 click으로 온다)
+            const head = e.target.closest("details.docs-folder > summary");
+            if (head) { folderOpen = !head.parentElement.open; return; }
             if (e.target.closest("#docs-back")) {
                 docSeq++; // 아직 오는 본문은 버린다
                 docPath = null; docsLoaded = false; docsView.hidden = true; docsList.hidden = false; loadDocs();
@@ -1888,6 +1907,7 @@
                     renderBrowser(ev.browser);
                     if (sideTab === "browser" && !side.hidden) loadBrowserFrame();
                     loadSide(); // 끊긴 사이 끝난 턴은 end가 오지 않는다 — 비용 · 외부 실행을 새로 (C3)
+                    refreshDocsOnTurnEnd();
                     break;
                 case "background":
                     showBackground(ev.backgroundCount, ev.backgroundUntil);
@@ -1998,6 +2018,7 @@
                     showContext(ev.contextTokens, ev.contextWindow);
                     if (ev.face) setFace(ev.face);
                     loadSide(); // 곁칸이 열려 있으면 비용 · 컨텍스트 · 외부 실행 · 첨부를 새로 (3차 c)
+                    refreshDocsOnTurnEnd();
                     break;
                 }
                 case "idle":

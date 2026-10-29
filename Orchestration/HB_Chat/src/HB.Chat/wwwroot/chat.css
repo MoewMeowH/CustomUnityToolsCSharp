@@ -136,6 +136,10 @@ select, input[type=text], textarea { background: var(--panel); border: 1px solid
 .docs-project + .docs-project { margin-top: 14px; }
 .docs-project h3 { font-size: 13px; margin: 0 0 6px; }
 .docs-status { flex-basis: 100%; }
+/* 방 기준 목록 아래 접힌 "작업 폴더 최근" */
+.docs-folder { margin-top: 14px; }
+.docs-folder > summary { cursor: pointer; font-size: 13px; }
+.docs-folder > .docs-project:first-of-type { margin-top: 8px; }
 .docs-bar { position: sticky; top: -10px; background: var(--panel); padding: 4px 0 8px; display: flex; gap: 8px; align-items: center; overflow-wrap: anywhere; }
 #docs-view[hidden], #docs-list[hidden] { display: none; }
 .docs-body { font-size: 13px; overflow-wrap: anywhere; }

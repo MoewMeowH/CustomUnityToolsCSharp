@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using HB.Chat;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -91,6 +92,31 @@ public sealed class ChatScriptTests(ChatApp app, ChatBrowser browser) : IClassFi
 
         await page.EvalAsync("document.querySelector('#docs-back').click()");
         await page.WaitForAsync("!document.querySelector('#docs-list').hidden && document.querySelector('#docs-view').hidden", "목록으로", TimeSpan.FromSeconds(10));
+        page.AssertNoErrors();
+    }
+
+    /// <summary>문서 탭을 열어 둔 채 턴이 끝나면 "이 방에서 다룬 문서"를 다시 받는다 (목록 화면일 때만).</summary>
+    [Fact]
+    public async Task SideDocs_TurnEnd_RefreshesRoomList()
+    {
+        if (!browser.Available) return;
+        var plans = Path.Combine(app.Dir, "ws", "Turn", "docs", "plans");
+        Directory.CreateDirectory(plans);
+        var plan = Path.Combine(plans, "2026-10-30_턴-끝.md");
+        File.WriteAllText(plan, "# 턴 끝");
+        var room = app.Room("docs-turn", ChatApp.User("q", 0), ChatApp.Conductor("first", 1));
+        await using var page = await browser.OpenAsync(app.RoomUrl(room));
+        await page.EvalAsync("document.querySelector('#side-toggle').click(); document.querySelector('#side-tab-docs').click()");
+        await page.WaitForAsync("(document.querySelector('#docs-list').textContent || '').includes('이 방에서 다룬 계획서 · 로그가 없습니다')", "빈 방 목록", TimeSpan.FromSeconds(10));
+
+        // 이 턴에 지휘자가 그 계획서를 읽은 것으로 — 턴이 끝나며 붙는 줄 앞에 둔다
+        File.AppendAllText(app.TranscriptPath(room.SessionId), ChatApp.Tool("Read", new JsonObject { ["file_path"] = plan }, 2) + "\n");
+        await page.SendAsync("say 1");
+        await page.WaitForAsync(HasConductor("say-1"), "턴 끝", ChatPage.TurnWait);
+        await page.WaitForAsync(
+            "[...document.querySelectorAll('#docs-list a[data-doc]')].some(a => a.dataset.doc.endsWith('2026-10-30_턴-끝.md') && !a.closest('details'))",
+            "턴 끝에 방 목록 갱신", TimeSpan.FromSeconds(10));
+        Assert.False(await page.EvalAsync<bool>("document.querySelector('#docs-list details.docs-folder').open")); // 방 목록이 생겨 접힘
         page.AssertNoErrors();
     }
 

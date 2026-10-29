@@ -1,15 +1,20 @@
+using HB.Orchestration.Shared;
+
 namespace HB.Chat;
 
 /// <summary>
 /// 방 작업 폴더의 계획서 · 작업 로그 (곁칸 "문서" 탭). 작업 폴더와 그 아래 <see cref="MaxDepth"/>단계의 <c>docs/</c>에서
 /// <c>plans/*.md</c> · <c>worklog/*.md</c> · 색인 <c>worklog.md</c>를 찾는다 (프로젝트가 여럿인 저장소는 프로젝트 폴더마다 docs).
 /// 화면에 내주는 파일은 같은 모양의 경로만 — 작업 폴더 안 · 건너뛸 폴더 밖 · 경로 중간 링크 · junction 없음 · .md · <see cref="MaxBytes"/> 이하.
+/// 방 기준 목록은 그 방 세션 기록의 도구 입력(<see cref="FileMention"/>)에 나온 계획서 · 로그다 — 색인은 거의 모든 작업에서 고치므로 넣지 않는다.
 /// </summary>
 public static class ProjectDocs
 {
     public const int MaxDepth = 3;
     public const int MaxPlans = 10;
     public const int MaxLooseLogs = 5;
+    /// <summary>프로젝트마다 방 기준 줄 상한 (오래 다룬 것부터 자른다).</summary>
+    public const int MaxRoomRows = 20;
     public const long MaxBytes = 1024 * 1024;
     /// <summary>docs를 찾으며 들르는 폴더 상한 — 큰 저장소(유니티)에서 곁칸이 늦지 않게.</summary>
     public const int MaxVisited = 2000;
@@ -27,17 +32,29 @@ public static class ProjectDocs
     /// <summary>docs 폴더 하나 = 프로젝트 하나. Name은 docs의 부모 폴더 이름, LooseLogs는 짝 계획서가 없는 로그.</summary>
     public sealed record Project(string Name, string DocsRel, Doc? Index, IReadOnlyList<PlanRow> Plans, IReadOnlyList<Doc> LooseLogs);
 
-    public static IReadOnlyList<Project> Find(string? workspace)
+    /// <summary>
+    /// 방에서 다룬 문서 줄: 계획서 · 짝 로그(둘 중 하나는 있음) · 색인 상태, 이 방에서 마지막으로 다룬 시각과 방식
+    /// (둘 중 하나만 다뤄도 짝을 함께 — 방식은 고침 → 읽음 → 셸 순으로 센 것).
+    /// </summary>
+    public sealed record RoomRow(Doc? Plan, Doc? Log, string? Status, DateTimeOffset? At, FileMentionKind Kind);
+    public sealed record RoomProject(string Name, string DocsRel, IReadOnlyList<RoomRow> Rows);
+
+    public static IReadOnlyList<Project> Find(string? workspace) => Find(workspace, null).Projects;
+
+    /// <summary>작업 폴더 목록과 방 기준 목록을 한 번에 (docs 찾기는 한 번). mentions가 null이면 방 기준 목록은 비어 있다.</summary>
+    public static (IReadOnlyList<Project> Projects, IReadOnlyList<RoomProject> Room) Find(string? workspace, IReadOnlyList<FileMention>? mentions)
     {
-        if (string.IsNullOrWhiteSpace(workspace)) return [];
+        if (string.IsNullOrWhiteSpace(workspace)) return ([], []);
         DirectoryInfo root;
         try
         {
             root = new DirectoryInfo(Path.GetFullPath(workspace));
-            if (!root.Exists) return [];
+            if (!root.Exists) return ([], []);
         }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException or IOException or UnauthorizedAccessException) { return []; }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException or IOException or UnauthorizedAccessException) { return ([], []); }
+        var touched = mentions is { Count: > 0 } ? new Touches(mentions) : null;
         var projects = new List<Project>();
+        var room = new List<(int Line, RoomProject Project)>();
         var queue = new Queue<(DirectoryInfo Dir, int Depth)>();
         queue.Enqueue((root, 0));
         var visited = 0;
@@ -48,13 +65,97 @@ public static class ProjectDocs
             {
                 if (child.Name.Equals("docs", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (Read(root.FullName, dir, child) is { } project) projects.Add(project);
+                    var (project, roomProject, roomLine) = Read(root.FullName, dir, child, touched);
+                    if (project is not null) projects.Add(project);
+                    if (roomProject is not null) room.Add((roomLine, roomProject));
                     continue; // docs 안은 더 찾지 않는다
                 }
                 if (depth < MaxDepth && !Skip(child.Name)) queue.Enqueue((child, depth + 1));
             }
         }
-        return projects;
+        // 프로젝트 사이도 이 방에서 마지막으로 다룬 차례로 — docs를 찾은 차례로 두면 방금 다룬 프로젝트가 아래로 간다 (abc6476218 C1)
+        return (projects, [.. room.OrderByDescending(r => r.Line).Select(r => r.Project)]);
+    }
+
+    /// <summary>다룬 흔적 하나로 모은 것: 마지막 줄 · 시각과 다룬 방식들.</summary>
+    private sealed class Touch
+    {
+        public int Line = -1;
+        public DateTimeOffset? At;
+        public bool Read, Edit, Shell;
+
+        public void Add(FileMention m)
+        {
+            if (m.Line >= Line) { Line = m.Line; At = m.Timestamp ?? At; }
+            switch (m.Kind)
+            {
+                case FileMentionKind.Read: Read = true; break;
+                case FileMentionKind.Edit: Edit = true; break;
+                default: Shell = true; break;
+            }
+        }
+    }
+
+    /// <summary>흔적 묶기: 파일 도구는 정규화한 전체 경로로, 셸은 파일 이름으로 (둘 다 대소문자 무시).</summary>
+    private sealed record Touches(Dictionary<string, Touch> ByPath, Dictionary<string, Touch> ByName)
+    {
+        public Touches(IReadOnlyList<FileMention> mentions) : this(new(StringComparer.OrdinalIgnoreCase), new(StringComparer.OrdinalIgnoreCase))
+        {
+            foreach (var m in mentions)
+            {
+                string key;
+                Dictionary<string, Touch> into;
+                if (m.Path is { } path)
+                {
+                    // 상대 경로는 HB_Chat 프로세스의 현재 폴더 기준으로 풀려 다른 파일과 맞을 수 있어 버린다 (파일 도구는 절대 경로를 받음, abc6476218 J1)
+                    if (!Path.IsPathFullyQualified(path)) continue;
+                    try { key = Path.GetFullPath(path); }
+                    catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { continue; }
+                    into = ByPath;
+                }
+                else { key = m.Name; into = ByName; }
+                if (!into.TryGetValue(key, out var touch)) into[key] = touch = new Touch();
+                touch.Add(m);
+            }
+        }
+
+        /// <summary>그 파일의 흔적 (경로 · 이름 둘 다 맞으면 합침). 없으면 null.</summary>
+        public Touch? Of(FileInfo file)
+        {
+            ByPath.TryGetValue(file.FullName, out var byPath);
+            ByName.TryGetValue(file.Name, out var byName);
+            if (byPath is null || byName is null) return byPath ?? byName;
+            var both = new Touch();
+            foreach (var t in new[] { byPath, byName })
+            {
+                if (t.Line >= both.Line) { both.Line = t.Line; both.At = t.At ?? both.At; }
+                both.Read |= t.Read; both.Edit |= t.Edit; both.Shell |= t.Shell;
+            }
+            return both;
+        }
+    }
+
+    /// <summary>계획서 · 짝 로그 중 다룬 것이 있는 줄만, 마지막으로 다룬 차례(줄 번호)가 늦은 것부터. LastLine은 그중 가장 늦은 줄 (없으면 -1).</summary>
+    private static (int LastLine, List<RoomRow> Rows) RoomRows(string root, List<FileInfo> plans, List<FileInfo> logs, string? indexText, Touches touched)
+    {
+        var planByName = new Dictionary<string, FileInfo>(StringComparer.OrdinalIgnoreCase);
+        foreach (var plan in plans) planByName.TryAdd(plan.Name, plan);
+        var logByName = new Dictionary<string, FileInfo>(StringComparer.OrdinalIgnoreCase);
+        foreach (var log in logs) logByName.TryAdd(log.Name, log);
+        var rows = new List<(int Line, RoomRow Row)>();
+        foreach (var name in planByName.Keys.Union(logByName.Keys, StringComparer.OrdinalIgnoreCase))
+        {
+            planByName.TryGetValue(name, out var plan);
+            logByName.TryGetValue(name, out var log);
+            var hits = new[] { plan is null ? null : touched.Of(plan), log is null ? null : touched.Of(log) }.OfType<Touch>().ToList();
+            if (hits.Count == 0) continue;
+            var last = hits.MaxBy(t => t.Line)!;
+            var kind = hits.Any(t => t.Edit) ? FileMentionKind.Edit : hits.Any(t => t.Read) ? FileMentionKind.Read : FileMentionKind.Shell;
+            rows.Add((last.Line, new RoomRow(plan is null ? null : ToDoc(root, plan), log is null ? null : ToDoc(root, log),
+                plan is null ? null : StatusOf(indexText, plan.Name), last.At, kind)));
+        }
+        var ordered = rows.OrderByDescending(r => r.Line).Take(MaxRoomRows).ToList();
+        return (ordered.Count == 0 ? -1 : ordered[0].Line, [.. ordered.Select(r => r.Row)]);
     }
 
     /// <summary>
@@ -117,9 +218,9 @@ public static class ProjectDocs
         return null;
     }
 
-    private static Project? Read(string root, DirectoryInfo parent, DirectoryInfo docs)
+    private static (Project?, RoomProject?, int RoomLine) Read(string root, DirectoryInfo parent, DirectoryInfo docs, Touches? touched)
     {
-        if (docs.LinkTarget is not null) return null;
+        if (docs.LinkTarget is not null) return (null, null, -1);
         var plans = Files(docs, "plans");
         var logs = Files(docs, "worklog");
         var indexFile = new FileInfo(Path.Combine(docs.FullName, "worklog.md"));
@@ -135,7 +236,7 @@ public static class ProjectDocs
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-        if (plans.Count == 0 && logs.Count == 0 && index is null) return null;
+        if (plans.Count == 0 && logs.Count == 0 && index is null) return (null, null, -1);
         // 대소문자를 가리는 폴더(WSL 등)에 a.md · A.md가 같이 있어도 예외 없이 첫 것
         var logByName = new Dictionary<string, FileInfo>(StringComparer.OrdinalIgnoreCase);
         foreach (var log in logs) logByName.TryAdd(log.Name, log);
@@ -145,7 +246,9 @@ public static class ProjectDocs
             .ToList();
         var loose = logs.Where(f => !planNames.Contains(f.Name)).OrderByDescending(f => f.LastWriteTimeUtc).Take(MaxLooseLogs)
             .Select(f => ToDoc(root, f)).ToList();
-        return new Project(parent.Name, Rel(root, docs.FullName), index, rows, loose);
+        var docsRel = Rel(root, docs.FullName);
+        var (roomLine, roomRows) = touched is null ? (-1, []) : RoomRows(root, plans, logs, indexText, touched);
+        return (new Project(parent.Name, docsRel, index, rows, loose), roomRows.Count == 0 ? null : new RoomProject(parent.Name, docsRel, roomRows), roomLine);
     }
 
     private static List<FileInfo> Files(DirectoryInfo docs, string folder)

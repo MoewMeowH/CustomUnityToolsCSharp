@@ -342,12 +342,22 @@ public sealed partial class RoomModel(
     /// <summary>곁칸 "문서" 탭 목록: 작업 폴더의 계획서 · 작업 로그 · 색인 (탭을 열 때 · 목록으로 돌아올 때).</summary>
     public IReadOnlyList<ProjectDocs.Project> DocProjects { get; private set; } = [];
 
+    /// <summary>
+    /// 곁칸 "문서" 탭의 방 기준 목록: 이 방 세션 기록의 도구 입력에 나온 계획서 · 로그.
+    /// 상태 — null: 보이지 않음 (Codex 구성원 방 · 아직 세션 기록 없음), "error": 세션 기록을 읽지 못함, "ok": 목록(비어 있을 수 있음).
+    /// </summary>
+    public IReadOnlyList<ProjectDocs.RoomProject> RoomDocs { get; private set; } = [];
+    public string? RoomDocsState { get; private set; }
+
     public IActionResult OnGetDocs(string id)
     {
         Response.Headers.CacheControl = "no-store";
         if (!RoomStore.IsRoomId(id) || store.Get(id) is not { } room) return NotFound();
         Room = room;
-        DocProjects = ProjectDocs.Find(WorkspacePath);
+        // 세션 기록은 ChatTranscripts가 기억해 둔 데서 붙은 줄만 더 읽는다 (Load와 달리 말 목록은 만들지 않음)
+        var transcript = room.Engine == RoomEngines.Codex ? null : transcripts.Read(room.SessionId);
+        RoomDocsState = transcript is null ? null : transcript.FormatError is null ? "ok" : "error";
+        (DocProjects, RoomDocs) = ProjectDocs.Find(WorkspacePath, RoomDocsState == "ok" ? transcript!.FileMentions : null);
         return Partial("_RoomDocs", this);
     }
 

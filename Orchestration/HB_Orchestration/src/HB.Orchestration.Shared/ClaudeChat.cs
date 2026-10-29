@@ -42,6 +42,20 @@ public sealed record ChatAnswer(int Line, DateTimeOffset? Timestamp, IReadOnlyLi
 
 public sealed record ChatAnswerItem(string Question, string? Header, string? Answer);
 
+/// <summary>지휘자가 도구로 파일을 다룬 방식: 파일 도구로 읽음 · 고침, 셸 명령에 이름이 나옴 (읽기인지 쓰기인지 모름).</summary>
+public enum FileMentionKind
+{
+    Read,
+    Edit,
+    Shell,
+}
+
+/// <summary>
+/// 지휘자 도구 입력에 나온 파일 하나 (HB_Chat 곁칸 "문서" 탭 — 이 방에서 다룬 문서). Line은 tool_use가 든 줄.
+/// Path는 파일 도구의 file_path 그대로(셸이면 null), Name은 파일 이름 — 셸 명령은 경로가 cwd에 기대므로 <c>.md</c> 이름만 남긴다.
+/// </summary>
+public sealed record FileMention(int Line, DateTimeOffset? Timestamp, FileMentionKind Kind, string? Path, string Name);
+
 /// <summary>
 /// 채팅방용 세션 기록. <see cref="TranscriptSummary"/>와 달리 대화 본문을 담는다:
 /// 사용자 글 · 지휘자 글(text 블록)만. 도구 호출 · 결과 · thinking · system-reminder · isMeta 줄은 넣지 않는다.
@@ -59,6 +73,9 @@ public sealed record ChatTranscript
 
     /// <summary>객관식 질문에 대한 답 (HB_Chat 4차 D1, 줄 차례). 말 목록과 따로.</summary>
     public IReadOnlyList<ChatAnswer> Answers { get; init; } = [];
+
+    /// <summary>지휘자 도구 입력에 나온 파일 (줄 차례). 말 목록과 따로 — 대시보드 채팅방은 쓰지 않는다.</summary>
+    public IReadOnlyList<FileMention> FileMentions { get; init; } = [];
 
     public int UnknownLines { get; init; }
     public string? FormatError { get; init; }
@@ -144,6 +161,7 @@ public static partial class ClaudeChatReader
         public readonly List<string?> PendingToolTargets = [];
         public readonly List<ChatEntry> Entries = [];
         public readonly List<ChatAnswer> Answers = [];
+        public readonly List<FileMention> FileMentions = [];
 
         /// <summary>답을 기다리는 AskUserQuestion 호출: tool_use ID → 질문들 (답 줄에 toolUseResult가 없을 때 질문을 보이려고).</summary>
         public readonly Dictionary<string, List<ChatAnswerItem>> AskCalls = new(StringComparer.Ordinal);
@@ -157,6 +175,7 @@ public static partial class ClaudeChatReader
             Title = CustomTitle ?? AiTitle,
             Entries = Entries.ToList(),
             Answers = Answers.ToList(),
+            FileMentions = FileMentions.ToList(),
             UnknownLines = Unknown,
         };
 
@@ -237,9 +256,36 @@ public static partial class ClaudeChatReader
                         ? ToolTargets.Of(toolName, toolInput) : null);
                     if (Str(block, "name") == AskTool && Str(block, "id") is { } askId && block.TryGetProperty("input", out var askInput))
                         s.AskCalls[askId] = QuestionItems(askInput, null);
+                    if (Str(block, "name") is { } usedName && block.TryGetProperty("input", out var usedInput))
+                        AddFileMentions(usedName, usedInput, lineNo, ts, s.FileMentions);
                     break;
             }
         }
+    }
+
+    /// <summary>
+    /// 파일 도구(Read · Edit · Write · MultiEdit)의 file_path, 셸(Bash · PowerShell) 명령 속 <c>.md</c> 낱말의 파일 이름.
+    /// mcp 도구는 보지 않는다. 셸 명령 본문은 남기지 않는다 (heredoc 본문이 클 수 있다).
+    /// </summary>
+    private static void AddFileMentions(string tool, JsonElement input, int lineNo, DateTimeOffset? ts, List<FileMention> into)
+    {
+        if (input.ValueKind != JsonValueKind.Object) return;
+        switch (tool)
+        {
+            case "Read" or "Edit" or "Write" or "MultiEdit" when Str(input, "file_path") is { Length: > 0 } path:
+                into.Add(new FileMention(lineNo, ts, tool == "Read" ? FileMentionKind.Read : FileMentionKind.Edit, path, FileNameOf(path)));
+                break;
+            case "Bash" or "PowerShell" when Str(input, "command") is { Length: > 0 } command:
+                foreach (var name in MarkdownWordRegex().Matches(command).Select(m => FileNameOf(m.Value)).Distinct(StringComparer.OrdinalIgnoreCase))
+                    if (name.Length > 3) into.Add(new FileMention(lineNo, ts, FileMentionKind.Shell, null, name));
+                break;
+        }
+    }
+
+    private static string FileNameOf(string path)
+    {
+        var cut = path.Replace('\\', '/').TrimEnd('/');
+        return cut[(cut.LastIndexOf('/') + 1)..];
     }
 
     private static void ReadUser(JsonElement root, int lineNo, DateTimeOffset? ts, State s)
@@ -408,4 +454,8 @@ public static partial class ClaudeChatReader
 
     [GeneratedRegex(@"^\[Request interrupted by user[^\]\n]*\]$")]
     private static partial Regex InterruptedRegex();
+
+    /// <summary>셸 명령 속 <c>.md</c>로 끝나는 낱말 — 공백 · 따옴표 · 셸 기호에서 끊는다 (<c>.mdx</c>는 아님).</summary>
+    [GeneratedRegex(@"[^\s""'`<>|;&()=*?,]+\.md(?![\w.])", RegexOptions.IgnoreCase)]
+    private static partial Regex MarkdownWordRegex();
 }

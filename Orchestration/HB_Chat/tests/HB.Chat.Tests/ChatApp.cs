@@ -129,6 +129,18 @@ public sealed class ChatApp : IDisposable
         ["message"] = new JsonObject { ["role"] = "user", ["content"] = text },
     }.ToJsonString();
 
+    /// <summary>지휘자 도구 호출 한 줄 (Read · Bash 등 — 곁칸 문서 탭의 방 기준 목록).</summary>
+    public static string Tool(string name, JsonObject input, int second) => new JsonObject
+    {
+        ["type"] = "assistant",
+        ["timestamp"] = Base.AddSeconds(second).ToString("O"),
+        ["message"] = new JsonObject
+        {
+            ["role"] = "assistant",
+            ["content"] = new JsonArray(new JsonObject { ["type"] = "tool_use", ["id"] = "t" + second, ["name"] = name, ["input"] = input }),
+        },
+    }.ToJsonString();
+
     /// <summary>지휘자 말 한 줄.</summary>
     public static string Conductor(string text, int second) => new JsonObject
     {

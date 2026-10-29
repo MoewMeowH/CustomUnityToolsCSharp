@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Net;
+using System.Text.Json.Nodes;
 using HB.Chat;
+using HB.Orchestration.Shared;
 
 namespace HB.Chat.Tests;
 
@@ -60,6 +62,71 @@ public sealed class ProjectDocsTests : IDisposable
         Assert.Null(chat.Plans[1].Log);
         Assert.Null(chat.Plans[1].Status);
         Assert.Equal(["묶음 로그"], chat.LooseLogs.Select(l => l.Title));
+    }
+
+    private static FileMention Mention(int line, FileMentionKind kind, string? path, string name) =>
+        new(line, new DateTimeOffset(2026, 10, 30, 0, line, 0, TimeSpan.Zero), kind, path, name);
+
+    [Fact]
+    public void FindForRoom_OnlyTouchedDocs_LastTouchedFirst_WithPairsAndStatus()
+    {
+        var old = new DateTime(2026, 10, 1);
+        var plan = Write("Orchestration/HB_Chat/docs/plans/2026-10-30_가.md", at: old);
+        Write("Orchestration/HB_Chat/docs/worklog/2026-10-30_가.md", at: old);
+        Write("Orchestration/HB_Chat/docs/plans/2026-10-29_나.md", at: old);
+        Write("Orchestration/HB_Chat/docs/worklog/2026-10-28_묶음.md", at: old);
+        Write("Orchestration/HB_Chat/docs/plans/2026-10-27_안-다룸.md");                  // 가장 최근 수정이지만 이 방에서 다루지 않음
+        Write("Orchestration/HB_Chat/docs/worklog.md",
+            "| 날짜 | 작업 | 계획서 | 로그 | 상태 |\n|---|---|---|---|---|\n| 2026-10-30 | 가 | [계획서](plans/2026-10-30_가.md) | - | 구현 중 |\n");
+        var orchPlan = Write("Orchestration/HB_Orchestration/docs/plans/2026-10-29_나.md", at: old); // 이름이 같은 다른 프로젝트 계획서
+
+        var (projects, room) = ProjectDocs.Find(ws,
+        [
+            Mention(1, FileMentionKind.Read, plan.ToUpperInvariant(), "2026-10-30_가.md"),   // 경로 대소문자 무시
+            Mention(2, FileMentionKind.Shell, null, "2026-10-29_나.md"),
+            Mention(3, FileMentionKind.Shell, null, "worklog.md"),                           // 색인은 방 목록에 넣지 않음
+            Mention(4, FileMentionKind.Edit, Path.Combine(ws, "밖", "2026-10-28_묶음.md"), "2026-10-28_묶음.md"), // 경로가 다르면 이름이 같아도 아님
+            Mention(5, FileMentionKind.Shell, null, "2026-10-28_묶음.md"),
+            Mention(6, FileMentionKind.Read, Path.Combine(ws, "secret.md"), "secret.md"),    // docs 밖
+            Mention(7, FileMentionKind.Edit, orchPlan, "2026-10-29_나.md"),                  // 마지막으로 다룬 프로젝트가 위로
+            Mention(8, FileMentionKind.Read, "Orchestration/HB_Chat/docs/plans/2026-10-27_안-다룸.md", "2026-10-27_안-다룸.md"), // 상대 경로는 버림
+        ]);
+
+        Assert.Equal(2, projects.Count);
+        Assert.Equal(["HB_Orchestration", "HB_Chat"], room.Select(p => p.Name));
+        var chat = room.Single(p => p.Name == "HB_Chat");
+        Assert.Equal(["묶음", "나", "가"], chat.Rows.Select(r => (r.Plan ?? r.Log)!.Title));
+        Assert.Null(chat.Rows[0].Plan);                                              // 짝 없는 로그
+        Assert.Equal(FileMentionKind.Shell, chat.Rows[0].Kind);
+        Assert.Equal(new DateTimeOffset(2026, 10, 30, 0, 5, 0, TimeSpan.Zero), chat.Rows[0].At);
+        Assert.Equal("Orchestration/HB_Chat/docs/worklog/2026-10-30_가.md", chat.Rows[2].Log?.Rel); // 계획서만 다뤄도 짝 로그
+        Assert.Equal(FileMentionKind.Read, chat.Rows[2].Kind);
+        Assert.Equal("구현 중", chat.Rows[2].Status);
+        Assert.Equal(["나"], room.Single(p => p.Name == "HB_Orchestration").Rows.Select(r => r.Plan!.Title)); // 이름 맞추기는 두 프로젝트 모두
+
+        Assert.Empty(ProjectDocs.Find(ws, null).Room);
+        Assert.Empty(ProjectDocs.Find(ws, []).Room);
+    }
+
+    [Fact]
+    public void FindForRoom_EditWins_AndKeepsNewestRows()
+    {
+        var log = Write("docs/worklog/2026-10-30_가.md");
+        Write("docs/plans/2026-10-30_가.md");
+        var mentions = new List<FileMention> { Mention(1, FileMentionKind.Edit, log, "2026-10-30_가.md"), Mention(2, FileMentionKind.Read, null, "2026-10-30_가.md") };
+        for (var i = 0; i < ProjectDocs.MaxRoomRows + 2; i++)
+        {
+            Write($"docs/plans/2026-09-{i + 1:00}_p{i}.md");
+            mentions.Add(Mention(10 + i, FileMentionKind.Shell, null, $"2026-09-{i + 1:00}_p{i}.md"));
+        }
+
+        var rows = Assert.Single(ProjectDocs.Find(ws, mentions).Room).Rows;
+
+        Assert.Equal(ProjectDocs.MaxRoomRows, rows.Count);
+        Assert.Equal($"p{ProjectDocs.MaxRoomRows + 1}", rows[0].Plan!.Title);
+        Assert.DoesNotContain(rows, r => r.Plan?.Title == "가");                   // 가장 먼저 다룬 것부터 잘림
+        var all = Assert.Single(ProjectDocs.Find(ws, mentions.Take(2).ToList()).Room).Rows;
+        Assert.Equal(FileMentionKind.Edit, Assert.Single(all).Kind);               // 로그를 고치고 계획서를 읽음 → 고침
     }
 
     [Fact]
@@ -177,5 +244,36 @@ public sealed class ProjectDocsPageTests(ChatApp app) : IClassFixture<ChatApp>
             using var res = await client.GetAsync($"/Room/{room.Id}?handler=Doc&path=" + Uri.EscapeDataString(bad));
             Assert.Equal(HttpStatusCode.NotFound, res.StatusCode);
         }
+    }
+
+    [Fact]
+    public async Task Docs_RoomSection_TouchedDocsFirst_FolderListFolded_CodexRoomHasNone()
+    {
+        var plans = Path.Combine(app.Dir, "ws", "docs", "plans");
+        Directory.CreateDirectory(plans);
+        var touched = Path.Combine(plans, "2026-10-30_방에서-읽음.md");
+        File.WriteAllText(touched, "# 읽음");
+        File.WriteAllText(Path.Combine(plans, "2026-10-30_다른-방.md"), "# 다른 방");
+        var room = app.Room("docs-room", ChatApp.User("hi", 0), ChatApp.Tool("Read", new JsonObject { ["file_path"] = touched }, 1));
+        var fresh = app.Room("docs-fresh", ChatApp.User("hi", 0));
+        var codex = app.Store.Update(app.Room("docs-codex", ChatApp.User("hi", 0)).Id, r => r with { Engine = RoomEngines.Codex })!;
+        using var client = Client();
+
+        var list = WebUtility.HtmlDecode(await client.GetStringAsync($"/Room/{room.Id}?handler=Docs"));
+        var roomPart = list[..list.IndexOf("<details", StringComparison.Ordinal)];
+        Assert.Contains("이 방에서 다룬 문서", roomPart);
+        Assert.Contains("data-doc=\"docs/plans/2026-10-30_방에서-읽음.md\"", roomPart);
+        Assert.Contains("읽음 · ", roomPart);
+        Assert.DoesNotContain("다른 방", roomPart);
+        Assert.Contains("<details class=\"docs-folder\">", list);                 // 방 기준이 있으면 접어 둔다
+        Assert.Contains("data-doc=\"docs/plans/2026-10-30_다른-방.md\"", list);
+
+        var none = WebUtility.HtmlDecode(await client.GetStringAsync($"/Room/{fresh.Id}?handler=Docs"));
+        Assert.Contains("이 방에서 다룬 계획서 · 로그가 없습니다", none);
+        Assert.Contains("<details class=\"docs-folder\" open=\"open\">", none);    // 방 목록이 없으면 펼친 채로
+
+        var codexList = WebUtility.HtmlDecode(await client.GetStringAsync($"/Room/{codex.Id}?handler=Docs"));
+        Assert.DoesNotContain("이 방에서 다룬", codexList);
+        Assert.Contains("<details class=\"docs-folder\" open=\"open\">", codexList); // 방 기준이 없으면 펼친 채로
     }
 }

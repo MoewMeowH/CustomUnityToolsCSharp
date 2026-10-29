@@ -658,6 +658,57 @@ public sealed class ChatRoomTests : IDisposable
         Assert.Equal("새로", Assert.Single(chat.Entries).Text);
     }
 
+    // ── 도구 입력에 나온 파일 (HB_Chat 곁칸 문서 탭) ──
+
+    [Fact]
+    public void Reader_FileMentions_FileToolPathsAndShellMarkdownNames()
+    {
+        var path = Write(
+            Assistant(1,
+                Use("t1", "Read", new { file_path = @"F:\ws\docs\plans\2026-10-30_가.md" }),
+                Use("t2", "Edit", new { file_path = "F:/ws/docs/worklog/2026-10-30_가.md", old_string = "a", new_string = "b" })),
+            Assistant(2, Use("t3", "Bash", new
+            {
+                command = "cd /f/ws/docs && cat >> \"worklog/2026-10-30_나.md\" <<'EOF'\n본문 x.md\nEOF\nsed -i 's/a/b/' worklog.md && ls a.mdx README.MD",
+            })),
+            Assistant(3, Use("t4", "PowerShell", new { command = "Get-Content docs\\plans\\2026-10-29_다.md" })),
+            Assistant(4, Use("t5", "mcp__x__Read", new { file_path = @"F:\ws\docs\plans\무시.md" }), Use("t6", "Grep", new { pattern = "b.md" })),
+            Line(new
+            {
+                type = "assistant", sessionId = Session, timestamp = Ts(5), isSidechain = true,
+                message = new { role = "assistant", content = new object[] { Use("t7", "Read", new { file_path = @"F:\ws\docs\plans\서브.md" }) } },
+            }));
+
+        var mentions = ClaudeChatReader.Read(path).FileMentions;
+
+        Assert.Equal(
+        [
+            (FileMentionKind.Read, @"F:\ws\docs\plans\2026-10-30_가.md", "2026-10-30_가.md"),
+            (FileMentionKind.Edit, "F:/ws/docs/worklog/2026-10-30_가.md", "2026-10-30_가.md"),
+            (FileMentionKind.Shell, null, "2026-10-30_나.md"),
+            (FileMentionKind.Shell, null, "x.md"),
+            (FileMentionKind.Shell, null, "worklog.md"),
+            (FileMentionKind.Shell, null, "README.MD"),
+            (FileMentionKind.Shell, null, "2026-10-29_다.md"),
+        ], mentions.Select(m => (m.Kind, m.Path, m.Name)));
+        Assert.Equal(At(1), mentions[0].Timestamp);
+        Assert.Equal(At(3), mentions[^1].Timestamp);
+    }
+
+    [Fact]
+    public void ReadMore_FileMentions_EqualFullRead()
+    {
+        var path = Path.Combine(_dir, Session + ".jsonl");
+        File.WriteAllText(path, Assistant(1, Use("t1", "Read", new { file_path = "a/docs/plans/p.md" })) + "\n", Utf8NoBom);
+        var (first, resume) = ClaudeChatReader.ReadMore(path, null);
+        File.AppendAllText(path, Assistant(2, Use("t2", "Bash", new { command = "cat q.md" })) + "\n", Utf8NoBom);
+        var (more, _) = ClaudeChatReader.ReadMore(path, resume);
+
+        Assert.Single(first.FileMentions);   // 앞서 돌려준 결과는 그대로
+        Assert.Equal(ClaudeChatReader.Read(path).FileMentions, more.FileMentions);
+        Assert.Equal(["p.md", "q.md"], more.FileMentions.Select(m => m.Name));
+    }
+
     [Fact]
     public void Build_MessageKeys_StableUniqueAndKeptWhenMessagesAdded()
     {
