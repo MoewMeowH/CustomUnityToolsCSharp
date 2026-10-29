@@ -30,8 +30,11 @@ public sealed class RoomModel(
 
     public GroupMember? MemberOf(string? memberId) => Room.Members.FirstOrDefault(m => m.Id == memberId);
 
-    /// <summary>구성원 상태 한 줄 (생각 중 · 답을 기다림 — 과정 보기 · null).</summary>
-    public string? MemberState(GroupMember m) => GroupChat.StateLabel(hub.ActivityOf(m.RoomId));
+    /// <summary>구성원 상태 한 줄 (생각 중 · 답을 기다림 · 차례 기다림 · null).</summary>
+    public string? MemberState(GroupMember m) => groups.MemberState(m.RoomId);
+
+    /// <summary>구성원 단계 표시: 쓰는 구성원(편집 · 명령)만 — 그 구성원이 낀 말은 차례로 돈다 (⑤).</summary>
+    public string? WriterLabel(GroupMember m) => store.Get(m.RoomId) is { } child && GroupChat.IsWriter(child) ? RoomRules.LevelName(child.Level) : null;
 
     /// <summary>
     /// 그 구성원이 그 사용자 말에 답했는지 (답 줄 · 보내지 못함 안내 줄) — 아니고 실행 중도 아니면 "답이 없음"으로 보인다.
@@ -41,7 +44,8 @@ public sealed class RoomModel(
 
     private HashSet<(int UserLine, string MemberId)> _answered = [];
 
-    public bool AnyMemberBusy(GroupMember m) => hub.IsBusy(m.RoomId);
+    /// <summary>중지 단추: 도는 구성원 · 단톡방이 답을 기다리는 구성원(차례 기다림 포함)이 있으면.</summary>
+    public bool AnyMemberBusy(GroupMember m) => hub.IsBusy(m.RoomId) || groups.Waiting(m.RoomId);
 
     /// <summary>그 구성원이 답하는 중인지 (실행 중이거나 단톡방이 답을 기다림).</summary>
     public bool Waiting(GroupMember m) => _waiting?.Contains(m.Id) ?? (hub.IsBusy(m.RoomId) || groups.Waiting(m.RoomId));
@@ -598,6 +602,14 @@ public sealed class RoomModel(
         room.GroupId is not null ? "단톡방 구성원 방의 단계 · 모델 · 연결은 바꿀 수 없습니다 (지금은 만들 때 정한 값으로만 돕니다)."
         : room.IsGroup ? "단톡방의 단계 · 모델 · 연결은 바꿀 수 없습니다 (지금은 만들 때 정한 값으로만 돕니다)."
         : null;
+
+    /// <summary>단톡방 화면이 다시 붙을 때 받는 구성원 카드 (승인 · 질문, ⑤): approval · question 알림 모양, detail = 구성원 ID.</summary>
+    public IActionResult OnGetGroupCards(string id)
+    {
+        Response.Headers.CacheControl = "no-store";
+        if (!RoomStore.IsRoomId(id) || store.Get(id) is not { IsGroup: true } group) return NotFound();
+        return new JsonResult(groups.Cards(group));
+    }
 
     /// <summary>단톡방 구성원 상태 (화면이 다시 붙을 때 · 대화 줄을 받을 때 칩을 맞춘다 — b8697252eb C4).</summary>
     public IActionResult OnGetGroupState(string id)

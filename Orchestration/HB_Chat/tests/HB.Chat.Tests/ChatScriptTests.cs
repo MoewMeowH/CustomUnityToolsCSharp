@@ -63,6 +63,37 @@ public sealed class ChatScriptTests(ChatApp app, ChatBrowser browser) : IClassFi
     }
 
     /// <summary>
+    /// 단톡방 ⑤: 명령 구성원의 승인 카드가 단톡방 화면에 구성원 이름으로 나오고, 거기서 허용하면 그 구성원이 이어서 답한다. 쓰는 구성원 칩에 단계 표시.
+    /// 다시 열어도(snapshot) 기다리는 카드를 받는다.
+    /// </summary>
+    [Fact]
+    public async Task Group_WriterApproval_CardInGroupPane()
+    {
+        if (!browser.Available) return;
+        var (group, error) = app.Services.GetRequiredService<GroupChat>()
+            .Create("ws", PermissionLevel.Read, "opus", null, "작업", [new GroupMemberSpec("A", "코드 작업", Level: PermissionLevel.Command), new GroupMemberSpec("B", "리뷰")]);
+        Assert.Null(error);
+        await using var page = await browser.OpenAsync(app.RoomUrl(group!));
+        Assert.Equal("명령", await page.EvalAsync<string>("document.querySelector('.member[data-member] .member-level').textContent.trim()"));
+        await page.SendAsync("approve @A");
+        await page.WaitForAsync("!!document.querySelector('#live .approval')", "단톡방 승인 카드", ChatPage.TurnWait);
+        Assert.Equal("A의 승인 요청 · Bash", await page.EvalAsync<string>("document.querySelector('#live .approval .head span').textContent"));
+        Assert.Equal("git status", await page.EvalAsync<string>("document.querySelector('#live .approval .cmd').textContent"));
+        Assert.True(await page.EvalAsync<bool>("[...document.querySelectorAll('#live .approval button')].some(b => b.textContent === '이 구성원에게 항상 허용')"));
+
+        // 다시 열면 기다리는 카드를 서버에서 받는다 (GroupCards)
+        await using var again = await browser.OpenAsync(app.RoomUrl(group!));
+        await again.WaitForAsync("!!document.querySelector('#live .approval')", "다시 연 화면의 카드", ChatPage.TurnWait);
+
+        await page.EvalAsync("[...document.querySelectorAll('#live .approval button')].find(b => b.textContent === '허용').click()");
+        await page.WaitForAsync("[...document.querySelectorAll('#chat .msg.group-member .body')].some(b => b.textContent.trim() === 'allowed')", "A의 답", ChatPage.TurnWait);
+        await page.WaitForAsync("!document.querySelector('#live .approval') && !document.querySelector('#live .live-line')", "카드 · 끝난 줄 정리", ChatPage.TurnWait);
+        await again.WaitForAsync("!document.querySelector('#live .approval')", "다른 화면의 카드도 닫힘", ChatPage.TurnWait);
+        page.AssertNoErrors();
+        again.AssertNoErrors();
+    }
+
+    /// <summary>
     /// 좁은 창(미니 창 등)에서도 보통 슬라이드로 그려진다 (/self-review 832f22f583 C1). 고치기 전 실측(2026-10-29): 틀 406 · 306px에서 reveal이
     /// 스크롤 보기로 바뀌어(scrollActivationWidth 기본 435) sessionStorage SecurityError, loading-scroll-mode 클래스가 남고 화살표 · 쪽 번호 없는
     /// 세로 보기가 됐다(빈 틀은 아님) → scrollActivationWidth:null. 틀 안 예외는 다른 대상(OOPIF)이라 이 탭의 Errors에 잡히지 않아 틀 안 상태로 본다.

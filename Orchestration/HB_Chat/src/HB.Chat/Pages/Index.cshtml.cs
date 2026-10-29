@@ -19,20 +19,25 @@ public sealed class IndexModel(RoomStore store, RoomHub hub, RoomList list, Chat
     /// <summary>Codex 구성원을 켤 수 있는 작업 폴더 (설정 화면).</summary>
     public IReadOnlyList<string> CodexWorkspaces => groups.CodexSettings?.Workspaces() ?? [];
 
-    public IActionResult OnPostCreateGroup(string workspace, PermissionLevel level, string model, string? title, string? effort,
-        string[]? names, string[]? roles, string[]? engines, string[]? codexModels, string[]? codexEfforts)
+    /// <summary>
+    /// 새 단톡방. 단계는 구성원 칸마다(levels — ⑤ 결정, 비면 읽기 · Codex는 읽기), baseMcp: Claude 구성원에게 작업 폴더 기본 MCP (기본 끔).
+    /// </summary>
+    public IActionResult OnPostCreateGroup(string workspace, string model, string? title, string? effort,
+        string[]? names, string[]? roles, string[]? engines, string[]? codexModels, string[]? codexEfforts, string[]? levels, bool baseMcp = false)
     {
         static string? At(string[]? values, int i) => values is not null && i < values.Length ? values[i] : null;
         var o = options.Value;
         var (cleanEffort, effortError) = RoomEffort.Clean(effort);
         Error = o.WorkspacePath(workspace) is null ? "허용 목록에 없는 작업 폴더입니다."
             : !o.ModelList.Contains(model, StringComparer.Ordinal) ? "허용 목록에 없는 모델입니다."
-            : !Enum.IsDefined(level) ? "알 수 없는 권한 단계입니다."
             : effortError;
+        // 단계 칸: 비면 기본(읽기, Codex도 읽기), 모르는 값은 거절 — Enum.TryParse는 숫자 글도 받아 이름만 본다
+        PermissionLevel? LevelAt(int i) => At(levels, i) is { Length: > 0 } s && Enum.GetNames<PermissionLevel>().Contains(s) ? Enum.Parse<PermissionLevel>(s) : null;
+        if (Error is null && Enumerable.Range(0, names?.Length ?? 0).Any(i => At(levels, i) is { Length: > 0 } && LevelAt(i) is null)) Error = "알 수 없는 권한 단계입니다.";
         if (Error is null)
         {
-            var members = (names ?? []).Select((n, i) => new GroupMemberSpec(n, At(roles, i) ?? "", At(engines, i), At(codexModels, i), At(codexEfforts, i))).ToList();
-            var (group, error) = groups.Create(workspace, level, model, cleanEffort, title, members);
+            var members = (names ?? []).Select((n, i) => new GroupMemberSpec(n, At(roles, i) ?? "", At(engines, i), At(codexModels, i), At(codexEfforts, i), LevelAt(i))).ToList();
+            var (group, error) = groups.Create(workspace, PermissionLevel.Read, model, cleanEffort, title, members, baseMcp);
             if (group is not null)
             {
                 hub.Touch(group.Id);

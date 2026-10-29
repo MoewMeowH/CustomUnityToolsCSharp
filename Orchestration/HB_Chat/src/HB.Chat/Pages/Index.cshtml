@@ -103,7 +103,7 @@
                     방의 세션은 이 앱 전용입니다 — Claude 앱 · CLI에서 이어 쓰지 마세요.
                 </p>
             </section>
-            @* 새 단톡방 (계획서 2026-10-29_HB_Chat-단톡방, 1단계): 구성원 2명 · 대화/읽기 · @이름으로 한 명씩 부름 *@
+            @* 새 단톡방 (계획서 2026-10-29_HB_Chat-단톡방): 구성원 2~4명 · 구성원마다 단계(⑤) · 기본 MCP는 고름(기본 끔) *@
             <section class="panel" style="padding:12px 14px;margin-top:12px">
                 <h2 style="margin:0 0 10px;font-size:16px">새 단톡방</h2>
                 <form method="post" asp-page-handler="CreateGroup" class="group-create">
@@ -116,11 +116,8 @@
                                 }
                             </select>
                         </label>
-                        <label>권한
-                            <select name="level">
-                                <option value="Chat">대화</option>
-                                <option value="Read" selected>읽기</option>
-                            </select>
+                        <label title="Claude 구성원이 작업 폴더 .mcp.json의 @(Model.Options.McpServer) (run_mode로 외부 에이전트 부르기)를 쓰게 — 켜면 .mcp.json에 그 항목이 있어야 합니다">
+                            <input type="checkbox" name="baseMcp" value="true" /> 구성원 기본 MCP (@Model.Options.McpServer)
                         </label>
                         <label>모델
                             <select name="model">
@@ -139,6 +136,13 @@
                         <div class="group-member-row" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
                             <input type="text" name="names" placeholder="@(optional ? "구성원 이름 (선택)" : "구성원 이름 (예: " + (i == 0 ? "A" : "B") + ")")" maxlength="20" required="@(!optional)" style="width:140px" />
                             <input type="text" name="roles" placeholder="@(i switch { 0 => "역할 (예: 내 코드의 위험을 찾는다)", 1 => "역할 (예: A의 의견에 반박한다)", _ => "역할" })" maxlength="@GroupChat.RoleMaxChars" style="flex:1;min-width:200px" />
+                            @* 단계 (단톡방 ⑤ — 구성원마다): 편집 · 명령 구성원이 낀 말은 차례로 돈다. Codex는 읽기만 *@
+                            <select name="levels" title="이 구성원의 권한 단계 (Codex는 읽기만)">
+                                <option value="Chat">대화</option>
+                                <option value="Read" selected>읽기</option>
+                                <option value="Edit">편집</option>
+                                <option value="Command">명령</option>
+                            </select>
                             @* 엔진 (단톡방 ②): Codex는 설정에서 고른 작업 폴더에서만 · 읽기 전용 *@
                             <select name="engines" title="이 구성원이 도는 CLI">
                                 <option value="claude" selected>Claude</option>
@@ -164,6 +168,7 @@
                 </form>
                 <p class="muted" style="margin:6px 0 0;font-size:12.5px">
                     부른 구성원만 답합니다 (@@이름 · 여러 명 · @@All은 동시에, 같은 대화를 받고). 구성원마다 세션이 따로 돌고, 단톡방 대화를 함께 받습니다.
+                    편집 · 명령 구성원이 낀 말은 구성원 순서대로 하나씩 돌고, 뒤 구성원은 앞 답을 받습니다. 승인 · 질문 카드는 단톡방 화면에 구성원 이름으로 나옵니다.
                     Codex 구성원은 <a href="/Settings">설정</a>에서 고른 작업 폴더에서만 됩니다 (지금: @(Model.CodexWorkspaces.Count == 0 ? "없음" : string.Join(", ", Model.CodexWorkspaces))) — 읽기 전용이지만 디스크 전체를 읽을 수 있습니다.
                 </p>
             </section>

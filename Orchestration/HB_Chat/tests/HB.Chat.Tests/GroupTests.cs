@@ -17,11 +17,12 @@ public sealed class GroupTests : IDisposable
     private readonly GroupLog _log;
     private readonly GroupChat _groups;
     private readonly List<(string RoomId, RunSpec Spec)> _specs = [];
+    private readonly ChatOptions _options;
 
     public GroupTests()
     {
         Directory.CreateDirectory(Path.Combine(_dir, "ws"));
-        var options = new ChatOptions
+        var options = _options = new ChatOptions
         {
             DataDir = Path.Combine(_dir, "data"),
             ClaudeProjectsDir = Path.Combine(_dir, "projects"),
@@ -182,7 +183,7 @@ public sealed class GroupTests : IDisposable
     }
 
     [Theory]
-    [InlineData(PermissionLevel.Edit, "A", "B", "대화 · 읽기")]
+    [InlineData((PermissionLevel)9, "A", "B", "권한 단계")] // 편집 · 명령은 ⑤에서 열림 — 모르는 단계만 거절
     [InlineData(PermissionLevel.Chat, "A", "", "2명 이상")]
     [InlineData(PermissionLevel.Chat, "All", "B", "쓸 수 없습니다")]
     [InlineData(PermissionLevel.Chat, "A", "a", "겹칩니다")]
@@ -479,5 +480,212 @@ public sealed class GroupTests : IDisposable
         var fresh = GroupChat.Delta(group, entries, fresh: true);
         Assert.Contains("지금까지 단톡방", fresh);
         Assert.DoesNotContain("마지막으로 본 뒤", fresh);
+    }
+
+    /// <summary>A = 쓰는 구성원(편집 · 명령), B = 읽기.</summary>
+    private Room WriterGroup(PermissionLevel writer = PermissionLevel.Edit) =>
+        _groups.Create("ws", PermissionLevel.Read, "opus", null, "작업", [new GroupMemberSpec("A", "코드 작업", Level: writer), new GroupMemberSpec("B", "리뷰")])
+            is { Group: { } g } ? g : throw new InvalidOperationException("단톡방을 만들지 못함");
+
+    /// <summary>
+    /// ⑤ 구성원마다 단계 · 기본 MCP (결정 "만들 때 고름, 기본 끔"): 끄면 자식 방 McpOff에 기본 서버(.mcp.json 없어도 됨), 명령 구성원은 앱 MCP(터미널 · 브라우저)도 끔.
+    /// 켰는데 작업 폴더 .mcp.json에 그 항목이 없으면 거절. 단톡방 단계는 가장 높은 구성원 단계.
+    /// </summary>
+    [Fact]
+    public void Create_PerMemberLevel_BaseMcpChoice()
+    {
+        var group = WriterGroup(PermissionLevel.Command);
+        Assert.Equal(PermissionLevel.Command, group.Level);
+        var a = _store.Get(group.Members[0].RoomId)!;
+        var b = _store.Get(group.Members[1].RoomId)!;
+        Assert.Equal((PermissionLevel.Command, PermissionLevel.Read), (a.Level, b.Level));
+        Assert.Equal([_options.McpServer, TerminalMcp.Server], a.McpOff);
+        Assert.Equal([_options.McpServer], b.McpOff);
+        Assert.True(GroupChat.IsWriter(a));
+        Assert.False(GroupChat.IsWriter(b));
+        Assert.Contains("명령", GroupRules.For(_store, b)); // 다른 구성원의 쓰기 단계 · 차례 안내
+        Assert.Contains("차례로", GroupRules.For(_store, b));
+        Assert.DoesNotContain("차례로", GroupRules.For(_store, _store.Get(NewGroup().Members[0].RoomId)!)); // 쓰는 구성원이 없으면 규칙 그대로
+
+        var checking = new GroupChat(_store, _hub, _log, null, Options.Create(_options));
+        GroupMemberSpec[] members = [new("A", "", Level: PermissionLevel.Edit), new("B", "")];
+        Assert.Contains(".mcp.json", checking.Create("ws", PermissionLevel.Read, "opus", null, "켬", members, baseMcp: true).Error);
+        File.WriteAllText(Path.Combine(_dir, "ws", ".mcp.json"), "{\"mcpServers\":{\"" + _options.McpServer + "\":{\"command\":\"cmd\"}}}");
+        var (on, error) = checking.Create("ws", PermissionLevel.Read, "opus", null, "켬", members, baseMcp: true);
+        Assert.Null(error);
+        Assert.All(on!.Members, m => Assert.Empty(_store.Get(m.RoomId)!.McpOff));
+    }
+
+    /// <summary>
+    /// ⑤ 쓰는 구성원이 낀 말은 차례로 (결정 "모두 차례로, 뒤는 앞 답을 받음"): B는 A가 답한 뒤에야 돌고, A의 답을 "먼저 답한 구성원" 머리 아래로 받는다.
+    /// 가짜 claude는 '('로 시작하는 말에 받은 프롬프트 전체를 답한다.
+    /// </summary>
+    [Fact]
+    public async Task Writer_All_RunsInTurn_LaterGetsEarlierAnswer()
+    {
+        var group = WriterGroup();
+        var a = group.Members[0];
+        var b = group.Members[1];
+        Assert.Null(_groups.Send(group.Id, "(probe) @All 고쳐 봐"));
+        Assert.Equal("차례 기다림", _groups.MemberState(b.RoomId)); // 아직 보내지 않음
+        Assert.Contains("답하는 중", _groups.Send(group.Id, "@B 끼어들기")); // 판이 끝날 때까지 새 말은 거절
+        var user = _log.Read(group.Id).Single(e => e.Kind == GroupEntryKind.User).Line;
+        var fromA = await AnswerAsync(group.Id, "A", user);
+        var fromB = await AnswerAsync(group.Id, "B", user);
+        Assert.Equal((user, user), (fromA.ReplyTo, fromB.ReplyTo));
+        Assert.True(fromB.Line > fromA.Line);
+        Assert.Contains("너보다 먼저 차례로 답한 구성원", fromB.Text);
+        Assert.Contains("] A: ", fromB.Text); // A의 답 줄
+        Assert.EndsWith("(probe) @All 고쳐 봐", fromB.Text.TrimEnd()); // 사용자 말은 블록 밖 끝에 그대로
+        Assert.DoesNotContain("먼저 차례로", fromA.Text);
+        await WaitAllIdleAsync(group);
+        // 다음 말: A는 B의 답을 받고, B는 이미 본 A의 답을 다시 받지 않는다
+        Assert.Null(_groups.Send(group.Id, "(next) @All 다음"));
+        var next = _log.Read(group.Id).Last(e => e.Kind == GroupEntryKind.User).Line;
+        var a2 = await AnswerAsync(group.Id, "A", next);
+        var b2 = await AnswerAsync(group.Id, "B", next);
+        Assert.Contains("] B: ", a2.Text);
+        Assert.DoesNotContain("] A: (", b2.Text[..b2.Text.IndexOf("너보다 먼저", StringComparison.Ordinal)]);
+    }
+
+    /// <summary>
+    /// ⑤ 차례로 도는 말에서 앞 구성원(A)이 답에서 차례를 기다리던 B를 부르면, B는 따로 이어 답하지 않고 자기 차례 답 하나로 갈음한다
+    /// (결정 "B의 차례로 갈음" — 5291에서 B가 두 번 돌았다). A 답 줄의 Merged에 B, B의 차례 안내에 "A가 답에서 너를 불렀다" · A의 답.
+    /// </summary>
+    [Fact]
+    public async Task Writer_CallToQueuedMember_MergedIntoTurn()
+    {
+        var group = WriterGroup();
+        var a = group.Members[0];
+        var b = group.Members[1];
+        Assert.Null(_groups.Send(group.Id, "(probe) @A @B")); // 가짜 claude: '('로 시작하면 받은 프롬프트 전체가 답 — A의 답에 "@B"가 있다
+        await WaitAllIdleAsync(group);
+        var log = _log.Read(group.Id);
+        var user = log.Single(e => e.Kind == GroupEntryKind.User).Line;
+        var fromA = log.Single(e => e.MemberId == a.Id && e.ReplyTo == user);
+        Assert.Empty(fromA.To);
+        Assert.Equal([b.Id], fromA.Merged);
+        var fromB = log.Single(e => e.MemberId == b.Id); // B는 한 번만 (B 답 속 "@A"로 A가 B 답에 이어 답하는 것은 ④ 그대로)
+        Assert.Equal(user, fromB.ReplyTo);
+        Assert.Contains("A가 답에서 너를 불렀다", fromB.Text);
+        Assert.Contains("] A: (probe)", fromB.Text);
+        lock (_specs) Assert.Single(_specs, s => s.RoomId == b.RoomId);
+        Assert.Contains((user, b.Id), GroupChat.AnsweredBy(log));
+    }
+
+    /// <summary>⑤ 중지: 차례를 기다리던 구성원은 돌지 않고 "(중지됨 — 차례가 오기 전)" 줄, 단톡방은 다음 말을 받는다.</summary>
+    [Fact]
+    public async Task Writer_Stop_ClosesQueuedTurn()
+    {
+        var group = WriterGroup();
+        var b = group.Members[1];
+        Assert.Null(_groups.Send(group.Id, "sleep @All"));
+        var sw = Stopwatch.StartNew();
+        while (sw.Elapsed < Wait && !_hub.IsBusy(group.Members[0].RoomId)) await Task.Delay(50);
+        _groups.Stop(group.Id);
+        await WaitAllIdleAsync(group);
+        var log = _log.Read(group.Id);
+        Assert.Equal("(중지됨 — 차례가 오기 전)", log.Single(e => e.MemberId == b.Id).Text);
+        Assert.False(_groups.Waiting(b.RoomId));
+        lock (_specs) Assert.DoesNotContain(_specs, s => s.RoomId == b.RoomId);
+        Assert.Null(_groups.Send(group.Id, "@B 다음"));
+    }
+
+    /// <summary>
+    /// ⑤ 읽는 구성원끼리 같이 돌다가 한 답이 쓰는 구성원을 이어 부르면 그때부터 차례로 — C(편집)는 A · B가 모두 답한 뒤에 돌아 둘의 답을 다 받는다.
+    /// 가짜 claude: A는 빠르고 B는 앞 대화의 SLOW로 3초 늦다(Chain_Stop_ClosesDeferredCall과 같은 방법).
+    /// </summary>
+    [Fact]
+    public async Task Chain_ToWriter_WaitsForRunningMembers()
+    {
+        var (group, error) = _groups.Create("ws", PermissionLevel.Read, "opus", null, "셋",
+            [new GroupMemberSpec("A", ""), new GroupMemberSpec("B", ""), new GroupMemberSpec("C", "", Level: PermissionLevel.Edit)]);
+        Assert.Null(error);
+        var c = group!.Members[2];
+        Assert.Null(_groups.Send(group.Id, "call @A SLOW"));
+        await WaitAllIdleAsync(group);
+        Assert.Null(_groups.Send(group.Id, "call @A @B #C"));
+        await WaitAllIdleAsync(group);
+        var log = _log.Read(group.Id);
+        var fromC = log.Single(e => e.MemberId == c.Id);
+        Assert.False(fromC.Failed, fromC.Text);
+        var user = log.Last(e => e.Kind == GroupEntryKind.User).Line;
+        var answers = log.Where(e => e.Kind == GroupEntryKind.Member && e.ReplyTo == user && e.MemberId != c.Id).ToList();
+        Assert.Equal(2, answers.Count); // A · B 둘 다 사용자 말에 답함
+        Assert.All(answers, e => Assert.True(e.Line < fromC.Line));
+        Assert.Contains("] A: call", fromC.Text);
+        Assert.Contains("] B: call", fromC.Text); // 늦은 B의 답까지 받은 뒤에 돌았다
+    }
+
+    /// <summary>
+    /// ⑤ 카드: 명령 구성원의 승인 카드가 단톡방 알림으로도 온다(Detail = 구성원 ID) · 다시 붙을 때 Cards로 받고, 단톡방에서 허용하면 그 구성원이 이어서 답한다.
+    /// </summary>
+    [Fact]
+    public async Task Writer_ApprovalCard_ForwardedToGroup()
+    {
+        var group = WriterGroup(PermissionLevel.Command);
+        var a = group.Members[0];
+        var events = _hub.Subscribe(group.Id);
+        try
+        {
+            Assert.Null(_groups.Send(group.Id, "approve @A"));
+            using var cts = new CancellationTokenSource(Wait);
+            LiveEvent card;
+            do card = await events.Reader.ReadAsync(cts.Token); while (card.Kind != "approval");
+            Assert.Equal(a.Id, card.Detail);
+            Assert.Equal("Bash", card.Approval!.Tool);
+            var waiting = Assert.Single(_groups.Cards(_store.Get(group.Id)!));
+            Assert.Equal((a.Id, card.Approval.Id), (waiting.Detail, waiting.Approval!.Id));
+            Assert.Equal("승인 · 질문 기다림", _groups.MemberState(a.RoomId));
+
+            Assert.Null(_hub.Decide(a.RoomId, card.Approval.Id, ApprovalChoice.Allow, null));
+            LiveEvent done;
+            do done = await events.Reader.ReadAsync(cts.Token); while (done.Kind != "approval-done");
+            Assert.Equal((a.Id, card.Approval.Id), (done.Detail, done.Approval!.Id));
+            var user = _log.Read(group.Id).Single(e => e.Kind == GroupEntryKind.User).Line;
+            Assert.Equal("allowed", (await AnswerAsync(group.Id, "A", user)).Text);
+            Assert.Empty(_groups.Cards(_store.Get(group.Id)!));
+        }
+        finally { _hub.Unsubscribe(group.Id, events); }
+    }
+
+    /// <summary>
+    /// ⑤ 리뷰 C3 · 1-F2: 4명 차례 판에서 첫 구성원이 나머지 셋을 부르면 셋 다 차례로 갈음 — 실행 수를 쓰지 않아 한도 안내가 없고 셋 다 "불렀다" 안내를 받는다.
+    /// </summary>
+    [Fact]
+    public async Task Writer_CallAllQueued_MergedWithoutLimitNote()
+    {
+        var (group, error) = _groups.Create("ws", PermissionLevel.Read, "opus", null, "넷",
+            [new GroupMemberSpec("A", "", Level: PermissionLevel.Edit), new GroupMemberSpec("B", ""), new GroupMemberSpec("C", ""), new GroupMemberSpec("D", "")]);
+        Assert.Null(error);
+        Assert.Null(_groups.Send(group!.Id, "(probe) @A @B @C @D"));
+        await WaitAllIdleAsync(group);
+        var log = _log.Read(group.Id);
+        var user = log.Single(e => e.Kind == GroupEntryKind.User).Line;
+        var fromA = log.Single(e => e.MemberId == group.Members[0].Id && e.ReplyTo == user);
+        Assert.Equal(group.Members.Skip(1).Select(m => m.Id), fromA.Merged);
+        Assert.DoesNotContain(log, e => e.Kind == GroupEntryKind.Note && e.Text.Contains("한도"));
+        foreach (var m in group.Members.Skip(1))
+            Assert.Contains("A가 답에서 너를 불렀다", log.Single(e => e.MemberId == m.Id && e.ReplyTo == user).Text);
+    }
+
+    /// <summary>⑤ 리뷰 C1: 차례 안내는 옛 대화부터 줄이고 앞 답(turn 뒤 줄)은 남긴다 — 긴 앞 답은 그 줄만 끝을 자르고, 머리 줄은 늘 남는다.</summary>
+    [Fact]
+    public void Delta_Turn_KeepsEarlierAnswers()
+    {
+        var group = NewGroup();
+        var a = group.Members[0].Id;
+        var entries = Enumerable.Range(0, 300)
+            .Select(i => new GroupEntry(i, DateTimeOffset.Now, GroupEntryKind.User, null, "옛말" + new string('가', 100)))
+            .Append(new GroupEntry(301, DateTimeOffset.Now, GroupEntryKind.Member, a, "FIRST " + new string('나', 15_000)))
+            .Append(new GroupEntry(302, DateTimeOffset.Now, GroupEntryKind.Member, a, "SECOND " + new string('다', 30_000)))
+            .ToList();
+        var delta = GroupChat.Delta(group, entries, turn: 300, calledBy: ["A"]);
+        Assert.Contains("FIRST", delta);
+        Assert.Contains("SECOND", delta);
+        Assert.Contains("길어서 잘림", delta);
+        Assert.Contains("너보다 먼저 차례로 답한 구성원 (A가 답에서 너를 불렀다", delta);
+        Assert.Contains("생략", delta); // 옛 대화는 줄었다
+        Assert.True(delta.Length < 15_000 + GroupChat.DeltaMaxChars + 2_000);
     }
 }

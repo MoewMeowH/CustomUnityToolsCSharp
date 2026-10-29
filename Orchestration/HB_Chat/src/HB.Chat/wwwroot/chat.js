@@ -562,6 +562,216 @@
     }
 
     // ---- 방 하나 ----
+    // 승인 · 질문 · 계획 카드 (방 화면 mountRoom · 단톡방 화면 mountGroup이 같이 쓴다 — 단톡방 ⑤). 서버가 답을 기다리는 동안 live 칸에 보인다 (2-2 b).
+    // 남은 시간은 1초마다 다시 쓴다. opts: live · atBottom · toBottom · post(카드 알림, 처리기, FormData) — 답은 그 카드가 난 방으로,
+    // who(알림) — 머리 앞 이름(단톡방은 구성원 이름, 방 화면은 ""), always — "항상 허용" 단추 글, onPlanDone(결정), answered(질문, 답) — 답한 질문 말풍선(없으면 한 줄).
+    function cardKit(opts) {
+        const { live, atBottom, toBottom } = opts;
+        const cards = new Map();
+        const who = (a) => opts.who ? opts.who(a) : "";
+        function showApproval(a) {
+            if (cards.has(a.id)) return;
+            if (a.plan) { showPlan(a); return; }
+            const follow = atBottom();
+            const card = el("div", "approval");
+            const head = el("div", "head");
+            const left = el("span"); left.style.marginLeft = "auto";
+            head.append(el("span", null, who(a) + "승인 요청 · " + a.tool + (a.fromAgent ? " · 서브에이전트" : "")), left); // 서브에이전트가 낸 요청 (D)
+            // 명령 전문(스크롤 칸) — 사용자가 본 것이 허용되는 것과 같게 (/self-review 36e4e20e04 C3 · C5, ab79e61df5 C5).
+            card.append(head, el("div", "cmd", a.summary));
+            // 터미널 시작 · 브라우저 사이트 카드의 설명은 앱이 쓴 안내다 — 지휘자 설명으로 보이지 않게
+            if (a.description) card.append(el("div", "desc", (a.tool === "터미널" || a.tool === "브라우저" ? "" : "Claude 설명: ") + a.description));
+            // 명령 밖의 입력도 허용하면 같이 실행된다 — 본 것 = 허용되는 것 (/self-review 5e747ff851 C1)
+            if (a.extra) card.append(el("div", "cmd", "추가 입력: " + a.extra));
+            // 백그라운드 실행 명령 — 답이 끝난 뒤에도 돈다 (계획서 2026-10-29_HB_Chat-백그라운드-명령, 결정 "넣음")
+            if (a.backgroundMinutes) card.append(el("div", "warn-line",
+                `백그라운드: 답이 끝난 뒤에도 최대 ${a.backgroundMinutes}분 계속 돕니다 — 대화 아래 '지금 끝내기'로 먼저 정리할 수 있습니다.`));
+            const denyOnly = a.truncated || a.risky;
+            if (a.risky) card.append(el("div", "warn-line", "위험한 입력(dangerously · bypass)이 있어 거절만 할 수 있습니다."));
+            else if (a.truncated) card.append(el("div", "warn-line", "명령이나 입력이 너무 길어 끝까지 보이지 않습니다 — 거절만 할 수 있습니다."));
+            else if (a.rule) {
+                const r = el("div", "rule");
+                r.append(document.createTextNode("항상 허용하면 저장될 규칙: "), el("code", "mono", a.rule));
+                card.append(r, el("div", "warn-line", "항상 허용하면 이 명령은 다음부터 묻지 않습니다 — 이 명령이 돌리는 파일(스크립트 · package.json · 프로젝트 파일 등)이 바뀌어도 그대로 실행됩니다."));
+            }
+            const acts = el("div", "acts");
+            const button = (label, choice, extra) => {
+                const b = el("button", "btn" + (extra ? " " + extra : ""), label);
+                b.type = "button";
+                b.addEventListener("click", () => decide(a, choice, card));
+                acts.append(b);
+                return b;
+            };
+            if (!denyOnly) {
+                button("허용", "allow", "primary");
+                if (a.rule) button(opts.always || "이 방에서 항상 허용", "always");
+            }
+            const reasonBox = el("input", "reason");
+            reasonBox.type = "text"; reasonBox.maxLength = 500; reasonBox.placeholder = "거절 이유 (선택, 지휘자에게 전해짐)";
+            reasonBox.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); decide(a, "deny", card); } });
+            acts.append(reasonBox);
+            button("거절", "deny");
+            card.append(acts);
+            card.dataset.expires = String(Date.parse(a.expiresAt));
+            card.left = left;
+            place(a, card);
+            if (follow) toBottom();
+        }
+        // 카드를 live 칸에 넣는다 — 알림의 detail(단톡방 구성원 ID)을 달아 둔다
+        function place(a, card) {
+            if (a.detail) card.dataset.member = a.detail;
+            live.append(card);
+            cards.set(a.id, card);
+            tick();
+        }
+
+        // 계획 카드 (Claude 앱 기능 C): 지휘자의 계획(ExitPlanMode)을 글로 보이고 "승인하고 진행" · 이유 적어 거절(다시 계획). 항상 허용은 없다.
+        function showPlan(a) {
+            const follow = atBottom();
+            const card = el("div", "approval plan-card");
+            const head = el("div", "head");
+            const left = el("span"); left.style.marginLeft = "auto";
+            head.append(el("span", null, who(a) + "계획 승인"), left);
+            card.append(head, el("div", "plan-text", a.summary));
+            if (a.truncated) card.append(el("div", "warn-line", "계획이 길어 끝부분이 잘려 보입니다 — 지휘자는 전체 계획대로 진행합니다."));
+            // 계획 글 · 파일 경로 밖의 입력은 승인해도 넘기지 않는다 (/self-review security d3dd55b237 C1)
+            if (a.extra) card.append(el("div", "warn-line", "보이지 않는 추가 입력(" + a.extra + ")은 빼고 승인합니다."));
+            card.append(el("div", "desc", "승인하면 지휘자가 지금 바로 이 계획대로 진행합니다. 명령은 따로 명령 카드로 묻습니다."));
+            const acts = el("div", "acts");
+            const ok = el("button", "btn primary", "승인하고 진행");
+            ok.type = "button";
+            ok.addEventListener("click", () => decide(a, "allow", card));
+            const reasonBox = el("input", "reason");
+            reasonBox.type = "text"; reasonBox.maxLength = 500; reasonBox.placeholder = "고칠 점 (지휘자가 계획을 고쳐 다시 묻습니다)";
+            reasonBox.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); decide(a, "deny", card); } });
+            const no = el("button", "btn", "고쳐 달라고 거절");
+            no.type = "button";
+            no.addEventListener("click", () => decide(a, "deny", card));
+            acts.append(ok, reasonBox, no);
+            card.append(acts);
+            card.dataset.expires = String(Date.parse(a.expiresAt));
+            card.left = left;
+            place(a, card);
+            if (follow) toBottom();
+        }
+        // 끝난 카드는 한 줄로 바꾼다. 줄에도 구성원 ID를 달아 단톡방이 그 구성원 턴이 끝나면 지운다
+        function line(a, cls, text) {
+            const l = el("div", "live-line " + cls, text);
+            if (a.detail) l.dataset.member = a.detail;
+            return l;
+        }
+        function doneApproval(a, label) {
+            const card = cards.get(a.id);
+            if (!card) return;
+            cards.delete(a.id);
+            if (a.plan) {
+                opts.onPlanDone?.(label); // 승인하면 서버가 "계획 먼저"를 껐다 — 토글도 맞춘다
+                card.replaceWith(line(a, "approval-line" + (label === "허용" ? "" : " denied"), who(a) + "계획 " + (label === "허용" ? "승인 — 진행합니다" : (label || "끝남"))));
+                return;
+            }
+            // approval-line: 턴이 끝나 기록을 다시 그리면 지운다 — 같은 줄이 기록 속 제자리(방 기록 줄)에 있다
+            card.replaceWith(line(a, "approval-line" + (label === "허용" || label === "항상 허용" ? "" : " denied"),
+                who(a) + "승인 " + (label || "끝남") + " — " + a.tool + ": " + a.summary.slice(0, 120)));
+        }
+        // 질문 카드 (3차 a): 지휘자의 AskUserQuestion. 질문마다 선택지(하나 · 여러 개) + "기타" 직접 쓰기. 남은 시간은 승인 카드와 같이 다시 쓴다.
+        function showQuestion(q) {
+            if (cards.has(q.id)) return;
+            const follow = atBottom();
+            const card = el("div", "approval question-card");
+            const head = el("div", "head");
+            const left = el("span"); left.style.marginLeft = "auto";
+            head.append(el("span", null, who(q) ? who(q) + "질문" : "지휘자의 질문"), left);
+            card.append(head);
+            const reads = [];
+            q.questions.forEach((item, qi) => {
+                const set = el("fieldset");
+                const legend = el("legend");
+                if (item.header) legend.append(el("span", "tag", item.header));
+                legend.append(document.createTextNode(item.question));
+                set.append(legend);
+                const name = "q-" + q.id + "-" + qi;
+                const inputs = [];
+                for (const o of item.options) {
+                    const lab = el("label", "opt");
+                    const box = el("input");
+                    box.type = item.multiSelect ? "checkbox" : "radio"; box.name = name; box.value = o.label;
+                    lab.append(box, el("span", null, o.label));
+                    if (o.description) lab.append(el("span", "d", o.description));
+                    set.append(lab);
+                    inputs.push(box);
+                }
+                // 기타: 글을 쓰면 그 글이 답 (하나 고르기면 선택지 표시를 지운다)
+                const otherLab = el("label", "opt");
+                const other = el("input", "other");
+                other.type = "text"; other.maxLength = 1000; other.placeholder = item.options.length ? "기타 (직접 쓰기)" : "답 쓰기";
+                other.addEventListener("input", () => { if (!item.multiSelect && other.value.trim()) inputs.forEach(b => b.checked = false); });
+                // 반대로 하나 고르기에서 선택지를 고르면 기타 글을 비운다 — 안 그러면 보이는 선택과 다른 글이 답으로 갔다 (/self-review 7d839f4aa5 C3)
+                if (!item.multiSelect) inputs.forEach(b => b.addEventListener("change", () => { if (b.checked) other.value = ""; }));
+                otherLab.append(other);
+                set.append(otherLab);
+                card.append(set);
+                reads.push(() => {
+                    const picked = inputs.filter(b => b.checked).map(b => b.value);
+                    const typed = other.value.trim();
+                    if (typed) picked.push(typed);
+                    return [item.question, item.multiSelect ? picked.join(", ") : (typed || picked[0] || "")];
+                });
+            });
+            const acts = el("div", "acts");
+            const send = el("button", "btn primary", "답하기"); send.type = "button";
+            const skip = el("button", "btn", "답하지 않기"); skip.type = "button";
+            send.addEventListener("click", async () => {
+                const answers = Object.fromEntries(reads.map(r => r()));
+                if (Object.values(answers).some(a => !a)) { alert("모든 질문에 답을 고르거나 써 주세요."); return; }
+                await answer(q, card, answers);
+            });
+            skip.addEventListener("click", () => answer(q, card, null));
+            acts.append(send, skip);
+            card.append(acts);
+            card.dataset.expires = String(Date.parse(q.expiresAt));
+            card.left = left;
+            place(q, card);
+            if (follow) toBottom();
+        }
+        async function answer(q, card, answers) {
+            const controls = card.querySelectorAll("button, input");
+            controls.forEach(b => b.disabled = true);
+            const data = new FormData();
+            data.append("question", q.id);
+            if (answers) data.append("answers", JSON.stringify(answers)); else data.append("skip", "true");
+            if (!await opts.post(q, "Answer", data)) controls.forEach(b => b.disabled = false);
+        }
+        function doneQuestion(q, text, answered, answers) {
+            const card = cards.get(q.id);
+            if (!card) return;
+            cards.delete(q.id);
+            const bubbled = answered && answers ? opts.answered?.(q, answers) : null;
+            // q-done: 턴 끝에 세션 기록의 같은 줄(답하지 않음)로 바뀌므로 그때 지운다
+            card.replaceWith(bubbled || line(q, "q-done" + (answered ? "" : " denied"), who(q) + "질문 " + (answered ? "답함 — " + text : (text || "끝남"))));
+        }
+        async function decide(a, choice, card) {
+            const reason = choice === "deny" ? card.querySelector("input.reason")?.value.trim() : null;
+            const buttons = card.querySelectorAll("button");
+            buttons.forEach(b => b.disabled = true);
+            const data = new FormData();
+            data.append("approval", a.id); data.append("choice", choice);
+            if (reason) data.append("reason", reason);
+            if (!await opts.post(a, "Approve", data)) buttons.forEach(b => b.disabled = false);
+        }
+        function tick() {
+            for (const card of cards.values()) {
+                const s = Math.max(0, Math.round((Number(card.dataset.expires) - Date.now()) / 1000));
+                card.left.textContent = "남은 시간 " + Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+            }
+        }
+        const ticker = setInterval(tick, 1000);
+        return {
+            cards, showApproval, doneApproval, showQuestion, doneQuestion,
+            clear() { cards.forEach(c => c.remove()); cards.clear(); },
+            dispose() { clearInterval(ticker); },
+        };
+    }
+
     function mountRoom(root) {
         const roomId = root.dataset.room;
         const self = "/Room/" + roomId;
@@ -1339,58 +1549,33 @@
             if (store.get("hbchat.side") === "1" && wide() && !root.closest(".mini")) setSide(true);
         }
 
-        // 승인 카드 (명령 단계): 서버가 답을 기다리는 동안 대화 흐름 안(live)에 보인다 (2-2 b). 남은 시간은 1초마다 다시 쓴다.
-        const cards = new Map();
-        function showApproval(a) {
-            if (cards.has(a.id)) return;
-            if (a.plan) { showPlan(a); return; }
-            const follow = atBottom();
-            const card = el("div", "approval");
-            const head = el("div", "head");
-            const left = el("span"); left.style.marginLeft = "auto";
-            head.append(el("span", null, "승인 요청 · " + a.tool + (a.fromAgent ? " · 서브에이전트" : "")), left); // 서브에이전트가 낸 요청 (D)
-            // 명령 전문(스크롤 칸) — 사용자가 본 것이 허용되는 것과 같게 (/self-review 36e4e20e04 C3 · C5, ab79e61df5 C5).
-            card.append(head, el("div", "cmd", a.summary));
-            // 터미널 시작 · 브라우저 사이트 카드의 설명은 앱이 쓴 안내다 — 지휘자 설명으로 보이지 않게
-            if (a.description) card.append(el("div", "desc", (a.tool === "터미널" || a.tool === "브라우저" ? "" : "Claude 설명: ") + a.description));
-            // 명령 밖의 입력도 허용하면 같이 실행된다 — 본 것 = 허용되는 것 (/self-review 5e747ff851 C1)
-            if (a.extra) card.append(el("div", "cmd", "추가 입력: " + a.extra));
-            // 백그라운드 실행 명령 — 답이 끝난 뒤에도 돈다 (계획서 2026-10-29_HB_Chat-백그라운드-명령, 결정 "넣음")
-            if (a.backgroundMinutes) card.append(el("div", "warn-line",
-                `백그라운드: 답이 끝난 뒤에도 최대 ${a.backgroundMinutes}분 계속 돕니다 — 대화 아래 '지금 끝내기'로 먼저 정리할 수 있습니다.`));
-            const denyOnly = a.truncated || a.risky;
-            if (a.risky) card.append(el("div", "warn-line", "위험한 입력(dangerously · bypass)이 있어 거절만 할 수 있습니다."));
-            else if (a.truncated) card.append(el("div", "warn-line", "명령이나 입력이 너무 길어 끝까지 보이지 않습니다 — 거절만 할 수 있습니다."));
-            else if (a.rule) {
-                const r = el("div", "rule");
-                r.append(document.createTextNode("항상 허용하면 저장될 규칙: "), el("code", "mono", a.rule));
-                card.append(r, el("div", "warn-line", "항상 허용하면 이 명령은 다음부터 묻지 않습니다 — 이 명령이 돌리는 파일(스크립트 · package.json · 프로젝트 파일 등)이 바뀌어도 그대로 실행됩니다."));
-            }
-            const acts = el("div", "acts");
-            const button = (label, choice, extra) => {
-                const b = el("button", "btn" + (extra ? " " + extra : ""), label);
-                b.type = "button";
-                b.addEventListener("click", () => decide(a.id, choice, card));
-                acts.append(b);
-                return b;
-            };
-            if (!denyOnly) {
-                button("허용", "allow", "primary");
-                if (a.rule) button("이 방에서 항상 허용", "always");
-            }
-            const reasonBox = el("input", "reason");
-            reasonBox.type = "text"; reasonBox.maxLength = 500; reasonBox.placeholder = "거절 이유 (선택, 지휘자에게 전해짐)";
-            reasonBox.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); decide(a.id, "deny", card); } });
-            acts.append(reasonBox);
-            button("거절", "deny");
-            card.append(acts);
-            card.dataset.expires = String(Date.parse(a.expiresAt));
-            card.left = left;
-            live.append(card);
-            cards.set(a.id, card);
-            tickApprovals();
-            if (follow) toBottom();
-        }
+        // 승인 · 질문 · 계획 카드 — 단톡방 화면과 같이 쓰는 cardKit (단톡방 ⑤)
+        const kit = cardKit({
+            live, atBottom, toBottom,
+            post: (_, handler, data) => post(handler, data),
+            onPlanDone: (label) => { if (label === "허용" && planToggle) planToggle.checked = false; },
+            // 답한 질문은 '나' 말풍선 (4차 D1, 서버 _Messages의 answer 말풍선과 같은 모양)
+            answered: (q, answers) => {
+                const m = el("div", "msg user answer"), b = el("div", "bubble");
+                m.dataset.speaker = "user";
+                const w = el("div", "who");
+                // 서버 말풍선과 같게 시각 · 답장 단추 (e8091295fe C2 — 턴이 끝날 때까지도 인용할 수 있게)
+                const now = new Date(), p2 = n => String(n).padStart(2, "0");
+                const when = `${p2(now.getMonth() + 1)}-${p2(now.getDate())} ${p2(now.getHours())}:${p2(now.getMinutes())}:${p2(now.getSeconds())}`;
+                const reply = el("button", "reply"); reply.append(icon("reply"));
+                reply.type = "button"; reply.title = "이 답에 답장 (인용)"; reply.setAttribute("aria-label", "답장");
+                w.append(el("b", null, profiles.user?.name || "나"), " ", el("span", "detail", "질문에 답함"), " ", el("span", "when", when), " ", reply);
+                const body = el("div", "body");
+                for (const item of q.questions) {
+                    body.append(el("div", "answer-q", item.question), el("div", "answer-a", answers[item.question] ?? ""));
+                }
+                b.append(w, body);
+                m.append(avatar(profiles.user, "나"), b);
+                return m;
+            },
+        });
+        const cards = kit.cards;
+        const { showApproval, doneApproval, showQuestion, doneQuestion } = kit;
         // 서브에이전트 진행 줄 (Claude 앱 기능 D): task_id마다 한 줄 — 시작 · 진행(설명 · 도구 수) · 끝. 턴이 끝나면 다른 진행 줄처럼 지워진다.
         const agentLines = new Map();
         function showAgent(t) {
@@ -1442,164 +1627,6 @@
             if (atBottom()) toBottom();
         }
 
-        // 계획 카드 (Claude 앱 기능 C): 지휘자의 계획(ExitPlanMode)을 글로 보이고 "승인하고 진행" · 이유 적어 거절(다시 계획). 항상 허용은 없다.
-        function showPlan(a) {
-            const follow = atBottom();
-            const card = el("div", "approval plan-card");
-            const head = el("div", "head");
-            const left = el("span"); left.style.marginLeft = "auto";
-            head.append(el("span", null, "계획 승인"), left);
-            card.append(head, el("div", "plan-text", a.summary));
-            if (a.truncated) card.append(el("div", "warn-line", "계획이 길어 끝부분이 잘려 보입니다 — 지휘자는 전체 계획대로 진행합니다."));
-            // 계획 글 · 파일 경로 밖의 입력은 승인해도 넘기지 않는다 (/self-review security d3dd55b237 C1)
-            if (a.extra) card.append(el("div", "warn-line", "보이지 않는 추가 입력(" + a.extra + ")은 빼고 승인합니다."));
-            card.append(el("div", "desc", "승인하면 지휘자가 지금 바로 이 계획대로 진행합니다. 명령은 따로 명령 카드로 묻습니다."));
-            const acts = el("div", "acts");
-            const ok = el("button", "btn primary", "승인하고 진행");
-            ok.type = "button";
-            ok.addEventListener("click", () => decide(a.id, "allow", card));
-            const reasonBox = el("input", "reason");
-            reasonBox.type = "text"; reasonBox.maxLength = 500; reasonBox.placeholder = "고칠 점 (지휘자가 계획을 고쳐 다시 묻습니다)";
-            reasonBox.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); decide(a.id, "deny", card); } });
-            const no = el("button", "btn", "고쳐 달라고 거절");
-            no.type = "button";
-            no.addEventListener("click", () => decide(a.id, "deny", card));
-            acts.append(ok, reasonBox, no);
-            card.append(acts);
-            card.dataset.expires = String(Date.parse(a.expiresAt));
-            card.left = left;
-            live.append(card);
-            cards.set(a.id, card);
-            tickApprovals();
-            if (follow) toBottom();
-        }
-        function doneApproval(a, label) {
-            const card = cards.get(a.id);
-            if (!card) return;
-            cards.delete(a.id);
-            if (a.plan) {
-                // 승인하면 서버가 "계획 먼저"를 껐다 — 토글도 맞춘다
-                if (label === "허용" && planToggle) planToggle.checked = false;
-                card.replaceWith(el("div", "live-line approval-line" + (label === "허용" ? "" : " denied"), "계획 " + (label === "허용" ? "승인 — 진행합니다" : (label || "끝남"))));
-                return;
-            }
-            // approval-line: 턴이 끝나 기록을 다시 그리면 지운다 — 같은 줄이 기록 속 제자리(방 기록 줄)에 있다
-            card.replaceWith(el("div", "live-line approval-line" + (label === "허용" || label === "항상 허용" ? "" : " denied"),
-                "승인 " + (label || "끝남") + " — " + a.tool + ": " + a.summary.slice(0, 120)));
-        }
-        // 질문 카드 (3차 a): 지휘자의 AskUserQuestion. 질문마다 선택지(하나 · 여러 개) + "기타" 직접 쓰기. 남은 시간은 승인 카드와 같이 다시 쓴다.
-        function showQuestion(q) {
-            if (cards.has(q.id)) return;
-            const follow = atBottom();
-            const card = el("div", "approval question-card");
-            const head = el("div", "head");
-            const left = el("span"); left.style.marginLeft = "auto";
-            head.append(el("span", null, "지휘자의 질문"), left);
-            card.append(head);
-            const reads = [];
-            q.questions.forEach((item, qi) => {
-                const set = el("fieldset");
-                const legend = el("legend");
-                if (item.header) legend.append(el("span", "tag", item.header));
-                legend.append(document.createTextNode(item.question));
-                set.append(legend);
-                const name = "q-" + q.id + "-" + qi;
-                const inputs = [];
-                for (const o of item.options) {
-                    const lab = el("label", "opt");
-                    const box = el("input");
-                    box.type = item.multiSelect ? "checkbox" : "radio"; box.name = name; box.value = o.label;
-                    lab.append(box, el("span", null, o.label));
-                    if (o.description) lab.append(el("span", "d", o.description));
-                    set.append(lab);
-                    inputs.push(box);
-                }
-                // 기타: 글을 쓰면 그 글이 답 (하나 고르기면 선택지 표시를 지운다)
-                const otherLab = el("label", "opt");
-                const other = el("input", "other");
-                other.type = "text"; other.maxLength = 1000; other.placeholder = item.options.length ? "기타 (직접 쓰기)" : "답 쓰기";
-                other.addEventListener("input", () => { if (!item.multiSelect && other.value.trim()) inputs.forEach(b => b.checked = false); });
-                // 반대로 하나 고르기에서 선택지를 고르면 기타 글을 비운다 — 안 그러면 보이는 선택과 다른 글이 답으로 갔다 (/self-review 7d839f4aa5 C3)
-                if (!item.multiSelect) inputs.forEach(b => b.addEventListener("change", () => { if (b.checked) other.value = ""; }));
-                otherLab.append(other);
-                set.append(otherLab);
-                card.append(set);
-                reads.push(() => {
-                    const picked = inputs.filter(b => b.checked).map(b => b.value);
-                    const typed = other.value.trim();
-                    if (typed) picked.push(typed);
-                    return [item.question, item.multiSelect ? picked.join(", ") : (typed || picked[0] || "")];
-                });
-            });
-            const acts = el("div", "acts");
-            const send = el("button", "btn primary", "답하기"); send.type = "button";
-            const skip = el("button", "btn", "답하지 않기"); skip.type = "button";
-            send.addEventListener("click", async () => {
-                const answers = Object.fromEntries(reads.map(r => r()));
-                if (Object.values(answers).some(a => !a)) { alert("모든 질문에 답을 고르거나 써 주세요."); return; }
-                await answer(q.id, card, answers);
-            });
-            skip.addEventListener("click", () => answer(q.id, card, null));
-            acts.append(send, skip);
-            card.append(acts);
-            card.dataset.expires = String(Date.parse(q.expiresAt));
-            card.left = left;
-            live.append(card);
-            cards.set(q.id, card);
-            tickApprovals();
-            if (follow) toBottom();
-        }
-        async function answer(id, card, answers) {
-            const controls = card.querySelectorAll("button, input");
-            controls.forEach(b => b.disabled = true);
-            const data = new FormData();
-            data.append("question", id);
-            if (answers) data.append("answers", JSON.stringify(answers)); else data.append("skip", "true");
-            if (!await post("Answer", data)) controls.forEach(b => b.disabled = false);
-        }
-        function doneQuestion(q, text, answered, answers) {
-            const card = cards.get(q.id);
-            if (!card) return;
-            cards.delete(q.id);
-            if (!answered || !answers) {
-                // q-done: 턴 끝에 세션 기록의 같은 줄(답하지 않음)로 바뀌므로 그때 지운다
-                card.replaceWith(el("div", "live-line q-done" + (answered ? "" : " denied"), "질문 " + (answered ? "답함 — " + text : (text || "끝남"))));
-                return;
-            }
-            // 답한 질문은 '나' 말풍선 (4차 D1, 서버 _Messages의 answer 말풍선과 같은 모양)
-            const m = el("div", "msg user answer"), b = el("div", "bubble");
-            m.dataset.speaker = "user";
-            const w = el("div", "who");
-            // 서버 말풍선과 같게 시각 · 답장 단추 (e8091295fe C2 — 턴이 끝날 때까지도 인용할 수 있게)
-            const now = new Date(), p2 = n => String(n).padStart(2, "0");
-            const when = `${p2(now.getMonth() + 1)}-${p2(now.getDate())} ${p2(now.getHours())}:${p2(now.getMinutes())}:${p2(now.getSeconds())}`;
-            const reply = el("button", "reply"); reply.append(icon("reply"));
-            reply.type = "button"; reply.title = "이 답에 답장 (인용)"; reply.setAttribute("aria-label", "답장");
-            w.append(el("b", null, profiles.user?.name || "나"), " ", el("span", "detail", "질문에 답함"), " ", el("span", "when", when), " ", reply);
-            const body = el("div", "body");
-            for (const item of q.questions) {
-                body.append(el("div", "answer-q", item.question), el("div", "answer-a", answers[item.question] ?? ""));
-            }
-            b.append(w, body);
-            m.append(avatar(profiles.user, "나"), b);
-            card.replaceWith(m);
-        }
-        async function decide(id, choice, card) {
-            const reason = choice === "deny" ? card.querySelector("input.reason")?.value.trim() : null;
-            const buttons = card.querySelectorAll("button");
-            buttons.forEach(b => b.disabled = true);
-            const data = new FormData();
-            data.append("approval", id); data.append("choice", choice);
-            if (reason) data.append("reason", reason);
-            if (!await post("Approve", data)) buttons.forEach(b => b.disabled = false);
-        }
-        function tickApprovals() {
-            for (const card of cards.values()) {
-                const s = Math.max(0, Math.round((Number(card.dataset.expires) - Date.now()) / 1000));
-                card.left.textContent = "남은 시간 " + Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
-            }
-        }
-        const ticker = setInterval(tickApprovals, 1000);
         // 이 방의 "항상 허용" 목록: 처음엔 서버가 그리고, 바뀌면 rules 알림으로 다시 그린다 (/self-review 36e4e20e04 C9).
         function removeButton(rule) {
             const b = el("button", "btn rule-remove");
@@ -2005,7 +2032,7 @@
                 clearTimeout(termResizeTimer);
                 for (const v of termViews.values()) v.term.dispose(); // 프로세스는 그대로 — 방을 다시 열면 버퍼로 다시 그린다
                 termViews.clear();
-                clearInterval(ticker);
+                kit.dispose();
                 clearInterval(codexTimer);
                 clearTimeout(readTimer);
                 clearTimeout(faceTimer);
@@ -2062,12 +2089,44 @@
             } catch { }
         }
         function setMember(id, label) {
-            const chip = root.querySelector(`.member[data-member="${CSS.escape(id || "")}"]`);
+            const chip = memberChip(id);
             if (chip) {
                 chip.querySelector(".member-state").textContent = label || "";
                 chip.classList.toggle("active", !!label);
             }
             stopBtn.disabled = !root.querySelector(".member.active");
+            // 그 구성원이 쉬면 끝난 카드 줄(허용 · 거절 · 답함)을 지운다 — 답은 대화 줄 말풍선으로 온다
+            if (!label) live.querySelectorAll(`:scope > .live-line[data-member="${CSS.escape(id || "")}"]`).forEach(l => l.remove());
+        }
+        const memberChip = (id) => root.querySelector(`.member[data-member="${CSS.escape(id || "")}"]`);
+
+        // 구성원 승인 · 질문 카드 (⑤): 자식 방 카드 알림이 detail(구성원 ID)을 달고 온다. 답은 그 구성원 자식 방 처리기로 보낸다
+        const live = $("#live");
+        const kit = cardKit({
+            live, atBottom, toBottom,
+            who: (a) => (memberChip(a.detail)?.dataset.name || "구성원") + "의 ",
+            always: "이 구성원에게 항상 허용",
+            post: async (a, handler, data) => {
+                const child = memberChip(a.detail)?.dataset.room;
+                if (!child) { alert("구성원을 찾지 못했습니다 — 화면을 새로 고쳐 주세요."); return false; }
+                data.append("__RequestVerificationToken", token);
+                try {
+                    const res = await fetch("/Room/" + encodeURIComponent(child) + "?handler=" + handler, { method: "POST", body: data });
+                    if (!res.ok) { alert(await res.text() || ("요청 실패 " + res.status)); return false; }
+                    return true;
+                } catch (e) { alert("요청 실패: " + e); return false; }
+            },
+        });
+        // 다시 붙을 때: 기다리는 카드를 서버에서 다시 받는다 (끊긴 사이 끝난 카드는 사라진다)
+        async function syncCards() {
+            try {
+                const res = await fetch(self + "?handler=GroupCards", { cache: "no-store" });
+                if (!res.ok || disposed) return;
+                const list = await res.json();
+                if (disposed) return;
+                kit.clear();
+                for (const ev of list) ev.kind === "question" ? kit.showQuestion({ ...ev.question, detail: ev.detail }) : kit.showApproval({ ...ev.approval, detail: ev.detail });
+            } catch { }
         }
         // 구성원 상태를 서버에서 다시 받아 맞춘다 — 다시 붙었을 때 · 대화 줄이 바뀔 때 (끊긴 사이 놓친 member 알림, b8697252eb C4)
         async function syncMembers() {
@@ -2086,9 +2145,14 @@
             switch (ev.kind) {
                 case "rooms": scheduleList(); break; // 방 목록 신호 (탭당 SSE 하나)
                 case "profiles": reopenRoom(roomId); break;
-                case "snapshot":
+                case "snapshot": chain = chain.then(() => disposed ? null : refresh()).then(() => disposed ? null : syncMembers()).then(() => disposed ? null : syncCards()).catch(() => { }); break;
                 case "group": chain = chain.then(() => disposed ? null : refresh()).then(() => disposed ? null : syncMembers()).catch(() => { }); break;
                 case "member": setMember(ev.detail, ev.text); break;
+                // 구성원 카드 — 차례(chain) 뒤에: snapshot의 syncCards가 지운 뒤 그리게. 실패해도 차례가 끊기지 않게 catch (⑤ 리뷰 C4)
+                case "approval": chain = chain.then(() => disposed ? null : kit.showApproval({ ...ev.approval, detail: ev.detail })).catch(() => { }); break;
+                case "approval-done": chain = chain.then(() => disposed ? null : kit.doneApproval({ ...ev.approval, detail: ev.detail }, ev.text)).catch(() => { }); break;
+                case "question": chain = chain.then(() => disposed ? null : kit.showQuestion({ ...ev.question, detail: ev.detail })).catch(() => { }); break;
+                case "question-done": chain = chain.then(() => disposed ? null : kit.doneQuestion({ ...ev.question, detail: ev.detail }, ev.text, ev.ok === true, ev.answers)).catch(() => { }); break;
             }
         };
 
@@ -2123,7 +2187,7 @@
 
         decorate(root);
         toBottom();
-        return { id: roomId, reveal() { }, dispose() { disposed = true; es.close(); } };
+        return { id: roomId, reveal() { }, dispose() { disposed = true; es.close(); kit.dispose(); } };
     }
 
     // 설정 · 프로필 그림 (4차 B2): 고른 그림을 올리기 전에 브라우저에서 줄인다 (긴 변 256px, webp) — 아바타는 작게만 보이고

@@ -50,10 +50,11 @@
                     {
                         <span class="detail" title="@member.Role">@(member.Role.Length > 30 ? member.Role[..30] + "…" : member.Role)</span>
                     }
-                    @* 이어 부르기 (④ 결정 3): 이 답이 부른 구성원 *@
-                    @if (e.To.Count > 0)
+                    @* 이어 부르기 (④ 결정 3): 이 답이 부른 구성원. 차례를 기다리던 구성원(⑤ Merged)은 "(차례에)" — 따로 돌지 않고 자기 차례 답으로 갈음 *@
+                    @if (e.To.Count > 0 || e.Merged.Count > 0)
                     {
-                        <span class="detail chain">→ @string.Join(", ", e.To.Select(Model.MemberOf).Where(m => m is not null).Select(m => "@" + m!.Name))</span>
+                        <span class="detail chain">→ @string.Join(", ", e.To.Select(Model.MemberOf).Where(m => m is not null).Select(m => "@" + m!.Name)
+                            .Concat(e.Merged.Select(Model.MemberOf).Where(m => m is not null).Select(m => "@" + m!.Name + " (차례에)")))</span>
                     }
                     <span class="when">@e.At.ToLocalTime().ToString("MM-dd HH:mm:ss")</span>
                     @if (member is not null)

@@ -1581,6 +1581,8 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     private void Broadcast(Live live, LiveEvent ev)
     {
         foreach (var ch in live.Subscribers) ch.Writer.TryWrite(ev);
+        if (CardKinds.Contains(ev.Kind))
+            try { CardChanged?.Invoke(live.Id, ev); } catch (Exception ex) when (ex is InvalidOperationException or IOException) { }
         if (ListKinds.Contains(ev.Kind))
         {
             Touch(live.Id);
@@ -1596,6 +1598,23 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
 
     /// <summary>한 턴이 끝남 (end 알림 뒤, 잠금 밖) — 단톡방이 구성원 답을 대화 줄에 올린다.</summary>
     public event Action<string, RunResult>? TurnEnded;
+
+    private static readonly HashSet<string> CardKinds = ["approval", "approval-done", "question", "question-done"];
+
+    /// <summary>
+    /// 승인 · 질문 카드 알림 (나옴 · 끝남) — 단톡방이 구성원 카드를 단톡방 화면에도 보인다 (계획서 2026-10-29_HB_Chat-단톡방 ⑤).
+    /// 방 잠금 안에서 부르므로 받는 쪽은 짧게(다른 방 잠금을 오래 잡지 않게).
+    /// </summary>
+    public event Action<string, LiveEvent>? CardChanged;
+
+    /// <summary>그 방이 답을 기다리는 승인 · 질문 카드 (단톡방 화면이 다시 붙을 때).</summary>
+    public (IReadOnlyList<ApprovalView> Approvals, IReadOnlyList<QuestionView> Questions) WaitingCards(string roomId)
+    {
+        if (!_rooms.TryGetValue(roomId, out var live)) return ([], []);
+        lock (live.Gate)
+            return ([.. live.Approvals.Values.Where(p => !p.Answer.Task.IsCompleted).Select(p => p.View)],
+                    [.. live.Questions.Values.Where(q => !q.Answer.Task.IsCompleted).Select(q => q.View)]);
+    }
 
     /// <summary>실행 없는 방(단톡방)에 알림을 흘린다 — 그 방을 열어 둔 화면이 받는다.</summary>
     public void Announce(string roomId, LiveEvent ev)

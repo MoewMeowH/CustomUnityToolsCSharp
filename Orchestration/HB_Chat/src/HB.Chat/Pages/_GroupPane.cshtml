@@ -2,7 +2,7 @@
 @inject ProfileView Profiles
 @*
     단톡방 칸 (계획서 2026-10-29_HB_Chat-단톡방, 1단계): 머리(구성원 · 상태 · 과정 보기) + 대화 줄 말풍선 + 입력칸. 동작은 wwwroot/chat.js의 mountGroup.
-    구성원 도구 · 승인 · 질문 카드는 그 구성원 자식 방("과정 보기")에서 보고 답한다.
+    구성원 도구 상세는 그 구성원 자식 방("과정 보기"). 승인 · 질문 카드는 단톡방 화면에도 구성원 이름으로 나오고 여기서 답한다(⑤ — 답은 그 자식 방 처리기로).
 *@
 @{
     var room = Model.Room;
@@ -19,11 +19,15 @@
             @foreach (var m in room.Members)
             {
                 var state = Model.MemberState(m);
-                <span class="member@(state is null ? "" : " active")" data-member="@m.Id" title="@(m.Role.Length > 0 ? m.Role : "역할 없음")">
+                <span class="member@(state is null ? "" : " active")" data-member="@m.Id" data-room="@m.RoomId" data-name="@m.Name" title="@(m.Role.Length > 0 ? m.Role : "역할 없음")">
                     <button type="button" class="btn member-call" data-name="@m.Name" title="입력칸에 @@@m.Name 넣기">@@@m.Name</button>
                     @if (Model.EngineLabel(m) is { } engine)
                     {
                         <span class="badge member-engine" title="읽기 전용 · 디스크 전체를 읽을 수 있음">@engine</span>
+                    }
+                    @if (Model.WriterLabel(m) is { } writer)
+                    {
+                        <span class="badge member-level" title="작업 폴더에 쓰는 구성원 — 이 구성원이 낀 말은 차례로 돕니다">@writer</span>
                     }
                     <span class="member-state muted">@state</span>
                     <a href="/Room/@m.RoomId" target="_blank" class="icon-link" title="@(m.Name)의 과정 (도구 · 승인 · 질문 카드)" aria-label="@(m.Name) 과정 보기">@Icons.Svg("external")</a>
@@ -57,12 +61,13 @@
     <div class="composer">
         <form id="send-form" autocomplete="off">
             @Html.AntiForgeryToken()
-            <textarea id="text" name="text" placeholder="@("@이름 · @All로 구성원 부르기 (Enter 보내기 · Shift+Enter 줄바꿈) — 여러 명은 동시에")" maxlength="@RoomHub.MaxPromptChars"></textarea>
+            <textarea id="text" name="text" placeholder="@("@이름 · @All로 구성원 부르기 (Enter 보내기 · Shift+Enter 줄바꿈) — " + (room.Members.Any(m => Model.WriterLabel(m) is not null) ? "편집 · 명령 구성원이 낀 말은 차례로" : "여러 명은 동시에"))" maxlength="@RoomHub.MaxPromptChars"></textarea>
             <button class="btn primary" type="submit" id="send">@Icons.Svg("send") 보내기</button>
             <button class="btn" type="button" id="stop" disabled="@(!room.Members.Any(Model.AnyMemberBusy))">@Icons.Svg("stop") 중지</button>
         </form>
         <details class="hint"><summary>단톡방: @RoomRules.LevelName(room.Level)</summary>
-            부른 구성원만 답합니다. 구성원은 마지막으로 본 뒤의 단톡방 대화를 함께 받습니다. 구성원이 승인 · 질문을 기다리면 그 구성원의 "과정 보기"에서 답하세요.
+            부른 구성원만 답합니다. 구성원은 마지막으로 본 뒤의 단톡방 대화를 함께 받습니다. 편집 · 명령 구성원이 낀 말은 구성원 순서대로 하나씩 돌고, 뒤 구성원은 앞 답을 받습니다.
+            구성원의 승인 · 질문 카드는 이 화면에 구성원 이름으로 나옵니다.
             @RoomRules.Describe(room.Level)
         </details>
     </div>
