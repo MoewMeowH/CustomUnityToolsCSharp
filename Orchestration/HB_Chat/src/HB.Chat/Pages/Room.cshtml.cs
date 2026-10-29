@@ -694,7 +694,10 @@ public sealed partial class RoomModel(
         return new JsonResult(groups.Cards(group));
     }
 
-    /// <summary>단톡방 구성원 상태 (화면이 다시 붙을 때 · 대화 줄을 받을 때 칩을 맞춘다 — b8697252eb C4).</summary>
+    /// <summary>
+    /// 단톡방 구성원 상태 (화면이 다시 붙을 때 · 대화 줄을 받을 때 칩을 맞춘다 — b8697252eb C4). 구성원이 쓰는 중인 글은 여기서 주지 않는다 —
+    /// SSE를 붙일 때 같은 채널로 온다 (GroupChat.OnSubscribed, 7e68bf5791 C1 · C3).
+    /// </summary>
     public IActionResult OnGetGroupState(string id)
     {
         Response.Headers.CacheControl = "no-store";
@@ -768,6 +771,24 @@ public sealed partial class RoomModel(
     /// <summary>단톡방 칩의 엔진 표시: Codex면 "Codex · 모델"(빈 모델 = 기본), Claude면 null.</summary>
     public string? EngineLabel(GroupMember m) =>
         store.Get(m.RoomId) is { Engine: RoomEngines.Codex } child ? "Codex" + (child.Model.Length > 0 ? " · " + child.Model : "") + (child.Effort is { } e ? " · " + e : "") : null;
+
+    /// <summary>단톡방 칩의 작업 폴더: 단톡방 작업 폴더와 다르면 그 이름, 같으면 null.</summary>
+    public string? MemberWorkspace(GroupMember m) =>
+        store.Get(m.RoomId) is { } child && !string.Equals(child.Workspace, Room.Workspace, StringComparison.OrdinalIgnoreCase) ? child.Workspace : null;
+
+    /// <summary>작업 폴더 경로 (칩 title). 허용 목록에서 빠졌으면 안내 글.</summary>
+    public string WorkspaceTitle(string workspace) => options.Value.WorkspacePath(workspace) ?? "(허용 목록에 없음)";
+
+    /// <summary>
+    /// 단톡방 머리의 작업 폴더: 구성원이 모두 같은 폴더면 그 이름(단톡방 폴더가 아니어도 — 칩 배지와 맞게), 섞였으면 "작업 폴더 N곳".
+    /// 자식 방이 없으면 단톡방 폴더.
+    /// </summary>
+    public string GroupWorkspaceLabel => GroupChat.Workspaces(store, Room) switch
+    {
+        { Count: > 1 } all => $"작업 폴더 {all.Count}곳",
+        [var one] => one,
+        _ => Room.Workspace,
+    };
 
     /// <summary>과정 보기(자식 방)의 단톡방 — 화면 안내 줄에 이름을 보인다.</summary>
     public Room? ParentGroup => Room.GroupId is { } g ? store.Get(g) : null;

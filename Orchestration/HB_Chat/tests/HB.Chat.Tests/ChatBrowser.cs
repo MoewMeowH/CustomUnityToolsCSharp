@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using HB.Chat;
 
@@ -62,8 +63,8 @@ public sealed class ChatBrowser : IAsyncLifetime
         await _root.ConnectAsync(new Uri($"ws://127.0.0.1:{_port}{lines[1]}"), default);
     }
 
-    /// <summary>새 탭에서 주소를 열고 방 칸(#chat)이 그려질 때까지 기다린다.</summary>
-    public async Task<ChatPage> OpenAsync(Uri url, int width = 1280, int height = 800)
+    /// <summary>새 탭에서 주소를 열고 방 칸(#chat)이 그려질 때까지 기다린다. 방이 아닌 화면(첫 화면 등)은 <paramref name="ready"/>로 기다릴 요소를 준다.</summary>
+    public async Task<ChatPage> OpenAsync(Uri url, int width = 1280, int height = 800, string ready = "#chat")
     {
         if (_root is null) throw new InvalidOperationException("브라우저가 없습니다.");
         var target = (string)(await _root.CallAsync("Target.createTarget", new JsonObject { ["url"] = "about:blank" }))["targetId"]!;
@@ -81,7 +82,8 @@ public sealed class ChatBrowser : IAsyncLifetime
             await cdp.CallAsync("Page.enable");
             await page.ResizeAsync(width, height);
             await cdp.CallAsync("Page.navigate", new JsonObject { ["url"] = url.ToString() });
-            await page.WaitForAsync("document.readyState === 'complete' && !!document.querySelector('#chat')", "방 화면");
+            await page.WaitForAsync($"document.readyState === 'complete' && !!document.querySelector({JsonSerializer.Serialize(ready)})",
+                ready == "#chat" ? "방 화면" : ready);
             return page;
         }
         catch

@@ -142,6 +142,12 @@ public sealed class CodexTests : IDisposable
     {
         GroupMemberSpec[] members = [new("A", "위험"), new("X", "반박", RoomEngines.Codex, "gpt-test", "low")];
         Assert.Contains("Codex 구성원을 켜지 않았습니다", _groups.Create("ws", PermissionLevel.Read, "opus", null, "팀", members).Error);
+        // Codex 허용은 구성원 작업 폴더 기준 — 단톡방 폴더가 허용 밖이어도 구성원 폴더가 허용이면 만든다 (실행 검사도 자식 방 폴더)
+        _settings.Save(["other"]);
+        var (elsewhere, elsewhereError) = _groups.Create("ws", PermissionLevel.Read, "opus", null, "팀", [members[0], members[1] with { Workspace = "other" }]);
+        Assert.Null(elsewhereError);
+        Assert.Equal("other", _store.Get(elsewhere!.Members[1].RoomId)!.Workspace);
+        Assert.Contains("'ws'", _groups.Create("other", PermissionLevel.Read, "opus", null, "팀", [members[0], members[1] with { Workspace = "ws" }]).Error);
         _settings.Save(["ws"]);
         Assert.Contains("목록에 없습니다", _groups.Create("ws", PermissionLevel.Read, "opus", null, "팀", [members[0], members[1] with { Model = "nope" }]).Error);
         Assert.Contains("추론 강도", _groups.Create("ws", PermissionLevel.Read, "opus", null, "팀", [members[0], members[1] with { Effort = "huge" }]).Error);

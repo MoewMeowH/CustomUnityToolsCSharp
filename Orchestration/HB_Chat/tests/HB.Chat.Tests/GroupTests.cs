@@ -22,11 +22,12 @@ public sealed class GroupTests : IDisposable
     public GroupTests()
     {
         Directory.CreateDirectory(Path.Combine(_dir, "ws"));
+        Directory.CreateDirectory(Path.Combine(_dir, "ws2"));
         var options = _options = new ChatOptions
         {
             DataDir = Path.Combine(_dir, "data"),
             ClaudeProjectsDir = Path.Combine(_dir, "projects"),
-            Workspaces = new(StringComparer.OrdinalIgnoreCase) { ["ws"] = Path.Combine(_dir, "ws") },
+            Workspaces = new(StringComparer.OrdinalIgnoreCase) { ["ws"] = Path.Combine(_dir, "ws"), ["ws2"] = Path.Combine(_dir, "ws2") },
         };
         _store = new RoomStore(Path.Combine(_dir, "data", "rooms.json"));
         var script = Path.Combine(AppContext.BaseDirectory, "TestData", "fake-claude.ps1");
@@ -606,6 +607,50 @@ public sealed class GroupTests : IDisposable
     }
 
     /// <summary>
+    /// 구성원마다 작업 폴더: 칸이 비면 단톡방 작업 폴더, 고르면 그 구성원 자식 방이 그 폴더. 허용 목록 · 기본 MCP의 .mcp.json은 구성원 폴더로 본다.
+    /// 섞인 단톡방만 규칙 안내에 다른 구성원 폴더가 들어간다 (모두 같으면 문장 그대로 — 이미 있는 단톡방의 규칙 지문이 바뀌지 않게).
+    /// </summary>
+    [Fact]
+    public void Create_PerMemberWorkspace()
+    {
+        var checking = new GroupChat(_store, _hub, _log, null, Options.Create(_options));
+        GroupMemberSpec[] members = [new("A", "코드", Level: PermissionLevel.Edit, Workspace: "ws2"), new("B", "리뷰")];
+        Assert.Contains("허용 목록에 없는 작업 폴더입니다: nope", checking.Create("ws", PermissionLevel.Read, "opus", null, "섞임", [members[0] with { Workspace = "nope" }, members[1]]).Error);
+
+        // 기본 MCP: 단톡방 폴더에만 항목이 있으면 A(ws2)에서 거절
+        File.WriteAllText(Path.Combine(_dir, "ws", ".mcp.json"), "{\"mcpServers\":{\"" + _options.McpServer + "\":{\"command\":\"cmd\"}}}");
+        var refused = checking.Create("ws", PermissionLevel.Read, "opus", null, "섞임", members, baseMcp: true).Error;
+        Assert.Contains("'ws2'", refused);
+        Assert.Contains("(A)", refused);
+        File.WriteAllText(Path.Combine(_dir, "ws2", ".mcp.json"), "{\"mcpServers\":{\"" + _options.McpServer + "\":{\"command\":\"cmd\"}}}");
+        var (group, error) = checking.Create("ws", PermissionLevel.Read, "opus", null, "섞임", members, baseMcp: true);
+        Assert.Null(error);
+        Assert.Equal("ws", group!.Workspace);
+        var a = _store.Get(group.Members[0].RoomId)!;
+        var b = _store.Get(group.Members[1].RoomId)!;
+        Assert.Equal(("ws2", "ws"), (a.Workspace, b.Workspace));
+        Assert.Equal(["ws2", "ws"], GroupChat.Workspaces(_store, group)); // 구성원 순서
+
+        var rulesB = GroupRules.For(_store, b)!;
+        Assert.Contains("A(코드 · 편집 · 작업 폴더 ws2)", rulesB);
+        Assert.Contains("너의 작업 폴더는 ws다", rulesB);
+        Assert.Contains("다른 구성원이 파일을 바꿨을 수 있으니", rulesB); // 섞여도 좁히지 않음 (128de5a971 C2)
+        Assert.Contains("너의 작업 폴더는 ws2다", GroupRules.For(_store, a));
+        // 경로를 알면 이름 옆에 (7e68bf5791 C2 — 구성원은 앱 설정 이름만으로 위치를 모른다)
+        var withPath = GroupRules.For(_store, b, _options.WorkspacePath)!;
+        Assert.Contains($"작업 폴더 ws2({Path.Combine(_dir, "ws2")})", withPath);
+        Assert.Contains($"너의 작업 폴더는 ws({Path.Combine(_dir, "ws")})다", withPath);
+
+        // 모두 같은 폴더(칸을 비움 · 단톡방 폴더를 고름)면 안내 문장은 그대로
+        var same = _groups.Create("ws", PermissionLevel.Read, "opus", null, "같음", [members[0] with { Workspace = "ws" }, members[1] with { Workspace = "" }]).Group!;
+        Assert.Equal(["ws"], GroupChat.Workspaces(_store, same));
+        var rulesSame = GroupRules.For(_store, _store.Get(same.Members[1].RoomId)!)!;
+        Assert.DoesNotContain("작업 폴더 ws", rulesSame);
+        Assert.DoesNotContain("구성원마다 작업 폴더", rulesSame);
+        Assert.Contains("다른 구성원이 파일을 바꿨을 수 있으니", rulesSame);
+    }
+
+    /// <summary>
     /// ⑤ 쓰는 구성원이 낀 말은 차례로 (결정 "모두 차례로, 뒤는 앞 답을 받음"): B는 A가 답한 뒤에야 돌고, A의 답을 "먼저 답한 구성원" 머리 아래로 받는다.
     /// 가짜 claude는 '('로 시작하는 말에 받은 프롬프트 전체를 답한다.
     /// </summary>
@@ -734,6 +779,52 @@ public sealed class GroupTests : IDisposable
             var user = _log.Read(group.Id).Single(e => e.Kind == GroupEntryKind.User).Line;
             Assert.Equal("allowed", (await AnswerAsync(group.Id, "A", user)).Text);
             Assert.Empty(_groups.Cards(_store.Get(group.Id)!));
+        }
+        finally { _hub.Unsubscribe(group.Id, events); }
+    }
+
+    /// <summary>
+    /// 답 실시간 표시: 구성원 자식 방의 도구 · 글 조각이 단톡방 알림 member-tool · member-delta(Member = 구성원 ID)로 오고, 실행 중에 새로 구독하면
+    /// 같은 채널 처음에 쌓인 글(member-reset) · 마지막 도구가 온다 (7e68bf5791 C1). 끝난 뒤 구독에는 없다. 가짜 claude 'stream'은 go 파일을 기다린다.
+    /// </summary>
+    [Fact]
+    public async Task LiveText_ForwardedToGroup()
+    {
+        var group = NewGroup();
+        var a = group.Members[0];
+        var events = _hub.Subscribe(group.Id);
+        try
+        {
+            Assert.Null(_groups.Send(group.Id, "stream @A"));
+            using var cts = new CancellationTokenSource(Wait);
+            var seen = new List<LiveEvent>();
+            while (seen.Count(e => e.Kind == "member-delta") < 2) if (await events.Reader.ReadAsync(cts.Token) is { Kind: "member-delta" or "member-tool" } e) seen.Add(e);
+            Assert.All(seen, e => Assert.Equal(a.Id, e.Member));
+            Assert.Equal(["member-tool", "member-delta", "member-delta"], seen.Select(e => e.Kind));
+            Assert.Equal(("Read", "notes.md"), (seen[0].Text, seen[0].Detail));
+            Assert.Equal("Hello", string.Concat(seen.Skip(1).Select(e => e.Text)));
+
+            // 실행 중 새 구독: snapshot 다음에 A의 쌓인 글 · 마지막 도구 (부르지 않은 B는 없음)
+            var late = _hub.Subscribe(group.Id);
+            try
+            {
+                var replay = new List<LiveEvent>();
+                while (late.Reader.TryRead(out var e)) if (e.Kind.StartsWith("member-", StringComparison.Ordinal)) replay.Add(e);
+                Assert.Equal([("member-reset", "Hello"), ("member-tool", "Read")], replay.Select(e => (e.Kind, e.Text!)));
+                Assert.All(replay, e => Assert.Equal(a.Id, e.Member));
+            }
+            finally { _hub.Unsubscribe(group.Id, late); }
+
+            Directory.CreateDirectory(Path.Combine(_dir, "tasks"));
+            File.WriteAllText(Path.Combine(_dir, "tasks", "go-" + _store.Get(a.RoomId)!.SessionId), "");
+            var user = _log.Read(group.Id).Single(e => e.Kind == GroupEntryKind.User).Line;
+            Assert.Equal("Hello world", (await AnswerAsync(group.Id, "A", user)).Text);
+            var after = _hub.Subscribe(group.Id);
+            try
+            {
+                while (after.Reader.TryRead(out var e)) Assert.False(e.Kind.StartsWith("member-", StringComparison.Ordinal), e.Kind);
+            }
+            finally { _hub.Unsubscribe(group.Id, after); }
         }
         finally { _hub.Unsubscribe(group.Id, events); }
     }

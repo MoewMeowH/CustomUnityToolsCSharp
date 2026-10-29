@@ -196,6 +196,81 @@ public sealed class ChatScriptTests(ChatApp app, ChatBrowser browser) : IClassFi
     }
 
     /// <summary>
+    /// 단톡방 답 실시간 표시: 부른 구성원의 글 조각 · 도구 칩이 진행 칸 임시 말풍선에 흐르고, 새로 연 화면(다시 붙음)도 쌓인 글을 받는다.
+    /// 끝나면 임시 말풍선이 사라지고 대화 줄 말풍선 하나만 남는다. 가짜 claude 'stream'은 go 파일을 기다린다.
+    /// </summary>
+    [Fact]
+    public async Task Group_LiveText_StreamsThenAnswer()
+    {
+        if (!browser.Available) return;
+        var (group, error) = app.Services.GetRequiredService<GroupChat>()
+            .Create("ws", PermissionLevel.Read, "opus", null, "흐름", [("A", ""), ("B", "")]);
+        Assert.Null(error);
+        var a = group!.Members[0];
+        const string streaming = "#live .msg.group-member.streaming";
+        await using var page = await browser.OpenAsync(app.RoomUrl(group));
+        await page.SendAsync("stream @A");
+        await page.WaitForAsync($"document.querySelector('{streaming} .body')?.textContent === 'Hello'", "A의 흐르는 글", ChatPage.TurnWait);
+        Assert.Equal(a.Id, await page.EvalAsync<string>($"document.querySelector('{streaming}').dataset.member"));
+        Assert.StartsWith("Read", await page.EvalAsync<string>($"document.querySelector('{streaming} .chips .chip').textContent"));
+        Assert.Equal(1, await page.EvalAsync<int>($"document.querySelectorAll('{streaming}').length")); // 부르지 않은 B는 없음
+
+        await using var again = await browser.OpenAsync(app.RoomUrl(group));
+        await again.WaitForAsync($"document.querySelector('{streaming} .body')?.textContent === 'Hello'", "다시 연 화면의 쌓인 글", ChatPage.TurnWait);
+
+        Directory.CreateDirectory(Path.Combine(app.Dir, "tasks"));
+        File.WriteAllText(Path.Combine(app.Dir, "tasks", "go-" + app.Store.Get(a.RoomId)!.SessionId), "");
+        foreach (var p in new[] { page, again })
+        {
+            await p.WaitForAsync("[...document.querySelectorAll('#chat .msg.group-member .body')].some(b => b.textContent.trim() === 'Hello world')", "A의 답", ChatPage.TurnWait);
+            await p.WaitForAsync($"!document.querySelector('{streaming}')", "임시 말풍선 지움", ChatPage.TurnWait);
+            p.AssertNoErrors();
+        }
+    }
+
+    /// <summary>
+    /// 단톡방 만들기: Codex 모델 · 강도 칸은 엔진이 Codex일 때만 보인다 (단계 칸 잠금 · 되돌림은 그대로). 구성원 작업 폴더 칸 값이 그 구성원 자식 방 폴더가 되고,
+    /// 단톡방 머리에 "작업 폴더 2곳" · 다른 폴더 구성원 칩에 폴더 이름.
+    /// </summary>
+    [Fact]
+    public async Task GroupCreate_CodexFieldsOnlyForCodex_MemberWorkspace()
+    {
+        if (!browser.Available) return;
+        await using var page = await browser.OpenAsync(new Uri(app.BaseAddress, "/?new=1"), ready: "form.group-create");
+        const string row = "document.querySelectorAll('form.group-create .group-member-row')[1]";
+        static string Codex(string row) => $"[...{row}.querySelectorAll('select[name=codexModels], select[name=codexEfforts]')].map(s => s.hidden ? 'h' : 'v').join('')";
+        static string SetEngine(string row, string engine) =>
+            $"(() => {{ const e = {row}.querySelector('select[name=engines]'); e.value = '{engine}'; e.dispatchEvent(new Event('change', {{ bubbles: true }})); }})()";
+        Assert.Equal("hh", await page.EvalAsync<string>(Codex(row)));
+        await page.EvalAsync($"{row}.querySelector('select[name=levels]').value = 'Edit'");
+        await page.EvalAsync(SetEngine(row, "codex"));
+        Assert.Equal("vv", await page.EvalAsync<string>(Codex(row)));
+        Assert.Equal("Read", await page.EvalAsync<string>($"{row}.querySelector('select[name=levels]').value"));
+        Assert.Equal("hh", await page.EvalAsync<string>(Codex("document.querySelectorAll('form.group-create .group-member-row')[0]"))); // 다른 줄은 그대로
+        await page.EvalAsync(SetEngine(row, "claude"));
+        Assert.Equal("hh", await page.EvalAsync<string>(Codex(row)));
+        Assert.Equal("Edit", await page.EvalAsync<string>($"{row}.querySelector('select[name=levels]').value"));
+
+        await page.EvalAsync("(() => { const f = document.querySelector('form.group-create'); f.querySelector('select[name=workspace]').value = 'ws'; " +
+                             "f.querySelector('input[name=title]').value = '두 폴더'; const n = f.querySelectorAll('input[name=names]'); n[0].value = 'A'; n[1].value = 'B'; " +
+                             "f.querySelectorAll('select[name=memberWorkspaces]')[1].value = 'ToolWithCS'; f.requestSubmit(); })()");
+        await page.WaitForAsync("location.pathname.startsWith('/Room/') && !!document.querySelector('.room.group')", "만든 단톡방", ChatPage.TurnWait);
+        var group = app.Store.All().Single(r => r.IsGroup && r.Title == "두 폴더");
+        Assert.Equal(("ws", "ws", "ToolWithCS"), (group.Workspace, app.Store.Get(group.Members[0].RoomId)!.Workspace, app.Store.Get(group.Members[1].RoomId)!.Workspace));
+        Assert.Contains("작업 폴더 2곳", await page.EvalAsync<string>("document.querySelector('.room-head .head-title .muted').textContent"));
+        Assert.Equal("ToolWithCS", await page.EvalAsync<string>("[...document.querySelectorAll('.member .member-ws')].map(b => b.textContent.trim()).join(',')"));
+        page.AssertNoErrors();
+
+        // 구성원이 모두 단톡방 폴더가 아닌 한 폴더면 머리는 그 폴더 — 칩 배지와 맞게 (/self-review 128de5a971 C1)
+        var (moved, error) = app.Services.GetRequiredService<GroupChat>().Create("ws", PermissionLevel.Read, "opus", null, "옮김",
+            [new GroupMemberSpec("A", "", Workspace: "ToolWithCS"), new GroupMemberSpec("B", "", Workspace: "ToolWithCS")]);
+        Assert.Null(error);
+        await using var other = await browser.OpenAsync(app.RoomUrl(moved!));
+        Assert.EndsWith("· ToolWithCS", (await other.EvalAsync<string>("document.querySelector('.room-head .head-title .muted').textContent")).Trim());
+        other.AssertNoErrors();
+    }
+
+    /// <summary>
     /// 좁은 창(미니 창 등)에서도 보통 슬라이드로 그려진다 (/self-review 832f22f583 C1). 고치기 전 실측(2026-10-29): 틀 406 · 306px에서 reveal이
     /// 스크롤 보기로 바뀌어(scrollActivationWidth 기본 435) sessionStorage SecurityError, loading-scroll-mode 클래스가 남고 화살표 · 쪽 번호 없는
     /// 세로 보기가 됐다(빈 틀은 아님) → scrollActivationWidth:null. 틀 안 예외는 다른 대상(OOPIF)이라 이 탭의 Errors에 잡히지 않아 틀 안 상태로 본다.

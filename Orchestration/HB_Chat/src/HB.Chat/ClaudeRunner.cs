@@ -61,6 +61,17 @@ public static class ClaudeRunner
     /// <summary>승인을 물을 곳이 없을 때(onPermission 없음)의 거절 문구 — 그 전 --permission-prompts none과 같은 뜻.</summary>
     public const string NoApprover = "승인할 사람이 없어 자동으로 거절했습니다. 다시 시도하지 말고, 무엇이 필요한지 사용자에게 말하세요.";
 
+    /// <summary>
+    /// CLI가 스스로 허용하지 않은 파일 쓰기(작업 폴더 밖 · 보호된 파일)를 거절할 때 — 이 앱은 쓰기 승인 카드가 없다. 무엇을 할지 알린다
+    /// (사용자 보고 2026-10-30: 단톡방에서 %TEMP%에 Write가 카드 없이 거절돼 "승인을 못 받는다"로 보였다).
+    /// </summary>
+    public const string NoWriteApprover =
+        "이 방에서는 작업 폴더 밖이거나 보호된 파일을 Write · Edit로 쓸 수 없어 자동으로 거절했습니다 (파일 쓰기 승인 카드 없음). " +
+        "같은 쓰기를 다시 시도하지 말고, 작업 폴더 안에 쓰거나 무엇이 필요한지 사용자에게 말하세요.";
+
+    /// <summary>파일 쓰기 도구 — 승인 요청까지 왔으면 <see cref="NoWriteApprover"/>로 거절한다.</summary>
+    public static readonly IReadOnlySet<string> WriteTools = new HashSet<string>(StringComparer.Ordinal) { "Write", "Edit", "MultiEdit", "NotebookEdit" };
+
     public static Task<RunResult> RunAsync(ProcessSpec spec, string prompt, Action<StreamEvent> onEvent, CancellationToken ct) =>
         RunAsync(spec, prompt, onEvent, null, ct);
 

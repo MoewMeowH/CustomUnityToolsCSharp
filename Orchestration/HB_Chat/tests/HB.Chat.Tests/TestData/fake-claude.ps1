@@ -106,6 +106,16 @@ switch ($mode) {
         Emit '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_u1","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}},{"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":"/9j/4AAQ"}}]},{"type":"tool_result","tool_use_id":"toolu_u2","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}}]}]}}'
         Emit '{"type":"result","subtype":"success","is_error":false,"result":"shot","total_cost_usd":0.001,"permission_denials":[]}'
     }
+    'stream' {
+        # group live text (screen test): a tool and two text pieces, then wait for the test's go file (<tasks>/go-<session id>, up to 30s), then the rest
+        Emit '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"ts","name":"Read","input":{"file_path":"C:\\ws\\notes.md"}}]}}'
+        Emit '{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Hel"}}}'
+        Emit '{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"lo"}}}'
+        $go = Join-Path $TasksRoot ('go-' + $Sid)
+        for ($i = 0; $i -lt 300 -and -not (Test-Path $go); $i++) { Start-Sleep -Milliseconds 100 }
+        Emit '{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" world"}}}'
+        Emit '{"type":"result","subtype":"success","is_error":false,"result":"Hello world","total_cost_usd":0.001,"permission_denials":[]}'
+    }
     'sleep' {
         Emit '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"wait"}}}'
         Start-Sleep -Seconds 60

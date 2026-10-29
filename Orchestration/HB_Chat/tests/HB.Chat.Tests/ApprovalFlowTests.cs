@@ -676,10 +676,12 @@ public sealed class ApprovalFlowTests : IDisposable
             var seen = await Until(ch, e => e.Kind == "idle");
             Assert.DoesNotContain(seen, e => e.Kind is "approval" or "question");
             // 호스트 거절에는 CLI의 permission_denied 줄이 없어 앱이 "거절됨" 줄을 낸다 (3차 a 실제 확인)
-            Assert.Contains(@"Write C:\outside\x.txt", seen.Single(e => e.Kind == "denied").Text);
+            var denied = seen.Single(e => e.Kind == "denied").Text;
+            Assert.Contains(@"Write C:\outside\x.txt", denied);
+            Assert.Contains("작업 폴더 밖", denied); // 쓰기는 까닭을 알린다 (사용자 보고 2026-10-30)
             var end = seen.Single(e => e.Kind == "end");
             Assert.False(end.Ok);
-            Assert.Contains(ClaudeRunner.NoApprover, end.Text);
+            Assert.Contains(ClaudeRunner.NoWriteApprover, end.Text);
         }
     }
 

@@ -139,20 +139,23 @@
             if (list) list.hidden = true;
         } catch { /* 다음 입력 때 다시 */ }
     }
-    // ---- 단톡방 만들기: Codex 구성원은 읽기만 — 엔진 칸에서 Codex를 고르면 단계 칸을 읽기로 맞추고 다른 값을 막는다 ----
-    function lockCodexLevel(engine) {
-        const level = engine?.closest(".group-member-row")?.querySelector("select[name=levels]");
+    // ---- 단톡방 만들기: 엔진 칸에 맞춘다 — Codex 구성원은 읽기만(단계 칸을 읽기로 맞추고 다른 값을 막음), Codex 모델 · 강도 칸은 Codex일 때만 보임 ----
+    function syncEngine(engine) {
+        const row = engine?.closest(".group-member-row");
+        const level = row?.querySelector("select[name=levels]");
         if (!level) return;
         const codex = engine.value === "codex";
         if (codex && level.dataset.before == null) { level.dataset.before = level.value; level.value = "Read"; }
         else if (!codex && level.dataset.before != null) { level.value = level.dataset.before; delete level.dataset.before; } // Claude로 돌리면 고르던 값으로 (9c54e0c54a C6)
         for (const o of level.options) o.disabled = codex && o.value !== "Read";
+        // 숨겨도 고른 값은 둔다 — 서버는 Claude 구성원의 Codex 값을 쓰지 않는다
+        row.querySelectorAll("select[name=codexModels], select[name=codexEfforts]").forEach(s => { s.hidden = !codex; });
     }
     document.addEventListener("change", (e) => {
-        if (e.target instanceof Element && e.target.matches("form.group-create select[name=engines]")) lockCodexLevel(e.target);
+        if (e.target instanceof Element && e.target.matches("form.group-create select[name=engines]")) syncEngine(e.target);
     });
-    // 뒤로 가기 · 양식 복원으로 엔진 칸이 Codex로 돌아와도 잠그게 (C6)
-    window.addEventListener("pageshow", () => document.querySelectorAll("form.group-create select[name=engines]").forEach(lockCodexLevel));
+    // 뒤로 가기 · 양식 복원으로 엔진 칸이 Codex로 돌아와도 맞추게 (C6)
+    window.addEventListener("pageshow", () => document.querySelectorAll("form.group-create select[name=engines]").forEach(syncEngine));
     searchBox?.addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(runSearch, 250); });
     searchBox?.addEventListener("keydown", (e) => { if (e.key === "Escape") { searchBox.value = ""; searchSeq++; showList(); } });
 
@@ -2390,6 +2393,8 @@
                 if (!res.ok || disposed) return;
                 const fresh = parseChat(await res.text());
                 if (!fresh || disposed || $("#chat") !== chat) return;
+                // 새로 올라온 구성원 답 — 그 구성원의 임시 말풍선을 지운다 (같은 답이 두 번 보이지 않게)
+                const answered = [...fresh.querySelectorAll(".msg.group-member[data-member]")].map(m => m.dataset.member);
                 if (Number(fresh.dataset.lastLine) < Number(chat.dataset.lastLine)) {
                     const all = await fetch(self + "?handler=Messages", { cache: "no-store" });
                     const whole = all.ok && !disposed ? parseChat(await all.text()) : null;
@@ -2401,6 +2406,7 @@
                     decorate(fresh);
                     while (fresh.firstChild) chat.append(fresh.firstChild);
                 }
+                answered.forEach(dropStream);
                 if ($("#chat") === chat) chat.dataset.lastLine = fresh.dataset.lastLine;
                 if (follow) toBottom();
             } catch { }
@@ -2414,8 +2420,85 @@
             stopBtn.disabled = !root.querySelector(".member.active");
             // 그 구성원이 쉬면 끝난 카드 줄(허용 · 거절 · 답함)을 지운다 — 답은 대화 줄 말풍선으로 온다
             if (!label) live.querySelectorAll(`:scope > .live-line[data-member="${CSS.escape(id || "")}"]`).forEach(l => l.remove());
+            // 답 쓰는 중 임시 말풍선: 돌기 시작하면 "입력 중" 점(글 조각이 없는 Codex도), 쉬거나 차례를 기다리면 지운다 (중지 · 실패 · 답 없이 끝남)
+            if (label === "생각 중" || label === "승인 · 질문 기다림") streamOf(id);
+            else dropStream(id);
         }
         const memberChip = (id) => root.querySelector(`.member[data-member="${CSS.escape(id || "")}"]`);
+
+        // ---- 구성원 답 쓰는 중 (임시 말풍선, 구성원마다 하나): 자식 방의 글 조각을 텍스트로 이어 붙이고 도구는 칩으로 —
+        // 일반 방처럼 Markdown은 끝난 답(대화 줄)에서만. 답이 대화 줄에 올라오거나 구성원이 쉬면 지운다
+        const streams = new Map(); // 구성원 ID → { msg, body, chips }
+        function streamOf(id) {
+            const known = streams.get(id);
+            if (known?.msg.isConnected) return known;
+            const chip = memberChip(id);
+            if (!chip) return null;
+            const follow = atBottom();
+            const m = el("div", "msg conductor group-member streaming"), b = el("div", "bubble");
+            m.dataset.member = id;
+            const face = root.querySelector(`template.member-avatar[data-member="${CSS.escape(id)}"]`);
+            if (face) m.append(face.content.cloneNode(true));
+            const who = el("div", "who");
+            who.append(el("b", null, chip.dataset.name));
+            const chips = el("div", "chips");
+            chips.hidden = true;
+            const body = el("div", "body stream");
+            typingInto(body);
+            b.append(who, chips, body);
+            m.append(b);
+            live.append(m);
+            const s = { msg: m, body, chips };
+            streams.set(id, s);
+            if (follow) toBottom();
+            return s;
+        }
+        function dropStream(id) {
+            streams.get(id)?.msg.remove();
+            streams.delete(id);
+        }
+        function typingInto(body) {
+            const dots = el("span", "typing");
+            dots.setAttribute("aria-label", "입력 중");
+            dots.append(el("i"), el("i"), el("i"));
+            body.replaceChildren(dots);
+            body.dataset.empty = "1";
+        }
+        function streamText(id, text) {
+            const s = streamOf(id);
+            if (!s || !text) return;
+            const follow = atBottom();
+            if (s.body.dataset.empty) { s.body.textContent = ""; delete s.body.dataset.empty; }
+            s.body.append(text); // 텍스트 노드로 — 일반 방과 같음 (C11)
+            if (follow) toBottom();
+        }
+        // SSE를 붙일 때 서버가 같은 채널로 주는 쌓인 글 (member-reset) — 본문을 통째로 바꾸고 칩을 비운다(마지막 도구는 뒤따르는 member-tool로).
+        // 그 앞에 온 조각은 이 글에 들어 있고 뒤에 오는 조각은 이어 붙는다 (7e68bf5791 C1)
+        function resetStream(id, text) {
+            const s = streamOf(id);
+            if (!s) return;
+            s.chips.replaceChildren();
+            s.chips.hidden = true;
+            if (text) { s.body.textContent = text; delete s.body.dataset.empty; }
+            else typingInto(s.body);
+        }
+        function streamTool(id, name, detail) {
+            const s = streamOf(id);
+            if (!s) return;
+            const label = shortTool(name) + (detail ? " " + detail : "");
+            s.chips.hidden = false;
+            const last = s.chips.lastElementChild;
+            if (last && last.dataset.name === label) {
+                last.dataset.count = String(Number(last.dataset.count) + 1);
+                last.textContent = label + " ×" + last.dataset.count;
+                return;
+            }
+            const c = el("span", "chip", label);
+            c.dataset.name = label;
+            c.dataset.count = "1";
+            s.chips.append(c);
+            while (s.chips.children.length > 20) s.chips.firstElementChild.remove(); // 최근 20개만 (일반 방 MaxChips와 같은 수)
+        }
 
         // 구성원 승인 · 질문 카드 (⑤): 자식 방 카드 알림이 detail(구성원 ID)을 달고 온다. 답은 그 구성원 자식 방 처리기로 보낸다
         const live = $("#live");
@@ -2471,7 +2554,11 @@
                 case "profiles": reopenRoom(roomId); break;
                 case "snapshot": chain = chain.then(() => disposed ? null : refresh()).then(() => disposed ? null : syncMembers()).then(() => disposed ? null : syncCards()).catch(() => { }); break;
                 case "group": chain = chain.then(() => disposed ? null : refresh()).then(() => disposed ? null : syncMembers()).catch(() => { }); break;
-                case "member": setMember(ev.detail, ev.text); break;
+                // 구성원 상태 · 글 조각 · 도구도 차례(chain) 안에서 — 답 말풍선 받기(refresh)보다 먼저 지우거나, 늦게 그려 지운 말풍선이 되살아나지 않게
+                case "member": chain = chain.then(() => disposed ? null : setMember(ev.detail, ev.text)).catch(() => { }); break;
+                case "member-delta": chain = chain.then(() => disposed ? null : streamText(ev.member, ev.text)).catch(() => { }); break;
+                case "member-reset": chain = chain.then(() => disposed ? null : resetStream(ev.member, ev.text)).catch(() => { }); break;
+                case "member-tool": chain = chain.then(() => disposed ? null : streamTool(ev.member, ev.text, ev.detail)).catch(() => { }); break;
                 // 구성원 카드 — 차례(chain) 뒤에: snapshot의 syncCards가 지운 뒤 그리게. 실패해도 차례가 끊기지 않게 catch (⑤ 리뷰 C4)
                 case "approval": chain = chain.then(() => disposed ? null : kit.showApproval({ ...ev.approval, detail: ev.detail })).catch(() => { }); break;
                 case "approval-done": chain = chain.then(() => disposed ? null : kit.doneApproval({ ...ev.approval, detail: ev.detail }, ev.text)).catch(() => { }); break;

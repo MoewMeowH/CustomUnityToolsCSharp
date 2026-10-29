@@ -21,9 +21,11 @@ public sealed class IndexModel(RoomStore store, RoomHub hub, RoomList list, Chat
 
     /// <summary>
     /// 새 단톡방. 단계는 구성원 칸마다(levels — 비면 읽기 · Codex는 읽기), baseMcp: Claude 구성원에게 작업 폴더 기본 MCP (기본 끔).
+    /// memberWorkspaces: 구성원 작업 폴더 (비면 단톡방 작업 폴더 — 허용 목록 검사는 GroupChat.Create).
     /// </summary>
     public IActionResult OnPostCreateGroup(string workspace, string model, string? title, string? effort,
-        string[]? names, string[]? roles, string[]? engines, string[]? codexModels, string[]? codexEfforts, string[]? levels, bool baseMcp = false)
+        string[]? names, string[]? roles, string[]? engines, string[]? codexModels, string[]? codexEfforts, string[]? levels, string[]? memberWorkspaces,
+        bool baseMcp = false)
     {
         static string? At(string[]? values, int i) => values is not null && i < values.Length ? values[i] : null;
         var o = options.Value;
@@ -36,7 +38,8 @@ public sealed class IndexModel(RoomStore store, RoomHub hub, RoomList list, Chat
         if (Error is null && Enumerable.Range(0, names?.Length ?? 0).Any(i => At(levels, i) is { Length: > 0 } && LevelAt(i) is null)) Error = "알 수 없는 권한 단계입니다.";
         if (Error is null)
         {
-            var members = (names ?? []).Select((n, i) => new GroupMemberSpec(n, At(roles, i) ?? "", At(engines, i), At(codexModels, i), At(codexEfforts, i), LevelAt(i))).ToList();
+            var members = (names ?? []).Select((n, i) => new GroupMemberSpec(n, At(roles, i) ?? "", At(engines, i), At(codexModels, i), At(codexEfforts, i), LevelAt(i),
+                At(memberWorkspaces, i))).ToList();
             var (group, error) = groups.Create(workspace, PermissionLevel.Read, model, cleanEffort, title, members, baseMcp);
             if (group is not null)
             {

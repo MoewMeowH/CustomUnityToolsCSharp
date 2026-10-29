@@ -67,6 +67,9 @@ public sealed record LiveEvent(string Kind)
 
     /// <summary>browser 알림 · snapshot: 지휘자 브라우저 상태 (곁칸 브라우저 탭). browser-frame 알림은 Data에 jpeg(base64).</summary>
     public BrowserView? Browser { get; init; }
+
+    /// <summary>단톡방 member-delta · member-tool 알림: 그 글 조각 · 도구를 낸 구성원 ID (tool의 Detail은 도구 대상 그대로).</summary>
+    public string? Member { get; init; }
 }
 
 /// <summary>
@@ -296,6 +299,25 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     }
 
     public bool IsBusy(string roomId) => _rooms.TryGetValue(roomId, out var live) && live.Busy;
+
+    /// <summary>
+    /// 실행 중이면 지금까지 흘린 글(reset) · 마지막 도구(tool)를 그 채널에 넣는다 — 단톡방 화면이 구독할 때 구성원 임시 말풍선을 되살린다.
+    /// 이 방 잠금 안에서 써서, 같은 채널로 오는 이 방의 글 조각(<see cref="Streamed"/>)과 겹치거나 빠지지 않는다 (/self-review 7e68bf5791 C1 —
+    /// 따로 HTTP로 받으면 그 사이 조각이 두 번 붙었다). <paramref name="shape"/>: 알림 모양을 바꾼다 (단톡방 — member- 종류 · 구성원 ID).
+    /// </summary>
+    public void ReplayLive(string roomId, ChannelWriter<LiveEvent> to, Func<LiveEvent, LiveEvent> shape)
+    {
+        if (!_rooms.TryGetValue(roomId, out var live)) return;
+        lock (live.Gate)
+        {
+            if (!live.Busy) return;
+            to.TryWrite(shape(new LiveEvent("reset") { Text = live.Partial.ToString() }));
+            if (live.Tool is { } tool) to.TryWrite(shape(new LiveEvent("tool") { Text = tool.Name, Detail = tool.Detail }));
+        }
+    }
+
+    /// <summary>방 SSE 구독이 붙은 뒤 (snapshot 다음, 잠금 밖) — 단톡방이 구성원 진행 글을 같은 채널에 이어 넣는다 (<see cref="ReplayLive"/>).</summary>
+    public event Action<string, ChannelWriter<LiveEvent>>? Subscribed;
 
     /// <summary>방 목록에 보일 실행 상태: 쉼 · 실행 중 · 답 기다림(승인 · 질문 카드) (실패는 방 색인의 LastError로 따로 본다).</summary>
     public RoomActivity ActivityOf(string roomId)
@@ -640,6 +662,12 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         // 호스트가 거절하면 CLI는 system/permission_denied를 내지 않는다 (3차 a 실제 확인) — 그 전처럼 "거절됨" 줄을 화면에 남긴다.
         var summary = ApprovalRequest.Parse(ask.RequestJson)?.Summary ?? "";
         var target = summary is { Length: > 0 } s ? $" {(s.Length > 120 ? s[..120] + "…" : s)}" : "";
+        if (ClaudeRunner.WriteTools.Contains(ask.Tool))
+        {
+            // CLI가 스스로 허용하지 않은 파일 쓰기 — 이 앱에는 쓰기 카드가 없다. 화면 줄 · 지휘자에게 까닭을 알린다 (카드로 묻기는 나중 일)
+            HostDenied(room, live, generation, ask.Tool, summary, "작업 폴더 밖 쓰기", $"{ask.Tool}{target}: 작업 폴더 밖 · 보호된 파일 쓰기는 카드가 없어 자동 거절");
+            return PermissionDecision.Deny(ClaudeRunner.NoWriteApprover);
+        }
         HostDenied(room, live, generation, ask.Tool, summary, "승인할 곳 없음", $"{ask.Tool}{target}: 승인할 곳이 없어 자동 거절");
         return PermissionDecision.Deny(ClaudeRunner.NoApprover);
     }
@@ -1038,6 +1066,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             if (_disposed) ch.Writer.TryComplete();
             else _roomListeners.Add(ch);
         }
+        try { Subscribed?.Invoke(roomId, ch.Writer); } catch (Exception ex) when (ex is InvalidOperationException or IOException) { }
         return ch;
     }
 
@@ -1218,7 +1247,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         if (exe is null && CodexProcessFactory is null)
             return Refused(Blocked("Codex CLI를 찾지 못했습니다 — npm i -g @openai/codex 뒤 터미널에서 codex login (또는 설정 Chat:CodexPath)."));
 
-        var rules = CodexRunner.Rules + GroupRules.For(store, room);
+        var rules = CodexRunner.Rules + GroupRules.For(store, room, o.WorkspacePath);
         var hash = RoomRules.Hash(rules);
         var thread = room.CodexThread;
         var noted = thread is not null && room.RulesHash != hash;
@@ -1445,7 +1474,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             extras: [.. extraServers.Where(s => s != McpConfigFile.UnityServer)],
             // 모델 선택창 안내는 기본 서버가 붙고 요청 창 · 스위치가 있는 방에만 (785ebb5e97 C7)
             modeCard: mcpConfig is not null && !room.McpOff.Contains(o.McpServer) && room.GroupId is null)
-            + GroupRules.For(store, room); // 단톡방 구성원 방이면 역할 · 다른 구성원 — 바뀌면 지문이 바뀌어 다음 말에 다시 붙는다
+            + GroupRules.For(store, room, o.WorkspacePath); // 단톡방 구성원 방이면 역할 · 다른 구성원 — 바뀌면 지문이 바뀌어 다음 말에 다시 붙는다
         // 이어 쓰는 세션은 CLI가 압축 전까지 처음 시스템 프롬프트를 쓴다 (단계 실측: resume에 넣은 새 규칙은 안 보임).
         // 지휘자가 마지막으로 받은 규칙과 다르면 이번 말 앞에 새 규칙을 붙인다 — 갈래 첫 실행 · 이 칸 전에 만든 방도 한 번 받는다.
         // '/명령'은 앞에 글이 붙으면 CLI가 명령으로 알아보지 못한다 — 그 말에는 붙이지 않고 다음 말로 미룬다 (/self-review 70170a8801 C2).
@@ -1671,6 +1700,8 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         foreach (var ch in live.Subscribers) ch.Writer.TryWrite(ev);
         if (CardKinds.Contains(ev.Kind))
             try { CardChanged?.Invoke(live.Id, ev); } catch (Exception ex) when (ex is InvalidOperationException or IOException) { }
+        if (StreamKinds.Contains(ev.Kind))
+            try { Streamed?.Invoke(live.Id, ev); } catch (Exception ex) when (ex is InvalidOperationException or IOException) { }
         if (ListKinds.Contains(ev.Kind))
         {
             Touch(live.Id);
@@ -1694,6 +1725,13 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     /// 방 잠금 안에서 부르므로 받는 쪽은 짧게(다른 방 잠금을 오래 잡지 않게).
     /// </summary>
     public event Action<string, LiveEvent>? CardChanged;
+
+    private static readonly HashSet<string> StreamKinds = ["delta", "tool"];
+
+    /// <summary>
+    /// 글 조각 · 도구 알림 — 단톡방이 구성원 임시 말풍선에 흘린다. 방 잠금 안에서 부르므로 받는 쪽은 짧게 (CardChanged와 같음).
+    /// </summary>
+    public event Action<string, LiveEvent>? Streamed;
 
     /// <summary>그 방이 답을 기다리는 승인 · 질문 카드 (단톡방 화면이 다시 붙을 때).</summary>
     public (IReadOnlyList<ApprovalView> Approvals, IReadOnlyList<QuestionView> Questions) WaitingCards(string roomId)
