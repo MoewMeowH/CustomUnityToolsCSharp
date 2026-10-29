@@ -9,6 +9,8 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <!-- 화면 · 통합 시험 틀 (계획서 2026-10-29_HB_Chat-화면-스크립트-시험-틀): 실제 앱을 Kestrel 임의 포트로 -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.14" />
   </ItemGroup>
 
   <ItemGroup>

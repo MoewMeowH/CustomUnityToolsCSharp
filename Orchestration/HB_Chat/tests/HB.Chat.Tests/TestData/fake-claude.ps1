@@ -54,6 +54,29 @@ switch ($mode) {
         if ($Transcript) { New-Item -ItemType Directory -Force (Split-Path $Transcript) | Out-Null; Add-Content -Path $Transcript -Value '{"type":"user"}' }
         Emit ('{"type":"result","subtype":"error_during_execution","is_error":true,"result":' + (ConvertTo-Json $prompt -Compress) + ',"total_cost_usd":0.001,"permission_denials":[]}')
     }
+    { $_ -in 'say', 'shrink' } {
+        # screen tests (ChatScriptTests): 'say N' appends the user line + N conductor lines (say-1..say-N) to the transcript like the real CLI;
+        # 'shrink' rewrites the transcript to its first line + the user line + one conductor line (the record got shorter).
+        # ASCII only - Windows PowerShell reads this file as ANSI.
+        $utf8 = New-Object Text.UTF8Encoding $false
+        $now = [DateTime]::UtcNow
+        # 'o' is culture-independent (custom formats follow the time separator and calendar of the current culture)
+        $stamp = { param($i) $now.AddMilliseconds($i).ToString('o') }
+        $lines = @('{"type":"user","timestamp":"' + (& $stamp 0) + '","message":{"role":"user","content":' + (ConvertTo-Json $body.Trim() -Compress) + '}}')
+        $count = if ($mode -eq 'say') { [int](($body.Trim() -split '\s+')[1]) } else { 1 }
+        for ($i = 1; $i -le $count; $i++) {
+            $text = if ($mode -eq 'say') { "say-$i" } else { 'shrunk' }
+            $lines += '{"type":"assistant","timestamp":"' + (& $stamp $i) + '","message":{"role":"assistant","content":[{"type":"text","text":"' + $text + '"}]}}'
+        }
+        # the app reads transcripts with FileShare.ReadWrite, so no retry; a failed write must not look like success
+        try {
+            if ($mode -eq 'shrink') { $lines = @([IO.File]::ReadAllLines($Transcript, $utf8)[0]) + $lines; [IO.File]::WriteAllText($Transcript, (($lines -join "`n") + "`n"), $utf8) }
+            else { [IO.File]::AppendAllText($Transcript, (($lines -join "`n") + "`n"), $utf8) }
+            Emit '{"type":"result","subtype":"success","is_error":false,"result":"said","total_cost_usd":0.001,"permission_denials":[]}'
+        } catch {
+            Emit ('{"type":"result","subtype":"error_during_execution","is_error":true,"result":' + (ConvertTo-Json ('transcript write failed: ' + $_.Exception.Message) -Compress) + ',"total_cost_usd":0.001,"permission_denials":[]}')
+        }
+    }
     'roomtools' {
         # room servers: unity editor_status (expect allow, no card), unity eval (card; test lowers the level then denies), editor_status again (expect deny)
         $r1 = Ask 'req_u1' '{"subtype":"can_use_tool","tool_name":"mcp__unity__editor_status","input":{},"tool_use_id":"toolu_u1"}'
