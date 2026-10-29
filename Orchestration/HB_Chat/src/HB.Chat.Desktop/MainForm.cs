@@ -67,7 +67,7 @@ public sealed class MainForm : Form
     private Dictionary<string, RoomState>? _rooms;
     private readonly FailureMarks _unseenFailures = new();
     private string? _balloonRoom;
-    private bool _exiting, _hintShown, _confirming;
+    private bool _exiting, _confirming;
 
     // 미니 창 · 단축키 (2-3 c)
     private CoreWebView2Environment? _env;
@@ -793,17 +793,11 @@ public sealed class MainForm : Form
             e.Cancel = true;
             return;
         }
-        // 닫기(X)는 트레이로 숨긴다 (2-3 b). 끝내기는 트레이 메뉴 · Windows 종료.
+        // 닫기(X)는 트레이로 숨긴다 (2-3 b). 끝내기는 트레이 메뉴 · Windows 종료. 숨길 때 안내 풍선은 띄우지 않는다 (사용자 요청 2026-10-29)
         if (!_exiting && e.CloseReason == CloseReason.UserClosing)
         {
             e.Cancel = true;
             Hide();
-            if (!_hintShown)
-            {
-                _hintShown = true;
-                _balloonRoom = null;
-                _tray.ShowBalloonTip(4000, "HB Chat", "트레이에서 계속 돌아갑니다 — 끝내려면 트레이 메뉴의 끝내기", ToolTipIcon.None);
-            }
             return;
         }
         // 이 앱이 띄운 채팅 서버에 도는 턴이 있으면 묻는다 — 끄면 서버와 claude가 같이 끝나 그 턴이 멈춘다. Windows 종료 때는 묻지 않는다.
