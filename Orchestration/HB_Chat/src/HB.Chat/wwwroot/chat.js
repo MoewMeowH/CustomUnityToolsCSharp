@@ -711,7 +711,7 @@
             tick();
         }
 
-        // 계획 카드 (Claude 앱 기능 C): 지휘자의 계획(ExitPlanMode)을 글로 보이고 "승인하고 진행" · 이유 적어 거절(다시 계획). 항상 허용은 없다.
+        // 계획 카드 (Claude 앱 기능 C): 지휘자의 계획(ExitPlanMode)을 글로 보이고 "승인하고 진행" · 이유 적어 거절(다시 계획).
         function showPlan(a) {
             const follow = atBottom();
             const card = el("div", "approval plan-card");
@@ -741,7 +741,7 @@
             if (follow) toBottom();
         }
         // 모델 선택 카드: 지휘자의 run_mode — 모드 · 이유 · 요청 글 · 보낼 파일을 보이고, 에이전트마다 교체 · 강도를 골라 허가 · 거절.
-        // 항상 허용은 없다. 모드 · 요청 글은 바꾸지 않는다 (지휘자가 준비한 입력과 어긋나지 않게).
+        // 모드 · 요청 글은 바꾸지 않는다 (지휘자가 준비한 입력과 어긋나지 않게).
         function showModeCard(a) {
             const m = a.mode;
             const follow = atBottom();
@@ -997,7 +997,7 @@
             if (e.target.closest(".menu-fork")) {
                 if (menu) menu.open = false;
                 // 갈라지는 때는 새 방에 첫 말을 보낼 때다 (95e8b1c242 C2) — 문구도 그대로
-                if (!confirm("이 방 대화를 이어받는 새 방을 만들까요?\n새 방에 첫 말을 보낼 때 그때까지의 이 방 대화가 복사됩니다 (그 전에 이 방에서 더 나눈 대화도 포함). '항상 허용' 규칙은 옮기지 않습니다.")) return;
+                if (!confirm("이 방 대화를 이어받는 새 방을 만들까요?\n새 방에 첫 말을 보낼 때 그때까지의 이 방 대화가 복사됩니다 (그 전에 이 방에서 더 나눈 대화도 포함).")) return;
                 const res = await post("Fork", new FormData(), false, true);
                 if (res?.id) openRoom(res.id, true);
                 return;
