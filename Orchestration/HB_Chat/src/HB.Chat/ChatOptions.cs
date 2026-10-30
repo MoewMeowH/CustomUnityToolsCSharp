@@ -9,6 +9,11 @@ public enum PermissionLevel
     Read,
     /// <summary>읽기 + 작업 폴더 파일 편집 + 명령 실행(Bash · PowerShell). 명령은 실행 전에 방의 카드로 승인한다 (2차).</summary>
     Command,
+    /// <summary>
+    /// Claude 앱과 같은 쓰임: 편집 · 명령을 CLI auto 판정으로 묻지 않고 돌리고, 스킬 · 서브에이전트 · 폴더 밖 읽기를 쓴다.
+    /// 카드가 필요한 도구만 ask 규칙으로 호스트에 보낸다 (<see cref="ClaudeArgs.AppAskTools"/>).
+    /// </summary>
+    App,
 }
 
 /// <summary>
@@ -22,6 +27,7 @@ public sealed class PermissionLevelConverter : System.Text.Json.Serialization.Js
         {
             "Chat" or "Edit" or nameof(PermissionLevel.Read) => PermissionLevel.Read,
             nameof(PermissionLevel.Command) => PermissionLevel.Command,
+            nameof(PermissionLevel.App) => PermissionLevel.App,
             var other => throw new System.Text.Json.JsonException($"알 수 없는 권한 단계: {other}"),
         } : throw new System.Text.Json.JsonException("권한 단계는 글자여야 한다");
 

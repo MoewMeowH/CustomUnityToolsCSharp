@@ -645,7 +645,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         // 웹 도구: 검색은 카드 없이 — 검색어만, 받는 곳은 이미 대화를 보는 Anthropic. 가져오기는 사이트마다 카드
         if (ask.Tool is ClaudeArgs.WebSearchTool or ClaudeArgs.WebFetchTool)
             return ask.Tool == ClaudeArgs.WebSearchTool ? PermissionDecision.Allow(ask.InputJson) : await DecideWebFetchAsync(room, live, generation, ask, aborted);
-        if (room.Level == PermissionLevel.Command && ask.Tool == TerminalMcp.BrowserOpenTool && _browser is not null)
+        if (ClaudeArgs.RunsCommands(room.Level) && ask.Tool == TerminalMcp.BrowserOpenTool && _browser is not null)
         {
             // 지휘자 브라우저 열기 (결정 "localhost만 묻지 않음"): 로컬 · 이 방에서 허용한 사이트는 카드 없이, 그 밖은 사이트마다 한 번 카드.
             // 허용 답은 url만 다시 담는다(보이지 않는 키는 승인하지 않는다). 도구 쪽도 허용된 사이트인지 다시 본다.
@@ -655,7 +655,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             if (_browser.IsForbidden(url)) return PermissionDecision.Deny("이 앱 · 대시보드 주소는 지휘자 브라우저로 열 수 없습니다.");
             var input = TerminalMcp.UrlInput(url.AbsoluteUri);
             if (_browser.IsAllowed(room.Id, url)) return PermissionDecision.Allow(input);
-            if (store.Get(room.Id) is not { Level: PermissionLevel.Command })
+            if (store.Get(room.Id) is not { Level: PermissionLevel.Command or PermissionLevel.App })
                 return PermissionDecision.Deny("사용자가 이 방 권한을 명령 단계 아래로 내렸습니다 — 브라우저를 열지 않습니다.");
             var card = new ApprovalRequest(BrowserTool, url.AbsoluteUri,
                 $"지휘자 브라우저(사용자 브라우저와 따로)에서 {url.Host}를 엽니다. 허용하면 이 방 브라우저가 닫힐 때까지 같은 사이트는 다시 묻지 않습니다. " +
@@ -665,14 +665,14 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             _browser.ApproveHost(room.Id, url.Host);
             return PermissionDecision.Allow(input);
         }
-        if (room.Level == PermissionLevel.Command && ask.Tool == TerminalMcp.StartTool && _terminals is not null)
+        if (ClaudeArgs.RunsCommands(room.Level) && ask.Tool == TerminalMcp.StartTool && _terminals is not null)
         {
             // 터미널 시작 (결정 "늘 카드"): 카드로 묻는다. 허용하면 표를 남겨 앱 MCP가 그 하나만 띄운다.
             if (TerminalMcp.ParseStart(ask.InputJson) is not var (name, command))
                 return PermissionDecision.Deny("terminal_start 입력은 name · command 문자열이어야 합니다.");
             if (!Terminals.IsValidName(name)) return PermissionDecision.Deny("터미널 이름은 글자 · 숫자 · . _ - 만 32자까지입니다.");
             if (Terminals.WhyBadCommand(command) is { } bad) return PermissionDecision.Deny(bad);
-            if (store.Get(room.Id) is not { Level: PermissionLevel.Command })
+            if (store.Get(room.Id) is not { Level: PermissionLevel.Command or PermissionLevel.App })
             {
                 HostDenied(room, live, generation, TerminalTool, command, "권한을 명령 아래로 내림", $"터미널 {name}: 이 방 권한을 명령 아래로 내려 거절");
                 return PermissionDecision.Deny("사용자가 이 방 권한을 명령 단계 아래로 내렸습니다 — 터미널을 띄우지 않습니다.");
@@ -686,11 +686,11 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             _terminals.Approve(room.Id, name, command);
             return PermissionDecision.Allow(TerminalMcp.StartInput(name, command));
         }
-        if (room.Level == PermissionLevel.Command && ClaudeArgs.CommandTools.Contains(ask.Tool))
+        if (ClaudeArgs.RunsCommands(room.Level) && ClaudeArgs.CommandTools.Contains(ask.Tool))
         {
             // 실행 중에 곁칸에서 단계를 내렸으면(명령 → 그 아래) 이 턴의 명령도 카드 없이 거절한다 — 내리기는 바로 막힌다
             // (/self-review security 8ccecae84d C1). 올리기는 다음 실행부터.
-            if (store.Get(room.Id) is not { Level: PermissionLevel.Command })
+            if (store.Get(room.Id) is not { Level: PermissionLevel.Command or PermissionLevel.App })
             {
                 HostDenied(room, live, generation, ask.Tool, ApprovalRequest.Parse(ask.RequestJson)?.Summary ?? "", "권한을 명령 아래로 내림",
                     $"{ask.Tool}: 이 방 권한을 명령 아래로 내려 거절");
@@ -718,7 +718,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         {
             // CLI가 스스로 허용하지 않은 파일 쓰기(작업 폴더 밖 등). 명령 방은 카드로 묻는다 (결정 "명령 단계만" — 명령으로 이미 카드를 거쳐 폴더 밖에
             // 쓸 수 있는 단계라 권한이 넓어지지 않는다). 위험한 곳(앱 · 설정 폴더 · 지시 · 스크립트 이름 · 링크)은 카드 없이 거절
-            if (room.Level == PermissionLevel.Command && store.Get(room.Id) is { Level: PermissionLevel.Command })
+            if (ClaudeArgs.RunsCommands(room.Level) && store.Get(room.Id) is { Level: PermissionLevel.Command or PermissionLevel.App })
             {
                 var o = options.Value;
                 var path = ApprovalRequest.WritePath(ask.Tool, ask.InputJson);
@@ -831,7 +831,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         var now = store.Get(room.Id);
         var isUnity = server == McpConfigFile.UnityServer;
         var still = isUnity
-            ? now is { Level: PermissionLevel.Command } && unity is not null && string.Equals(now.UnityProject, unity, StringComparison.OrdinalIgnoreCase)
+            ? now is { Level: PermissionLevel.Command or PermissionLevel.App } && unity is not null && string.Equals(now.UnityProject, unity, StringComparison.OrdinalIgnoreCase)
             : now is { } n && n.McpExtra.Contains(server);
         if (!still)
         {
@@ -884,7 +884,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             if (live.Cts is null || live.Generation != generation) return null;
             // "이 턴 동안 묻지 않기": 켜기와 같은 잠금에서 보아 일괄 허용을 비껴간 요청이 카드로 남지 않게 (/cross-review 240769947f F1).
             // 단계도 Decide처럼 잠금 안에서 다시 본다 — 그사이 내렸으면 카드로 간다 (109f21e330 C3)
-            if (!(live.TrustCommands && request.TurnAllowable && store.Get(roomId)?.Level == PermissionLevel.Command))
+            if (!(live.TrustCommands && request.TurnAllowable && store.Get(roomId)?.Level is PermissionLevel.Command or PermissionLevel.App))
             {
                 waiting = new PendingApproval(request, DateTimeOffset.Now + timeout);
                 live.Approvals[waiting.Id] = waiting;
@@ -1010,6 +1010,9 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     /// <summary>"이 턴 동안 묻지 않기"로 허용한 명령의 기록 문구.</summary>
     public const string TurnAllowLabel = "이 턴 허용";
 
+    /// <summary>앱 단계에서 카드 없이 부른 도구의 승인 기록 라벨. 채팅 줄에는 보이지 않는다 — 도구 칩이 이미 있다.</summary>
+    public const string AppRanLabel = "앱 단계";
+
     /// <summary>"이 턴 동안 묻지 않기"를 켠다 · 끈다 (잠금 안에서 부른다). 바뀔 때만 화면에 알린다.</summary>
     private void SetTrust(Live live, bool on)
     {
@@ -1067,7 +1070,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 return DecideModeCard(pending, card, level, choice, reason, picks);
             if (choice != ApprovalChoice.Deny && (pending.Request.IsPlan ? level is not { } l || ClaudeArgs.PlanMode(l) is null
                     : pending.Request.Web ? level is null
-                    : level != PermissionLevel.Command))
+                    : level is not (PermissionLevel.Command or PermissionLevel.App)))
                 return pending.Request.IsPlan
                     ? "이 방 권한을 명령 단계 아래로 내려 계획을 진행할 수 없습니다 — 거절만 됩니다."
                     : pending.Request.Web ? "이 방이 없어져 허용할 수 없습니다 — 거절만 됩니다."
@@ -1332,7 +1335,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         var before = transcripts.Size(room.SessionId);
         // 터미널 곁칸: 명령 방 실행에만 앱 MCP를 붙인다 — 이 실행 동안만 듣는 토큰 (끝나면 거두고 설정 파일도 지운다)
         string? terminalToken = null, terminalConfig = null;
-        if (room.Level == PermissionLevel.Command && _terminals is not null && !room.McpOff.Contains(TerminalMcp.Server) && SelfUrl?.Invoke() is { } self)
+        if (ClaudeArgs.RunsCommands(room.Level) && _terminals is not null && !room.McpOff.Contains(TerminalMcp.Server) && SelfUrl?.Invoke() is { } self)
         {
             terminalToken = _terminals.Issue(room.Id);
             try
@@ -1470,7 +1473,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         IReadOnlyList<string> extraServers = [];
         // 방별 연결: 더한 서버 · 끈 기본 서버 · Unity가 없으면 예전처럼 작업 폴더별 공용 파일
         (string Cli, string Project)? unity = null;
-        if (room.Level == PermissionLevel.Command && room.UnityProject is { } unityProject)
+        if (ClaudeArgs.RunsCommands(room.Level) && room.UnityProject is { } unityProject)
         {
             var why = o.UnityProjectPath(unityProject) is not { } projectPath ? $"Unity 프로젝트 '{unityProject}'가 설정에 없습니다"
                 : !o.UnityProjects.ContainsKey(unityProject) && o.AppUnityProjects?.WhyUnusable(projectPath) is { } unsafeUnity ? $"Unity 프로젝트 '{unityProject}'를 지금은 쓸 수 없습니다: {unsafeUnity}"
@@ -1601,7 +1604,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         IReadOnlyList<string> inheritedDirs = [.. room.AttachFrom.Where(RoomStore.IsRoomId).Select(id => Attachments.Folder(o.DataFolder, id)).Where(f => Attachments.WhyNotOpen(f) is null)];
         // 명령 방: 편집 금지 규칙에 쓸 수 없는 글자가 든 경로면 그 첨부 폴더는 열지 않는다 — 금지가 안 걸린 채 열리는 것보다 닫는 쪽
         // (/self-review security 4c300badae C3). 데이터 폴더 경로에서 오므로 다 같이 걸린다
-        if (room.Level == PermissionLevel.Command
+        if (ClaudeArgs.RunsCommands(room.Level)
             && (attachDir is not null && !ClaudeArgs.IsRuleSafePath(attachDir) || inheritedDirs.Any(d => !ClaudeArgs.IsRuleSafePath(d))))
         {
             attachDir = attachDir is not null && ClaudeArgs.IsRuleSafePath(attachDir) ? attachDir : null;
@@ -1708,6 +1711,10 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                     foreach (var tool in u.Tools)
                     {
                         Broadcast(live, SetTool(live, tool));
+                        // 앱 단계: 카드를 거치지 않는 도구도 승인 기록에 남긴다 (호출 기록 — 판정 거절은 denied 줄로 따로)
+                        if (room.Level == PermissionLevel.App && !ClaudeRunner.ReadTools.Contains(tool.Name) && !ClaudeArgs.AppAskTools(o.McpServer).Contains(tool.Name)
+                            && tool.Name is not (ClaudeArgs.AskTool or ApprovalRequest.PlanTool or "TaskCreate" or "TaskGet" or "TaskList" or "TaskUpdate"))
+                            Log?.Write(room.Id, new ApprovalRequest(tool.Name, tool.Detail ?? "", null), AppRanLabel);
                         if (tool.Name is "TaskCreate" or "TaskUpdate") live.StepsWatch = true; // 목록을 바꾸는 도구만
                     }
                 if (ev is UsageEvent blocks)
@@ -1992,10 +1999,13 @@ public static class RoomRules
             ? $"이 방에는 MCP 서버 {string.Join(", ", extras)}도 붙어 있고, 그 도구는 이 방 권한 단계와 상관없이 묻지 않고 돈다 — " +
               "밖에 쓰거나 지우는 것처럼 되돌리기 어려운 호출은 먼저 사용자에게 말로 확인한다. "
             : "") +
-        (level == PermissionLevel.Command
-            ? "명령을 실행하면 사용자가 그 자리에서 카드로 허용 · 거절한다. 거절되면 같은 명령을 다시 시도하지 말고, 거절 이유를 보고 다른 방법을 묻는다." +
-              // 카드 수를 줄인다 (사용자 "승인을 한 20번을 누르는느낌")
-              " 명령마다 카드가 하나씩 뜨므로 되도록 한 번에 묶어 실행하고, 읽기 · 찾기는 Read · Grep으로 먼저 한다." +
+        (ClaudeArgs.RunsCommands(level)
+            ? (level == PermissionLevel.App
+                ? "편집 · 명령은 사용자에게 묻지 않고 바로 돈다. 판정이 거절하면 같은 명령을 다시 시도하지 말고 거절 이유를 사용자에게 말한다. " +
+                  "사용자는 실행 전에 볼 수 없으니, 지우기 · 원격에 올리기 · 밖으로 보내기처럼 되돌리기 어려운 일은 먼저 사용자에게 말로 확인한다."
+                : "명령을 실행하면 사용자가 그 자리에서 카드로 허용 · 거절한다. 거절되면 같은 명령을 다시 시도하지 말고, 거절 이유를 보고 다른 방법을 묻는다." +
+                  // 카드 수를 줄인다 (사용자 "승인을 한 20번을 누르는느낌")
+                  " 명령마다 카드가 하나씩 뜨므로 되도록 한 번에 묶어 실행하고, 읽기 · 찾기는 Read · Grep으로 먼저 한다.") +
               // 백그라운드 명령
               $" 백그라운드 실행(run_in_background)은 그 턴에서만 산다 — 끝나는 작업(테스트 · 빌드)은 끝나면 이어서 결과를 알려 주고, 서버처럼 안 끝나는 것은 필요한 확인을 마치고 답을 끝내면 앱이 최대 {ClaudeRunner.BackgroundBashMinutes}분 뒤(또는 사용자가 '지금 끝내기'를 누르면) 정리한다." +
               // 터미널 곁칸 — 앱 MCP를 붙인 실행에만
@@ -2049,6 +2059,7 @@ public static class RoomRules
     {
         PermissionLevel.Read => "읽기",
         PermissionLevel.Command => "명령",
+        PermissionLevel.App => "앱",
         _ => level.ToString(),
     };
 
@@ -2069,6 +2080,9 @@ public static class RoomRules
             "명령으로 쓰는 것은 카드가 막는다. 작업 폴더 밖 파일을 Write · Edit로 쓰는 것도 카드로 묻는다(이 앱 · 설정 · 시작프로그램 폴더, 지시 · 설정 · 실행으로 이어지는 파일(.git · .vscode · .gitconfig · 스크립트 · 실행 파일 등), 짧은 이름 · 스트림 표기 경로는 카드 없이 거절). " +
             "\"이 턴 동안 묻지 않기\"를 누르면 그 턴이 끝날 때까지 명령을 카드 없이 허용하고 승인 기록에 남긴다 — 그 턴에는 편집 금지 경로를 명령으로 쓰는 것을 카드가 막지 않는다 " +
             "(git push · git clean · reset --hard · 재귀 삭제 · 지시 · 설정 파일을 건드리는 모양과 잘린 명령은 그래도 묻지만 글자 검사라 비껴갈 수 있다)",
+        PermissionLevel.App =>
+            "Claude 앱과 같은 쓰임: 작업 폴더 편집 · 명령 실행 · 스킬 · 서브에이전트 · 폴더 밖 읽기를 묻지 않고 쓴다. 위험한 명령은 CLI auto 판정이 거절하지만 폴더 밖 쓰기는 막지 않는다. " +
+            "외부 에이전트(run_mode) · 터미널 · 지휘자 브라우저 · 웹 페이지 가져오기 · Unity 코드 실행은 카드로 묻고, .claude · .mcp.json은 편집이 막힌다. 프로젝트 훅은 그대로 돈다",
         _ => level.ToString(),
     };
 }

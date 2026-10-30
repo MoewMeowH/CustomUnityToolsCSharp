@@ -91,6 +91,10 @@
             <div class="panel" style="padding:8px 12px;margin-bottom:12px;border-color:var(--err)" id="last-error">마지막 실행 실패: @lastError</div>
         }
 
+        @if (room.Level == PermissionLevel.App)
+        {
+            <div class="panel" style="padding:8px 12px;margin-bottom:12px">앱 단계 — 편집 · 명령을 묻지 않고 실행합니다. 외부 에이전트 · 터미널 · 웹 가져오기만 카드로 묻습니다.</div>
+        }
         @if (room.Level == PermissionLevel.Command && Model.InheritedRules is { Count: > 0 } inherited)
         {
             <details class="rules panel" style="padding:8px 12px" open>
@@ -206,7 +210,7 @@
                 <button type="button" role="tab" data-tab="docs" id="side-tab-docs" aria-controls="side-sec-docs">문서</button>
                 <button type="button" role="tab" data-tab="mcp" id="side-tab-mcp" aria-controls="side-sec-mcp">연결</button>
                 <button type="button" role="tab" data-tab="term" id="side-tab-term" aria-controls="side-sec-term">터미널</button>
-                @if (room.Level == PermissionLevel.Command)
+                @if (ClaudeArgs.RunsCommands(room.Level))
                 {
                     <button type="button" role="tab" data-tab="browser" id="side-tab-browser" aria-controls="side-sec-browser">브라우저</button>
                 }
@@ -232,7 +236,7 @@
                     </div>
                 </div>
             </div>
-            <p class="muted" id="term-empty">+ 로 작업 폴더에서 PowerShell을 엽니다 (▾로 명령 프롬프트).@(room.Level == PermissionLevel.Command ? " 지휘자가 서버를 띄우면 '지휘자' 탭으로 보입니다 (읽기 전용)." : "")</p>
+            <p class="muted" id="term-empty">+ 로 작업 폴더에서 PowerShell을 엽니다 (▾로 명령 프롬프트).@(ClaudeArgs.RunsCommands(room.Level) ? " 지휘자가 서버를 띄우면 '지휘자' 탭으로 보입니다 (읽기 전용)." : "")</p>
             <div class="term-bar" id="term-bar" hidden><span class="term-state" id="term-state"></span><button type="button" class="btn" id="term-stop">중지</button><button type="button" class="btn" id="term-close">닫기</button></div>
             <div class="term-host" id="term-host"></div>
         </section>
@@ -246,7 +250,7 @@
             </div>
         </section>
         @* 지휘자 브라우저 (결정 "보기만"): 명령 방만. browser · browser-frame 알림으로 그린다 *@
-        @if (room.Level == PermissionLevel.Command)
+        @if (ClaudeArgs.RunsCommands(room.Level))
         {
             <section class="side-sec side-browser" data-tab="browser" id="side-sec-browser" role="tabpanel" aria-labelledby="side-tab-browser" hidden>
                 <p class="browser-state" id="browser-state">지휘자 브라우저가 닫혀 있습니다 — 지휘자가 웹 페이지를 열면 여기에 실시간으로 보입니다 (보기만).</p>

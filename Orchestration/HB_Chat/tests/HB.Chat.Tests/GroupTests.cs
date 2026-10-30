@@ -582,6 +582,10 @@ public sealed class GroupTests : IDisposable
     /// 켰는데 작업 폴더 .mcp.json에 그 항목이 없으면 거절. 단톡방 단계는 가장 높은 구성원 단계.
     /// </summary>
     [Fact]
+    public void Create_RefusesAppLevelMember() =>
+        Assert.Contains("앱 단계", _groups.Create("ws", PermissionLevel.Read, "opus", null, "앱", [new GroupMemberSpec("A", "", Level: PermissionLevel.App), new GroupMemberSpec("B", "")]).Error);
+
+    [Fact]
     public void Create_PerMemberLevel_BaseMcpChoice()
     {
         var group = WriterGroup(PermissionLevel.Command);

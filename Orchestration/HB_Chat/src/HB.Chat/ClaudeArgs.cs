@@ -69,6 +69,25 @@ public static partial class ClaudeArgs
         "**/*.bat", "**/*.cmd", "**/*.ps1",
     ];
 
+    /// <summary>
+    /// 앱 단계의 편집 금지: 프로젝트 훅 · MCP 설정만. auto 판정은 시키지 않은 .claude/settings.json 덮어쓰기를 막지 못했다 — 훅이 그대로 꺼졌다 (2.1.312 실측).
+    /// 이 규칙은 Write와 Bash 리다이렉션을 둘 다 거절했다 (같은 실측).
+    /// </summary>
+    public static readonly IReadOnlyList<string> AppDenied = ["**/.claude/**", "**/.mcp*.json"];
+
+    /// <summary>편집 · 명령을 쓸 수 있는 단계 — 터미널 · 지휘자 브라우저 · Unity도 이 단계에 붙는다.</summary>
+    public static bool RunsCommands(PermissionLevel level) => level is PermissionLevel.Command or PermissionLevel.App;
+
+    /// <summary>
+    /// 앱 단계에서도 카드로 묻는 도구. auto는 AskUserQuestion 말고는 호스트에 묻지 않아, ask 규칙이 없으면 모델 선택 · 사이트 검사 · 터미널 표 · Unity 코드 카드가 모두 사라진다 (2.1.312 실측).
+    /// </summary>
+    public static IReadOnlyList<string> AppAskTools(string server) =>
+        [$"mcp__{server}__{RunModeTool}", TerminalMcp.StartTool, TerminalMcp.BrowserOpenTool, WebFetchTool, .. RoomHub.UnityCardTools];
+
+    /// <summary>--settings 값: <see cref="AppAskTools"/>를 ask 규칙으로.</summary>
+    public static string AppSettings(string server) =>
+        System.Text.Json.JsonSerializer.Serialize(new { permissions = new { ask = AppAskTools(server) } });
+
     /// <summary>모델 · MCP 서버 이름에 쓸 수 있는 모양인지 (인자 · 파일 이름에 들어간다).</summary>
     public static bool IsSafeName(string? value) => value is not null && SafeOption().IsMatch(value);
 
@@ -110,7 +129,7 @@ public static partial class ClaudeArgs
             if (!Path.IsPathFullyQualified(dir)) throw new ArgumentException($"첨부 폴더는 절대 경로여야 한다: {dir}");
             // 명령 방은 Edit(…) 금지가 걸려야 연다 — 규칙 괄호 안에서 뜻이 달라질 글자가 든 경로는 막는다 (RoomHub가 먼저 걸러 알림,
             // /self-review security 4c300badae C3)
-            if (spec.Level == PermissionLevel.Command && !IsRuleSafePath(dir))
+            if (RunsCommands(spec.Level) && !IsRuleSafePath(dir))
                 throw new ArgumentException($"편집 금지 규칙에 쓸 수 없는 글자가 든 첨부 폴더: {dir}");
         }
         if (dirs.Count > 0)
@@ -159,6 +178,15 @@ public static partial class ClaudeArgs
                 // --allowedTools 가변 인자(AddMcp의 MCP 규칙 뒤)에 작업 폴더 안 편집을 이어 붙인다.
                 args.Add(CommandEditAllow);
                 break;
+            case PermissionLevel.App:
+                // Claude 앱과 같은 쓰임: 편집 · 명령은 CLI auto 판정. --allowedTools로 미리 허용하지 않아도 auto가 돌린다.
+                args.AddRange(["--tools", "Read,Grep,Glob,Edit,Write,Bash,PowerShell," + HostTools + "," + WebTools + "," + AgentTool + "," + SkillTool + planTool,
+                    "--permission-mode", spec.Plan ? "plan" : "auto", "--settings", AppSettings(spec.McpServer)]);
+                args.Add("--disallowedTools");
+                args.AddRange(AppDenied.Select(p => $"Edit({p})"));
+                args.AddRange(attachDeny);
+                AddMcp(args, spec);
+                break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(spec), spec.Level, "알 수 없는 권한 단계");
         }
@@ -194,12 +222,13 @@ public static partial class ClaudeArgs
     /// 계획 모드를 쓸 수 있는 단계와, 계획 승인 뒤 돌아갈 권한 모드: 명령 default(평소 --permission-mode 없음).
     /// 읽기는 null — 계획 뒤 고칠 도구가 없다.
     /// </summary>
-    /// <summary>서브에이전트를 쓸 수 있는 단계 (읽기 — <see cref="AgentTool"/>).</summary>
-    public static bool AllowsAgents(PermissionLevel level) => level == PermissionLevel.Read;
+    /// <summary>서브에이전트를 쓸 수 있는 단계 (읽기 · 앱 — <see cref="AgentTool"/>).</summary>
+    public static bool AllowsAgents(PermissionLevel level) => level is PermissionLevel.Read or PermissionLevel.App;
 
     public static string? PlanMode(PermissionLevel level) => level switch
     {
         PermissionLevel.Command => "default",
+        PermissionLevel.App => "auto",
         _ => null,
     };
 
@@ -235,6 +264,9 @@ public static partial class ClaudeArgs
     /// </summary>
     public const string AgentTool = "Agent";
 
+    /// <summary>스킬 도구 — 앱 단계만. 스킬 목록이 시스템 프롬프트에 실려 세션마다 토큰이 는다 (빈 폴더 · 스킬 72개 실측 +9,777).</summary>
+    public const string SkillTool = "Skill";
+
     /// <summary>모델 선택 카드 (<see cref="RunSpec.AskRunMode"/>)일 때 묻지 않는 기본 서버 도구. 서버에 도구가 늘면 목록에 없어 카드 없이 거절된다.</summary>
     public static readonly IReadOnlyList<string> QuietOrchestrationTools = ["list_modes", "save_result", "record_verdicts", "server_info"];
 
@@ -246,11 +278,12 @@ public static partial class ClaudeArgs
         if (string.IsNullOrWhiteSpace(spec.McpConfigPath))
             throw new ArgumentException($"{spec.Level} 단계에는 MCP 설정 파일이 필요하다");
         // 명령 방은 앱 MCP(터미널)도 붙인다 — --mcp-config는 여러 파일을 받는다. 목록 · 읽기 · 중지는 묻지 않고, 시작은 승인 카드로
-        var terminal = spec.Level == PermissionLevel.Command && !string.IsNullOrWhiteSpace(spec.TerminalMcpConfigPath);
+        var terminal = RunsCommands(spec.Level) && !string.IsNullOrWhiteSpace(spec.TerminalMcpConfigPath);
         args.AddRange(["--strict-mcp-config", "--mcp-config", spec.McpConfigPath]);
         if (terminal) args.Add(spec.TerminalMcpConfigPath!);
         args.Add("--allowedTools");
-        if (spec.AskRunMode) args.AddRange(QuietOrchestrationTools.Select(t => $"mcp__{spec.McpServer}__{t}"));
+        // 앱 단계는 서버 전체를 미리 허용하지 않는다 — run_mode가 모델 선택 카드로 가게
+        if (spec.AskRunMode || spec.Level == PermissionLevel.App) args.AddRange(QuietOrchestrationTools.Select(t => $"mcp__{spec.McpServer}__{t}"));
         else args.Add($"mcp__{spec.McpServer}");
         foreach (var extra in spec.ExtraMcpServers)
             if (!IsServerName(extra) || extra == TerminalMcp.Server) throw new ArgumentException($"MCP 서버 이름 형식이 올바르지 않다: {extra}");

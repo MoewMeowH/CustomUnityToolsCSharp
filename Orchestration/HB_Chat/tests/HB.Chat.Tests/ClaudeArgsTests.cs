@@ -33,10 +33,10 @@ public sealed class ClaudeArgsTests
         // 서브에이전트는 읽기 방만 — 명령 방은 정의의 acceptEdits가 명령 카드를 건너뛰었다 (/self-review security 42f9d47dc4 C1)
         Assert.DoesNotContain(",Agent", Joined(ClaudeArgs.Build(Spec(PermissionLevel.Command), Models)));
         Assert.DoesNotContain(",Agent", command);
-        Assert.Equal((true, false), (ClaudeArgs.AllowsAgents(PermissionLevel.Read), ClaudeArgs.AllowsAgents(PermissionLevel.Command)));
+        Assert.Equal((true, false, true), (ClaudeArgs.AllowsAgents(PermissionLevel.Read), ClaudeArgs.AllowsAgents(PermissionLevel.Command), ClaudeArgs.AllowsAgents(PermissionLevel.App)));
         Assert.DoesNotContain("ExitPlanMode", Joined(ClaudeArgs.Build(Spec(PermissionLevel.Command), Models))); // 끄면 없음
         Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Read) with { Plan = true }, Models));
-        Assert.Equal(("default", (string?)null), (ClaudeArgs.PlanMode(PermissionLevel.Command), ClaudeArgs.PlanMode(PermissionLevel.Read)));
+        Assert.Equal(("default", (string?)null, "auto"), (ClaudeArgs.PlanMode(PermissionLevel.Command), ClaudeArgs.PlanMode(PermissionLevel.Read), ClaudeArgs.PlanMode(PermissionLevel.App)));
     }
 
     [Fact]
@@ -125,6 +125,33 @@ public sealed class ClaudeArgsTests
 
         // 읽기 단계에는 편집 도구가 없어 금지 규칙도 없다.
         Assert.DoesNotContain("--disallowedTools", ClaudeArgs.Build(Spec(PermissionLevel.Read), Models));
+    }
+
+    /// <summary>앱 단계: auto로 돌되 카드를 남길 도구는 ask 규칙으로 호스트에 보내고, 훅 · MCP 설정만 편집을 막는다.</summary>
+    [Fact]
+    public void App_AutoMode_KeepsCardsByAskRules_AndGuardsHooks()
+    {
+        var args = ClaudeArgs.Build(Spec(PermissionLevel.App), Models).ToList();
+        Assert.Equal("auto", args[args.IndexOf("--permission-mode") + 1]);
+        var tools = args[args.IndexOf("--tools") + 1].Split(',');
+        Assert.Contains("Bash", tools);
+        Assert.Contains("Skill", tools);
+        Assert.Contains("Agent", tools);
+
+        var ask = args[args.IndexOf("--settings") + 1];
+        foreach (var tool in new[] { "mcp__hb-orchestration__run_mode", "mcp__hb-chat__terminal_start", "mcp__hb-chat__browser_open", "WebFetch", "mcp__unity__eval" })
+            Assert.Contains(tool, ask);
+
+        var denied = args.Skip(args.IndexOf("--disallowedTools") + 1).TakeWhile(a => !a.StartsWith("--", StringComparison.Ordinal)).ToList();
+        Assert.Equal(["Edit(**/.claude/**)", "Edit(**/.mcp*.json)"], denied);
+
+        // run_mode가 카드로 가야 한다 — 서버 전체를 미리 허용하지 않는다
+        var allowed = args.Skip(args.IndexOf("--allowedTools") + 1).TakeWhile(a => !a.StartsWith("--", StringComparison.Ordinal)).ToList();
+        Assert.DoesNotContain("mcp__hb-orchestration", allowed);
+        Assert.DoesNotContain(allowed, a => a.Contains("run_mode", StringComparison.Ordinal));
+
+        Assert.Contains("--permission-mode | plan", Joined(ClaudeArgs.Build(Spec(PermissionLevel.App) with { Plan = true }, Models)));
+        Assert.DoesNotContain("--settings", ClaudeArgs.Build(Spec(PermissionLevel.Command), Models));
     }
 
     [Fact]

@@ -313,6 +313,15 @@ public sealed class AttachmentTests : IDisposable
     }
 
     [Fact]
+    public void RoomRules_AppLevelSaysNoCards()
+    {
+        var rules = RoomRules.For(PermissionLevel.App, terminal: true);
+        Assert.Contains("묻지 않고 바로 돈다", rules);
+        Assert.Contains("terminal_start", rules);
+        Assert.DoesNotContain("카드로 허용 · 거절한다. 거절되면", rules);
+    }
+
+    [Fact]
     public void RoomRules_MentionAttachments()
     {
         Assert.Contains("[첨부]", RoomRules.For(PermissionLevel.Read));

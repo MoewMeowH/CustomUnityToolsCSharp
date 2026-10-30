@@ -67,8 +67,9 @@
                     </label>
                     <label>권한
                         <select name="level">
-                            <option value="Read" selected>읽기</option>
-                            <option value="Command">명령 (승인)</option>
+                            <option value="Read">읽기</option>
+                            <option value="Command" selected>명령 (승인)</option>
+                            <option value="App">앱 (묻지 않음)</option>
                         </select>
                     </label>
                     <label>모델
@@ -96,6 +97,7 @@
                 <p class="muted" style="margin:8px 0 0;font-size:12.5px">
                     읽기: @RoomRules.Describe(PermissionLevel.Read).<br />
                     명령: @RoomRules.Describe(PermissionLevel.Command).<br />
+                    앱: @RoomRules.Describe(PermissionLevel.App).<br />
                     방의 세션은 이 앱 전용입니다 — Claude 앱 · CLI에서 이어 쓰지 마세요.
                 </p>
             </section>

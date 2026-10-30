@@ -120,7 +120,7 @@ public sealed partial class RoomModel(
                     !room.McpOff.Contains(o.McpServer), true, null,
                     Init(o.McpServer), probe.Last(room.Id, o.McpServer), probe.IsRunning(room.Id, o.McpServer)) { InitTools = InitTools(o.McpServer) },
                 new(TerminalMcp.Server, "app", "http", "이 앱 (터미널 · 지휘자 브라우저 도구)", !room.McpOff.Contains(TerminalMcp.Server),
-                    room.Level == PermissionLevel.Command, room.Level == PermissionLevel.Command ? null : "명령 방에서만 붙습니다",
+                    ClaudeArgs.RunsCommands(room.Level), ClaudeArgs.RunsCommands(room.Level) ? null : "명령 방에서만 붙습니다",
                     Init(TerminalMcp.Server), null, false, McpProbe.AppTools()),
             };
             var names = ws is null ? [] : McpConfigFile.ServerNames(ws);
@@ -149,9 +149,9 @@ public sealed partial class RoomModel(
                 var path = o.UnityProjectPath(unity);
                 var cli = o.ResolveUnityCli();
                 rows.Add(new(McpConfigFile.UnityServer, "unity", "stdio", cli is null || path is null ? null : $"unity mcp --project-path {path}",
-                    true, room.Level == PermissionLevel.Command && path is not null && cli is not null,
+                    true, ClaudeArgs.RunsCommands(room.Level) && path is not null && cli is not null,
                     path is null ? $"'{unity}'가 설정에 없습니다" : cli is null ? "Unity CLI(unity.exe)를 찾지 못했습니다 — 설정 Chat:UnityCliPath"
-                    : room.Level == PermissionLevel.Command ? null : "명령 방에서만 붙습니다",
+                    : ClaudeArgs.RunsCommands(room.Level) ? null : "명령 방에서만 붙습니다",
                     Init(McpConfigFile.UnityServer), probe.Last(room.Id, McpConfigFile.UnityServer), probe.IsRunning(room.Id, McpConfigFile.UnityServer))
                 {
                     InitTools = InitTools(McpConfigFile.UnityServer),
@@ -189,7 +189,7 @@ public sealed partial class RoomModel(
         var p = string.IsNullOrWhiteSpace(project) ? null : project.Trim();
         if (p is not null)
         {
-            if (room.Level != PermissionLevel.Command) return BadRequest("Unity 프로젝트는 명령 방에서만 연결합니다.");
+            if (!ClaudeArgs.RunsCommands(room.Level)) return BadRequest("Unity 프로젝트는 명령 방에서만 연결합니다.");
             if (options.Value.UnityProjectPath(p) is null) return BadRequest("설정에 없는 Unity 프로젝트입니다.");
             p = options.Value.AllUnityProjects.First(u => string.Equals(u.Name, p, StringComparison.OrdinalIgnoreCase)).Name;
         }
@@ -511,7 +511,9 @@ public sealed partial class RoomModel(
         hub.Touch(id);
         hub.ForgetCommands(id); // 단계 · 모델이 바뀌면 다음 실행의 init이 새 목록 (db1b130ff2 C7)
         // 명령 아래로 내리면 지휘자가 띄운 프로세스도 끝낸다 — "명령 실행 없음" 단계에서 돌던 서버가 남지 않게 (/self-review 57b59ef134 C1 · a3a9dd85c1 C1). 내 셸은 그대로
-        if (lv != PermissionLevel.Command && expectedLevel == PermissionLevel.Command)
+        // 앱 단계는 CLI가 묻지 않고 판단해 앱이 막을 자리가 없다 — 내리면 지금 턴을 멈춘다
+        if (expectedLevel == PermissionLevel.App && lv != PermissionLevel.App) hub.Stop(id);
+        if (lv == PermissionLevel.Read && expectedLevel != PermissionLevel.Read)
         {
             hub.EndTurnTrust(id);
             terminals.StopRoom(id, "권한 낮춤", TerminalKind.Agent);

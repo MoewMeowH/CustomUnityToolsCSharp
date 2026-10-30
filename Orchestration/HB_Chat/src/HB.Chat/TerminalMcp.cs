@@ -147,7 +147,7 @@ public static class TerminalMcp
 public sealed class TerminalTools(Terminals terminals, RoomStore store, IOptions<ChatOptions> options, IHttpContextAccessor http)
 {
     private Room? CurrentRoom =>
-        terminals.RoomFor(http.HttpContext?.Request.Headers[TerminalMcp.TokenHeader]) is { } id && store.Get(id) is { Level: PermissionLevel.Command } room
+        terminals.RoomFor(http.HttpContext?.Request.Headers[TerminalMcp.TokenHeader]) is { } id && store.Get(id) is { Level: PermissionLevel.Command or PermissionLevel.App } room
             ? room : null;
 
     [McpServerTool(Name = "terminal_start")]

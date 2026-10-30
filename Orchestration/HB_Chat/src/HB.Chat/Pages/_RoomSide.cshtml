@@ -57,7 +57,7 @@
             </select>
         </label>
         <button class="btn" type="submit">@Icons.Svg("check") 바꾸기</button>
-        <p class="muted side-settings-note">다음 말부터 적용됩니다 — 명령 아래로 내리면 실행 중인 턴의 명령도 바로 거절됩니다. @RoomRules.Describe(room.Level)</p>
+        <p class="muted side-settings-note">다음 말부터 적용됩니다 — 명령 아래로 내리면 실행 중인 턴의 명령도 바로 거절되고, 앱 단계에서 내리면 지금 턴을 멈춥니다. @RoomRules.Describe(room.Level)</p>
     </form>
     <dl class="side-info">
         <dt>작업 폴더</dt><dd>@room.Workspace <span class="mono muted">@(Model.WorkspacePath ?? "(허용 목록에 없음)")</span></dd>
@@ -241,7 +241,7 @@
     @* Unity 프로젝트 연결 (결정: 명령 방만 · 권한 나누지 않음 — 연결하면 편집) *@
     <div class="mcp-unity">
         <label for="side-unity"><b>Unity 프로젝트</b></label>
-        @if (room.Level != PermissionLevel.Command && room.UnityProject is null)
+        @if (!ClaudeArgs.RunsCommands(room.Level) && room.UnityProject is null)
         {
             <p class="muted side-settings-note">명령 방에서만 연결합니다.</p>
         }
@@ -255,7 +255,7 @@
                 <option value="" selected="@(room.UnityProject is null)">연결 안 함</option>
                 @foreach (var u in Model.UnityProjects)
                 {
-                    <option value="@u.Name" selected="@(string.Equals(u.Name, room.UnityProject, StringComparison.OrdinalIgnoreCase))" disabled="@(room.Level != PermissionLevel.Command)">@u.Name</option>
+                    <option value="@u.Name" selected="@(string.Equals(u.Name, room.UnityProject, StringComparison.OrdinalIgnoreCase))" disabled="@(!ClaudeArgs.RunsCommands(room.Level))">@u.Name</option>
                 }
                 @if (room.UnityProject is { } gone && Model.UnityProjects.All(u => !string.Equals(u.Name, gone, StringComparison.OrdinalIgnoreCase)))
                 {

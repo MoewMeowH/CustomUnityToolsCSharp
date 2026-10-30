@@ -365,7 +365,7 @@ public sealed partial class GroupChat
 
     /// <summary>작업 폴더에 쓰는 구성원 방(명령 단계 Claude) — 그 구성원이 낀 말은 차례로 돈다. Codex는 늘 읽기 전용.</summary>
     public static bool IsWriter(Room? room) =>
-        room is { Level: PermissionLevel.Command } && room.Engine != RoomEngines.Codex;
+        room is { Level: PermissionLevel.Command or PermissionLevel.App } && room.Engine != RoomEngines.Codex;
 
     /// <summary>Codex 구성원을 켤 수 있는 작업 폴더 (없으면 Codex 구성원을 만들지 않음).</summary>
     public CodexSettings? CodexSettings { get; }
@@ -426,6 +426,8 @@ public sealed partial class GroupChat
                 ? known.Efforts.Contains(e, StringComparer.Ordinal)
                 : CodexEfforts.Contains(e, StringComparer.Ordinal));
         var error = !Enum.IsDefined(level) || clean.Any(m => !Enum.IsDefined(LevelOf(m))) ? "알 수 없는 권한 단계입니다."
+            // 카드 없이 도는 구성원은 단톡방 차례 · 곁칸과 맞지 않는다
+            : clean.Any(m => LevelOf(m) == PermissionLevel.App) ? "단톡방 구성원은 앱 단계를 쓸 수 없습니다."
             : clean.FirstOrDefault(m => m.Engine is not null and not RoomEngines.Codex) is { } unknownEngine ? $"알 수 없는 엔진입니다: {unknownEngine.Engine}"
             // 명령 단계는 승인 카드를 낼 곳이 없다
             : codex.FirstOrDefault(m => LevelOf(m) != PermissionLevel.Read) is { } codexLevel ? $"Codex 구성원 '{codexLevel.Name}'은 읽기 단계만 됩니다 (읽기 전용 · 승인 카드 없음)."

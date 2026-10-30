@@ -16,6 +16,7 @@ public sealed class PermissionLevelMigrationTests : IDisposable
     [InlineData("Edit", PermissionLevel.Read)]
     [InlineData("Read", PermissionLevel.Read)]
     [InlineData("Command", PermissionLevel.Command)]
+    [InlineData("App", PermissionLevel.App)]
     public void OldIndex_LoadsWithLoweredLevel_AndNextSaveDropsOldValues(string stored, PermissionLevel expected)
     {
         var path = Path.Combine(_dir, "rooms.json");
