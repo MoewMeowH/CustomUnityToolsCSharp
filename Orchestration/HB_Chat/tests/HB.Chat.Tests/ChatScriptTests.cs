@@ -220,6 +220,16 @@ public sealed class ChatScriptTests(ChatApp app, ChatBrowser browser) : IClassFi
         await page.WaitForAsync("!document.querySelector('.shot-view')", "✕로 닫힘", ChatPage.TurnWait);
         // 그림이 아닌 첨부는 링크 그대로 (크게 보기 없음)
         Assert.Equal(1, await page.EvalAsync<int>("[...document.querySelectorAll('#chat a.attach')].filter(a => !a.querySelector('img') && a.target === '_blank').length"));
+
+        // 곁칸 첨부 탭의 그림 줄도 같은 크게 보기 — Esc로 닫힌다 (사용자 보고: "첨부에서 이미지 클릭하면 x 버튼이 없엉" — 곁칸 첨부 탭)
+        await page.EvalAsync("document.querySelector('#side-toggle').click(); document.querySelector('#side-tab-files').click()");
+        await page.WaitForAsync("!!document.querySelector('#side-sec-files a.attach-image')", "곁칸 첨부 그림 줄", ChatPage.TurnWait);
+        Assert.Equal(1, await page.EvalAsync<int>("document.querySelectorAll('#side-sec-files a.attach-image').length")); // notes.txt는 링크 그대로
+        await page.EvalAsync("document.querySelector('#side-sec-files a.attach-image').click()");
+        await page.WaitForAsync("!!document.querySelector('.shot-view .shot-x')", "곁칸에서 연 크게 보기 · ✕", ChatPage.TurnWait);
+        Assert.Equal(before, await page.EvalAsync<string>("location.href"));
+        await page.EvalAsync("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+        await page.WaitForAsync("!document.querySelector('.shot-view')", "Esc로 닫힘", ChatPage.TurnWait);
         page.AssertNoErrors();
     }
 

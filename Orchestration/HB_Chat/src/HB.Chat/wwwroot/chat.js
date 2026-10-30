@@ -1569,11 +1569,11 @@
         function shotKeys(e) { if (e.key === "Escape" && document.querySelector(".shot-view")) { e.stopPropagation(); closeShot(); } }
         document.addEventListener("keydown", shotKeys, true);
         root.addEventListener("click", (e) => {
-            // 첨부는 그림 칩만 (그림이 아닌 첨부는 지금처럼 링크 — 내려받기)
-            const a = e.target.closest?.(".note-shot, a.attach:has(img)");
+            // 첨부는 그림만 — 말풍선의 그림 칩, 곁칸 첨부 탭의 그림 줄 (그림이 아닌 첨부는 지금처럼 링크 — 내려받기)
+            const a = e.target.closest?.(".note-shot, a.attach:has(img), a.attach-image");
             if (!a) return;
             e.preventDefault();
-            openShot(a.getAttribute("href"), a.classList.contains("attach") ? "첨부 그림 " + (a.textContent || "").trim() : "지휘자 브라우저 스크린샷");
+            openShot(a.getAttribute("href"), a.matches(".attach, .attach-image") ? "첨부 그림 " + (a.textContent || "").trim() : "지휘자 브라우저 스크린샷");
         });
         async function loadBrowserFrame() {
             if (!browserFrame || !browserOpen) return;

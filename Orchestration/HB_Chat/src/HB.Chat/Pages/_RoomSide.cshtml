@@ -293,7 +293,8 @@
         @foreach (var f in files.Take(Attachments.MaxListed))
         {
             <li>
-                <a href="/Room/@room.Id?handler=Attachment&amp;name=@Uri.EscapeDataString(f.Name)" target="_blank" rel="noopener">@f.Name</a>
+                @* 그림은 화면 위 크게 보기로 (chat.js — ✕ · Esc), 그 밖은 링크 *@
+                <a href="/Room/@room.Id?handler=Attachment&amp;name=@Uri.EscapeDataString(f.Name)" target="_blank" rel="noopener" class="@(Attachments.IsImage(f.Name) ? "attach-image" : null)">@f.Name</a>
                 <span class="muted">@Size(f.Bytes) · @f.At.ToLocalTime().ToString("MM-dd HH:mm")</span>
             </li>
         }
