@@ -54,6 +54,7 @@ public sealed class CodexCliTests : IDisposable
         Assert.Contains("windows.sandbox=\"unelevated\"", args);
         Assert.Contains("web_search=\"disabled\"", args);
         Assert.Contains("forced_login_method=\"chatgpt\"", args);
+        Assert.Equal("-c", args[args.IndexOf("tool_output_token_limit=120000") - 1]);
         Assert.Equal("read-only", args[args.IndexOf("-s") + 1]);
         Assert.Equal("C:\\ws", args[args.IndexOf("-C") + 1]);
         Assert.Equal("gpt-6.1-sol", args[args.IndexOf("-m") + 1]);
@@ -381,7 +382,7 @@ public sealed class CodexCliTests : IDisposable
             Assert.False(File.Exists(Path.Combine(folder!, "logo.png")));                 // 이진
             Assert.False(Directory.Exists(Path.Combine(folder!, ".git")));
             Assert.Contains("저장소 사본", focus);
-            Assert.Contains("rg", focus);
+            AssertReadGuide(focus);
             Assert.Contains("## 변경 diff (review_tmp/c.diff)", focus);
             Assert.Contains("````diff", focus);                                           // diff 안의 ``` 보다 긴 울타리
             Assert.Contains("- Calc.cs:1-1", focus);
@@ -552,11 +553,22 @@ public sealed class CodexCliTests : IDisposable
             Assert.False(File.Exists(Path.Combine(folder!, "b.cs")));
             Assert.Contains("지휘자가 고른 파일만", focus);
             Assert.False(string.IsNullOrEmpty(noCopy));
+            AssertReadGuide(focus);
         }
         finally
         {
             ReviewWorkFolder.TryDelete(folder);
         }
+    }
+
+    /// <summary>Codex 안내는 깨지지 않고 잘리지 않는 읽기만 권한다: 파이프 없는 rg + 바깥 · 안쪽 출력 상한.</summary>
+    private static void AssertReadGuide(string? focus)
+    {
+        Assert.Contains("rg -n '^' 경로", focus);
+        Assert.Contains("// @exec: {\"max_output_tokens\": 60000}", focus);
+        Assert.Contains("`tools.exec_command` 호출에도 `max_output_tokens: 60000`", focus);
+        Assert.DoesNotContain("rg · Get-Content", focus);
+        Assert.Contains("`Get-Content`와 파이프(`|`)는 쓰지 않는다", focus);
     }
 
     // ── 모드 실행: 작업 폴더 · 스키마 · 한도 소진 대체 ─────────────────────────

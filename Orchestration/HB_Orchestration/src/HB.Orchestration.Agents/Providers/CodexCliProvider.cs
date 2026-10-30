@@ -11,7 +11,7 @@ namespace HB.Orchestration.Agents.Providers;
 /// <summary>
 /// OpenAI Codex CLI(<c>codex exec --json -s read-only</c>)를 읽기 전용 리뷰 에이전트로 띄운다.
 /// 과금은 API 키가 아니라 ChatGPT 구독 로그인(CODEX_HOME의 auth.json)이다 — 키 변수는 자식 환경에서 지운다.
-/// 에이전트는 작업 폴더(<see cref="ReviewWorkFolder"/>, 저장소 추적 파일 사본)에서 셸 명령(rg · Get-Content)으로 직접 찾아 읽는다.
+/// 에이전트는 작업 폴더(<see cref="ReviewWorkFolder"/>, 저장소 추적 파일 사본)에서 셸 명령(rg)으로 직접 찾아 읽는다.
 /// 읽기 전용 샌드박스는 쓰기만 막는다 — 디스크 전체를 읽을 수는 있다 (HB_Chat 실측). 그래서 웹 검색 · 앱 · 플러그인 · 브라우저를 끄고, 사용자 설정을 읽지 않는다.
 /// 실패 종류 · 쓴 토큰 · 기록 원문은 claude-cli와 같은 형(<see cref="ClaudeCliException"/> · <see cref="ClaudeCliRawResponse"/>)으로 넘겨
 /// AgentRunner · RetryClassifier · UsageExtractor 경로를 그대로 쓴다.
@@ -199,6 +199,8 @@ public sealed class CodexCliChatClient(CodexCliSettings settings, ClaudeCliRunne
             "-c", "web_search=\"disabled\"",
             // CODEX_HOME의 저장된 인증이 API 키여도 쓰지 않는다 — 구독 로그인만 (/cross-review b476ab3099 1-N3, 0.165.0에서 받아들임 실측)
             "-c", "forced_login_method=\"chatgpt\"",
+            // 명령 출력이 모델에 갈 때의 상한. 기본 약 1만 토큰이고, 작업 폴더 안내의 바깥 · 안쪽 max_output_tokens와 함께 올려야 풀린다 (0.165.0 실측)
+            "-c", "tool_output_token_limit=120000",
             "-s", "read-only", "--skip-git-repo-check", "-C", workspace,
             "-m", s.Model,
         };

@@ -400,6 +400,7 @@ claude --safe-mode --restricted --strict-mcp-config -p --no-session-persistence 
 ```
 codex exec --json --ephemeral --ignore-user-config
   -c windows.sandbox="unelevated" -c web_search="disabled" -c forced_login_method="chatgpt"
+  -c tool_output_token_limit=120000
   -s read-only --skip-git-repo-check -C <작업 폴더> -m <Model>
   --disable apps · plugins · remote_plugin · browser_use · browser_use_external · computer_use · in_app_browser · multi_agent · image_generation
   -c model_reasoning_effort=… -c developer_instructions=<시스템 프롬프트>
@@ -413,6 +414,7 @@ codex exec --json --ephemeral --ignore-user-config
 
 - `--ignore-user-config`: `~/.codex/config.toml`의 MCP 서버 · 훅이 붙지 않게 합니다. 그래서 샌드박스도 인자로 고릅니다 (MXC는 git이 작업 폴더로 chdir 하지 못합니다).
 - `--ephemeral`: `~/.codex/sessions`에 명령 출력(소스 사본)이 든 기록을 남기지 않습니다.
+- `tool_output_token_limit`: 명령 출력이 모델에 갈 때의 상한입니다. 기본 약 1만 토큰에서 가운데가 잘립니다. 이 값만으로는 풀리지 않고, 작업 폴더 안내대로 모델이 바깥 `// @exec:` 첫 줄과 안쪽 `max_output_tokens`도 함께 올려야 합니다 (0.165.0 실측, 내부 도구 형식이라 판이 바뀌면 다시 확인합니다).
 - 시스템 프롬프트는 명령줄로 가서, 2.4만 자를 넘으면 실패합니다.
 
 실행 파일 찾는 순서 (`codex.cmd`는 쓰지 않습니다):
@@ -451,6 +453,7 @@ codex exec --json --ephemeral --ignore-user-config
 - context의 `.diff` · `.patch` **본문**
 - 나머지 context의 "중심 (경로:줄)" 목록
 - 정의 색인은 넣지 않습니다 (rg로 찾습니다).
+- 읽는 법 안내: 파이프 없는 `rg -n '^' 경로`로 읽습니다. 샌드박스 PowerShell은 CP949로 내보내 `Get-Content` · 파이프를 거친 한글이 깨지고, Git Bash는 샌드박스에서 돌지 않습니다 (0.165.0 실측).
 
 **주의**: 읽기 전용 샌드박스는 쓰기만 막습니다 — 디스크 전체를 읽을 수 있습니다. 셸 명령의 네트워크는 막힙니다.
 
