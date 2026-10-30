@@ -280,7 +280,7 @@ OpenAI Chat Completions 전용입니다. 다른 제공사에는 넣지 않습니
 |---|---|
 | 모드 | `sub_self` · `sub_perf` · `sub_security` · `sub_direction` |
 | 역할 | `SubSelf` · `SubPerf` · `SubSecurity` · `SubDirection` = 각 검토형 서브에이전트 정의 본문 (읽는 것만 작업 폴더 · Read 기준) |
-| 에이전트 | `claude_cli_opus` 공용 = claude-opus-5-5 · effort high · MaxTurns 40 · MaxBudgetUsd 2 · 재시도 없음 (제공사도 MaxAttempts 1) |
+| 에이전트 | `claude_cli_opus` 공용 = claude-opus-5-5 · effort medium · MaxTurns 40 · MaxBudgetUsd 2 · 재시도 없음 (제공사도 MaxAttempts 1) |
 
 **검토형 리뷰의 기본**입니다 — `/self-review` · `/cross-review` 2단계 · `perf_*` ownReview. 서브에이전트는 `/self-review sub …`로 고르거나 크레딧이 소진됐을 때 씁니다.
 
