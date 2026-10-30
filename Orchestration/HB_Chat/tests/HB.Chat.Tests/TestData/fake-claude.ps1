@@ -148,6 +148,22 @@ switch ($mode) {
         }
         Finish $d 'Bash' 'allowed'
     }
+    'asktext' {
+        # question mid-turn: text, answer, more text, then a held command card so the live pane stays until the test ends the turn.
+        Emit '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"before"}}}'
+        $d = Ask 'req_ask' '{"subtype":"can_use_tool","tool_name":"AskUserQuestion","display_name":"AskUserQuestion","input":{"questions":[{"question":"Which color?","header":"Color","options":[{"label":"Red","description":"warm"},{"label":"Blue","description":"cool"}],"multiSelect":false}]},"tool_use_id":"toolu_q1","requires_user_interaction":true}'
+        Emit '{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"after"}}}'
+        $d = Ask 'req_hold' '{"subtype":"can_use_tool","tool_name":"Bash","display_name":"Bash","input":{"command":"echo hold"},"tool_use_id":"toolu_hold"}'
+        Finish $d 'Bash' 'allowed'
+    }
+    'commit' {
+        # text that reached the transcript (assistant line), then text still streaming, then a held card.
+        Emit '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"one"}}}'
+        Emit '{"type":"assistant","message":{"usage":{"input_tokens":2,"output_tokens":8}}}'
+        Emit '{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"two"}}}'
+        $d = Ask 'req_hold' '{"subtype":"can_use_tool","tool_name":"Bash","display_name":"Bash","input":{"command":"echo hold"},"tool_use_id":"toolu_hold"}'
+        Finish $d 'Bash' 'allowed'
+    }
     'clideny' {
         # CLI's own rule denials: empty reason with a known tool call, then no reason and no tool name.
         Emit '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t_deny","name":"Edit","input":{"file_path":"C:\\ws\\denied.md"}}]}}'

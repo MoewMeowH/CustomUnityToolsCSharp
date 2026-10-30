@@ -132,6 +132,13 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         public DateTimeOffset? BackgroundUntil;
         public string? Current;
         public readonly System.Text.StringBuilder Partial = new();
+
+        /// <summary>
+        /// Partial 앞쪽 중 세션 기록에 이미 쓰인 글자 수 · 이 턴의 말이 기록에 들어갔는지 (assistant 줄이 나왔는지). 턴 도중 방을 다시 열면 기록으로 그린 부분을
+        /// snapshot이 다시 보내지 않는다 — 내 말과 지휘자 글이 두 번 보이던 문제 (사용자 보고 2026-10-30).
+        /// </summary>
+        public int PartialLogged;
+        public bool TurnLogged;
         public ToolUse? Tool;
         public string? Notice;
         public readonly List<Channel<LiveEvent>> Subscribers = [];
@@ -1233,8 +1240,8 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             {
                 Face = face.ToString(),
                 Busy = live.Busy,
-                Text = live.Busy ? live.Partial.ToString() : null,
-                Prompt = live.Current,
+                Text = live.Busy ? live.Partial.ToString(live.PartialLogged, live.Partial.Length - live.PartialLogged) : null,
+                Prompt = live.TurnLogged ? null : live.Current,
                 Steps = live.Steps,
                 Status = room?.Status,
                 BackgroundCount = live.Busy && live.BackgroundUntil is not null ? live.BackgroundCount : null,
@@ -1284,7 +1291,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                     live.Cts = null;
                     live.WrapUpCts = null;
                     live.Tool = null;
-                    live.Partial.Clear();
+                    ClearPartial(live);
                     // 중지로 끝난 경우 새 세대에서 이미 받은 말이 있으면 이어서 돈다.
                     if (live.Pending.Count > 0 && !_disposed)
                     {
@@ -1300,7 +1307,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 live.PickUsed = false;
                 live.Pending.RemoveAt(0);
                 live.Current = text;
-                live.Partial.Clear();
+                ClearPartial(live);
                 live.Tool = null;
                 // 지난 턴의 "앱 밖에서 바뀜" 경고는 지운다 — 이번 턴에도 그렇다면 RunRoomAsync가 다시 낸다 (0a3b1d5155 C7). 화면은 start에서 숨긴다.
                 live.Notice = null;
@@ -1750,6 +1757,12 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 if (ev is DeltaEvent) SetFace(live, Face.Writing);
                 else if (ev is ToolEvent te) SetFace(live, Face.Tool, te.Name); // 화면은 표정을 face 알림으로만 바꾼다 (83b453653b C1)
                 // 칩은 tool_use 입력이 다 온 assistant 줄에서 — 대상(파일 이름 · 명령 첫 줄)까지 보인다 (3차 b, 0번 실측 C)
+                if (ev is UsageEvent)
+                {
+                    // assistant 줄 = 여기까지의 글과 이 턴의 말이 세션 기록에 있다
+                    live.PartialLogged = live.Partial.Length;
+                    live.TurnLogged = true;
+                }
                 if (ev is UsageEvent u)
                     foreach (var tool in u.Tools)
                     {
@@ -1852,8 +1865,20 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     private static LiveEvent AppendPartial(Live live, string text)
     {
         live.Partial.Append(text);
-        if (live.Partial.Length > MaxPartialChars) live.Partial.Remove(0, live.Partial.Length - MaxPartialChars);
+        if (live.Partial.Length > MaxPartialChars)
+        {
+            var cut = live.Partial.Length - MaxPartialChars;
+            live.Partial.Remove(0, cut);
+            live.PartialLogged = Math.Max(0, live.PartialLogged - cut);
+        }
         return new LiveEvent("delta") { Text = text };
+    }
+
+    private static void ClearPartial(Live live)
+    {
+        live.Partial.Clear();
+        live.PartialLogged = 0;
+        live.TurnLogged = false;
     }
 
     private static LiveEvent SetTool(Live live, ToolUse tool)

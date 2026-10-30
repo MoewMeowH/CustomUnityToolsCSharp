@@ -776,6 +776,28 @@ public sealed class ApprovalFlowTests : IDisposable
         Assert.True(new ApprovalRequest("PowerShell", command, null, null).TurnAllowable);
     }
 
+    /// <summary>턴 도중 방을 다시 열면 세션 기록에 들어간 말 · 글은 snapshot이 다시 보내지 않는다 — 기록에 없을 때는 내 말을 그대로 보낸다.</summary>
+    [Fact]
+    public async Task Snapshot_SkipsWhatTheTranscriptHas()
+    {
+        var room = CommandRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "approve please");
+        await Until(ch, e => e.Kind == "approval");
+        var early = (await Until(_hub.Subscribe(room.Id), e => e.Kind == "snapshot")).Last();
+        Assert.Equal("approve please", early.Prompt);
+        _hub.Stop(room.Id);
+        await Until(ch, e => e.Kind == "idle");
+
+        _hub.Send(room.Id, "commit");
+        await Until(ch, e => e.Kind == "approval");
+        var snapshot = (await Until(_hub.Subscribe(room.Id), e => e.Kind == "snapshot")).Last();
+        Assert.Null(snapshot.Prompt);
+        Assert.Equal("two", snapshot.Text); // "one"은 기록에 있다
+        _hub.Stop(room.Id);
+        await Until(ch, e => e.Kind == "idle");
+    }
+
     /// <summary>CLI가 스스로 거절한 호출: 승인 기록에 남아 방 기록의 주황 줄이 되고, 이유 · 도구 이름이 비면 기본 문구, 대상은 도구 호출에서.</summary>
     [Fact]
     public async Task CliDenied_LoggedWithDefaultReason()

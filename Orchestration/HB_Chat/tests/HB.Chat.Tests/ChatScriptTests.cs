@@ -195,6 +195,25 @@ public sealed class ChatScriptTests(ChatApp app, ChatBrowser browser) : IClassFi
         again.AssertNoErrors();
     }
 
+    /// <summary>턴 도중 질문에 답하면 지휘자의 다음 글은 답 아래 새 말풍선에 나온다 — 답 위 옛 말풍선에 이어 쓰여 화면이 멈춘 것처럼 보였다 (사용자 보고).</summary>
+    [Fact]
+    public async Task QuestionAnswered_NextTextBelowAnswer()
+    {
+        if (!browser.Available) return;
+        var room = app.Services.GetRequiredService<RoomStore>().Create("ws", PermissionLevel.Command, "opus", null);
+        await using var page = await browser.OpenAsync(app.RoomUrl(room));
+        await page.SendAsync("asktext");
+        await page.WaitForAsync("!!document.querySelector('#live .question-card')", "질문 카드", ChatPage.TurnWait);
+        await page.EvalAsync("(() => { const c = document.querySelector('#live .question-card'); c.querySelector('input:not([type=radio]):not([type=checkbox])').value = 'Red'; [...c.querySelectorAll('button')].find(b => b.textContent === '답하기').click(); })()");
+        await page.WaitForAsync("[...document.querySelectorAll('#live .msg.conductor .body')].some(b => b.textContent === 'after')", "답 뒤 글", ChatPage.TurnWait);
+        Assert.True(await page.EvalAsync<bool>("(() => { const bodies = [...document.querySelectorAll('#live .msg.conductor .body')], a = document.querySelector('#live .msg.answer'); " +
+            "return bodies[0].textContent === 'before' && !!(a.compareDocumentPosition(bodies.find(b => b.textContent === 'after')) & Node.DOCUMENT_POSITION_FOLLOWING); })()"));
+        await page.WaitForAsync("document.querySelector('#live .approval .cmd')?.textContent === 'echo hold'", "다음 명령 카드", ChatPage.TurnWait);
+        await page.EvalAsync("[...document.querySelectorAll('#live .approval button')].find(b => b.textContent === '허용').click()");
+        await page.WaitForAsync("!document.querySelector('#live .approval')", "카드 닫힘", ChatPage.TurnWait);
+        page.AssertNoErrors();
+    }
+
     /// <summary>명령 카드의 "이 턴 동안 묻지 않기": 다음 명령 카드가 사라지고 켜짐 줄이 뜨며, 꼭 묻는 명령 카드에는 단추가 없고, 끄기로 줄이 닫힌다.</summary>
     [Fact]
     public async Task TurnAllow_CardButton_LineAndOff()

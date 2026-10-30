@@ -1168,6 +1168,21 @@
             t.append(el("i"), el("i"), el("i"));
             return t;
         }
+        // 지휘자 글 · 칩이 이어질 말풍선을 맞춘다. 그 뒤에 답 말풍선 · 승인 줄 · 카드가 붙었으면 맨 아래 새 말풍선으로 — 옛 말풍선에 이어 쓰면
+        // 새 글이 위로 숨어 화면이 멈춘 것처럼 보였다 (사용자 보고 2026-10-30). 기다림 · 켜짐 줄(.bg-wait)은 대화 순서가 아니라 세지 않는다.
+        function followStream() {
+            if (!stream) { startTurn(null, "", null); return; }
+            const msg = stream.closest(".msg");
+            let after = msg?.nextElementSibling;
+            while (after?.classList.contains("bg-wait")) after = after.nextElementSibling;
+            if (!after) return;
+            if (stream.dataset.empty) {
+                // 글 없이 '입력 중'만 있던 말풍선 — 칩이 있으면 칩만 남기고, 없으면 지운다
+                if (chips?.hidden) msg.remove(); else stream.replaceChildren();
+            }
+            stream = bubble("conductor", profiles.conductor?.name || "지휘자", null);
+            stream.dataset.empty = "1"; stream.append(typing());
+        }
         function addChip(name) {
             if (!chips) return;
             chips.hidden = false;
@@ -1978,8 +1993,8 @@
                     startTurn(ev.prompt, "", ev.pendingItems);
                     break;
                 case "delta": {
-                    if (!stream) startTurn(null, "", null);
                     const follow = atBottom();
+                    followStream();
                     if (stream.dataset.empty) { stream.textContent = ""; delete stream.dataset.empty; }
                     stream.append(ev.text); // 글 조각을 텍스트 노드로 덧붙인다 (+= 는 매번 전체를 다시 만든다 — C11)
                     if (follow) toBottom();
@@ -1988,8 +2003,12 @@
                 case "tool":
                     // 칩만 — 표정은 서버 face 알림 · snapshot만 따른다. snapshot 뒤 다시 보내는 tool이 승인 기다림 · 답 쓰는 중을
                     // "도구 실행 중"으로 덮던 문제 (/self-review 83b453653b C1). 대상(파일 이름 · 명령 첫 줄)이 있으면 같이 (3차 b).
-                    if (!stream) startTurn(null, "", null);
-                    addChip(shortTool(ev.text) + (ev.detail ? " " + ev.detail : ""));
+                    {
+                        const follow = atBottom();
+                        followStream();
+                        addChip(shortTool(ev.text) + (ev.detail ? " " + ev.detail : ""));
+                        if (follow) toBottom();
+                    }
                     break;
                 case "steps":
                     renderSteps(ev.steps);
