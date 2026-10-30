@@ -154,7 +154,7 @@ public sealed class ApprovalTests
     public void CommandArgs_AddCommandToolsStdioHostAndRules()
     {
         var args = ClaudeArgs.Build(CommandSpec(["Bash(git status)", "Bash(*)"]), ["opus"]).ToList();
-        Assert.Equal("Read,Grep,Glob,Edit,Write,Bash,PowerShell,AskUserQuestion,TaskCreate,TaskGet,TaskList,TaskUpdate", args[args.IndexOf("--tools") + 1]);
+        Assert.Equal("Read,Grep,Glob,Edit,Write,Bash,PowerShell,AskUserQuestion,TaskCreate,TaskGet,TaskList,TaskUpdate,WebSearch,WebFetch", args[args.IndexOf("--tools") + 1]);
         // acceptEdits는 cp · mv 같은 파일 명령을 묻지 않고 허용해 카드를 지나치게 하므로 쓰지 않는다 (36e4e20e04 C1).
         Assert.DoesNotContain("--permission-mode", args);
         Assert.Contains("Edit(**/CLAUDE.md)", args); // 편집 금지는 그대로

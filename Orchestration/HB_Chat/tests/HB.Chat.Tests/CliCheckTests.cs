@@ -47,14 +47,15 @@ public sealed class CliCheckTests : IDisposable
     /// 정해 둔 명령 뒤 다른 Bash를 더 부름(통과 유지, C3) · 질문 답이 거절로 처리됨(실패, C1).
     /// </summary>
     [Theory]
-    [InlineData("", true, "통과", "통과", "통과", null)]
-    [InlineData("badcmd", false, "안 옴", "통과", "통과", "다른 명령")]
-    [InlineData("noask", false, "통과", "안 옴", "통과", null)]
-    [InlineData("ignoreallow", false, "실패", "통과", "통과", "듣지 않")]
-    [InlineData("preallowed", false, "안 옴", "통과", "통과", "묻지 않고")]
-    [InlineData("extra", true, "통과", "통과", "통과", null)]
-    [InlineData("denyanswer", false, "통과", "실패", "통과", null)]
-    public async Task SelfTest_FakeClaude(string variant, bool passed, string bash, string ask, string stream, string? bashDetail)
+    [InlineData("", true, "통과", "통과", "통과", "통과", null)]
+    [InlineData("badcmd", false, "안 옴", "통과", "통과", "통과", "다른 명령")]
+    [InlineData("noask", false, "통과", "안 옴", "통과", "통과", null)]
+    [InlineData("ignoreallow", false, "실패", "통과", "통과", "통과", "듣지 않")]
+    [InlineData("preallowed", false, "안 옴", "통과", "통과", "통과", "묻지 않고")]
+    [InlineData("extra", true, "통과", "통과", "통과", "통과", null)]
+    [InlineData("denyanswer", false, "통과", "실패", "통과", "통과", null)]
+    [InlineData("noweb", false, "통과", "통과", "안 옴", "통과", null)] // CLI가 웹 가져오기를 묻지 않음 (내장 문서 사이트 목록이 바뀜 등)
+    public async Task SelfTest_FakeClaude(string variant, bool passed, string bash, string ask, string web, string stream, string? bashDetail)
     {
         var script = Path.Combine(AppContext.BaseDirectory, "TestData", "fake-claude.ps1");
         var result = await CliSelfTest.RunAsync(_dir, "haiku", "hb-orchestration", (spec, workspace) =>
@@ -67,7 +68,7 @@ public sealed class CliCheckTests : IDisposable
         });
         Assert.Equal("0.0.0-fake", result.Version);
         Assert.Equal(passed, result.Passed);
-        Assert.Equal([bash, ask, stream], result.Steps.Select(s => s.State));
+        Assert.Equal([bash, ask, web, stream], result.Steps.Select(s => s.State));
         if (bashDetail is not null) Assert.Contains(bashDetail, result.Steps[0].Detail);
         if (variant == "badcmd") Assert.Contains("something-else", result.Steps[0].Detail);
     }

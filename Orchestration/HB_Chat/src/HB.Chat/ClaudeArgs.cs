@@ -151,11 +151,11 @@ public static partial class ClaudeArgs
                 args.AddRange(["--tools", "", "--strict-mcp-config"]);
                 break;
             case PermissionLevel.Read:
-                args.AddRange(["--tools", "Read,Grep,Glob," + HostTools + "," + AgentTool]);
+                args.AddRange(["--tools", "Read,Grep,Glob," + HostTools + "," + WebTools + "," + AgentTool]);
                 AddMcp(args, spec);
                 break;
             case PermissionLevel.Edit:
-                args.AddRange(["--tools", "Read,Grep,Glob,Edit,Write," + HostTools + "," + AgentTool + planTool, "--permission-mode", spec.Plan ? "plan" : "acceptEdits"]);
+                args.AddRange(["--tools", "Read,Grep,Glob,Edit,Write," + HostTools + "," + WebTools + "," + AgentTool + planTool, "--permission-mode", spec.Plan ? "plan" : "acceptEdits"]);
                 args.Add("--disallowedTools");
                 args.AddRange(EditDenied.Select(p => $"Edit({p})"));
                 args.AddRange(attachDeny);
@@ -166,7 +166,7 @@ public static partial class ClaudeArgs
                 // acceptEdits는 쓰지 않는다: 그 모드는 작업 폴더 안 cp · mv 같은 파일 명령을 묻지 않고 허용해, 편집 금지 규칙(Edit 도구에만 걸림)과
                 // 카드를 둘 다 지나치게 한다 (/self-review 36e4e20e04 C1). 대신 작업 폴더 안 편집만 `Edit(**)`로 미리 허용한다 —
                 // 실측(2026-10-28): 작업 폴더 안 Write는 묻지 않음, 밖 Write는 거절, Bash cp는 승인 요청으로 옴.
-                args.AddRange(["--tools", "Read,Grep,Glob,Edit,Write,Bash,PowerShell," + HostTools + planTool]);
+                args.AddRange(["--tools", "Read,Grep,Glob,Edit,Write,Bash,PowerShell," + HostTools + "," + WebTools + planTool]);
                 if (spec.Plan) args.AddRange(["--permission-mode", "plan"]);
                 args.Add("--disallowedTools");
                 args.AddRange(EditDenied.Select(p => $"Edit({p})"));
@@ -235,6 +235,15 @@ public static partial class ClaudeArgs
     /// 읽기 · 편집 · 명령 단계의 --tools 끝에 붙는다.
     /// </summary>
     public const string HostTools = AskTool + ",TaskCreate,TaskGet,TaskList,TaskUpdate";
+
+    /// <summary>
+    /// 웹 도구 (사용자 결정 "읽기 · 편집 · 명령"): WebSearch는 카드 없이(검색어만 Anthropic으로), WebFetch는 사이트마다 카드 · 로컬 · 사설망 주소는 거절 —
+    /// 승인 요청은 앱이 답한다 (RoomHub.DecideToolAsync). 대화 단계는 없음.
+    /// claude에 내장된 공식 문서 사이트(2.1.312 기준 약 95개 — learn.microsoft.com · docs.python.org …)는 CLI가 묻지 않고 가져와 앱 카드 · 기록을 거치지 않는다
+    /// (사용자 실측 2026-10-30, 목록은 판마다 바뀔 수 있음 — 카드 자가 시험의 웹 가져오기 단계가 목록 밖 사이트를 묻는지 본다).
+    /// 사용자 · 작업 폴더 설정의 WebFetch(domain:…) 허용 규칙에 든 사이트도 묻지 않아 앱의 주소 검사(로컬 · 사설망)를 거치지 않는다 (/cross-review 909a5c575e C6).
+    /// </summary>
+    public const string WebSearchTool = "WebSearch", WebFetchTool = "WebFetch", WebTools = WebSearchTool + "," + WebFetchTool;
 
     /// <summary>
     /// 서브에이전트 도구 (Claude 앱 기능 D) — 읽기 · 편집 단계만 (결정: /self-review security 42f9d47dc4 C1 "명령 방은 서브에이전트 끄기").

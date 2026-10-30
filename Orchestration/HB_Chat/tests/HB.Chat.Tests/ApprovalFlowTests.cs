@@ -685,6 +685,124 @@ public sealed class ApprovalFlowTests : IDisposable
         }
     }
 
+    /// <summary>웹 검색은 읽기 이상 방에서 카드 없이 허용 (사용자 결정 "카드 없이").</summary>
+    [Fact]
+    public async Task WebSearch_AllowedWithoutCard()
+    {
+        var room = _store.Create("ws", PermissionLevel.Read, "opus", null);
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "websearch");
+        var seen = await Until(ch, e => e.Kind == "idle");
+        Assert.DoesNotContain(seen, e => e.Kind == "approval");
+        Assert.True(seen.Single(e => e.Kind == "end").Ok);
+    }
+
+    /// <summary>
+    /// 웹 가져오기 (결정 "사이트마다 카드 · 앱을 다시 켤 때까지 기억"): 읽기 방에서 카드 → 허용하면 같은 사이트는 카드 없이, 다른 사이트는 다시 카드.
+    /// 허용 답은 url · prompt만. 로컬 · 사설망 · 점 없는 이름은 카드 없이 거절.
+    /// </summary>
+    [Fact]
+    public async Task WebFetch_SiteCard_RememberedPerRoom()
+    {
+        var room = _store.Create("ws", PermissionLevel.Read, "opus", null);
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "webfetch https://example.com/a?q=1");
+        var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        Assert.Equal((RoomHub.WebFetchCardTool, "https://example.com/a?q=1"), (card.Tool, card.Summary));
+        Assert.Null(card.Rule);
+        Assert.Contains("prompt=summarize", card.Extra);
+        Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null)); // 읽기 단계에서도 허용을 받는다
+        Assert.True((await Until(ch, e => e.Kind == "idle")).Single(e => e.Kind == "end").Ok); // 가짜 claude가 url · prompt만 돌아왔는지 봄
+
+        _hub.Send(room.Id, "webfetch https://EXAMPLE.com/other https://example.com/other"); // 돌려받는 url은 바르게 고친 값
+        var again = await Until(ch, e => e.Kind == "idle");
+        Assert.DoesNotContain(again, e => e.Kind == "approval"); // 같은 사이트 — 묻지 않음
+        Assert.True(again.Single(e => e.Kind == "end").Ok);
+
+        _hub.Send(room.Id, "webfetch https://other.example.org/");
+        var other = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        Assert.Equal("https://other.example.org/", other.Summary);
+        Assert.Null(_hub.Decide(room.Id, other.Id, ApprovalChoice.Deny, null));
+        await Until(ch, e => e.Kind == "idle");
+
+        // 같은 이름이라도 http · 다른 포트는 다시 묻는다 (기억 단위 = origin, 909a5c575e C5)
+        _hub.Send(room.Id, "webfetch http://example.com:8080/x");
+        var port = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        Assert.Equal("http://example.com:8080/x", port.Summary);
+        Assert.Null(_hub.Decide(room.Id, port.Id, ApprovalChoice.Deny, null));
+        await Until(ch, e => e.Kind == "idle");
+
+        // 다른 방은 따로 기억 · 편집 방에서도 같은 카드
+        var room2 = _store.Create("ws", PermissionLevel.Edit, "opus", null);
+        var ch2 = _hub.Subscribe(room2.Id);
+        _hub.Send(room2.Id, "webfetch https://example.com/a");
+        Assert.Equal("https://example.com/a", (await Until(ch2, e => e.Kind == "approval")).Last().Approval!.Summary);
+
+        // 방을 지우면(ForgetCommands) 기억도 — 같은 사이트를 다시 묻는다 (C12)
+        _hub.ForgetCommands(room.Id);
+        _hub.Send(room.Id, "webfetch https://example.com/again");
+        Assert.Equal("https://example.com/again", (await Until(ch, e => e.Kind == "approval")).Last().Approval!.Summary);
+    }
+
+    /// <summary>
+    /// 실행 중 대화 단계로 내리면 그 턴의 웹 검색 · 이미 허용한 사이트 가져오기도 카드 없이 거절 (/cross-review 909a5c575e · ff36c478db C1).
+    /// 웹 가져오기 카드는 읽기 단계에서 허용을 받지만, 카드가 뜬 뒤 대화로 내리면 거절만.
+    /// </summary>
+    [Fact]
+    public async Task WebTools_DowngradedMidRun_Denied()
+    {
+        var room = _store.Create("ws", PermissionLevel.Read, "opus", null);
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "webfetch https://example.com/a");
+        var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null));
+        await Until(ch, e => e.Kind == "idle");
+
+        _hub.Send(room.Id, "askthenweb");
+        var q = (await Until(ch, e => e.Kind == "question")).Last().Question!;
+        _store.Update(room.Id, r => r with { Level = PermissionLevel.Chat }); // 곁칸에서 대화로 내림 (실행 중)
+        Assert.Null(_hub.Answer(room.Id, q.Id, new Dictionary<string, string> { ["go?"] = "yes" }));
+        var seen = await Until(ch, e => e.Kind == "idle");
+        Assert.Contains("search=deny fetch=deny", seen.Single(e => e.Kind == "end").Text);
+        Assert.All(seen.Where(e => e.Kind == "denied"), d => Assert.Contains("대화 단계", d.Text));
+
+        // 카드가 뜬 뒤 대화로 내리면 허용을 받지 않는다
+        _store.Update(room.Id, r => r with { Level = PermissionLevel.Read });
+        _hub.Send(room.Id, "webfetch https://other.example.org/");
+        var other = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        _store.Update(room.Id, r => r with { Level = PermissionLevel.Chat });
+        Assert.NotNull(_hub.Decide(room.Id, other.Id, ApprovalChoice.Allow, null));
+        Assert.Null(_hub.Decide(room.Id, other.Id, ApprovalChoice.Deny, null));
+        await Until(ch, e => e.Kind == "idle");
+    }
+
+    [Theory]
+    [InlineData("http://localhost:5290/Room/x", "이 PC")]
+    [InlineData("http://127.0.0.1:5280/", "사설망")]
+    [InlineData("http://192.168.0.10/", "사설망")]
+    [InlineData("http://[::1]/", "사설망")]
+    [InlineData("http://intranet/wiki", "점 없는")]
+    [InlineData("file:///C:/secret.txt", "http")]
+    [InlineData("http://100.100.1.2/", "사설망")] // CGNAT (Tailscale)
+    [InlineData("http://[fd00::1]/", "사설망")] // IPv6 고유 로컬
+    [InlineData("http://0.0.0.0:5290/", "사설망")]
+    [InlineData("http://[::ffff:127.0.0.1]/", "사설망")]
+    [InlineData("http://2130706433/", "")] // IPv4 다른 표기 (127.0.0.1) — 어떤 까닭으로든 거절
+    [InlineData("http://0x7f.0.0.1/", "")]
+    [InlineData("http://127.1/", "")]
+    [InlineData("http://my_server/", "")] // 밑줄 든 사내 이름 (909a5c575e C4)
+    [InlineData("http://evil.example.0x7f/", "숫자")]
+    public async Task WebFetch_BlockedAddress_NoCard(string url, string why)
+    {
+        var room = _store.Create("ws", PermissionLevel.Command, "opus", null);
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "webfetch " + url);
+        var seen = await Until(ch, e => e.Kind == "idle");
+        Assert.DoesNotContain(seen, e => e.Kind == "approval");
+        Assert.Contains(why, seen.Single(e => e.Kind == "denied").Text);
+        Assert.Contains("가져오지 않습니다", seen.Single(e => e.Kind == "end").Text);
+    }
+
     /// <summary>
     /// 작업 폴더 밖 Read는 어느 단계든 카드 없이 거절하되 까닭을 정확히 — "승인할 사람이 없다"가 아니라 "작업 폴더 밖 읽기" (사용자 보고 2026-10-30).
     /// </summary>

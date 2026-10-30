@@ -865,6 +865,8 @@ public sealed partial class GroupChat
     private void OnTurnEnded(string roomId, RunResult result)
     {
         if (_store.Get(roomId) is not { GroupId: { } groupId }) return;
+        // 앱을 끄느라 끊긴 턴은 답 줄을 쓰지 않는다 — 다시 켜면 "답이 없습니다 (실행이 끊김)"으로 보인다 (방의 RoomHub.Record와 같은 처리, 서버 재시작 실측 2026-10-30)
+        if (result.Cancelled && _hub.ShuttingDown) return;
         // 단톡방 잠금 안에서 — 이어 부르기(④)가 판 상태를 바꾸고 다른 구성원에게 보낸다. TurnEnded는 방 잠금 밖에서 불려 잠금 순서(단톡방 → 방)가 같다
         lock (_gates.GetOrAdd(groupId, _ => new Lock()))
         {
@@ -1078,6 +1080,7 @@ public sealed partial class GroupChat
         // 방 알림 잠금 안에서 불린다 — 다른 방(단톡방) 알림은 넘겨서
         _ = Task.Run(() =>
         {
+            if (_hub.ShuttingDown) return; // 앱을 끄는 중의 쉼은 적지 않는다 — 다시 켜면 "답이 없습니다 (실행이 끊김)" (OnTurnEnded와 같음)
             if (_store.Get(roomId) is not { GroupId: { } groupId, MemberId: { } memberId }) return;
             // 단톡방마다 차례로, 보낼 때 지금 상태를 다시 읽는다 — 늦게 돈 작업이 옛 "생각 중"을 마지막에 덮지 않게 (b8697252eb C4 · 지휘자 K1)
             lock (_gates.GetOrAdd(groupId, _ => new Lock()))

@@ -129,7 +129,16 @@ public sealed partial class CliVersions(Func<string> dataFolder)
 /// </summary>
 public static class CliSelfTest
 {
-    public const string BashStep = "명령 승인 카드", AskStep = "질문 카드", StreamStep = "글 조각 · 결과";
+    /// <summary>
+    /// 단계 이름. 웹 단계는 "내장 문서 사이트 목록 밖 사이트를 앱에 묻는지"만 본다 — 목록이 늘거나 줄어든 것 자체는 잡지 못한다 (/cross-review 909a5c575e C9).
+    /// </summary>
+    public const string BashStep = "명령 승인 카드", AskStep = "질문 카드", WebStep = "웹 가져오기 요청 (목록 밖 사이트)", StreamStep = "글 조각 · 결과";
+
+    /// <summary>
+    /// 웹 가져오기 단계의 주소 — claude에 내장된 문서 사이트 목록 밖이라 CLI가 앱에 물어야 한다 (사용자 실측 2026-10-30: example.com은 목록에 없음).
+    /// 앱은 거절만 해 실제로 가져오지 않는다.
+    /// </summary>
+    public static string WebUrl(string nonce) => $"https://example.com/hb-selftest-{nonce}";
 
     public const string Passed = "통과", Failed = "실패", Missing = "안 옴";
 
@@ -155,7 +164,8 @@ public static class CliSelfTest
         $"{PromptHead} — 이 앱의 카드 자가 시험이다. 다른 말이나 도구 없이 아래 순서대로만 한다.\n" +
         $"1. Bash 도구로 정확히 이 명령을 실행한다: {Command(nonce)}\n" +
         "2. AskUserQuestion 도구로 질문 하나를 묻는다: 질문 \"자가 시험 질문\", 머리 \"시험\", 선택지 \"예\" · \"아니요\", 하나만 고름.\n" +
-        "3. 마지막으로 \"자가 시험 끝\"이라고만 답한다.";
+        $"3. WebFetch 도구로 {WebUrl(nonce)} 을 가져온다 (prompt는 \"제목\"). 거절되는 것이 정상이니 다시 시도하지 않는다.\n" +
+        "4. 마지막으로 \"자가 시험 끝\"이라고만 답한다.";
 
     /// <summary>부른 쪽이 취소해(설정 화면을 떠남) 끝까지 못 돈 결과의 Error — 실패가 아니라 기록하지 않는다 (/self-review 5ccb0f709a C2).</summary>
     public const string AbortedError = "자가 시험을 끝까지 돌리지 못했습니다 (화면을 떠남).";
@@ -194,6 +204,7 @@ public static class CliSelfTest
             string? version = null;
             var bashAsked = false; string? bashShape = null; string? bashOther = null;
             var askAnswered = false; string? askShape = null;
+            var webAsked = false; string? webOther = null;
             var ourDenials = 0;
             var deltas = 0;
             string Deny(string why)
@@ -223,6 +234,14 @@ public static class CliSelfTest
                     askAnswered = true;
                     return Task.FromResult(PermissionDecision.Allow(q.WithAnswers(new Dictionary<string, string> { [q.Items[0].Question] = q.Items[0].Options[0].Label })));
                 }
+                if (p.Tool == ClaudeArgs.WebFetchTool)
+                {
+                    // 목록 밖 사이트 가져오기 요청이 앱에 오는지만 본다 — 늘 거절(실제로 가져오지 않음)
+                    var url = TerminalMcp.ParseString(p.InputJson, "url");
+                    if (url == WebUrl(nonce)) webAsked = true;
+                    else webOther ??= url ?? "(주소 없음)";
+                    return Task.FromResult(Deny("자가 시험: 가져오지 않음 (거절이 정상)"));
+                }
                 return Task.FromResult(Deny("자가 시험: 다른 도구는 쓰지 않음"));
             }
             void OnEvent(StreamEvent ev)
@@ -251,12 +270,17 @@ public static class CliSelfTest
                 : !askAnswered ? (Missing, "질문 요청이 오지 않음")
                 : result.Denials > ourDenials && bash == Passed ? (Failed, "허용 답이 CLI에서 거절로 처리됨")
                 : (Passed, (string?)null);
+            // 웹 가져오기가 오지 않으면 CLI가 묻지 않고 가져왔거나(목록이 바뀜) 모델이 부르지 않음 — 둘 다 "안 옴"
+            var (web, webDetail) = webAsked ? (Passed, (string?)null)
+                : (Missing, webOther is { } wo ? $"모델이 다른 주소를 부름: {wo}"
+                    : "웹 가져오기 요청이 오지 않음 — CLI가 묻지 않고 가져왔거나(내장 문서 사이트 목록이 바뀜 · 사용자 WebFetch 허용 규칙일 수 있음) 모델이 부르지 않음");
             var stream = result.Ok && deltas > 0 ? Passed : result.Ok ? Missing : Failed;
             var streamDetail = result.Ok ? deltas == 0 ? "글 조각(stream_event)이 오지 않음" : null : result.Error ?? "결과가 성공이 아님";
             IReadOnlyList<CliVersions.TestStep> steps =
             [
                 new(BashStep, bash, bashDetail),
                 new(AskStep, ask, askDetail),
+                new(WebStep, web, webDetail),
                 new(StreamStep, stream, streamDetail),
             ];
             // 실행 오류(claude를 못 찾음 등)는 맨 위에 — init이 없다는 말에 묻히지 않게 (C5)

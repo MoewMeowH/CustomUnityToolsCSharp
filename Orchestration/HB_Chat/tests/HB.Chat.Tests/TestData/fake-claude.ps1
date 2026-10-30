@@ -318,8 +318,39 @@ switch ($mode) {
             $d2 = Ask 'req_st2' '{"subtype":"can_use_tool","tool_name":"AskUserQuestion","display_name":"AskUserQuestion","input":{"questions":[{"question":"self test question","header":"test","options":[{"label":"yes"},{"label":"no"}],"multiSelect":false}]},"tool_use_id":"toolu_st2"}'
             if ($v -eq 'denyanswer' -or -not $d2 -or $d2.behavior -ne 'allow') { $denials += '{"tool_name":"AskUserQuestion"}' }
         }
+        # web fetch of a site outside the CLI's built-in docs list ('noweb': the CLI did not ask)
+        if ($v -ne 'noweb') {
+            $d3 = Ask 'req_st3' ('{"subtype":"can_use_tool","tool_name":"WebFetch","display_name":"WebFetch","input":{"url":"https://example.com/' + $dir + '","prompt":"title"},"tool_use_id":"toolu_st3"}')
+            if (-not $d3 -or $d3.behavior -ne 'allow') { $denials += '{"tool_name":"WebFetch"}' }
+        }
         Emit '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"self test done"}}}'
         Emit ('{"type":"result","subtype":"success","is_error":false,"result":"self test done","total_cost_usd":0.0001,"permission_denials":[' + ($denials -join ',') + ']}')
+    }
+    'websearch' {
+        # web search: the app allows without a card (input back unchanged)
+        $d = Ask 'req_ws' '{"subtype":"can_use_tool","tool_name":"WebSearch","display_name":"WebSearch","input":{"query":"dotnet 10 release notes"},"tool_use_id":"toolu_ws"}'
+        if ($d -and $d.behavior -eq 'allow' -and $d.updatedInput.query -ne 'dotnet 10 release notes') { $d = [pscustomobject]@{ behavior = 'deny'; message = 'updatedInput changed' } }
+        Finish $d 'WebSearch' 'searched'
+    }
+    'webfetch' {
+        # web fetch 'webfetch <url> [expected url back]': site card (or no card if the room already allowed the site / the address is blocked).
+        # Allow must carry only url (the normalized one) + prompt back (the extra key is dropped).
+        $parts = $body.Trim() -split '\s+'
+        $url = $parts[1]
+        $want = if ($parts.Count -gt 2) { $parts[2] } else { $url }
+        $d = Ask 'req_wf' ('{"subtype":"can_use_tool","tool_name":"WebFetch","display_name":"WebFetch","input":{"url":' + (ConvertTo-Json $url -Compress) + ',"prompt":"summarize","extra":1},"tool_use_id":"toolu_wf"}')
+        if ($d -and $d.behavior -eq 'allow' -and ($d.updatedInput.url -ne $want -or $d.updatedInput.prompt -ne 'summarize' -or $null -ne $d.updatedInput.extra)) {
+            $d = [pscustomobject]@{ behavior = 'deny'; message = ('updatedInput changed: ' + $d.updatedInput.url) }
+        }
+        Finish $d 'WebFetch' 'fetched'
+    }
+    'askthenweb' {
+        # downgrade mid-run: a question card first (the test lowers the room to chat while it waits), then web search + web fetch of an allowed site
+        $q = Ask 'req_aw1' '{"subtype":"can_use_tool","tool_name":"AskUserQuestion","display_name":"AskUserQuestion","input":{"questions":[{"question":"go?","header":"go","options":[{"label":"yes"},{"label":"no"}],"multiSelect":false}]},"tool_use_id":"toolu_aw1"}'
+        $s = Ask 'req_aw2' '{"subtype":"can_use_tool","tool_name":"WebSearch","display_name":"WebSearch","input":{"query":"x"},"tool_use_id":"toolu_aw2"}'
+        $f = Ask 'req_aw3' '{"subtype":"can_use_tool","tool_name":"WebFetch","display_name":"WebFetch","input":{"url":"https://example.com/b","prompt":"p"},"tool_use_id":"toolu_aw3"}'
+        $text = 'search=' + $s.behavior + ' fetch=' + $f.behavior
+        Emit ('{"type":"result","subtype":"error_during_execution","is_error":true,"result":' + (ConvertTo-Json $text -Compress) + ',"total_cost_usd":0.001,"permission_denials":[]}')
     }
     'readout' {
         # Read outside the workspace: the app has no read card - denied without a card, with the reason (user report 2026-10-30)
