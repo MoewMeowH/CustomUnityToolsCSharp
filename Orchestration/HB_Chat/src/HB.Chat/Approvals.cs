@@ -142,6 +142,9 @@ public sealed record ApprovalRequest(string Tool, string Summary, string? Descri
     /// <summary>요약으로 보이는 키 (명령이면 command · description, 파일이면 file_path · description).</summary>
     private static readonly HashSet<string> ShownKeys = new(StringComparer.Ordinal) { "command", "description", "file_path" };
 
+    /// <summary>찾기 · 목록 도구의 요약 키 (command · file_path가 없을 때만 — 위 Parse).</summary>
+    private static readonly HashSet<string> SearchKeys = new(StringComparer.Ordinal) { "pattern", "path", "notebook_path" };
+
     /// <summary>
     /// 승인 요청 원문(control_request의 request 객체: tool_name · input · description · permission_suggestions)을 읽는다. 모양이 아니면 null.
     /// </summary>
@@ -174,10 +177,17 @@ public sealed record ApprovalRequest(string Tool, string Summary, string? Descri
             if (e.TryGetProperty("input", out var input) && input.ValueKind == JsonValueKind.Object)
             {
                 var shown = Str(input, "command") ?? Str(input, "file_path");
+                // 찾기 · 목록 도구(Grep · Glob · LS · NotebookRead)는 command · file_path가 없다 — 입력 JSON 대신 "패턴 — 경로"로 (사용자 보고 2026-10-30:
+                // 승인 기록에 JSON이 백슬래시 두 번으로 남았다). 그 키는 이때만 요약으로 본다 — 명령 카드의 추가 입력을 가리지 않게
+                var searchShown = shown is null && (Str(input, "pattern") is not null || Str(input, "path") is not null || Str(input, "notebook_path") is not null);
+                if (searchShown)
+                    shown = Str(input, "notebook_path") ?? (Str(input, "pattern") is { } pattern
+                        ? Str(input, "path") is { } where ? $"{pattern} — {where}" : pattern
+                        : Str(input, "path"));
                 summary = shown ?? input.GetRawText();
                 description = Str(input, "description") ?? Str(e, "description");
                 if (shown is not null)
-                    foreach (var p in input.EnumerateObject().Where(p => !ShownKeys.Contains(p.Name)))
+                    foreach (var p in input.EnumerateObject().Where(p => !ShownKeys.Contains(p.Name) && !(searchShown && SearchKeys.Contains(p.Name))))
                     {
                         var value = p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString()! : p.Value.GetRawText();
                         if (value.Length > MaxExtraValueChars) (value, truncated) = (value[..MaxExtraValueChars] + "…", true);

@@ -38,6 +38,23 @@ public sealed class ApprovalTests
         Assert.Null(r.Rule); // 명령 도구가 아닌 규칙은 "항상 허용"으로 받지 않는다
     }
 
+    /// <summary>
+    /// 찾기 · 목록 도구는 "패턴 — 경로"로 요약 (사용자 보고 2026-10-30: 입력 JSON이 백슬래시 두 번으로 기록에 남았다). 그 밖의 입력은 추가 입력으로.
+    /// 명령 카드는 path · pattern이 있어도 요약은 명령 그대로, 그 키는 추가 입력에 보인다 (본 것 = 허용되는 것).
+    /// </summary>
+    [Fact]
+    public void Parse_SearchToolsShowPatternAndPath()
+    {
+        var grep = ApprovalRequest.Parse("""{"tool_name":"Grep","input":{"pattern":"localhost","path":"C:\\Windows\\System32\\drivers\\etc","-i":true}}""")!;
+        Assert.Equal(@"localhost — C:\Windows\System32\drivers\etc", grep.Summary);
+        Assert.Equal("-i=true", grep.Extra);
+        Assert.Equal("*.ini", ApprovalRequest.Parse("""{"tool_name":"Glob","input":{"pattern":"*.ini"}}""")!.Summary);
+        Assert.Equal(@"C:\Windows", ApprovalRequest.Parse("""{"tool_name":"LS","input":{"path":"C:\\Windows"}}""")!.Summary);
+        var bash = ApprovalRequest.Parse("""{"tool_name":"Bash","input":{"command":"ls","path":"C:\\x"}}""")!;
+        Assert.Equal("ls", bash.Summary);
+        Assert.Contains(@"path=C:\x", bash.Extra);
+    }
+
     [Theory]
     [InlineData("not json")]
     [InlineData("[1]")]

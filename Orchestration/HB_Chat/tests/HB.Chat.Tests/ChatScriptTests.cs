@@ -195,6 +195,34 @@ public sealed class ChatScriptTests(ChatApp app, ChatBrowser browser) : IClassFi
         again.AssertNoErrors();
     }
 
+    /// <summary>
+    /// 첨부 그림 칩을 누르면 새 창(데스크톱은 같은 탭으로 가서 닫을 길이 없었다 — 사용자 보고) 대신 화면 위 크게 보기 — ✕로 닫힌다. 그림이 아닌 첨부는 링크 그대로.
+    /// </summary>
+    [Fact]
+    public async Task AttachmentImage_OpensOverlayWithClose()
+    {
+        if (!browser.Available) return;
+        var room = app.Room("attach-view");
+        var folder = Attachments.Folder(Path.Combine(app.Dir, "data"), room.Id);
+        Directory.CreateDirectory(folder);
+        File.WriteAllBytes(Path.Combine(folder, "pic.png"), Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="));
+        File.WriteAllText(Path.Combine(folder, "notes.txt"), "x");
+        var text = "보세요\n" + Attachments.Marker + Path.Combine(folder, "pic.png") + "\n" + Attachments.Marker + Path.Combine(folder, "notes.txt");
+        File.AppendAllText(app.TranscriptPath(room.SessionId), ChatApp.User(text, 0) + "\n" + ChatApp.Conductor("봤어요", 1) + "\n");
+        await using var page = await browser.OpenAsync(app.RoomUrl(room));
+        await page.WaitForAsync("!!document.querySelector('#chat a.attach img')", "첨부 그림 칩", ChatPage.TurnWait);
+        var before = await page.EvalAsync<string>("location.href");
+        await page.EvalAsync("document.querySelector('#chat a.attach img').click()");
+        await page.WaitForAsync("!!document.querySelector('.shot-view img')", "크게 보기", ChatPage.TurnWait);
+        Assert.Equal(before, await page.EvalAsync<string>("location.href")); // 화면을 떠나지 않음
+        Assert.Contains("pic.png", await page.EvalAsync<string>("document.querySelector('.shot-view img').alt"));
+        await page.EvalAsync("document.querySelector('.shot-view .shot-x').click()");
+        await page.WaitForAsync("!document.querySelector('.shot-view')", "✕로 닫힘", ChatPage.TurnWait);
+        // 그림이 아닌 첨부는 링크 그대로 (크게 보기 없음)
+        Assert.Equal(1, await page.EvalAsync<int>("[...document.querySelectorAll('#chat a.attach')].filter(a => !a.querySelector('img') && a.target === '_blank').length"));
+        page.AssertNoErrors();
+    }
+
     /// <summary>명령 방의 작업 폴더 밖 쓰기 카드: 경로 · 안내 줄 · "쓸 내용" 미리보기, "항상 허용" 단추 없음, 허용 단추가 있다(잘려도 허용). 거절하면 카드가 닫힌다.</summary>
     [Fact]
     public async Task OutsideWriteCard_ShowsPathPreviewNoAlways()

@@ -1546,16 +1546,17 @@
             if (!browserOpen) { browserFrame.hidden = true; browserFrame.removeAttribute("src"); }
             $("#side-tab-browser").textContent = browserOpen ? "브라우저 ●" : "브라우저";
         }
-        // 기록 줄의 스크린샷을 누르면 새 창 대신 화면 위에 크게 — 닫기 단추 · Esc · 바깥 누르기로 닫는다 (사용자 요청: 데스크톱에서 새 창은 닫을 길이 없었다)
-        function openShot(src) {
+        // 기록 줄의 스크린샷 · 첨부 그림을 누르면 새 창 대신 화면 위에 크게 — 닫기 단추 · Esc · 바깥 누르기로 닫는다
+        // (사용자 요청: 데스크톱에서 새 창은 닫을 길이 없었다 — 앱 출처 새 창은 같은 탭으로 가서 그림만 남았다)
+        function openShot(src, label) {
             closeShot();
             const box = el("div", "shot-view");
             box.setAttribute("role", "dialog");
-            box.setAttribute("aria-label", "스크린샷");
+            box.setAttribute("aria-label", label);
             const x = el("button", "shot-x icon-btn", "✕");
             x.type = "button"; x.title = "닫기 (Esc)"; x.setAttribute("aria-label", "닫기");
             const img = el("img");
-            img.src = src; img.alt = "지휘자 브라우저 스크린샷";
+            img.src = src; img.alt = label;
             // ✕는 화면 모서리가 아니라 그림 모서리에 — 화면 모서리면 방 머리 단추(대시보드 · 정보) 위에 겹쳐 보였다 (사용자 데스크톱 확인)
             const frame = el("div", "shot-frame");
             frame.append(img, x);
@@ -1568,10 +1569,11 @@
         function shotKeys(e) { if (e.key === "Escape" && document.querySelector(".shot-view")) { e.stopPropagation(); closeShot(); } }
         document.addEventListener("keydown", shotKeys, true);
         root.addEventListener("click", (e) => {
-            const a = e.target.closest?.(".note-shot");
+            // 첨부는 그림 칩만 (그림이 아닌 첨부는 지금처럼 링크 — 내려받기)
+            const a = e.target.closest?.(".note-shot, a.attach:has(img)");
             if (!a) return;
             e.preventDefault();
-            openShot(a.getAttribute("href"));
+            openShot(a.getAttribute("href"), a.classList.contains("attach") ? "첨부 그림 " + (a.textContent || "").trim() : "지휘자 브라우저 스크린샷");
         });
         async function loadBrowserFrame() {
             if (!browserFrame || !browserOpen) return;
