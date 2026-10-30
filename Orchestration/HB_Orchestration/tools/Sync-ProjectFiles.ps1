@@ -8,7 +8,7 @@
     파일 구분
       동기화   CLAUDE.md, .claude/commands/*.md, .claude/scripts/*.py, .claude/agents/*.md, .claude/mistakes/*.md (원본 폴더에 있는 것)  바이트 동일해야 한다
                prompts/(외부 에이전트 덧붙임)는 서버가 PromptsPath로 읽는 서버 전용이라 동기화하지 않는다 (2026-10-27).
-      없으면 만듦  REVIEW_GUIDELINES.md   프로젝트마다 고쳐 쓰는 리뷰 지침 (2026-10-22). 없을 때만 원본(기본 지침)을 복사하고,
+      없으면 만듦  REVIEW_GUIDELINES.md · PROJECT.md · MISTAKES.md   프로젝트마다 고쳐 쓰는 파일. 없을 때만 원본(기본 지침 · 빈 틀)을 복사하고,
                있으면 다르더라도 '프로젝트 지침'으로 보여 주기만 한다 — 멈추지 않고 덮지 않는다. 프로젝트 전용 규칙은 PROJECT.md(공통 CLAUDE.md가 불러옴).
                단 원본 git 이력의 옛 판과 같으면(프로젝트에서 고치지 않음) '기본 지침 옛 판'으로 맞출 대상에 넣는다 (-Apply가 갱신, -Force 불필요).
       확인만   .claude/settings.example.json → .claude/settings.json   덮지 않는다. 해시만 비교 (기존 파일이 있으면 allow 항목만 손으로 합친다)
@@ -191,7 +191,7 @@ if ($Source -eq $UnityProject) { Fail '원본과 Unity 프로젝트가 같은 �
 
 $syncFiles = @('CLAUDE.md')
 # 없으면 만듦: 프로젝트마다 고쳐 쓰는 파일. 없을 때만 복사하고, 있으면 달라도 멈추지 않고 덮지 않는다.
-$seedFiles = @('REVIEW_GUIDELINES.md')
+$seedFiles = @('REVIEW_GUIDELINES.md', 'PROJECT.md', 'MISTAKES.md')
 foreach ($f in ($syncFiles + $seedFiles)) {
     if (-not (Test-Path -LiteralPath (Join-Path $Source $f) -PathType Leaf)) { Fail "원본에 $f 가 없습니다: $Source" }
 }

@@ -83,7 +83,7 @@ powershell -ExecutionPolicy Bypass -File tools\Test-SyncProjectFiles.ps1
 | 있고 원본과 다름 | `프로젝트 지침`으로 보여 주기만 (멈추지 않고 `-Force`로도 덮지 않음) |
 | 원본 git 이력의 옛 판과 같음 (프로젝트에서 고치지 않음) | `기본 지침 옛 판`으로 맞출 대상. `-Apply`가 갱신 |
 
-프로젝트 전용 규칙은 그 프로젝트의 `PROJECT.md`에 둡니다. 공통 `CLAUDE.md` 끝의 `@PROJECT.md`가 불러오고, 파일이 없으면 오류 없이 건너뜁니다.
+프로젝트 전용 규칙은 그 프로젝트의 `PROJECT.md`에, 지휘자 실수 목록은 `MISTAKES.md`에 둡니다. 공통 `CLAUDE.md` 끝의 `@PROJECT.md` · `@MISTAKES.md`가 불러오고, 파일이 없으면 오류 없이 건너뜁니다. Sync는 두 파일이 없을 때만 빈 틀을 만들고, 있으면 덮지 않습니다.
 
 **확인만 하는 파일** (만들거나 덮지 않음, 종료 코드와 무관)
 
