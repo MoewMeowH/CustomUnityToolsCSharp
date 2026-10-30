@@ -168,6 +168,45 @@ public sealed class SettingsModel(
         _ => null,
     };
 
+    // ---- 데이터 백업 (결정: 설정 단추로 zip 내려받기 · 앱 데이터 + 세션 기록 · 복원은 zip 안 글대로) ----
+
+    /// <summary>지금 백업하면 담길 것 (화면에 크기 · 수). 화면을 그릴 때마다 파일 목록을 훑는다 — 캐시 폴더는 들어가지 않으므로 기록 파일 수만큼.</summary>
+    public ChatBackup.Plan BackupPlan => _backupPlan ??= ChatBackup.Collect(options.Value, store.All(), transcripts);
+    private ChatBackup.Plan? _backupPlan;
+
+    /// <summary>실행 중인 방 수 — 있으면 끝난 뒤 받기를 권한다 (방 색인과 세션 기록이 서로 다른 순간으로 담길 수 있음).</summary>
+    public int RunningRooms => store.All().Count(r => r.RunStartedAt is not null);
+
+    /// <summary>
+    /// 백업 zip 내려받기 — POST(같은 출처 · antiforgery)로만: 다른 사이트가 내려받기를 일으키지 못하게. 닫으면 지워지는 임시 파일 하나에 쓰고
+    /// 그대로 보낸다 — 실패하든 앱이 꺼지든 대화 · 토큰이 든 zip이 남지 않게 (ZipArchive는 동기로 쓰므로 응답 스트림에 바로 쓰지 않는다).
+    /// </summary>
+    public IActionResult OnPostBackup()
+    {
+        var now = DateTimeOffset.Now;
+        var tmp = Path.Combine(Path.GetTempPath(), "hbchat-backup-" + Guid.NewGuid().ToString("N") + ".zip");
+        FileStream? file = null;
+        try
+        {
+            file = new FileStream(tmp, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 81920, FileOptions.DeleteOnClose);
+            ChatBackup.Write(file, ChatBackup.Collect(options.Value, store.All(), transcripts), options.Value, now);
+            file.Position = 0;
+            var send = file;
+            file = null; // 응답이 닫는다
+            return File(send, "application/zip", ChatBackup.FileName(now));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Error = $"백업을 만들지 못했습니다: {ex.Message}";
+            Fill();
+            return Page();
+        }
+        finally
+        {
+            file?.Dispose();
+        }
+    }
+
     // ---- claude CLI 판 · 카드 자가 시험 (결정 "설정 단추로만") ----
 
     public CliVersions.State Cli => cliVersions.Read();

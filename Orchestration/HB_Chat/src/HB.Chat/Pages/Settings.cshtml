@@ -19,6 +19,27 @@
                 <div class="panel" style="padding:8px 12px;margin-bottom:12px;border-color:var(--warn)" role="alert">@error</div>
             }
 
+            @* 데이터 백업 (결정: 설정 단추로 zip 내려받기 · 앱 데이터 + 세션 기록 · 복원은 zip 안 글대로 · 암호 없음) *@
+            @{ var backup = Model.BackupPlan; }
+            <section class="panel" id="backup" style="padding:12px 14px;margin-bottom:16px">
+                <h3 style="margin:0 0 6px;font-size:15px">데이터 백업</h3>
+                <p class="muted" style="margin:0 0 8px;font-size:12.5px">
+                    방 색인 · 단톡방 대화 · 승인 기록 · 첨부 · 프로필 · 설정 파일과, 이 앱 방들의 세션 기록(대화 본문) · 할 일을 zip 하나로 받습니다.
+                    브라우저 캐시 · 로그와 단톡방 Codex 구성원의 스레드(~/.codex)는 빠집니다. 복원은 zip 안 "복원 방법.txt"대로 복사합니다.
+                    대화 · 첨부 · MCP 설정(토큰이 있을 수 있음)이 들어 있으니 다른 사람에게 보내지 마세요.
+                </p>
+                <p style="margin:0 0 8px;font-size:13px">
+                    지금 담길 것: 파일 @(backup.Files.Count)개 · 세션 기록 @(backup.Sessions)개 · 압축 전 @(backup.Bytes < 1024 * 1024 ? $"{backup.Bytes / 1024.0:0.#}KB" : $"{backup.Bytes / 1024.0 / 1024.0:0.#}MB")
+                </p>
+                @if (Model.RunningRooms is > 0 and var running)
+                {
+                    <p style="margin:0 0 8px;font-size:12.5px;color:var(--warn)">지금 실행 중인 방이 @(running)개 있습니다 — 끝난 뒤 받기를 권합니다 (실행 중인 대화는 그 순간까지만 담깁니다).</p>
+                }
+                <form method="post" asp-page-handler="Backup">
+                    <button class="btn" type="submit">@Icons.Svg("check") 백업 zip 받기</button>
+                </form>
+            </section>
+
             @* claude CLI 판 · 카드 자가 시험 (결정 "사이드바 + 설정" · "설정 단추로만") *@
             @{ var cli = Model.Cli; }
             <section class="panel" id="cli" style="padding:12px 14px;margin-bottom:16px@(cli.NeedsCheck ? ";border-color:var(--warn)" : "")">
