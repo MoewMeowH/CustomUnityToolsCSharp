@@ -8,10 +8,12 @@ using Microsoft.Extensions.AI;
 namespace HB.Orchestration.Agents.Providers;
 
 /// <summary>
-/// Claude Code 헤드리스(<c>claude --bare --restricted -p</c>)를 읽기 전용 검토 에이전트로 띄운다.
-/// 에이전트는 작업 폴더(<see cref="ReviewWorkFolder"/>) 안의 파일을 직접 읽는다. 이 PC의 Claude Code 2.1.311(Windows)은 --tools에 Grep · Glob을 줘도
-/// Read만 준다 (2026-10-27 확인) — 그래서 작업 폴더가 프롬프트에 파일 목록을 넣는다.
-/// 과금은 제공사 키 환경 변수의 API 키로만 한다: <c>--bare</c>는 구독 로그인(OAuth)을 읽지 않고, 키가 없으면 구독으로 넘어가지 않고 실패한다.
+/// Claude Code 헤드리스(<c>claude --safe-mode --restricted --strict-mcp-config -p</c>)를 읽기 전용 검토 에이전트로 띄운다.
+/// 에이전트는 작업 폴더(<see cref="ReviewWorkFolder"/>) 안의 파일을 Read · Glob · Grep으로 직접 읽는다.
+/// <c>--bare</c>는 쓰지 않는다 — CLAUDE_CODE_SIMPLE을 켜서 --tools에 Glob · Grep을 줘도 Read만 나온다 (2.1.312 실측).
+/// 격리: 지금 세 옵션으로 CLAUDE.md · 전역 지침이 읽히지 않고 MCP 서버도 붙지 않는다 (2.1.312 실측, 옵션 없는 대조 실행은 읽음). 훅은 --settings의 disableAllHooks로 끈다.
+/// 폴더 밖 읽기: --restricted가 Grep · Glob · Read를 모두 막는다 (2.1.312 실측 — .. · ../.. · 절대 경로 · \\?\ 경로 · 슬래시 경로).
+/// 과금은 제공사 키 환경 변수의 API 키로만 한다: 키가 없으면 시작하지 않고, 틀린 키는 구독으로 넘어가지 않고 실패한다 (2.1.312 실측). 구독 로그인 변수는 자식 환경에서 지운다.
 /// <c>--restricted</c>는 사용자 · 프로젝트 · 로컬 설정 파일을 무시한다 — 리뷰 대상의 .claude/settings.json이 작업 폴더에 복사돼도 적용되지 않는다 (확인).
 /// IChatClient로 감싸 AgentRunner의 기록 · 재시도 · 호출 중 표시 · 비용 경로를 그대로 쓴다.
 /// </summary>
@@ -138,8 +140,11 @@ public sealed class ClaudeCliChatClient(ClaudeCliSettings settings, ClaudeCliRun
     /// <summary>ChatOptions.AdditionalProperties 키: 작업 폴더 (ModeRunner → AgentRunner가 넣는다).</summary>
     public const string WorkFolderKey = "hb.workFolder";
 
-    /// <summary>읽기 전용 도구. 쓰기 · 실행 · 웹 · 하위 에이전트는 주지 않는다 (지금 판은 Read만 실제로 준다 — 클래스 설명).</summary>
+    /// <summary>읽기 전용 도구. 쓰기 · 실행 · 웹 · 하위 에이전트는 주지 않는다.</summary>
     public const string Tools = "Read,Glob,Grep";
+
+    /// <summary>임시 --settings 내용: 폴더 밖 읽기 차단, 훅 끄기 (--restricted는 설정 파일의 훅을 무시하고 --settings는 적용한다).</summary>
+    public const string SettingsJson = """{ "disableAllHooks": true, "permissions": { "blockReadsOutsideWorkingDirectories": true } }""";
 
     /// <summary>자식 프로세스에서 지우는 인증 · 클라우드 변수: API 키보다 먼저 쓰이거나 구독 로그인으로 이어질 수 있다 (인증 순서는 Claude Code 문서).</summary>
     public static readonly IReadOnlyList<string> RemovedEnvironment =
@@ -173,7 +178,7 @@ public sealed class ClaudeCliChatClient(ClaudeCliSettings settings, ClaudeCliRun
             var systemFile = Path.Combine(temp, "system.md");
             var settingsFile = Path.Combine(temp, "settings.json");
             await File.WriteAllTextAsync(systemFile, system, new UTF8Encoding(false), cancellationToken);
-            await File.WriteAllTextAsync(settingsFile, """{ "permissions": { "blockReadsOutsideWorkingDirectories": true } }""", new UTF8Encoding(false), cancellationToken);
+            await File.WriteAllTextAsync(settingsFile, SettingsJson, new UTF8Encoding(false), cancellationToken);
 
             var invocation = new ClaudeCliInvocation(settings.Executable,
                 Arguments(settings, options.Reasoning?.Effort, systemFile, settingsFile), folder, ChildEnvironment(settings.ApiKey, settings.KeyEnvName), user);
@@ -201,14 +206,16 @@ public sealed class ClaudeCliChatClient(ClaudeCliSettings settings, ClaudeCliRun
 
     /// <summary>
     /// 명령줄 인자 (프롬프트는 stdin). effort가 없으면 넘기지 않는다 (모델 기본값).
+    /// --safe-mode: CLAUDE.md · 스킬 · 플러그인 · 훅 · MCP · 커스텀 명령 끄기 (--restricted만으로도 CLAUDE.md는 안 읽혔지만 뜻을 겹쳐 둔다).
     /// --restricted: 설정 파일(사용자 · 프로젝트 · 로컬) 무시, 파일 도구를 작업 폴더로 제한 (두 겹 — settings의 폴더 밖 읽기 차단과 함께).
+    /// --strict-mcp-config: --mcp-config 없이 쓰면 MCP 서버를 하나도 붙이지 않는다.
     /// --no-session-persistence: ~/.claude/projects에 소스 사본이 든 세션 기록을 남기지 않는다 (2026-10-27 확인).
     /// </summary>
     public static List<string> Arguments(ClaudeCliSettings s, ReasoningEffort? effort, string systemFile, string settingsFile)
     {
         var args = new List<string>
         {
-            "--bare", "--restricted", "-p", "--no-session-persistence", "--output-format", "json",
+            "--safe-mode", "--restricted", "--strict-mcp-config", "-p", "--no-session-persistence", "--output-format", "json",
             "--model", s.Model,
             "--max-turns", s.MaxTurns.ToString(CultureInfo.InvariantCulture),
             "--permission-mode", "dontAsk",
@@ -307,13 +314,22 @@ public sealed class ClaudeCliChatClient(ClaudeCliSettings settings, ClaudeCliRun
             var n = d.GetArrayLength();
             if (n == 0) return null;
             var paths = d.EnumerateArray()
-                .Select(x => x.ValueKind == JsonValueKind.Object && x.TryGetProperty("tool_input", out var ti) && ti.ValueKind == JsonValueKind.Object
-                    && ti.EnumerateObject().FirstOrDefault(p => p.Value.ValueKind == JsonValueKind.String) is { Value.ValueKind: JsonValueKind.String } p0
-                    ? Path.GetFileName(p0.Value.GetString()) : null)
+                .Select(x => x.ValueKind == JsonValueKind.Object && x.TryGetProperty("tool_input", out var ti) && ti.ValueKind == JsonValueKind.Object ? DeniedTarget(ti) : null)
                 .OfType<string>().Distinct().Take(3);
             return $"[경고] claude-cli 도구 사용 {n}건이 거절됨 (작업 폴더 밖 · 막힌 파일: {string.Join(", ", paths)}) — 에이전트가 필요한 파일을 못 읽었을 수 있습니다";
         }
         catch (JsonException) { return null; }
+    }
+
+    /// <summary>
+    /// 거절된 호출의 대상: Read는 파일 이름, Grep · Glob은 path 그대로 (첫 값은 pattern이라 어디를 노렸는지 안 보인다), 그 밖은 첫 문자열 값의 파일 이름.
+    /// </summary>
+    private static string? DeniedTarget(JsonElement input)
+    {
+        if (input.TryGetProperty("file_path", out var file) && file.ValueKind == JsonValueKind.String) return Path.GetFileName(file.GetString());
+        if (input.TryGetProperty("path", out var path) && path.ValueKind == JsonValueKind.String) return path.GetString();
+        return input.EnumerateObject().FirstOrDefault(p => p.Value.ValueKind == JsonValueKind.String) is { Value.ValueKind: JsonValueKind.String } first
+            ? Path.GetFileName(first.Value.GetString()) : null;
     }
 
     private static ClaudeCliSpent? SpentOf(JsonElement root)

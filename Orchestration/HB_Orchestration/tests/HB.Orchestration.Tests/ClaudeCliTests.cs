@@ -7,7 +7,7 @@ using Microsoft.Extensions.AI;
 namespace HB.Orchestration.Tests;
 
 /// <summary>
-/// claude-cli 제공사 (claude --bare -p 읽기 전용 검토) · 작업 폴더.
+/// claude-cli 제공사 (claude -p 읽기 전용 검토) · 작업 폴더.
 /// 실제 CLI는 부르지 않는다 — 실행기는 가짜, 결과 JSON은 2026-10-27 시험 출력 모양을 줄인 합성 데이터.
 /// </summary>
 public sealed class ClaudeCliTests : IDisposable
@@ -34,11 +34,15 @@ public sealed class ClaudeCliTests : IDisposable
     // ── 명령줄 · 환경 ─────────────────────────────────────────────────────
 
     [Fact]
-    public void Arguments_are_bare_read_only_and_json()
+    public void Arguments_are_isolated_read_only_and_json()
     {
         var args = ClaudeCliChatClient.Arguments(Settings, ReasoningEffort.High, "sys.md", "set.json");
 
-        Assert.Equal(["--bare", "--restricted", "-p", "--no-session-persistence", "--output-format", "json"], args.Take(6));
+        Assert.Equal(["--safe-mode", "--restricted", "--strict-mcp-config", "-p", "--no-session-persistence", "--output-format", "json"], args.Take(7));
+        Assert.DoesNotContain("--bare", args);                                       // --bare를 쓰면 Glob · Grep이 사라진다 (2.1.312 실측)
+        using var settings = JsonDocument.Parse(ClaudeCliChatClient.SettingsJson);
+        Assert.True(settings.RootElement.GetProperty("disableAllHooks").GetBoolean());
+        Assert.True(settings.RootElement.GetProperty("permissions").GetProperty("blockReadsOutsideWorkingDirectories").GetBoolean());
         Assert.Equal("Read,Glob,Grep", args[args.IndexOf("--tools") + 1]);
         Assert.Equal("dontAsk", args[args.IndexOf("--permission-mode") + 1]);
         Assert.Equal("high", args[args.IndexOf("--effort") + 1]);
@@ -523,6 +527,11 @@ public sealed class ClaudeCliTests : IDisposable
 
         Assert.StartsWith("[경고] claude-cli 도구 사용 1건이 거절됨", warning);
         Assert.Contains("calls.jsonl", warning);
+
+        var grep = ClaudeCliChatClient.DenialWarning("""{"permission_denials":[{"tool_name":"Grep","tool_input":{"pattern":"API_KEY","path":"..\\.."}}]}""");
+
+        Assert.Contains("..\\..", grep);                                             // 어디를 노렸는지
+        Assert.DoesNotContain("API_KEY", grep);
     }
 
     [Theory]

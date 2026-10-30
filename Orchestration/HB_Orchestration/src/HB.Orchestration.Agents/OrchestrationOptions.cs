@@ -304,6 +304,17 @@ public sealed class ContextOptions
     public IEnumerable<string> AllDenyPatterns => BuiltInDenyPatterns.Concat(DenyPatterns);
 
     /// <summary>
+    /// 저장소 사본에서만 더 빼는 비밀 모양 이름. 지휘자가 고르지 않은 파일까지 외부로 나갈 수 있어서다 — context로 직접 넘긴 파일에는 걸지 않는다.
+    /// 이름 검사뿐이라 코드 · 에셋 안에 박힌 비밀은 못 거른다. *token* · *secret* 전체는 CancellationToken 같은 코드 파일까지 빠져 설정 확장자로 좁혔다.
+    /// </summary>
+    public static readonly IReadOnlyList<string> BuiltInRepoCopyDenyPatterns =
+    [
+        ".mcp*.json", "google-services.json", "GoogleService-Info.plist", "appsettings.*.json",
+        "*secret*.json", "*secret*.yaml", "*secret*.yml", "*secret*.toml", "*secret*.ini", "*secret*.xml", "*secret*.txt",
+        "*token*.json", "*token*.yaml", "*token*.yml", "*token*.toml", "*token*.ini", "*token*.xml", "*token*.txt",
+    ];
+
+    /// <summary>
     /// save_result가 쓰지 않을 파일을 추가한다 (쓰기에만 적용, 형식은 DenyPatterns와 같음).
     /// <see cref="BuiltInWriteDenyPatterns"/>와 DenyPatterns(비밀 파일)는 항상 함께 적용된다.
     /// </summary>

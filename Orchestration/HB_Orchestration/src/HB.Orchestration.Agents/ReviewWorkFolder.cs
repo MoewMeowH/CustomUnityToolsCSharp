@@ -4,8 +4,8 @@ using System.Text;
 namespace HB.Orchestration.Agents;
 
 /// <summary>
-/// claude-cli 단계의 작업 폴더.
-/// context가 가리키는 파일을 <b>파일 전체</b>로 상대 경로 그대로 복사한다 — 에이전트가 그 안을 직접 읽는다.
+/// claude-cli · codex-cli 단계의 작업 폴더.
+/// context가 가리키는 파일을 <b>파일 전체</b>로 상대 경로 그대로 복사한다 — 에이전트가 그 안을 직접 읽는다. 저장소 사본 스타일은 그 아래에 추적 파일을 먼저 깐다.
 /// 경로 규칙 · 추가 루트 · 전송 금지 · 파일 크기 상한은 기존 첨부(ContextLoader)와 같다. 지휘자가 하던 subagent_in 복사를 서버가 대신하고,
 /// 복사한 파일 목록과 SHA-256 앞자리를 프롬프트(= 호출 기록)에 남긴다 — 폴더는 실행 뒤 지워지므로 에이전트가 무엇을 받았는지 나중에 대조할 수 있게.
 /// </summary>
@@ -25,22 +25,25 @@ public static class ReviewWorkFolder
         Path.Combine(Path.GetDirectoryName(Path.GetFullPath(callLogPath))!, "review_in");
 
     /// <summary>
-    /// 저장소 사본 상한 (codex-cli). 넘으면 사본을 만들지 않고 context 파일만 둔다 — 큰 Unity 저장소에서 복사가 리뷰보다 오래 걸리지 않게.
+    /// 저장소 사본 상한 (Codex · ClaudeRepo). 넘으면 사본을 만들지 않고 context 파일만 둔다 — 큰 Unity 저장소에서 복사가 리뷰보다 오래 걸리지 않게.
     /// </summary>
     public const int MaxTrackedFiles = 20_000;
     public const long MaxTrackedBytes = 64_000_000;
 
-    /// <summary>작업 폴더 모양: claude-cli는 context 파일만 · Read 안내, codex-cli는 저장소 추적 파일 사본 + diff 본문 첨부 · 셸 명령 안내.</summary>
-    public enum Style { ClaudeRead, Codex }
+    /// <summary>
+    /// 작업 폴더 모양: ClaudeRead는 context 파일만 · Read 안내, ClaudeRepo는 저장소 추적 파일 사본 + Glob · Grep 안내 (diff는 파일로),
+    /// Codex는 저장소 추적 파일 사본 + diff 본문 첨부 · 셸 명령 안내.
+    /// </summary>
+    public enum Style { ClaudeRead, ClaudeRepo, Codex }
 
     /// <summary>
     /// 폴더를 만들고 파일을 복사한다. Focus = 프롬프트의 첨부 절 대신 넣을 "파일 목록 + 주목할 범위" (Codex는 + diff 본문).
     /// 실패하면(예상 밖 예외 포함) 만든 폴더를 지우고 오류 문구를 돌려준다. 취소는 폴더를 지운 뒤 그대로 던진다.
-    /// <paramref name="onNoCopy"/>: Codex 저장소 사본을 만들지 못한 이유 — 프롬프트에만 남기면 지휘자 눈에 띄지 않는다.
+    /// <paramref name="onNote"/>: 결과 끝에 보일 안내 (저장소 사본을 만들지 못한 이유 · diff에 있는데 사본에서 뺀 파일) — 프롬프트에만 남기면 지휘자 눈에 띄지 않는다.
     /// </summary>
     public static (string? Folder, string? Focus, string? Error) Create(
         string baseDir, IReadOnlyList<ContextRange>? ranges, ContextOptions options, string rootDir, CancellationToken ct = default, Style style = Style.ClaudeRead,
-        Action<string>? onNoCopy = null)
+        Action<string>? onNote = null)
     {
         if (ranges is null || ranges.Count == 0)
             return (null, null, "작업 폴더를 쓰는 단계(claude-cli · codex-cli)는 context가 필요합니다 — 검토할 파일(변경이면 diff 파일 먼저)과 판단용 파일을 넘기세요.");
@@ -51,7 +54,7 @@ public static class ReviewWorkFolder
         var folder = Path.Combine(baseDir, Guid.NewGuid().ToString("N")[..12]);
         try
         {
-            return Fill(folder, ranges, options, rootDir, ct, style, onNoCopy);
+            return Fill(folder, ranges, options, rootDir, ct, style, onNote);
         }
         catch (OperationCanceledException)
         {
@@ -65,13 +68,15 @@ public static class ReviewWorkFolder
     }
 
     private static (string? Folder, string? Focus, string? Error) Fill(
-        string folder, IReadOnlyList<ContextRange> ranges, ContextOptions options, string rootDir, CancellationToken ct, Style style, Action<string>? onNoCopy)
+        string folder, IReadOnlyList<ContextRange> ranges, ContextOptions options, string rootDir, CancellationToken ct, Style style, Action<string>? onNote)
     {
         Directory.CreateDirectory(folder);
         var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootDir));
-        // Codex: 저장소 추적 파일을 먼저 깔고 context 파일을 위에 덮는다 (작업 트리 상태라 내용은 같고, 비추적 diff 파일 · 추가 루트 파일이 여기서 들어간다).
-        var tracked = style == Style.Codex ? CopyTracked(root, folder, options, ct) : default;
-        if (style == Style.Codex && tracked.Files == 0) onNoCopy?.Invoke(tracked.Note ?? "복사할 수 있는 추적 파일 없음");
+        // 저장소 사본: 추적 파일을 먼저 깔고 context 파일을 위에 덮는다 (작업 트리 상태라 내용은 같고, 비추적 diff 파일 · 추가 루트 파일이 여기서 들어간다).
+        var repoCopy = style != Style.ClaudeRead;
+        var tracked = repoCopy ? CopyTracked(root, folder, options, ct) : default;
+        if (repoCopy && tracked.Files == 0)
+            onNote?.Invoke($"(저장소 사본 없음: {tracked.Note ?? "복사할 수 있는 추적 파일 없음"} — 이 실행은 지휘자가 고른 파일만 봄)");
         var diffs = new List<(string Inside, string Dest)>();
         var instructionSkipped = new List<string>();
         var copied = new Dictionary<string, (string Inside, string Sha, int? Lines)>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
@@ -144,7 +149,7 @@ public static class ReviewWorkFolder
                     if (last != (byte)'\n') lines++;   // 마지막 줄에 줄바꿈이 없으면 그 줄도 센다 (빈 파일은 0)
                     copied[dest] = (inside, Convert.ToHexStringLower(sha.GetHashAndReset())[..12], utf16 ? null : lines);
                     copyOrder.Add(dest);
-                    if (style == Style.Codex && IsDiff(inside)) diffs.Add((inside, dest));
+                    if (repoCopy && IsDiff(inside)) diffs.Add((inside, dest));
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
@@ -165,6 +170,18 @@ public static class ReviewWorkFolder
                     : $"지금 작업 폴더에는 지휘자가 고른 파일만 아래 경로 그대로 복사돼 있다{why}. 판단에 필요하면 목록의 다른 파일 · 다른 부분도 읽는다.")
                 .AppendLine("작업 폴더 밖은 읽지 않는다. 파일을 만들거나 고치지 않는다. 명령은 읽기 · 검색만 쓴다.")
                 .AppendLine("확인할 수 없는 것은 추측하지 말고 자료 요청(needsInfo)으로 남긴다.")
+                .AppendLine().AppendLine("### 지휘자가 넘긴 파일 (경로 · SHA-256 앞 12자 · 줄 수)");
+        }
+        else if (style == Style.ClaudeRepo)
+        {
+            var skipped = tracked.Skipped > 0 ? $", 뺀 파일 {tracked.Skipped:N0}개" : "";
+            var why = tracked.Note is { } note ? $" ({note})" : "";
+            text.AppendLine().AppendLine("## 작업 폴더 (서버가 복사함)")
+                .AppendLine(tracked.Files > 0
+                    ? $"지금 작업 폴더는 저장소 사본이다 — git 추적 파일 {tracked.Files:N0}개를 지금 작업 트리 상태 그대로 같은 상대 경로로 복사했다 (비추적 · 금지 패턴 · 이진 · 큰 파일 · 지시 · 규칙 · 계획 문서는 사본에 넣지 않았다{skipped}). 아래 '중심' 목록에서 시작하고, 판단에 필요한 정의 · 호출부 · 시험은 Glob · Grep으로 찾아 Read로 읽는다."
+                    : $"지금 작업 폴더에는 지휘자가 고른 파일만 아래 경로 그대로 복사돼 있다{why}. 판단에 필요하면 목록의 다른 파일 · 다른 부분도 읽는다.")
+                .AppendLine("폴더 밖은 읽지 않는다.")
+                .AppendLine("'정의' 줄은 서버가 정규식으로 뽑은 대략의 위치(이름 줄번호)다. 큰 파일은 필요한 범위만 Read(offset · limit)로 열고, 판단 전에 그 줄을 직접 확인한다.")
                 .AppendLine().AppendLine("### 지휘자가 넘긴 파일 (경로 · SHA-256 앞 12자 · 줄 수)");
         }
         else
@@ -201,8 +218,18 @@ public static class ReviewWorkFolder
             text.AppendLine($"(Codex가 지시 · 설정으로 읽는 파일이라 작업 폴더에 두지 않음: {string.Join(", ", instructionSkipped.Distinct())})");
         text.AppendLine().AppendLine("### 이번 검토의 중심 (경로:줄)");
         foreach (var line in focus) text.AppendLine(line);
+        // 지시 · 규칙 파일을 고친 변경은 그 파일이 검토 대상인데 사본에서 빠진다 — 리뷰어와 지휘자 모두 알아차리게 한다.
+        var given = copied.Values.Select(v => v.Inside).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var left = diffs.SelectMany(d => ExcludedPathsInDiff(File.ReadAllText(d.Dest))).Where(p => !given.Contains(p))
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (tracked.Files > 0 && left.Count > 0)
+        {
+            var names = string.Join(", ", left.Take(MaxListedExcluded)) + (left.Count > MaxListedExcluded ? $" 외 {left.Count - MaxListedExcluded}개" : "");
+            text.AppendLine().AppendLine($"(diff에 있지만 사본에서 뺀 파일: {names} — 파일 전체는 볼 수 없다)");
+            onNote?.Invoke($"(사본에서 뺀 변경 파일: {names} — 리뷰어는 diff만 봄. 전체를 보게 하려면 context로 넘긴다)");
+        }
         // Codex: 변경 diff는 본문을 붙인다 — 실험에서 'diff 첨부 + 나머지는 직접 찾기'가 시간 · 발견 균형이 가장 좋았다.
-        foreach (var (inside, dest) in diffs)
+        foreach (var (inside, dest) in style == Style.Codex ? diffs : [])
         {
             var body = File.ReadAllText(dest);
             var fence = new string('`', Math.Max(3, LongestBacktickRun(body) + 1));
@@ -227,7 +254,7 @@ public static class ReviewWorkFolder
 
     /// <summary>
     /// 루트의 git 추적 파일(<c>git ls-files</c> — intent-to-add 포함, 비추적 제외)을 지금 작업 트리 상태로 복사한다.
-    /// 금지 패턴(비밀 파일 · .git) · AGENTS.md(Codex가 지시로 읽음) · 링크 · 파일 크기 상한 · 이진(앞 8KB에 NUL) · 지워진 파일은 건너뛴다.
+    /// 금지 패턴(비밀 파일 · .git) · 지시 · 규칙 · 계획 문서(<see cref="IsExcludedFromCopy"/>) · 링크 · 파일 크기 상한 · 이진(앞 8KB에 NUL) · 지워진 파일은 건너뛴다.
     /// git이 없거나 저장소가 아니거나 상한(<see cref="MaxTrackedFiles"/> · <see cref="MaxTrackedBytes"/>)을 넘으면 복사하지 않고 Note에 이유를 남긴다
     /// (그때는 context 파일만으로 돈다). 반쯤 복사한 파일은 지운다.
     /// </summary>
@@ -240,7 +267,7 @@ public static class ReviewWorkFolder
 
         // git이 돌려준 경로는 실제 이름이라 SafePath.Resolve(구성 요소마다 디렉터리 열거 · 파일마다 패턴 컴파일)보다 가벼운 검사로 본다:
         // 대체 데이터 스트림 · 장치 이름 · 루트 밖 · 금지 패턴(한 번 컴파일) · 링크(폴더마다 한 번) (/cross-review 90978dee2f C2).
-        var denied = SafePath.DenyMatcher(options.AllDenyPatterns);
+        var denied = SafePath.DenyMatcher(options.AllDenyPatterns.Concat(ContextOptions.BuiltInRepoCopyDenyPatterns));
         var rootPrefix = root + Path.DirectorySeparatorChar;
         var linkFree = new Dictionary<string, bool>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
         int files = 0, skipped = 0;
@@ -249,7 +276,7 @@ public static class ReviewWorkFolder
         foreach (var relative in paths)
         {
             ct.ThrowIfCancellationRequested();
-            if (IsCodexInstructionPath(relative) || relative.Contains(':') || SafePath.WindowsNameProblem(relative) is not null || denied(relative) is not null) { skipped++; continue; }
+            if (IsExcludedFromCopy(relative) || relative.Contains(':') || SafePath.WindowsNameProblem(relative) is not null || denied(relative) is not null) { skipped++; continue; }
             try
             {
                 var full = Path.GetFullPath(Path.Combine(root, relative));
@@ -290,6 +317,41 @@ public static class ReviewWorkFolder
         var name = parts[^1];
         return name.Equals("AGENTS.md", StringComparison.OrdinalIgnoreCase) || name.Equals("AGENTS.override.md", StringComparison.OrdinalIgnoreCase)
             || parts[..^1].Any(p => p.Equals(".codex", StringComparison.OrdinalIgnoreCase) || p.Equals(".agents", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static readonly HashSet<string> CopySkipNames = new(StringComparer.OrdinalIgnoreCase) { "CLAUDE.md", "CLAUDE.local.md", "MISTAKES.md", "PROJECT.md" };
+    private static readonly HashSet<string> CopySkipFolders = new(StringComparer.OrdinalIgnoreCase) { ".claude", ".git", "review_tmp", "subagent_in" };
+
+    /// <summary>
+    /// 저장소 사본에 넣지 않는 자리 (subagent_copy_tracked.py와 같은 목록): Codex 지시 · 설정, 지휘자 지시 · 실수 · 프로젝트 규칙, .claude, 리뷰 임시 폴더,
+    /// 계획서 · 작업 로그 (리뷰어가 "계획대로인가"로 쏠리지 않게). 지휘자가 context로 넘긴 파일은 여기에 걸려도 복사한다 (Codex 지시 파일만 예외).
+    /// </summary>
+    internal static bool IsExcludedFromCopy(string relative)
+    {
+        if (IsCodexInstructionPath(relative)) return true;
+        var parts = relative.Split('/', '\\');
+        if (CopySkipNames.Contains(parts[^1]) || parts[..^1].Any(CopySkipFolders.Contains)) return true;
+        for (var i = 0; i + 1 < parts.Length; i++)
+            if (parts[i].Equals("docs", StringComparison.OrdinalIgnoreCase)
+                && (parts[i + 1].Equals("plans", StringComparison.OrdinalIgnoreCase) || parts[i + 1].Equals("worklog", StringComparison.OrdinalIgnoreCase)
+                    || parts[i + 1].Equals("worklog.md", StringComparison.OrdinalIgnoreCase)))
+                return true;
+        return false;
+    }
+
+    /// <summary>안내 줄에 이름을 적는 사본 제외 변경 파일 수.</summary>
+    private const int MaxListedExcluded = 10;
+
+    /// <summary>diff의 파일 머리 줄(<c>--- a/…</c> · <c>+++ b/…</c>)에서 사본 제외 경로를 뽑는다.</summary>
+    internal static IEnumerable<string> ExcludedPathsInDiff(string diff)
+    {
+        foreach (var raw in diff.Split('\n'))
+        {
+            var line = raw.TrimEnd('\r');
+            if (!line.StartsWith("+++ b/", StringComparison.Ordinal) && !line.StartsWith("--- a/", StringComparison.Ordinal)) continue;
+            var path = line[6..].TrimEnd('\t');
+            if (IsExcludedFromCopy(path)) yield return path;
+        }
     }
 
     /// <summary>루트(제외)부터 dir까지 링크 · junction이 없는지. 폴더마다 한 번만 본다.</summary>

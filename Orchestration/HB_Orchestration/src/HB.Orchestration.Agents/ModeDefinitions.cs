@@ -59,6 +59,12 @@ public sealed class ModeDefinition
     public bool RequireOwnReview { get; set; }
 
     /// <summary>
+    /// true면 claude-cli 단계의 작업 폴더에 저장소 추적 파일 사본을 깐다 (코드를 찾아 읽는 리뷰). 없으면 지휘자가 고른 파일만 —
+    /// sub_direction처럼 요청 원문과 계획서만 보는 리뷰는 켜지 않는다. codex-cli는 이 값과 상관없이 늘 사본이다.
+    /// </summary>
+    public bool RepoCopy { get; set; }
+
+    /// <summary>
     /// 이 모드의 프롬프트 캐시 방식. 비우면 제공사 설정(Providers.*.PromptCache).
     /// 제공사가 ProviderDefault(캐시 정책 없음)면 무시한다. 같은 앞부분을 30분 안에 다시 보내지 않는 모드는 Off.
     /// </summary>

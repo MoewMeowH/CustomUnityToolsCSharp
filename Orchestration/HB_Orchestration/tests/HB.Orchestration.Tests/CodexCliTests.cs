@@ -394,6 +394,133 @@ public sealed class CodexCliTests : IDisposable
     }
 
     [Fact]
+    public void Claude_repo_folder_copies_tracked_files_but_not_instructions_or_plans()
+    {
+        var repo = Repo();
+        foreach (var (path, body) in new[]
+                 {
+                     ("CLAUDE.md", "지시\n"), ("sub/MISTAKES.md", "실수\n"), ("PROJECT.md", "규칙\n"), (".claude/settings.json", "{}\n"),
+                     ("docs/plans/p.md", "계획\n"), ("docs/worklog/p.md", "로그\n"), ("docs/worklog.md", "색인\n"), ("docs/guide.md", "안내\n"),
+                 })
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(repo, path))!);
+            File.WriteAllText(Path.Combine(repo, path), body);
+            Git(repo, "add", "-f", path);
+        }
+
+        var (folder, focus, error) = ReviewWorkFolder.Create(Path.Combine(_dir, "review_in3"),
+            [new ContextRange("review_tmp/c.diff", 1, 5), new ContextRange("Calc.cs", 1, 1)], new ContextOptions(), repo, default, ReviewWorkFolder.Style.ClaudeRepo);
+        try
+        {
+            Assert.Null(error);
+            Assert.True(File.Exists(Path.Combine(folder!, "src", "Caller.cs")));          // context에 없어도 추적 파일이면 사본에
+            Assert.True(File.Exists(Path.Combine(folder!, "docs", "guide.md")));
+            Assert.True(File.Exists(Path.Combine(folder!, "review_tmp", "c.diff")));      // 비추적이지만 context
+            foreach (var path in new[] { "CLAUDE.md", "sub/MISTAKES.md", "PROJECT.md", ".claude/settings.json", "docs/plans/p.md", "docs/worklog/p.md", "docs/worklog.md", "AGENTS.md" })
+                Assert.False(File.Exists(Path.Combine(folder!, path)), path);
+            Assert.Contains("저장소 사본", focus);
+            Assert.Contains("Glob · Grep", focus);
+            Assert.DoesNotContain("## 변경 diff", focus);                                  // diff는 파일로 읽는다 (본문 첨부는 Codex만)
+            Assert.DoesNotContain("목록이 전부", focus);
+        }
+        finally
+        {
+            ReviewWorkFolder.TryDelete(folder);
+        }
+    }
+
+    [Fact]
+    public void Claude_read_folder_stays_context_files_only()
+    {
+        var repo = Repo();
+
+        var (folder, focus, error) = ReviewWorkFolder.Create(Path.Combine(_dir, "review_in4"), [new ContextRange("Calc.cs", 1, 1)], new ContextOptions(), repo);
+        try
+        {
+            Assert.Null(error);
+            Assert.True(File.Exists(Path.Combine(folder!, "Calc.cs")));
+            Assert.False(File.Exists(Path.Combine(folder!, "src", "Caller.cs")));
+            Assert.Contains("목록이 전부", focus);
+        }
+        finally
+        {
+            ReviewWorkFolder.TryDelete(folder);
+        }
+    }
+
+    [Fact]
+    public void Repo_copy_leaves_out_secret_shaped_names_but_not_code_or_named_context()
+    {
+        var repo = Repo();
+        foreach (var path in new[] { "config/appsettings.Production.json", "google-services.json", "api_secret.yaml", "auth_token.json", ".mcp.local.json",
+                     "src/CancellationToken.cs", "src/SecretManager.cs", "appsettings.json" })
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(repo, path))!);
+            File.WriteAllText(Path.Combine(repo, path), "x\n");
+            Git(repo, "add", "-f", path);
+        }
+
+        var (folder, _, error) = ReviewWorkFolder.Create(Path.Combine(_dir, "review_in5"), [new ContextRange("api_secret.yaml", 1, 1)], new ContextOptions(), repo, default, ReviewWorkFolder.Style.ClaudeRepo);
+        try
+        {
+            Assert.Null(error);
+            foreach (var path in new[] { "config/appsettings.Production.json", "google-services.json", "auth_token.json", ".mcp.local.json" })
+                Assert.False(File.Exists(Path.Combine(folder!, path)), path);
+            foreach (var path in new[] { "src/CancellationToken.cs", "src/SecretManager.cs", "appsettings.json", "api_secret.yaml" })   // 마지막은 지휘자가 context로 넘긴 파일
+                Assert.True(File.Exists(Path.Combine(folder!, path)), path);
+        }
+        finally
+        {
+            ReviewWorkFolder.TryDelete(folder);
+        }
+    }
+
+    [Fact]
+    public void Changed_files_left_out_of_the_copy_are_named_for_the_reviewer_and_conductor()
+    {
+        var repo = Repo();
+        File.WriteAllText(Path.Combine(repo, "CLAUDE.md"), "지시\n");
+        Git(repo, "add", "-f", "CLAUDE.md");
+        File.WriteAllText(Path.Combine(repo, "review_tmp", "d.diff"),
+            "diff --git a/CLAUDE.md b/CLAUDE.md\n--- a/CLAUDE.md\n+++ b/CLAUDE.md\n@@ -1 +1 @@\n-x\n+y\ndiff --git a/Calc.cs b/Calc.cs\n--- a/Calc.cs\n+++ b/Calc.cs\n@@ -1 +1 @@\n-x\n+y\n");
+        var notes = new List<string>();
+
+        var (folder, focus, error) = ReviewWorkFolder.Create(Path.Combine(_dir, "review_in6"), [new ContextRange("review_tmp/d.diff", 1, 12)], new ContextOptions(), repo, default,
+            ReviewWorkFolder.Style.ClaudeRepo, notes.Add);
+        ReviewWorkFolder.TryDelete(folder);
+
+        Assert.Null(error);
+        Assert.Contains("사본에서 뺀 파일: CLAUDE.md", focus);
+        Assert.DoesNotContain("Calc.cs —", focus);
+        Assert.Contains("사본에서 뺀 변경 파일: CLAUDE.md", Assert.Single(notes));
+
+        // 지휘자가 context로 넘기면 빠진 것이 아니다
+        notes.Clear();
+        var (again, focus2, error2) = ReviewWorkFolder.Create(Path.Combine(_dir, "review_in7"),
+            [new ContextRange("review_tmp/d.diff", 1, 12), new ContextRange("CLAUDE.md", 1, 1)], new ContextOptions(), repo, default, ReviewWorkFolder.Style.ClaudeRepo, notes.Add);
+        var copied = File.Exists(Path.Combine(again!, "CLAUDE.md"));
+        ReviewWorkFolder.TryDelete(again);
+
+        Assert.Null(error2);
+        Assert.True(copied);
+        Assert.Empty(notes);
+        Assert.DoesNotContain("사본에서 뺀 파일", focus2);
+    }
+
+    [Theory]
+    [InlineData("CLAUDE.md", true)]
+    [InlineData("a/claude.local.md", true)]
+    [InlineData("a/.Claude/x.json", true)]
+    [InlineData("Orchestration/x/docs/plans/p.md", true)]
+    [InlineData("docs/WORKLOG.md", true)]
+    [InlineData("review_tmp/a.diff", true)]
+    [InlineData("docs/guide.md", false)]
+    [InlineData("plans/p.md", false)]
+    [InlineData("src/Project.cs", false)]
+    public void Copy_exclusions_match_the_tracked_copy_script(string path, bool excluded) =>
+        Assert.Equal(excluded, ReviewWorkFolder.IsExcludedFromCopy(path));
+
+    [Fact]
     public void Git_start_info_takes_stdin_instead_of_inheriting_it()   // 서버 stdin에 읽기가 걸려 있어 물려받으면 ls-files가 끝나지 않았다
     {
         var psi = ReviewWorkFolder.GitStartInfo("git", _dir);
@@ -441,6 +568,7 @@ public sealed class CodexCliTests : IDisposable
             "cx":    { "Steps": [ { "Role": "R", "Agent": "a1", "FallbackAgent": "a2" } ] },
             "cxrev": { "Steps": [ { "Role": "Reviewer", "Agent": "a1" } ] },
             "nofb":  { "Steps": [ { "Role": "R", "Agent": "a1" } ] },
+            "repo":  { "RepoCopy": true, "Steps": [ { "Role": "R", "Agent": "a1" } ] },
             "cxsm":  { "MaxInputChars": 300, "Steps": [ { "Role": "R", "Agent": "a1", "FallbackAgent": "a2" } ] }
           }
         }
@@ -493,6 +621,23 @@ public sealed class CodexCliTests : IDisposable
 
         Assert.Contains("(저장소 사본 없음:", withoutCopy);
         Assert.DoesNotContain("저장소 사본 없음", withCopy);
+    }
+
+    [Fact]
+    public async Task Claude_mode_uses_the_repository_copy_only_when_the_mode_asks()
+    {
+        using var h = new ModeRunnerHarness(Modes, providerType: ClaudeCliProvider.TypeName);
+        var repo = Repo();
+        h.Client.Script = [ScriptedChatClient.Reply("결과"), ScriptedChatClient.Reply("결과")];
+
+        await h.Runner.RunAsync("repo", "의도", null, null, [new ContextRange("Calc.cs", 1, 1)], null, ModeRunnerHarness.DefaultReason, null, CancellationToken.None, rootDir: repo);
+        var withCopy = h.Client.Received[^1].Messages.Last().Text;
+        await h.Runner.RunAsync("nofb", "의도", null, null, [new ContextRange("Calc.cs", 1, 1)], null, ModeRunnerHarness.DefaultReason, null, CancellationToken.None, rootDir: repo);
+        var withoutCopy = h.Client.Received[^1].Messages.Last().Text;
+
+        Assert.Contains("저장소 사본이다", withCopy);
+        Assert.DoesNotContain("저장소 사본이다", withoutCopy);
+        Assert.Contains("목록이 전부", withoutCopy);
     }
 
     [Theory]

@@ -97,9 +97,9 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             return $"[모드 '{modeName}'] 이미지를 받지 않는 에이전트(Vision=false): {string.Join(", ", blind)}. images 없이 호출하거나 agents로 바꾸세요.";
 
         // 작업 폴더 단계(claude-cli · codex-cli): context 파일을 통째로 작업 폴더에 복사하고, 프롬프트의 첨부 본문 대신 "주목할 범위"만 넣는다
-        // (codex-cli는 저장소 추적 파일 사본 + diff 본문). 한 실행의 단계가 같은 프롬프트 입력을 나눠 쓰므로 다른 제공사와 섞지 않는다.
+        // (codex-cli는 저장소 추적 파일 사본 + diff 본문, RepoCopy 모드의 claude-cli는 저장소 추적 파일 사본). 한 실행의 단계가 같은 프롬프트 입력을 나눠 쓰므로 다른 제공사와 섞지 않는다.
         string? workFolder = null;
-        string? noCopy = null;
+        var folderNotes = new List<string>();
         if (cliSteps > 0)
         {
             var cliType = plan[0].Agent.ProviderOptions?.Type ?? "";
@@ -118,9 +118,10 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
                        $"{ClaudeCliQuotaHold.TotalHours:0}시간 동안은 호출하지 않는다 — " +
                        (string.Equals(cliType, ClaudeCliProvider.TypeName, StringComparison.OrdinalIgnoreCase) ? "서브에이전트로 대신하라" : "다른 에이전트로 대신하라") + " (그 뒤 한 번 다시 시도).";
             }
-            var style = string.Equals(cliType, CodexCliProvider.TypeName, StringComparison.OrdinalIgnoreCase) ? ReviewWorkFolder.Style.Codex : ReviewWorkFolder.Style.ClaudeRead;
+            var style = string.Equals(cliType, CodexCliProvider.TypeName, StringComparison.OrdinalIgnoreCase) ? ReviewWorkFolder.Style.Codex
+                : mode.RepoCopy ? ReviewWorkFolder.Style.ClaudeRepo : ReviewWorkFolder.Style.ClaudeRead;
             // 저장소 사본(git · 복사)은 동기 작업이라 스레드 풀 밖으로 (/cross-review 90978dee2f C2).
-            var (folder, focus, folderError) = await Task.Run(() => ReviewWorkFolder.Create(ReviewWorkFolder.BaseFor(runner.LogPath), context, Options.Context, root, ct, style, why => noCopy = why), ct);
+            var (folder, focus, folderError) = await Task.Run(() => ReviewWorkFolder.Create(ReviewWorkFolder.BaseFor(runner.LogPath), context, Options.Context, root, ct, style, folderNotes.Add), ct);
             if (folderError is not null) return $"[첨부 코드 오류] {folderError}";
             // Codex는 diff 본문이 프롬프트에 들어간다 — 그 길이로 입력 상한을 다시 잰다.
             if (style == ReviewWorkFolder.Style.Codex && maxChars > 0 && input.Length + focus!.Length > maxChars)
@@ -185,10 +186,10 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             note = note is null ? reasoningNote : $"{note}\n{reasoningNote}";
         if (fallbackNote is not null)
             note = note is null ? fallbackNote : $"{fallbackNote}\n{note}";
-        if (noCopy is not null)
+        if (folderNotes.Count > 0)
         {
-            var noCopyNote = $"(저장소 사본 없음: {noCopy} — 이 실행은 지휘자가 고른 파일만 봄)";
-            note = note is null ? noCopyNote : $"{noCopyNote}\n{note}";
+            var folderNote = string.Join("\n", folderNotes);
+            note = note is null ? folderNote : $"{folderNote}\n{note}";
         }
         if (cliSteps > 0 && results.Any(r => r.Structured?.Requests is { Count: > 0 }))
         {

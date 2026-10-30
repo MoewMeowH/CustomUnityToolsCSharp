@@ -268,9 +268,11 @@ OpenAI Chat Completions 전용입니다. 다른 제공사에는 넣지 않습니
 
 검토형 서브에이전트(self-reviewer 등)를 Claude Code 구독 대신 **Anthropic API 키**로 돌립니다.
 
-- 서버가 `claude --bare --restricted -p`를 읽기 전용 에이전트로 띄웁니다.
-- 에이전트가 작업 폴더의 파일을 통째로 직접 읽습니다. 지휘자가 고른 범위만 받는 외부 에이전트와 다릅니다.
-- **Windows의 Claude Code 2.1.311은 `--tools`에 Grep · Glob을 줘도 Read만 줍니다.** 검색은 못 하고, 프롬프트의 파일 목록에서 골라 읽습니다.
+- 서버가 `claude --safe-mode --restricted --strict-mcp-config -p`를 읽기 전용 에이전트로 띄웁니다.
+- `sub_self` · `sub_perf` · `sub_security`는 작업 폴더가 저장소 추적 파일 사본입니다 (모드의 `RepoCopy`). 에이전트가 Glob · Grep으로 찾아 Read로 읽습니다. `sub_direction`은 지휘자가 넘긴 파일만 받습니다.
+- 사본에서 빼는 것: 비추적 · 이진 · 큰 파일, 지시 · 규칙 · 계획 문서, `DenyPatterns`, 비밀 모양 이름(`.mcp*.json` · `appsettings.*.json` · `google-services.json` · 이름에 secret · token이 든 설정 파일). 코드 · 에셋 안에 박힌 비밀은 이름으로 거르지 못합니다. 더 빼려면 `Context.DenyPatterns`에 넣습니다.
+- diff에 든 파일이 사본에서 빠지면 결과 끝에 `(사본에서 뺀 변경 파일: …)`이 붙습니다. 전체를 보게 하려면 그 파일을 `context`로 넘깁니다.
+- **`--bare`는 쓰지 않습니다.** `--tools`에 Glob · Grep을 줘도 Read만 나옵니다 (Claude Code 2.1.312).
 
 모드 · 에이전트:
 
@@ -285,10 +287,10 @@ OpenAI Chat Completions 전용입니다. 다른 제공사에는 넣지 않습니
 ### 실행
 
 ```
-claude --bare --restricted -p --no-session-persistence --output-format json
+claude --safe-mode --restricted --strict-mcp-config -p --no-session-persistence --output-format json
   --model <Model> --effort <ReasoningEffort> --max-turns <MaxTurns> [--max-budget-usd <MaxBudgetUsd>]
   --permission-mode dontAsk --tools Read,Glob,Grep
-  --settings <폴더 밖 읽기 막음>
+  --settings <폴더 밖 읽기 막음 · 훅 끔>
   --append-system-prompt-file <역할 + 출력 형식 + 공통 규칙 + 지침>
 ```
 
@@ -297,8 +299,10 @@ claude --bare --restricted -p --no-session-persistence --output-format json
 플래그를 고른 까닭:
 
 - `blockReadsOutsideWorkingDirectories`는 상대 · 절대 경로 모두 폴더 밖 읽기를 거절합니다.
-- `--bare`만으로는 작업 폴더의 `.claude/settings.json`이 **적용됩니다**. 그래서 `--restricted`를 함께 씁니다 — 사용자 · 프로젝트 · 로컬 설정 파일을 무시하고, `--settings`만 적용하고, 파일 도구를 작업 폴더로 제한합니다.
-- `--bare -p`는 세션 기록(소스 사본 포함)을 `~/.claude/projects`에 남깁니다. `--no-session-persistence`로 끕니다.
+- `--restricted`는 사용자 · 프로젝트 · 로컬 설정 파일을 무시하고, `--settings`만 적용하고, 파일 도구를 작업 폴더로 제한합니다.
+- `--safe-mode`는 CLAUDE.md · 스킬 · 플러그인 · 훅 · MCP · 커스텀 명령을 끕니다. `--strict-mcp-config`는 MCP 서버를 하나도 붙이지 않게 합니다.
+- 훅은 `--settings`의 `disableAllHooks`로도 끕니다.
+- `claude -p`는 세션 기록(소스 사본 포함)을 `~/.claude/projects`에 남깁니다. `--no-session-persistence`로 끕니다.
 
 실행 파일 찾기:
 
@@ -314,7 +318,7 @@ claude --bare --restricted -p --no-session-persistence --output-format json
   - 키를 담은 원래 변수
   - 이름이 `_API_KEY` · `_ADMIN_KEY` · `_TOKEN` · `_SECRET`으로 끝나는 변수 (다른 제공사 키)
 - 설정 · 실행 기록(record의 ToString)에 키 값은 찍히지 않습니다.
-- `--bare`는 구독 로그인(OAuth)을 읽지 않습니다. 키가 없으면 구독으로 넘어가지 않고 실패합니다.
+- 키가 비어 있으면 서버가 시작하지 않습니다. 틀린 키는 구독으로 넘어가지 않고 실패합니다 (Claude Code 2.1.312).
 - `ApiKeyEnv`에 `ANTHROPIC_API_KEY`를 쓰면 에이전트를 건너뜁니다. 사용자 환경 변수로 두면 Claude Code 자체가 API 과금으로 바뀌기 때문입니다.
 
 키는 각 프로젝트 `.mcp.json`의 `env`로 넘깁니다.
