@@ -181,7 +181,6 @@ public sealed class ChatScriptTests(ChatApp app, ChatBrowser browser) : IClassFi
         await page.WaitForAsync("!!document.querySelector('#live .approval')", "단톡방 승인 카드", ChatPage.TurnWait);
         Assert.Equal("A의 승인 요청 · Bash", await page.EvalAsync<string>("document.querySelector('#live .approval .head span').textContent"));
         Assert.Equal("git status", await page.EvalAsync<string>("document.querySelector('#live .approval .cmd').textContent"));
-        Assert.True(await page.EvalAsync<bool>("[...document.querySelectorAll('#live .approval button')].some(b => b.textContent === '이 구성원에게 항상 허용')"));
 
         // 다시 열면 기다리는 카드를 서버에서 받는다 (GroupCards)
         await using var again = await browser.OpenAsync(app.RoomUrl(group!));
@@ -334,9 +333,9 @@ public sealed class ChatScriptTests(ChatApp app, ChatBrowser browser) : IClassFi
         page.AssertNoErrors();
     }
 
-    /// <summary>명령 방의 작업 폴더 밖 쓰기 카드: 경로 · 안내 줄 · "쓸 내용" 미리보기, "항상 허용" 단추 없음, 허용 단추가 있다(잘려도 허용). 거절하면 카드가 닫힌다.</summary>
+    /// <summary>명령 방의 작업 폴더 밖 쓰기 카드: 경로 · 안내 줄 · "쓸 내용" 미리보기, 허용 단추가 있다(잘려도 허용). 거절하면 카드가 닫힌다.</summary>
     [Fact]
-    public async Task OutsideWriteCard_ShowsPathPreviewNoAlways()
+    public async Task OutsideWriteCard_ShowsPathPreview()
     {
         if (!browser.Available) return;
         var room = app.Store.Create("ws", PermissionLevel.Command, "opus", "밖 쓰기");
@@ -350,7 +349,6 @@ public sealed class ChatScriptTests(ChatApp app, ChatBrowser browser) : IClassFi
         Assert.StartsWith("쓸 내용: content=", await page.EvalAsync<string>("document.querySelectorAll('#live .approval .cmd')[1].textContent"));
         var buttons = await page.EvalAsync<string>("[...document.querySelectorAll('#live .approval button')].map(b => b.textContent).join('|')");
         Assert.Contains("허용", buttons);
-        Assert.DoesNotContain("항상 허용", buttons);
         await page.EvalAsync("[...document.querySelectorAll('#live .approval button')].find(b => b.textContent === '거절').click()");
         await page.WaitForAsync("!document.querySelector('#live .approval')", "카드 닫힘", ChatPage.TurnWait);
         page.AssertNoErrors();

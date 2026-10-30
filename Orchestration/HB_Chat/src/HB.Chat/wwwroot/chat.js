@@ -652,7 +652,7 @@
     // ---- 방 하나 ----
     // 승인 · 질문 · 계획 카드 (방 화면 mountRoom · 단톡방 화면 mountGroup이 같이 쓴다 — 단톡방 ⑤). 서버가 답을 기다리는 동안 live 칸에 보인다 (2-2 b).
     // 남은 시간은 1초마다 다시 쓴다. opts: live · atBottom · toBottom · post(카드 알림, 처리기, FormData) — 답은 그 카드가 난 방으로,
-    // who(알림) — 머리 앞 이름(단톡방은 구성원 이름, 방 화면은 ""), always — "항상 허용" 단추 글, onPlanDone(결정), answered(질문, 답) — 답한 질문 말풍선(없으면 한 줄).
+    // who(알림) — 머리 앞 이름(단톡방은 구성원 이름, 방 화면은 ""), onPlanDone(결정), answered(질문, 답) — 답한 질문 말풍선(없으면 한 줄).
     function cardKit(opts) {
         const { live, atBottom, toBottom } = opts;
         const cards = new Map();
@@ -671,7 +671,7 @@
             // 터미널 시작 · 브라우저 사이트 카드의 설명은 앱이 쓴 안내다 — 지휘자 설명으로 보이지 않게
             if (a.description) card.append(el("div", "desc", (a.tool === "터미널" || a.tool === "브라우저" || a.tool === "웹 가져오기" ? "" : "Claude 설명: ") + a.description));
             // 작업 폴더 밖 파일 쓰기 (명령 방): 경로가 위, 쓸 내용은 앞부분만 — 잘려도 허용 (결정 "앞 2,000자 · 잘려도 허용")
-            if (a.outsideWrite) card.append(el("div", "warn-line", "작업 폴더 밖 파일 쓰기입니다 — 허용하면 위 경로의 파일이 만들어지거나 바뀝니다. 항상 허용은 없습니다."));
+            if (a.outsideWrite) card.append(el("div", "warn-line", "작업 폴더 밖 파일 쓰기입니다 — 허용하면 위 경로의 파일이 만들어지거나 바뀝니다."));
             // 명령 밖의 입력도 허용하면 같이 실행된다 — 본 것 = 허용되는 것 (/self-review 5e747ff851 C1)
             if (a.extra) card.append(el("div", "cmd", (a.outsideWrite ? "쓸 내용: " : "추가 입력: ") + a.extra));
             // 백그라운드 실행 명령 — 답이 끝난 뒤에도 돈다 (결정 "넣음")
@@ -680,11 +680,6 @@
             const denyOnly = a.truncated || a.risky;
             if (a.risky) card.append(el("div", "warn-line", "위험한 입력(dangerously · bypass)이 있어 거절만 할 수 있습니다."));
             else if (a.truncated) card.append(el("div", "warn-line", "명령이나 입력이 너무 길어 끝까지 보이지 않습니다 — 거절만 할 수 있습니다."));
-            else if (a.rule) {
-                const r = el("div", "rule");
-                r.append(document.createTextNode("항상 허용하면 저장될 규칙: "), el("code", "mono", a.rule));
-                card.append(r, el("div", "warn-line", "항상 허용하면 이 명령은 다음부터 묻지 않습니다 — 이 명령이 돌리는 파일(스크립트 · package.json · 프로젝트 파일 등)이 바뀌어도 그대로 실행됩니다."));
-            }
             const acts = el("div", "acts");
             const button = (label, choice, extra) => {
                 const b = el("button", "btn" + (extra ? " " + extra : ""), label);
@@ -695,7 +690,6 @@
             };
             if (!denyOnly) {
                 button("허용", "allow", "primary");
-                if (a.rule) button(opts.always || "이 방에서 항상 허용", "always");
                 if (a.turnAllow) button("이 턴 동안 묻지 않기", "turn");
             }
             const reasonBox = el("input", "reason");
@@ -1894,31 +1888,6 @@
             live.prepend(trustLine);
         }
 
-        // 이 방의 "항상 허용" 목록: 처음엔 서버가 그리고, 바뀌면 rules 알림으로 다시 그린다 (/self-review 36e4e20e04 C9).
-        function removeButton(rule) {
-            const b = el("button", "btn rule-remove");
-            b.append(icon("x"), "지우기");
-            b.type = "button";
-            b.addEventListener("click", async () => {
-                if (!confirm("이 규칙을 지울까요? 다음 실행부터 다시 묻습니다.\n" + rule)) return;
-                const data = new FormData(); data.append("rule", rule);
-                await post("RemoveRule", data); // 목록은 rules 알림으로 바뀐다
-            });
-            return b;
-        }
-        function renderRules(rules) {
-            const list = $("#room-rules");
-            if (!list) return;
-            list.replaceChildren(...rules.map(rule => {
-                const li = el("li");
-                li.append(el("code", "mono", rule), document.createTextNode(" "), removeButton(rule));
-                return li;
-            }));
-            const count = $("#rule-count");
-            if (count) count.textContent = String(rules.length);
-        }
-        root.querySelectorAll(".rule-remove").forEach(b => b.replaceWith(removeButton(b.dataset.rule)));
-
         // 알림은 온 차례대로 하나씩 처리한다. EventSource는 onmessage가 끝나기를 기다리지 않아,
         // end의 말풍선 다시 받기(fetch) 중에 다음 턴의 start가 먼저 그려졌다가 지워지는 일이 있었다 (/self-review 0a3b1d5155 C1).
         let chain = Promise.resolve();
@@ -1993,10 +1962,6 @@
                     break;
                 case "question-done":
                     doneQuestion(ev.question, ev.text, ev.ok === true, ev.answers);
-                    break;
-                case "rules":
-                    renderRules(ev.rules || []);
-                    loadSide(); // 곁칸의 항상 허용 수 (c216951e79 C3)
                     break;
                 case "start":
                     $("#last-error")?.remove();
@@ -2582,7 +2547,6 @@
         const kit = cardKit({
             live, atBottom, toBottom,
             who: (a) => (memberChip(a.detail)?.dataset.name || "구성원") + "의 ",
-            always: "이 구성원에게 항상 허용",
             post: async (a, handler, data) => {
                 const child = memberChip(a.detail)?.dataset.room;
                 if (!child) { alert("구성원을 찾지 못했습니다 — 화면을 새로 고쳐 주세요."); return false; }

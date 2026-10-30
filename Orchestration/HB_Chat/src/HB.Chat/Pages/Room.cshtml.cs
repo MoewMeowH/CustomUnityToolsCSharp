@@ -614,7 +614,7 @@ public sealed partial class RoomModel(
     }
 
     /// <summary>
-    /// 방 복제(갈래): 지금까지 대화를 이어받는 새 방. 같은 작업 폴더 · 권한 · 모델, "항상 허용" 규칙은 옮기지 않는다.
+    /// 방 복제(갈래): 지금까지 대화를 이어받는 새 방. 같은 작업 폴더 · 권한 · 모델.
     /// 첫 말을 보낼 때 CLI가 대화를 복사한다 (--fork-session). 세션 기록이 없거나 실행 중이면 거절.
     /// </summary>
     public IActionResult OnPostFork(string id)
@@ -628,7 +628,7 @@ public sealed partial class RoomModel(
         {
             var fork = store.Create(Room.Workspace, Room.Level, Room.Model, title, forkOf: Room.SessionId,
                 forkSourceSize: transcripts.Size(Room.SessionId));
-            // 이 방에 고른 스티커 팩 · 추론 강도도 따라간다 (4차 D2 — ef2c83416c C6). "항상 허용" 규칙은 그대로 옮기지 않는다
+            // 이 방에 고른 스티커 팩 · 추론 강도도 따라간다 (4차 D2 — ef2c83416c C6)
             // 연결(더한 서버 · 끈 기본 연결 · Unity)도 따라간다 — 갈래가 원래 방과 다른 도구로 시작하지 않게 (/self-review 0bcf01451b C5)
             // 원래 방(과 그 조상)의 첨부 폴더도 읽게 — 이어받은 대화의 [첨부] 줄이 그 폴더를 가리킨다
             store.Update(fork.Id, r => r with
@@ -898,7 +898,7 @@ public sealed partial class RoomModel(
         return new JsonResult(new { ok = true });
     }
 
-    /// <summary>승인 카드 단추: choice = allow · always · turn · deny, reason은 거절 이유 (선택), picks는 모델 선택 카드에서 고른 값 (JSON, 선택).</summary>
+    /// <summary>승인 카드 단추: choice = allow · turn · deny, reason은 거절 이유 (선택), picks는 모델 선택 카드에서 고른 값 (JSON, 선택).</summary>
     public IActionResult OnPostApprove(string id, string? approval, string? choice, string? reason, string? picks)
     {
         if (!RoomStore.IsRoomId(id) || string.IsNullOrEmpty(approval)) return NotFound();
@@ -906,7 +906,6 @@ public sealed partial class RoomModel(
         ApprovalChoice? parsed = choice switch
         {
             "allow" => ApprovalChoice.Allow,
-            "always" => ApprovalChoice.AlwaysAllow,
             "turn" => ApprovalChoice.AllowTurn,
             "deny" => ApprovalChoice.Deny,
             _ => null,
@@ -951,13 +950,6 @@ public sealed partial class RoomModel(
             if (parsed is null) return BadRequest("답을 읽지 못했습니다.");
         }
         return hub.Answer(id, question, parsed) is { } error ? CardError(error) : new JsonResult(new { ok = true });
-    }
-
-    /// <summary>"이 방에서 항상 허용" 규칙 지우기.</summary>
-    public IActionResult OnPostRemoveRule(string id, string? rule)
-    {
-        if (!RoomStore.IsRoomId(id) || string.IsNullOrEmpty(rule)) return NotFound();
-        return hub.RemoveRule(id, rule) is { } error ? BadRequest(error) : new JsonResult(new { ok = true });
     }
 
     /// <summary>끼어들기: 지금 턴을 멈추고 이 말을 바로 보낸다. 큐의 다른 말은 남는다.</summary>

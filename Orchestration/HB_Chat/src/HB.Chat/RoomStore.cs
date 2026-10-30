@@ -29,8 +29,6 @@ public sealed record Room
     /// </summary>
     public DateTimeOffset? RunStartedAt { get; init; }
 
-    /// <summary>명령 단계의 "이 방에서 항상 허용" 규칙 (예: <c>Bash(git status)</c>). 다음 실행부터 --allowedTools로 들어간다.</summary>
-    public IReadOnlyList<string> AllowRules { get; init; } = [];
 
     /// <summary>
     /// 사용자가 본 마지막 말의 세션 기록 줄 번호 (<see cref="HB.Orchestration.Shared.ChatEntry.Line"/>). 안 읽은 수 = 이 줄 뒤의 지휘자 말 수.
@@ -198,7 +196,7 @@ public sealed class RoomStore
     /// </summary>
     private static Room Clean(Room r) => r with
     {
-        AllowRules = r.AllowRules ?? [], McpExtra = r.McpExtra ?? [], McpOff = r.McpOff ?? [], McpStatus = r.McpStatus ?? [],
+        McpExtra = r.McpExtra ?? [], McpOff = r.McpOff ?? [], McpStatus = r.McpStatus ?? [],
         McpTools = r.McpTools ?? [], AttachFrom = r.AttachFrom ?? [], Members = r.Members ?? [],
     };
 

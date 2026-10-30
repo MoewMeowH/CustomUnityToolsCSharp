@@ -58,19 +58,6 @@
         </label>
         <button class="btn" type="submit">@Icons.Svg("check") 바꾸기</button>
         <p class="muted side-settings-note">다음 말부터 적용됩니다 — 명령 아래로 내리면 실행 중인 턴의 명령도 바로 거절됩니다. @RoomRules.Describe(room.Level)</p>
-        @* 명령이 아닌 방에 남은 "항상 허용" 규칙: 다시 명령으로 올리면 묻지 않고 쓰인다 — 내용을 보인다 (8ccecae84d C3) *@
-        @if (room.Level != PermissionLevel.Command && room.AllowRules.Count > 0)
-        {
-            <div class="side-settings-note warn-rules">
-                <span>다시 명령으로 올리면 승인 없이 쓰일 '항상 허용' 규칙 @(room.AllowRules.Count)개:</span>
-                <ul>
-                    @foreach (var rule in room.AllowRules)
-                    {
-                        <li class="mono">@rule</li>
-                    }
-                </ul>
-            </div>
-        }
     </form>
     <dl class="side-info">
         <dt>작업 폴더</dt><dd>@room.Workspace <span class="mono muted">@(Model.WorkspacePath ?? "(허용 목록에 없음)")</span></dd>
@@ -112,10 +99,6 @@
             @* 명령 방은 서브에이전트를 쓰지 않는다 (/self-review security 42f9d47dc4 C1) *@
             <dt>서브에이전트</dt>
             <dd class="muted">명령 방에서는 쓰지 않습니다 — 에이전트 정의가 명령 승인을 건너뛸 수 있어서 (읽기 · 편집 방에서 쓰세요)</dd>
-        }
-        @if (room.Level == PermissionLevel.Command)
-        {
-            <dt>항상 허용</dt><dd>이 방 @(room.AllowRules.Count)개 <span class="muted">(목록은 대화 위 접힌 칸)</span></dd>
         }
         @if (Model.DashboardLink is { } dash)
         {

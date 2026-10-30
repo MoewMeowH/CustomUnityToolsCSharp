@@ -185,8 +185,6 @@ select, input[type=text], textarea { background: var(--panel); border: 1px solid
 .side-settings { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: flex-end; margin-top: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
 .side-settings label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
 .side-settings-note { flex-basis: 100%; margin: 0; font-size: 11.5px; }
-.side-settings-note.warn-rules { color: var(--warn); }
-.side-settings-note.warn-rules ul { margin: 2px 0 0; padding-left: 18px; overflow-wrap: anywhere; }
 .side-rename input { flex: 1; min-width: 0; }
 /* 연결 탭 */
 .mcp-list { list-style: none; margin: 8px 0 0; padding: 0; }
@@ -458,7 +456,6 @@ input.rename { font-size: 15px; font-weight: 600; min-width: 200px; }
 .approval .head { font-size: 12.5px; color: var(--warn); display: flex; gap: 8px; }
 .approval .cmd { font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0;
                  max-height: 260px; overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
-.approval .rule { font-size: 12.5px; margin-top: 4px; }
 .approval .warn-line { font-size: 12px; color: var(--warn); }
 .approval .desc { font-size: 12.5px; color: var(--muted); }
 .approval .acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; align-items: center; }

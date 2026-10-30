@@ -82,7 +82,6 @@ public sealed class ApprovalFlowTests : IDisposable
         Assert.Equal("Bash", card.Tool);
         Assert.Equal("git status", card.Summary);
         Assert.Equal("Show status", card.Description);
-        Assert.Equal("Bash(git status)", card.Rule);
         Assert.True(card.ExpiresAt > DateTimeOffset.Now);
 
         Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null));
@@ -90,7 +89,6 @@ public sealed class ApprovalFlowTests : IDisposable
         Assert.Equal("허용", seen.Single(e => e.Kind == "approval-done").Text);
         var end = seen.Single(e => e.Kind == "end");
         Assert.True(end.Ok);
-        Assert.Empty(_store.Get(room.Id)!.AllowRules); // 이번만 허용은 규칙을 남기지 않는다
         Assert.Contains("\"decision\":\"허용\"", Log());
     }
 
@@ -109,27 +107,6 @@ public sealed class ApprovalFlowTests : IDisposable
         Assert.Contains("지금은 안 돼", end.Text); // 가짜 claude가 받은 거절 문구를 결과로 돌려준다
     }
 
-    [Fact]
-    public async Task AlwaysAllow_SavesRule_AndNextRunGetsIt()
-    {
-        var room = CommandRoom();
-        var ch = _hub.Subscribe(room.Id);
-        _hub.Send(room.Id, "approve please");
-        var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
-        Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.AlwaysAllow, null));
-        var seen = await Until(ch, e => e.Kind == "idle");
-        Assert.Equal(["Bash(git status)"], _store.Get(room.Id)!.AllowRules);
-        Assert.Equal(["Bash(git status)"], seen.Single(e => e.Kind == "rules").Rules); // 화면 목록이 바로 바뀐다
-
-        _hub.Send(room.Id, "hello");
-        await Until(ch, e => e.Kind == "idle");
-        Assert.Equal(["Bash(git status)"], _specs.Last().AllowRules);
-
-        Assert.Null(_hub.RemoveRule(room.Id, "Bash(git status)"));
-        Assert.Empty(_store.Get(room.Id)!.AllowRules);
-        Assert.Empty((await Until(ch, e => e.Kind == "rules")).Last().Rules!);
-    }
-
     [Theory]
     [InlineData(PermissionLevel.Edit, "acceptEdits")]
     [InlineData(PermissionLevel.Command, "default")]
@@ -144,9 +121,7 @@ public sealed class ApprovalFlowTests : IDisposable
         Assert.True(card.Plan);
         Assert.Equal("ExitPlanMode", card.Tool);
         Assert.Equal("# Plan\n1. edit notes", card.Summary);
-        Assert.Null(card.Rule); // 항상 허용 없음
         Assert.Equal("allowedPrompts", card.Extra); // 보이지 않는 입력은 이름을 보이고 허용 답에서 뺀다 (가짜 claude가 확인)
-        Assert.NotNull(_hub.Decide(room.Id, card.Id, ApprovalChoice.AlwaysAllow, null));
 
         Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null));
         var end = (await Until(ch, e => e.Kind == "idle")).Single(e => e.Kind == "end");
@@ -353,9 +328,9 @@ public sealed class ApprovalFlowTests : IDisposable
     }
 
     [Fact]
-    public async Task TerminalStart_CardWithoutAlwaysAllow_LeavesOneTicket()
+    public async Task TerminalStart_Card_LeavesOneTicket()
     {
-        // 터미널 곁칸 (결정 "늘 카드"): terminal_start는 카드로 묻고 항상 허용은 받지 않는다.
+        // 터미널 곁칸 (결정 "늘 카드"): terminal_start는 카드로 묻는다.
         // 허용하면 name · command만 돌려주고(가짜가 extra 키를 확인) 앱 MCP가 쓸 표를 하나 남긴다
         var room = CommandRoom();
         var ch = _hub.Subscribe(room.Id);
@@ -363,8 +338,6 @@ public sealed class ApprovalFlowTests : IDisposable
         var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
         Assert.Equal(RoomHub.TerminalTool, card.Tool);
         Assert.Equal("python -m http.server 8000", card.Summary);
-        Assert.Null(card.Rule);
-        Assert.NotNull(_hub.Decide(room.Id, card.Id, ApprovalChoice.AlwaysAllow, null));
         Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null));
         var end = (await Until(ch, e => e.Kind == "idle")).Single(e => e.Kind == "end");
         Assert.True(end.Ok, end.Text);
@@ -384,7 +357,6 @@ public sealed class ApprovalFlowTests : IDisposable
         var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
         Assert.Equal(RoomHub.BrowserTool, card.Tool);
         Assert.Equal("https://example.com/a", card.Summary);
-        Assert.Null(card.Rule);
         Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null));
         var seen = await Until(ch, e => e.Kind == "idle");
         Assert.True(seen.Single(e => e.Kind == "end").Ok);
@@ -457,17 +429,15 @@ public sealed class ApprovalFlowTests : IDisposable
     [Fact]
     public async Task LoweredLevel_PendingCardCanOnlyBeDenied()
     {
-        // /self-review security 8ccecae84d C1: 카드가 뜬 뒤 곁칸에서 명령 아래로 내리면 허용 · 항상 허용을 받지 않는다
+        // /self-review security 8ccecae84d C1: 카드가 뜬 뒤 곁칸에서 명령 아래로 내리면 허용을 받지 않는다
         var room = CommandRoom();
         var ch = _hub.Subscribe(room.Id);
         _hub.Send(room.Id, "approve please");
         var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
         _store.Update(room.Id, r => r with { Level = PermissionLevel.Read });
         Assert.Contains("거절만", _hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null));
-        Assert.Contains("거절만", _hub.Decide(room.Id, card.Id, ApprovalChoice.AlwaysAllow, null));
         Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Deny, null));
         await Until(ch, e => e.Kind == "idle");
-        Assert.Empty(_store.Get(room.Id)!.AllowRules);
     }
 
     [Fact]
@@ -532,7 +502,6 @@ public sealed class ApprovalFlowTests : IDisposable
         var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
         Assert.True(card.Risky);
         Assert.Equal("run_in_background=true, dangerouslyDisableSandbox=true", card.Extra);
-        Assert.Null(card.Rule);
         Assert.NotNull(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null));
         Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Deny, null));
         Assert.False((await task)!.Allow);
@@ -702,9 +671,9 @@ public sealed class ApprovalFlowTests : IDisposable
         var ch = _hub.Subscribe(room.Id);
         _hub.Send(room.Id, "approve3");
         var first = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
-        var other = _hub.RequestApprovalAsync(room.Id, new ApprovalRequest("Bash", "echo other", null, null), default);
-        var cut = _hub.RequestApprovalAsync(room.Id, new ApprovalRequest("Bash", "echo cut…", null, null, true), default);
-        var web = _hub.RequestApprovalAsync(room.Id, new ApprovalRequest("웹 가져오기", "https://example.com/", null, null) { Web = true }, default);
+        var other = _hub.RequestApprovalAsync(room.Id, new ApprovalRequest("Bash", "echo other", null), default);
+        var cut = _hub.RequestApprovalAsync(room.Id, new ApprovalRequest("Bash", "echo cut…", null, true), default);
+        var web = _hub.RequestApprovalAsync(room.Id, new ApprovalRequest("웹 가져오기", "https://example.com/", null) { Web = true }, default);
         await Until(ch, e => e.Kind == "approval" && e.Approval!.Summary == "https://example.com/");
 
         Assert.Null(_hub.Decide(room.Id, first.Id, ApprovalChoice.AllowTurn, null));
@@ -755,7 +724,7 @@ public sealed class ApprovalFlowTests : IDisposable
     public void MustAsk_Listed(string command)
     {
         Assert.True(ApprovalRules.MustAsk(command));
-        Assert.False(new ApprovalRequest("Bash", command, null, null).TurnAllowable);
+        Assert.False(new ApprovalRequest("Bash", command, null).TurnAllowable);
     }
 
     [Theory]
@@ -773,7 +742,7 @@ public sealed class ApprovalFlowTests : IDisposable
     public void MustAsk_Others(string command)
     {
         Assert.False(ApprovalRules.MustAsk(command));
-        Assert.True(new ApprovalRequest("PowerShell", command, null, null).TurnAllowable);
+        Assert.True(new ApprovalRequest("PowerShell", command, null).TurnAllowable);
     }
 
     /// <summary>서버 요약 중간 글이 진행 중 화면으로 간다 — 다시 열 때 보낼 글(Partial)에는 넣지 않는다, 기록으로 그려진다.</summary>
@@ -846,12 +815,12 @@ public sealed class ApprovalFlowTests : IDisposable
         Assert.Null(_hub.Decide(room.Id, first.Id, ApprovalChoice.AllowTurn, null));
         await Until(ch, e => e.Kind == "approval"); // git push에서 멈춰 턴이 이어진다
 
-        Assert.True((await _hub.RequestApprovalAsync(room.Id, new ApprovalRequest("Bash", "echo auto", null, null), default))!.Allow);
+        Assert.True((await _hub.RequestApprovalAsync(room.Id, new ApprovalRequest("Bash", "echo auto", null), default))!.Allow);
         Assert.Contains("echo auto", Log());
 
         _store.Update(room.Id, r => r with { Level = PermissionLevel.Read });
         Assert.True(_hub.TurnTrusted(room.Id));
-        var late = _hub.RequestApprovalAsync(room.Id, new ApprovalRequest("Bash", "echo late", null, null), default);
+        var late = _hub.RequestApprovalAsync(room.Id, new ApprovalRequest("Bash", "echo late", null), default);
         var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
         Assert.Equal("echo late", card.Summary);
         Assert.NotNull(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null));
@@ -864,9 +833,9 @@ public sealed class ApprovalFlowTests : IDisposable
     [Fact]
     public void TurnAllowable_CommandCardsOnly()
     {
-        Assert.False(new ApprovalRequest("Write", "x.txt", null, null).TurnAllowable);
-        Assert.False(new ApprovalRequest("Bash", "echo", null, null, true).TurnAllowable);
-        Assert.False(new ApprovalRequest("Bash", "echo", null, null) { Risky = true }.TurnAllowable);
+        Assert.False(new ApprovalRequest("Write", "x.txt", null).TurnAllowable);
+        Assert.False(new ApprovalRequest("Bash", "echo", null, true).TurnAllowable);
+        Assert.False(new ApprovalRequest("Bash", "echo", null) { Risky = true }.TurnAllowable);
     }
 
     [Fact]
@@ -947,7 +916,6 @@ public sealed class ApprovalFlowTests : IDisposable
         _hub.Send(room.Id, "webfetch https://example.com/a?q=1");
         var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
         Assert.Equal((RoomHub.WebFetchCardTool, "https://example.com/a?q=1"), (card.Tool, card.Summary));
-        Assert.Null(card.Rule);
         Assert.Contains("prompt=summarize", card.Extra);
         Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null)); // 읽기 단계에서도 허용을 받는다
         Assert.True((await Until(ch, e => e.Kind == "idle")).Single(e => e.Kind == "end").Ok); // 가짜 claude가 url · prompt만 돌아왔는지 봄
@@ -1065,7 +1033,7 @@ public sealed class ApprovalFlowTests : IDisposable
 
     /// <summary>
     /// 명령 방의 작업 폴더 밖 Write는 카드로 묻는다 (결정 "명령 단계만"): 요약 = 경로, 쓸 내용은 앞 2,000자 미리보기라도 허용을 받고(결정 "잘려도 허용"),
-    /// 항상 허용은 없다. 허용 답은 입력 그대로. 거절하면 거절 답.
+    /// 허용 답은 입력 그대로. 거절하면 거절 답.
     /// </summary>
     [Fact]
     public async Task OutsideWrite_CommandRoom_Card()
@@ -1080,9 +1048,7 @@ public sealed class ApprovalFlowTests : IDisposable
             Assert.Equal(("Write", outside), (card.Tool, card.Summary));
             Assert.True(card.OutsideWrite);
             Assert.False(card.Truncated);
-            Assert.Null(card.Rule);
             Assert.Contains("앞 2,000자만", card.Extra);
-            Assert.NotNull(_hub.Decide(room.Id, card.Id, ApprovalChoice.AlwaysAllow, null)); // 항상 허용 없음
             Assert.False(card.TurnAllow);
             Assert.NotNull(_hub.Decide(room.Id, card.Id, ApprovalChoice.AllowTurn, null)); // 이 턴 묻지 않기도 명령 카드만
             Assert.Null(_hub.Decide(room.Id, card.Id, choice, null));
@@ -1293,12 +1259,11 @@ public sealed class ApprovalFlowTests : IDisposable
         var ch = _hub.Subscribe(room.Id);
         _hub.Send(room.Id, "roomtools");
 
-        // editor_status는 카드 없이 지나가고 eval만 카드 ("항상 허용" 없음)
+        // editor_status는 카드 없이 지나가고 eval만 카드
         var before = await Until(ch, e => e.Kind == "approval");
         var card = before.Single(e => e.Kind == "approval").Approval!;
         Assert.Equal("mcp__unity__eval", card.Tool);
         Assert.Contains("Debug.Log(1);", card.Summary);
-        Assert.Null(card.Rule);
 
         // 카드를 기다리는 사이 권한을 내리면 카드 허용도 막히고(기존 장치), 그 뒤 Unity 호출은 카드 없이 거절된다 (미리 허용하지 않으므로)
         _store.Update(room.Id, r => r with { Level = PermissionLevel.Edit });
@@ -1341,8 +1306,6 @@ public sealed class ApprovalFlowTests : IDisposable
         Assert.Equal("pick one", mode.Reason);
         Assert.Equal(["gpt_main_sol", "gemini_main_flash"], mode.Rows.Select(r => r.Agent));
         Assert.All(mode.Rows, r => Assert.Equal("low", r.Effort)); // 지휘자가 넣은 '*=low'가 처음 값
-        Assert.Null(card.Rule);
-        Assert.NotNull(_hub.Decide(room.Id, card.Id, ApprovalChoice.AlwaysAllow, null)); // 항상 허용 없음
         Assert.NotNull(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null,
             new Dictionary<string, ModeRowPick> { ["gpt_main_sol"] = new("off_agent", null) })); // 꺼진 에이전트는 받지 않는다
 

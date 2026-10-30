@@ -7,12 +7,12 @@ namespace HB.Chat;
 
 /// <summary>
 /// CLI가 stdio 호스트(앱)에 보낸 명령 승인 요청 하나 (control_request can_use_tool — 3차 0번 실측, 그 전 2-1은 PermissionRequest 훅 본문 · 같은 키).
-/// Summary는 카드에 보일 명령 전문(명령 · 파일 경로 · 그 밖은 입력 JSON). Rule은 CLI가 제안한 규칙 중 이 앱이 "항상 허용"으로 받는 것.
+/// Summary는 카드에 보일 명령 전문(명령 · 파일 경로 · 그 밖은 입력 JSON).
 /// Truncated면 전문이 너무 길어 잘린 것 — 사용자가 다 보지 못한 명령이라 거절만 받는다 (/self-review 36e4e20e04 C5 · ab79e61df5 C5).
 /// Extra는 명령 · 설명 밖의 입력(예 <c>run_in_background=true</c>) — 허용하면 입력 전체가 그대로 실행되므로 카드에 같이 보인다.
 /// Risky면 그 입력 이름에 dangerously · bypass가 있다 (예 <c>dangerouslyDisableSandbox</c>) — 거절만 받는다 (/self-review 5e747ff851 C1).
 /// </summary>
-public sealed record ApprovalRequest(string Tool, string Summary, string? Description, string? Rule, bool Truncated = false)
+public sealed record ApprovalRequest(string Tool, string Summary, string? Description, bool Truncated = false)
 {
     /// <summary>카드에 보일 명령 전문의 상한 (글자). 넘으면 잘라 보이고 허용을 막는다.</summary>
     public const int MaxSummaryChars = 20_000;
@@ -38,7 +38,7 @@ public sealed record ApprovalRequest(string Tool, string Summary, string? Descri
     /// </summary>
     public bool TurnAllowable => ClaudeArgs.CommandTools.Contains(Tool) && !DenyOnly && !ApprovalRules.MustAsk(Summary);
 
-    /// <summary>서브에이전트가 낸 요청 (request의 agent_id — Claude 앱 기능 D). 카드에 "서브에이전트"로 보인다. 허용 · 규칙은 같다.</summary>
+    /// <summary>서브에이전트가 낸 요청 (request의 agent_id — Claude 앱 기능 D). 카드에 "서브에이전트"로 보인다. 허용은 같다.</summary>
     public bool FromAgent { get; init; }
 
     /// <summary>백그라운드 실행 명령 (input의 run_in_background = true) — 답이 끝난 뒤에도 계속 돈다는 줄을 카드에 보인다.</summary>
@@ -86,7 +86,7 @@ public sealed record ApprovalRequest(string Tool, string Summary, string? Descri
     /// 명령 방의 작업 폴더 밖 파일 쓰기 카드 (Write · Edit · MultiEdit · NotebookEdit): 요약 = 대상 경로, 추가 입력 = 쓸 내용(경로 밖의 입력) 미리보기.
     /// 짧은 값(동작 플래그)을 먼저 다 보이고, 긴 값은 써질 내용부터 키마다 2,000자를 나눠 앞부분을 보인다 — 잘린 값은 키 이름과 전체 길이를 적는다
     /// (/cross-review a43e6f3e7b — 앞 값이 길면 new_string · replace_all이 가려졌다). 명령 카드와 달리 잘려도 허용을 받는다 (결정 "앞 2,000자 · 잘려도 허용" —
-    /// 위험은 대상 경로에 있고, 위험한 이름 · 폴더는 앞에서 카드 없이 거절). 위험한 이름의 입력(dangerously · bypass)이 있으면 거절만. "항상 허용"은 없다.
+    /// 위험은 대상 경로에 있고, 위험한 이름 · 폴더는 앞에서 카드 없이 거절). 위험한 이름의 입력(dangerously · bypass)이 있으면 거절만.
     /// 입력을 읽지 못하면 null.
     /// </summary>
     public static ApprovalRequest? ForWrite(string tool, string inputJson, string path)
@@ -112,7 +112,7 @@ public sealed record ApprovalRequest(string Tool, string Summary, string? Descri
                     ? $"{name}={text}"
                     : $"{name}={text[..share]}\n… ({name} 앞 {share.ToString("N0", inv)}자만 보임 — 전체 {text.Length.ToString("N0", inv)}자)");
             var preview = string.Join("\n", lines);
-            return new ApprovalRequest(tool, path, null, null)
+            return new ApprovalRequest(tool, path, null)
             {
                 Extra = preview.Length == 0 ? null : preview,
                 Risky = risky,
@@ -172,7 +172,7 @@ public sealed record ApprovalRequest(string Tool, string Summary, string? Descri
                 var cut = plan.Length > MaxSummaryChars;
                 // 계획 글 · 파일 경로 밖의 입력은 허용 답에서 뺀다(PlanInput) — 카드에도 그 이름을 보인다 (/self-review security d3dd55b237 C1)
                 var others = hasInput ? planInput.EnumerateObject().Select(p => p.Name).Where(n => !PlanKeys.Contains(n)).ToList() : [];
-                return new ApprovalRequest(tool, cut ? plan[..MaxSummaryChars] + "…" : plan, null, null, cut)
+                return new ApprovalRequest(tool, cut ? plan[..MaxSummaryChars] + "…" : plan, null, cut)
                 {
                     IsPlan = true,
                     Extra = others.Count == 0 ? null : string.Join(", ", others),
@@ -206,7 +206,7 @@ public sealed record ApprovalRequest(string Tool, string Summary, string? Descri
             }
             else summary = "";
             if (summary.Length > MaxSummaryChars) (summary, truncated) = (summary[..MaxSummaryChars] + "…", true);
-            return new ApprovalRequest(tool, summary, description, truncated || risky ? null : SuggestedRule(e), truncated)
+            return new ApprovalRequest(tool, summary, description, truncated)
             {
                 Extra = extras.Count == 0 ? null : string.Join(", ", extras),
                 Risky = risky,
@@ -221,27 +221,6 @@ public sealed record ApprovalRequest(string Tool, string Summary, string? Descri
         }
     }
 
-    /// <summary>
-    /// permission_suggestions에서 "항상 허용"으로 받을 규칙: addRules · allow인 첫 규칙이 명령 도구(Bash · PowerShell)이고 내용이 안전한 모양일 때만.
-    /// destination(localSettings)은 따르지 않는다 — 돌려주면 작업 폴더 .claude/settings.local.json에 써지므로, 방에 저장해 다음 실행의 --allowedTools로 넣는다.
-    /// </summary>
-    private static string? SuggestedRule(JsonElement e)
-    {
-        if (!e.TryGetProperty("permission_suggestions", out var list) || list.ValueKind != JsonValueKind.Array) return null;
-        foreach (var s in list.EnumerateArray())
-        {
-            if (s.ValueKind != JsonValueKind.Object || Str(s, "type") != "addRules" || Str(s, "behavior") != "allow") continue;
-            if (!s.TryGetProperty("rules", out var rules) || rules.ValueKind != JsonValueKind.Array) continue;
-            foreach (var r in rules.EnumerateArray())
-            {
-                if (r.ValueKind != JsonValueKind.Object) continue;
-                var rule = $"{Str(r, "toolName")}({Str(r, "ruleContent")})";
-                if (ApprovalRules.IsAcceptable(rule)) return rule;
-            }
-        }
-        return null;
-    }
-
     private static string? Str(JsonElement e, string name) =>
         e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
 }
@@ -249,8 +228,6 @@ public sealed record ApprovalRequest(string Tool, string Summary, string? Descri
 public enum ApprovalChoice
 {
     Allow,
-    /// <summary>허용 + 제안 규칙을 방에 저장 (다음 실행부터 묻지 않음).</summary>
-    AlwaysAllow,
     /// <summary>허용 + 이 턴이 끝날 때까지 명령을 묻지 않음 (저장하지 않음).</summary>
     AllowTurn,
     Deny,
@@ -291,26 +268,9 @@ public static class PermissionDecision
     }.ToJsonString();
 }
 
-/// <summary>"이 방에서 항상 허용" 규칙 모양 검사.</summary>
+/// <summary>명령 카드의 입력 검사 (꼭 묻는 명령 · 위험한 이름).</summary>
 public static partial class ApprovalRules
 {
-    public const int MaxRuleChars = 500;
-
-    /// <summary>
-    /// "항상 허용"으로 받는 규칙: 명령 도구(Bash · PowerShell)의 정확한 명령 하나 — 와일드카드(*)가 없고, 줄바꿈이 없고, 상한 안.
-    /// `Bash(python:*)` 같은 접두 규칙 하나면 그 방에서 사실상 모든 코드 실행이 카드 없이 통과해 받지 않는다 (/self-review 36e4e20e04 C4 · ab79e61df5 C1).
-    /// 괄호 짝이 맞지 않으면(`x) Bash(y`처럼 --allowedTools 값이 둘로 읽힐 수 있는 모양) 받지 않는다.
-    /// 인자 검사(위험 인자)에 걸릴 글자가 있으면 받지 않는다 — 저장하면 그 방의 모든 실행이 막힌다.
-    /// </summary>
-    public static bool IsAcceptable(string? rule)
-    {
-        if (rule is null || rule.Length > MaxRuleChars) return false;
-        var m = RuleShape().Match(rule);
-        if (!m.Success) return false;
-        var content = m.Groups[2].Value;
-        return content.Trim().Length > 0 && !content.Contains('*') && Balanced(content) && !Dangerous().IsMatch(rule);
-    }
-
     /// <summary>
     /// "이 턴 동안 묻지 않기"가 켜져 있어도 카드로 묻는 명령 (사용자 결정 "짧은 목록 유지" · "넓히되 일상 경로는 뺀"): git push · clean · reset --hard, 재귀 삭제,
     /// 숨긴 실행(-EncodedCommand · iex), 지시 · 설정 · 다음 실행으로 이어지는 파일을 건드리는 모양. 편집 금지 목록의 이 앱 폴더 · 스크립트 확장자는 뺐다 — 평소 명령마다 걸려 단추가 소용없어진다.
@@ -324,20 +284,6 @@ public static partial class ApprovalRules
 
     /// <summary>입력 이름이 우회 · 위험 인자 모양인지 (예 dangerouslyDisableSandbox).</summary>
     public static bool IsDangerousName(string name) => Dangerous().IsMatch(name);
-
-    private static bool Balanced(string s)
-    {
-        var depth = 0;
-        foreach (var c in s)
-        {
-            if (c == '(') depth++;
-            else if (c == ')' && --depth < 0) return false;
-        }
-        return depth == 0;
-    }
-
-    [GeneratedRegex(@"^(Bash|PowerShell)\(([^\r\n]+)\)$")]
-    private static partial Regex RuleShape();
 
     [GeneratedRegex(@"\bgit\b[^\n;|&]*\b(?:push|clean|reset\b[^\n;|&]*--hard)\b" +
         @"|\brm\b[^\n;|&]*\s(?:-[a-z]*r|--recursive)" +
@@ -392,7 +338,7 @@ public sealed class ApprovalLog(Func<string> dataFolder)
 
     /// <summary>방 기록 줄(정리 표시 등)을 같은 파일에 남긴다 — 기록 화면이 시각으로 제자리에 그린다 (RoomNotes).</summary>
     public void Note(string roomId, string tool, string text) =>
-        Write(roomId, new ApprovalRequest(tool, "", null, null), text);
+        Write(roomId, new ApprovalRequest(tool, "", null), text);
 
     private static string Cut(string s) => s.Length > 300 ? s[..300] + "…" : s;
 }

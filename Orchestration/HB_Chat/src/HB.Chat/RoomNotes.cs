@@ -136,7 +136,7 @@ public sealed class RoomNotes(Func<string> dataFolder)
                 ApprovalRequest.PlanTool => "계획 " + (decision == "허용" ? "승인" : decision),
                 _ => summary.Length > 0 ? $"승인 {decision} — {tool}: {summary}" : $"승인 {decision} — {tool}",
             };
-            var denied = tool is not (BackgroundTool or TerminalTool) && decision is not ("허용" or "항상 허용" or RoomHub.TurnAllowLabel);
+            var denied = tool is not (BackgroundTool or TerminalTool) && decision is not ("허용" or "항상 허용" or RoomHub.TurnAllowLabel); // "항상 허용"은 없앤 단추의 옛 기록
             return (room, new RoomNote(at, text, denied));
         }
         catch (JsonException)

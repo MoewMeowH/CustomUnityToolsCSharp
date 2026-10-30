@@ -5,7 +5,6 @@ namespace HB.Chat;
 /// <summary>
 /// 실행 하나의 입력. Resume이면 --resume, 아니면 --session-id로 새 세션을 앱이 정한 ID로 만든다.
 /// McpConfigPath는 읽기 · 편집 · 명령 단계에 필요하다 (hb-orchestration 항목만 담은 파일, <see cref="McpConfigFile"/>).
-/// AllowRules는 명령 단계에만 쓴다: "이 방에서 항상 허용" 규칙.
 /// </summary>
 public sealed record RunSpec(
     PermissionLevel Level,
@@ -14,8 +13,7 @@ public sealed record RunSpec(
     bool Resume,
     string? McpConfigPath,
     string McpServer,
-    string? AppendSystemPrompt,
-    IReadOnlyList<string>? AllowRules = null)
+    string? AppendSystemPrompt)
 {
     /// <summary>갈래 방의 첫 실행: 이어받을 원래 세션 ID (Resume이 아닐 때만 쓴다).</summary>
     public string? ForkFrom { get; init; }
@@ -172,9 +170,8 @@ public static partial class ClaudeArgs
                 args.AddRange(EditDenied.Select(p => $"Edit({p})"));
                 args.AddRange(attachDeny);
                 AddMcp(args, spec);
-                // --allowedTools 가변 인자(AddMcp의 MCP 규칙 뒤)에 작업 폴더 안 편집과 "항상 허용" 규칙을 이어 붙인다. 규칙 모양은 저장할 때 검사했지만 다시 거른다.
+                // --allowedTools 가변 인자(AddMcp의 MCP 규칙 뒤)에 작업 폴더 안 편집을 이어 붙인다.
                 args.Add(CommandEditAllow);
-                args.AddRange((spec.AllowRules ?? []).Where(ApprovalRules.IsAcceptable));
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(spec), spec.Level, "알 수 없는 권한 단계");

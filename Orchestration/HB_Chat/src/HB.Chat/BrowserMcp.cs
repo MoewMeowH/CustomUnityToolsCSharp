@@ -58,7 +58,7 @@ public sealed class BrowserTools(AgentBrowser browser, Terminals terminals, Room
             var view = browser.View(room.Id);
             // 방 기록에 그림으로 (결정 "기록에 그림으로 남김") — 기록 줄의 요약 칸에 파일 이름
             var name = browser.SaveShot(room.Id, png);
-            hub.Log?.Write(room.Id, new ApprovalRequest(RoomNotes.BrowserShotTool, name, null, null), "스크린샷 — " + (view.Url ?? "빈 화면"));
+            hub.Log?.Write(room.Id, new ApprovalRequest(RoomNotes.BrowserShotTool, name, null), "스크린샷 — " + (view.Url ?? "빈 화면"));
             return
             [
                 new TextContentBlock { Text = $"[{view.Url ?? "빈 화면"} · {Untrusted}]" },

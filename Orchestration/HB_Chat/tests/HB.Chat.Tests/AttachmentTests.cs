@@ -285,7 +285,6 @@ public sealed class AttachmentTests : IDisposable
         var room = Assert.Single(new RoomStore(path).All());
         Assert.Empty(room.AttachFrom);
         Assert.Empty(room.McpExtra);
-        Assert.Empty(room.AllowRules);
         Assert.Empty(room.McpStatus);
     }
 

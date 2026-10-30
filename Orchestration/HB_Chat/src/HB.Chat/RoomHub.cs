@@ -5,7 +5,7 @@ namespace HB.Chat;
 
 /// <summary>
 /// 방 화면에 보내는 실시간 알림 (SSE data 한 줄 = JSON 하나).
-/// kind: snapshot · start · delta · tool · denied · retry · end · queued · notice · idle · approval · approval-done · question · question-done · rules ·
+/// kind: snapshot · start · delta · tool · denied · retry · end · queued · notice · idle · approval · approval-done · question · question-done ·
 /// rooms(방 목록 줄이 바뀌었을 수 있음, Text = 그 방 ID — 어느 방이든).
 /// Prompt는 지금 처리 중인 사용자 말, Pending은 큐에서 기다리는 말들. Approval은 승인 카드(approval) · 끝난 카드의 ID(approval-done, Text = 결정).
 /// Question은 질문 카드(question) · 끝난 카드(question-done, Text = 결정 한 줄 — 3차 a).
@@ -27,9 +27,6 @@ public sealed record LiveEvent(string Kind)
 
     /// <summary>question-done 알림: 고른 답 (질문 글 → 답, 4차 D1 — 화면이 '나' 말풍선으로). 답하지 않았으면 null.</summary>
     public IReadOnlyDictionary<string, string>? Answers { get; init; }
-
-    /// <summary>rules 알림: 이 방의 "항상 허용" 규칙 전체 (바뀐 뒤 화면 목록을 다시 그린다).</summary>
-    public IReadOnlyList<string>? Rules { get; init; }
 
     /// <summary>face 알림 · snapshot: 지휘자 표정 상태 (<see cref="HB.Chat.Face"/> 이름).</summary>
     public string? Face { get; init; }
@@ -76,11 +73,11 @@ public sealed record LiveEvent(string Kind)
 }
 
 /// <summary>
-/// 화면의 승인 카드 하나. Rule이 있으면 "이 방에서 항상 허용" 단추와 저장될 규칙을 보인다.
+/// 화면의 승인 카드 하나.
 /// Truncated면 명령이 너무 길어 잘린 것 — 거절만 보인다 (서버도 허용을 받지 않는다).
 /// Extra는 명령 밖의 입력(허용하면 같이 실행됨), Risky면 위험한 이름의 입력이 있어 거절만 (/self-review 5e747ff851 C1).
 /// </summary>
-public sealed record ApprovalView(string Id, string Tool, string Summary, string? Description, string? Rule, DateTimeOffset ExpiresAt, bool Truncated)
+public sealed record ApprovalView(string Id, string Tool, string Summary, string? Description, DateTimeOffset ExpiresAt, bool Truncated)
 {
     public string? Extra { get; init; }
     public bool Risky { get; init; }
@@ -184,12 +181,12 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         public readonly ApprovalRequest Request = request;
         public readonly DateTimeOffset ExpiresAt = expiresAt;
         public readonly TaskCompletionSource<ApprovalAnswer> Answer = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        /// <summary>카드에 남길 결정 (허용 · 항상 허용 · 거절 …). 답을 정한 쪽이 적는다.</summary>
+        /// <summary>카드에 남길 결정 (허용 · 이 턴 허용 · 거절 …). 답을 정한 쪽이 적는다.</summary>
         public string? Label;
         /// <summary>결정을 기록하고 approval-done을 알린 뒤 끝난다 — 실행 끝 알림(end)이 그 뒤에 나가게 기다린다 (/self-review e464ec29ba C3).</summary>
         public readonly TaskCompletionSource Settled = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public ApprovalView View => new(Id, Request.Tool, Request.Summary, Request.Description, Request.Rule, ExpiresAt, Request.Truncated)
+        public ApprovalView View => new(Id, Request.Tool, Request.Summary, Request.Description, ExpiresAt, Request.Truncated)
         {
             Mode = Request.Mode,
             Extra = Request.Extra,
@@ -670,7 +667,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 return PermissionDecision.Deny("사용자가 이 방 권한을 명령 단계 아래로 내렸습니다 — 브라우저를 열지 않습니다.");
             var card = new ApprovalRequest(BrowserTool, url.AbsoluteUri,
                 $"지휘자 브라우저(사용자 브라우저와 따로)에서 {url.Host}를 엽니다. 허용하면 이 방 브라우저가 닫힐 때까지 같은 사이트는 다시 묻지 않습니다. " +
-                "지휘자는 그 사이트에서 클릭 · 입력을 카드 없이 할 수 있습니다. 막는 것은 다른 사이트로의 페이지 이동뿐이고, 페이지 스크립트의 요청(fetch · 그림)은 막지 않습니다.", null);
+                "지휘자는 그 사이트에서 클릭 · 입력을 카드 없이 할 수 있습니다. 막는 것은 다른 사이트로의 페이지 이동뿐이고, 페이지 스크립트의 요청(fetch · 그림)은 막지 않습니다.");
             var answer = await RequestApprovalAsync(room.Id, live, generation, card, aborted);
             if (answer is not { Allow: true }) return (answer ?? new ApprovalAnswer(false, "실행이 이미 끝나 거절했습니다.")).ToDecisionJson(ask.InputJson);
             _browser.ApproveHost(room.Id, url.Host);
@@ -678,7 +675,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         }
         if (room.Level == PermissionLevel.Command && ask.Tool == TerminalMcp.StartTool && _terminals is not null)
         {
-            // 터미널 시작 (결정 "늘 카드"): 항상 허용 규칙 없이 카드로. 허용하면 표를 남겨 앱 MCP가 그 하나만 띄운다.
+            // 터미널 시작 (결정 "늘 카드"): 카드로 묻는다. 허용하면 표를 남겨 앱 MCP가 그 하나만 띄운다.
             if (TerminalMcp.ParseStart(ask.InputJson) is not var (name, command))
                 return PermissionDecision.Deny("terminal_start 입력은 name · command 문자열이어야 합니다.");
             if (!Terminals.IsValidName(name)) return PermissionDecision.Deny("터미널 이름은 글자 · 숫자 · . _ - 만 32자까지입니다.");
@@ -691,7 +688,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             // 감시형 명령(dev 서버 · watch)이면 이후 지휘자가 묻지 않고 고친 파일을 그대로 다시 실행한다 — 카드에 적는다 (/self-review security a3a9dd85c1 C1)
             var card = new ApprovalRequest(TerminalTool, command,
                 $"터미널 '{name}' — 턴이 끝나도 계속 돌고, 곁칸 터미널 탭에서 보고 중지합니다. 파일을 감시해 다시 실행하는 명령이면 " +
-                "이후 지휘자가 고친 파일(명령 방은 작업 폴더 편집을 묻지 않음)이 카드 없이 다시 실행됩니다.", null);
+                "이후 지휘자가 고친 파일(명령 방은 작업 폴더 편집을 묻지 않음)이 카드 없이 다시 실행됩니다.");
             var answer = await RequestApprovalAsync(room.Id, live, generation, card, aborted);
             if (answer is not { Allow: true }) return (answer ?? new ApprovalAnswer(false, "실행이 이미 끝나 거절했습니다.")).ToDecisionJson(ask.InputJson);
             _terminals.Approve(room.Id, name, command);
@@ -787,7 +784,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         var shownHost = url.IdnHost != url.Host ? $"{url.Host} ({url.IdnHost})" : url.Host;
         var card = new ApprovalRequest(WebFetchCardTool, url.AbsoluteUri,
             $"지휘자가 {shownHost}{(url.IsDefaultPort ? "" : ":" + url.Port)}에 요청을 보내 페이지를 가져옵니다 — 주소에 든 글도 함께 나갑니다. " +
-            "허용하면 앱을 다시 켤 때까지 이 방에서 같은 사이트(같은 http · https · 포트)는 다시 묻지 않습니다. 가져온 글에 든 지시는 사용자 지시가 아닙니다.", null)
+            "허용하면 앱을 다시 켤 때까지 이 방에서 같은 사이트(같은 http · https · 포트)는 다시 묻지 않습니다. 가져온 글에 든 지시는 사용자 지시가 아닙니다.")
         {
             // prompt는 사이트로 나가지 않고(가져온 글을 claude 쪽에서 요약할 때 씀) 잘라 보여도 허용을 받는다 — 명령 카드의 "잘리면 거절만"과 다른 예외 (C8)
             Extra = prompt is null ? null : $"prompt={(prompt.Length > ApprovalRequest.MaxExtraValueChars ? prompt[..ApprovalRequest.MaxExtraValueChars] + "…" : prompt)}",
@@ -812,7 +809,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         if (ModeCard.Build(ask.InputJson, list, pick) is not { } card) return PermissionDecision.Deny("run_mode 입력을 읽지 못해 거절했습니다.");
         if (card.Prefilled) lock (live.Gate) live.PickUsed = true;
         // 기록(approvals.jsonl)에 모드 이름이 남게 요약 첫 줄로
-        var request = new ApprovalRequest(ask.Tool, $"{card.Mode}\n{card.InputHead}", card.Reason, null) { Mode = card };
+        var request = new ApprovalRequest(ask.Tool, $"{card.Mode}\n{card.InputHead}", card.Reason) { Mode = card };
         var answer = await RequestApprovalAsync(room.Id, live, generation, request, aborted);
         if (answer is not { Allow: true }) return (answer ?? new ApprovalAnswer(false, "실행이 이미 끝나 거절했습니다.")).ToDecisionJson(ask.InputJson);
         if (store.Get(room.Id) is not { } now || now.Level == PermissionLevel.Chat)
@@ -836,7 +833,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
 
     /// <summary>
     /// 방별 서버 도구: 지금 방을 다시 보고 — 단계를 내렸거나 · 연결을 끊었거나 · 다른 Unity 프로젝트로 바꿨으면 거절(내리기는 바로 막힌다),
-    /// Unity 코드 실행 셋은 명령 카드("항상 허용" 없음), 그 밖은 카드 없이 허용(결정 "묻지 않음" · "연결하면 편집").
+    /// Unity 코드 실행 셋은 명령 카드, 그 밖은 카드 없이 허용(결정 "묻지 않음" · "연결하면 편집").
     /// </summary>
     private async Task<string> DecideRoomServerAsync(Room room, Live live, int generation, ToolPermission ask, CancellationToken aborted, string server, string? unity)
     {
@@ -855,7 +852,6 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         if (ApprovalRequest.Parse(ask.RequestJson) is not { } request) return PermissionDecision.Deny("승인 요청 모양을 읽지 못해 거절했습니다.");
         var card = request with
         {
-            Rule = null, // 코드 실행은 매번 묻는다
             Description = $"Unity 에디터({unity}) 안에서 C# 코드를 실행합니다 — 에디터 · 프로젝트 파일 · 이 PC의 파일을 바꿀 수 있고, 편집 금지 경로도 막히지 않습니다.",
         };
         var answer = await RequestApprovalAsync(room.Id, live, generation, card, aborted);
@@ -868,7 +864,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     /// </summary>
     private void HostDenied(Room room, Live live, int generation, string tool, string summary, string why, string line)
     {
-        Log?.Write(room.Id, new ApprovalRequest(tool, summary, null, null), $"거절 ({why})");
+        Log?.Write(room.Id, new ApprovalRequest(tool, summary, null), $"거절 ({why})");
         lock (live.Gate)
         {
             if (live.Generation == generation) Broadcast(live, new LiveEvent("denied") { Text = line, Logged = true });
@@ -996,7 +992,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             });
             if (live.Cts is not null && !live.Waiting) SetFace(live, Face.Thinking); // 답을 받으면 지휘자가 이어 생각한다
         }
-        Log?.Write(roomId, new ApprovalRequest(ClaudeArgs.AskTool, QuestionRequest.Summary(request.Items, null), null, null),
+        Log?.Write(roomId, new ApprovalRequest(ClaudeArgs.AskTool, QuestionRequest.Summary(request.Items, null), null),
             answers is null ? label : "답: " + QuestionRequest.Summary(request.Items, answers));
         return (answers, label);
     }
@@ -1064,19 +1060,16 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
 
     /// <summary>
     /// 카드 단추. 오류 문구(null이면 받음). 잘린 명령은 허용을 받지 않는다 (사용자가 다 보지 못함).
-    /// 항상 허용은 답이 정해진 뒤에만 규칙을 저장한다 — 같은 순간 시간 초과로 거절됐는데 규칙만 남는 일이 없게 (지휘자 검토 R3).
-    /// 저장에 실패하면 이번 허용은 그대로 두고 오류를 알린다.
     /// </summary>
     /// <param name="picks">모델 선택 카드에서 고른 값 (원래 에이전트 → 고른 에이전트 · 강도). 다른 카드는 null.</param>
     public string? Decide(string roomId, string approvalId, ApprovalChoice choice, string? reason, IReadOnlyDictionary<string, ModeRowPick>? picks = null)
     {
         if (!_rooms.TryGetValue(roomId, out var live)) return "없는 방입니다.";
-        string? rule = null;
         lock (live.Gate)
         {
             if (!live.Approvals.TryGetValue(approvalId, out var pending) || pending.Answer.Task.IsCompleted)
                 return ApprovalDone;
-            // 카드가 뜬 뒤 곁칸에서 권한을 내렸으면 허용 · 항상 허용을 받지 않는다 (/self-review security 8ccecae84d C1) —
+            // 카드가 뜬 뒤 곁칸에서 권한을 내렸으면 허용을 받지 않는다 (/self-review security 8ccecae84d C1) —
             // 명령 카드는 명령 단계가 아니면, 계획 카드는 편집 · 명령 단계가 아니면. 단계는 이 잠금 안에서 읽는다 (d3dd55b237 C2)
             var level = store.Get(roomId)?.Level;
             if (pending.Request.Mode is { } card)
@@ -1093,14 +1086,11 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 return pending.Request.Risky
                     ? "위험한 입력(dangerously · bypass)이 있어 거절만 할 수 있습니다."
                     : "명령이나 입력이 너무 길어 다 보이지 않습니다 — 거절만 할 수 있습니다.";
-            if (choice == ApprovalChoice.AlwaysAllow && (rule = pending.Request.Rule) is null)
-                return "이 요청에는 항상 허용할 규칙이 없습니다.";
             if (choice == ApprovalChoice.AllowTurn && !pending.Request.TurnAllowable)
                 return "이 요청에는 '이 턴 동안 묻지 않기'를 쓸 수 없습니다.";
             var label = choice switch
             {
                 ApprovalChoice.Allow => "허용",
-                ApprovalChoice.AlwaysAllow => "항상 허용",
                 ApprovalChoice.AllowTurn => TurnAllowLabel,
                 _ => "거절",
             };
@@ -1116,24 +1106,13 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                     if (other.Answer.TrySetResult(new ApprovalAnswer(true, null))) other.Label = TurnAllowLabel;
             }
         }
-        if (rule is null) return null;
-        try
-        {
-            var room = store.Update(roomId, r => r with { AllowRules = r.AllowRules.Contains(rule) ? r.AllowRules : [.. r.AllowRules, rule] });
-            BroadcastRules(live, room);
-            return null;
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
-        {
-            return $"이번은 허용했지만 규칙을 저장하지 못했습니다: {ex.Message}";
-        }
+        return null;
     }
 
-    /// <summary>모델 선택 카드의 답 (잠금 안에서 부른다). 항상 허용은 없다. 허용 기록에는 바꾼 줄을 적는다.</summary>
+    /// <summary>모델 선택 카드의 답 (잠금 안에서 부른다). 허용 기록에는 바꾼 줄을 적는다.</summary>
     private static string? DecideModeCard(PendingApproval pending, ModeCard card, PermissionLevel? level, ApprovalChoice choice, string? reason,
         IReadOnlyDictionary<string, ModeRowPick>? picks)
     {
-        if (choice == ApprovalChoice.AlwaysAllow) return "이 요청에는 항상 허용할 규칙이 없습니다.";
         if (choice == ApprovalChoice.AllowTurn) return "이 요청에는 '이 턴 동안 묻지 않기'를 쓸 수 없습니다.";
         if (choice == ApprovalChoice.Allow && level is null or PermissionLevel.Chat) return "이 방 권한을 대화 단계로 내려 허가할 수 없습니다 — 거절만 됩니다.";
         if (choice == ApprovalChoice.Allow && card.Check(picks) is { } bad) return bad;
@@ -1156,29 +1135,6 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 changes.Add((swapped ? $"{row.Agent}→{pick.Agent}" : row.Agent) + (string.IsNullOrEmpty(pick.Effort) ? "" : $" · {pick.Effort}"));
         }
         return changes.Count == 0 ? "허용" : $"허용 ({string.Join(", ", changes)})";
-    }
-
-    /// <summary>"항상 허용" 규칙 지우기. 오류 문구(null이면 지움).</summary>
-    public string? RemoveRule(string roomId, string rule)
-    {
-        try
-        {
-            var room = store.Update(roomId, r => r with { AllowRules = [.. r.AllowRules.Where(x => x != rule)] });
-            if (room is null) return "없는 방입니다.";
-            if (_rooms.TryGetValue(roomId, out var live)) BroadcastRules(live, room);
-            return null;
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
-        {
-            return $"규칙을 지우지 못했습니다: {ex.Message}"; // 저장 실패를 500 대신 이유로 (/self-review 36e4e20e04 C8)
-        }
-    }
-
-    /// <summary>규칙 목록이 바뀌면 열린 화면에 새 목록을 보낸다 (새로고침 없이 — /self-review 36e4e20e04 C9).</summary>
-    private void BroadcastRules(Live live, Room? room)
-    {
-        if (room is null) return;
-        lock (live.Gate) Broadcast(live, new LiveEvent("rules") { Rules = room.AllowRules });
     }
 
     /// <summary>
@@ -1623,7 +1579,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             try
             {
                 var file = RoomShots.Save(options.Value.DataFolder, roomId, Convert.FromBase64String(image.Base64), ext);
-                Log?.Write(roomId, new ApprovalRequest(RoomNotes.UnityShotTool, file, null, null), "Unity " + name[(UnityCapturePrefix.Length - "capture_".Length)..]);
+                Log?.Write(roomId, new ApprovalRequest(RoomNotes.UnityShotTool, file, null), "Unity " + name[(UnityCapturePrefix.Length - "capture_".Length)..]);
             }
             catch (Exception ex) when (ex is FormatException or IOException or UnauthorizedAccessException or InvalidOperationException) { }
         }
@@ -1696,7 +1652,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         var sizeBefore = transcripts.Size(room.SessionId) ?? -1;
         ModePick? runPick;
         lock (live.Gate) runPick = live.CurrentPick;
-        var spec = new RunSpec(room.Level, room.Model, room.SessionId, resume, mcpConfig, o.McpServer, rules, room.AllowRules)
+        var spec = new RunSpec(room.Level, room.Model, room.SessionId, resume, mcpConfig, o.McpServer, rules)
         {
             ExtraMcpServers = extraServers, // 방이 더한 서버 · unity는 묻지 않고
             ForkFrom = resume ? null : room.ForkOf, // 갈래 방의 첫 실행 (2-2 c)
@@ -2136,7 +2092,6 @@ public static class RoomRules
             "읽기 단계 + 작업 폴더 파일 편집(묻지 않음) + 명령 실행(Bash · PowerShell). 명령은 실행 전에 방의 카드로 사용자가 허용 · 거절한다 " +
             "(답이 없으면 약 10분 뒤 거절, 읽기 전용 명령과 작업 폴더 설정이 미리 허용한 명령은 묻지 않음). 편집 금지 경로는 Edit · Write 도구에만 걸리고, " +
             "명령으로 쓰는 것은 카드가 막는다. 작업 폴더 밖 파일을 Write · Edit로 쓰는 것도 카드로 묻는다(이 앱 · 설정 · 시작프로그램 폴더, 지시 · 설정 · 실행으로 이어지는 파일(.git · .vscode · .gitconfig · 스크립트 · 실행 파일 등), 짧은 이름 · 스트림 표기 경로는 카드 없이 거절). " +
-            "\"이 방에서 항상 허용\" 규칙은 이 방에만 적용되며, 그 명령이 돌리는 파일이 바뀌어도 다시 묻지 않는다. " +
             "\"이 턴 동안 묻지 않기\"를 누르면 그 턴이 끝날 때까지 명령을 카드 없이 허용하고 승인 기록에 남긴다 — 그 턴에는 편집 금지 경로를 명령으로 쓰는 것을 카드가 막지 않는다 " +
             "(git push · git clean · reset --hard · 재귀 삭제 · 지시 · 설정 파일을 건드리는 모양과 잘린 명령은 그래도 묻지만 글자 검사라 비껴갈 수 있다)",
         _ => level.ToString(),

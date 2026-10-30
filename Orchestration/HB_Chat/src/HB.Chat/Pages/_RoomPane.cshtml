@@ -91,28 +91,17 @@
             <div class="panel" style="padding:8px 12px;margin-bottom:12px;border-color:var(--err)" id="last-error">마지막 실행 실패: @lastError</div>
         }
 
-        @if (room.Level == PermissionLevel.Command)
+        @if (room.Level == PermissionLevel.Command && Model.InheritedRules is { Count: > 0 } inherited)
         {
-            var inherited = Model.InheritedRules;
-            <details class="rules panel" style="padding:8px 12px" @(room.AllowRules.Count + inherited.Count > 0 ? "open" : null)>
-                <summary>카드 없이 실행되는 명령 — 이 방 <span id="rule-count">@room.AllowRules.Count</span>개 · 작업 폴더 설정 @(inherited.Count)개</summary>
-                <p class="muted" style="margin:6px 0 0">이 방에서 항상 허용 (카드에서 더함, 그 명령이 돌리는 파일이 바뀌어도 다시 묻지 않음):</p>
-                <ul id="room-rules" style="margin:4px 0 0;padding-left:0;list-style:none">
-                    @foreach (var rule in room.AllowRules)
+            <details class="rules panel" style="padding:8px 12px" open>
+                <summary>카드 없이 실행되는 명령 — 작업 폴더 설정 @(inherited.Count)개</summary>
+                <p class="muted" style="margin:6px 0 0">작업 폴더 · 사용자 설정이 미리 허용 (이 앱에서는 못 지움 — 그 settings 파일에서):</p>
+                <ul style="margin:4px 0 0;padding-left:0;list-style:none">
+                    @foreach (var (source, rule) in inherited)
                     {
-                        <li><code class="mono">@rule</code> <button class="btn rule-remove" type="button" data-rule="@rule">@Icons.Svg("x") 지우기</button></li>
+                        <li><code class="mono">@rule</code> <span class="muted">@source</span></li>
                     }
                 </ul>
-                @if (inherited.Count > 0)
-                {
-                    <p class="muted" style="margin:8px 0 0">작업 폴더 · 사용자 설정이 미리 허용 (이 앱에서는 못 지움 — 그 settings 파일에서):</p>
-                    <ul style="margin:4px 0 0;padding-left:0;list-style:none">
-                        @foreach (var (source, rule) in inherited)
-                        {
-                            <li><code class="mono">@rule</code> <span class="muted">@source</span></li>
-                        }
-                    </ul>
-                }
             </details>
         }
 

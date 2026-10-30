@@ -62,7 +62,6 @@ public sealed class ClaudeArgsTests
         var plan = ApprovalRequest.Parse("""{"tool_name":"ExitPlanMode","input":{"plan":"# 계획\n1. 고치기","planFilePath":"C:\\p.md"},"permission_suggestions":null}""")!;
         Assert.True(plan.IsPlan);
         Assert.Equal("# 계획\n1. 고치기", plan.Summary);
-        Assert.Null(plan.Rule);
         var big = ApprovalRequest.Parse("{\"tool_name\":\"ExitPlanMode\",\"input\":{\"plan\":\"" + new string('x', ApprovalRequest.MaxSummaryChars + 5) + "\"}}")!;
         Assert.True(big.Truncated);
         Assert.False(big.DenyOnly); // 계획은 잘려도 허용 가능 (명령 실행이 아님)
