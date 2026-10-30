@@ -320,6 +320,7 @@ claude --safe-mode --restricted --strict-mcp-config -p --no-session-persistence 
 - 설정 · 실행 기록(record의 ToString)에 키 값은 찍히지 않습니다.
 - 키가 비어 있으면 서버가 시작하지 않습니다. 틀린 키는 구독으로 넘어가지 않고 실패합니다 (Claude Code 2.1.312).
 - `ApiKeyEnv`에 `ANTHROPIC_API_KEY`를 쓰면 에이전트를 건너뜁니다. 사용자 환경 변수로 두면 Claude Code 자체가 API 과금으로 바뀌기 때문입니다.
+- 제공사에 `MonthlyCreditUsd` · `CreditResetDay`(매달 1~28, 비우면 1일)를 넣으면 대시보드 첫 화면 플랫폼 표에 지난 갱신일부터의 사용량이 크레딧 대비로 보입니다. 호출 기록으로 센 값이고 서버 동작에는 쓰지 않습니다.
 
 키는 각 프로젝트 `.mcp.json`의 `env`로 넘깁니다.
 

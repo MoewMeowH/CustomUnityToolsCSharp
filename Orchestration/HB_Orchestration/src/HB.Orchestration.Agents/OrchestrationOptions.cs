@@ -432,6 +432,12 @@ public sealed class ProviderOptions
     /// Gemini OpenAI 호환 엔드포인트의 json_schema 지원은 문서에 없어(2026-10-19) 실제 호출로 확인한 뒤 Schema로 바꾼다.
     /// </summary>
     public StructuredOutputMode? StructuredOutput { get; set; }
+
+    /// <summary>주기마다 들어오는 크레딧 (USD). 있으면 대시보드가 사용량을 크레딧 대비로 보인다 (호출 기록 기준, 서버 동작에는 쓰지 않는다).</summary>
+    public decimal? MonthlyCreditUsd { get; set; }
+
+    /// <summary>크레딧이 갱신되는 날 (매달, 1~28). 비우면 1일. 남은 크레딧이 주기 끝에 사라지는 플랜은 결제일이다.</summary>
+    public int? CreditResetDay { get; set; }
 }
 
 /// <summary>구조화 출력 요청 방식.</summary>

@@ -17,6 +17,7 @@
     .stat .label { color: var(--muted); font-size: 12.5px; }
     .stat .value { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; margin-top: 2px; }
     .daily { padding: 14px 16px; margin-bottom: 16px; }
+    .platforms { padding: 14px 16px; margin-bottom: 16px; }
     .bars { display: flex; align-items: flex-end; gap: 6px; height: 80px; margin-top: 10px; }
     .bar { flex: 1; min-width: 8px; background: var(--accent); opacity: .8; border-radius: 3px 3px 0 0; }
     .bar-labels { display: flex; gap: 6px; margin-top: 4px; }
@@ -94,9 +95,51 @@
     <div class="panel stat"><div class="label" title="캐시 정보 없음 = 제공사가 캐시 값을 주지 않은 기록 (미적중 0과 다름)">입력 토큰 (캐시 @Model.TotalCached.ToString("N0")@(Model.TotalCacheWrite > 0 ? $" · 쓰기 {Model.TotalCacheWrite:N0}" : "")@(Model.CacheUnknown > 0 ? $" · 정보 없음 {Model.CacheUnknown}건" : ""))</div><div class="value">@Model.TotalIn.ToString("N0")</div></div>
     <div class="panel stat"><div class="label">출력 토큰@(Model.TotalReasoning > 0 ? $" (추론 {Model.TotalReasoning:N0})" : "")</div><div class="value">@Model.TotalOut.ToString("N0")</div></div>
     <div class="panel stat"><div class="label">평균 응답</div><div class="value">@Model.AvgSeconds.ToString("0.0")s</div></div>
-    <div class="panel stat"><div class="label" title="끊긴 호출(Timeout · Network · 취소 · 강제 종료)은 추정 사용량으로 센다">예상 비용@(Model.Pricing.Current.KrwPerUsd is { } rate ? $" · 1$ = ₩{rate:N0}" : "")@Model.Pricing.EstimateNote(Model.Calls, 3)</div><div class="value">@Model.Pricing.Format(Model.TotalCost, 3)</div></div>
+    <div class="panel stat"><div class="label" title="따로 청구되는 플랫폼만 (구독 · 로컬 제외). 끊긴 호출(Timeout · Network · 취소 · 강제 종료)은 추정 사용량으로 센다">예상 비용@(Model.Pricing.Current.KrwPerUsd is { } rate ? $" · 1$ = ₩{rate:N0}" : "")@Model.Pricing.EstimateNote(Model.PaidCalls, 3)</div><div class="value">@Model.Pricing.Format(Model.TotalCost, 3)</div></div>
     <div class="panel stat"><div class="label">실패</div><div class="value @(Model.Failures > 0 ? "err" : "")">@Model.Failures</div></div>
 </section>
+
+@if (Model.Platforms.Count > 0)
+{
+    <section class="panel platforms">
+        <div class="muted" style="font-size:12.5px" title="같은 API 키를 쓰는 제공사는 한 줄. 기록을 단가로 계산한 값이라 콘솔 금액과 다를 수 있다. 모드 · 제공사 · 검색 필터는 따르지 않는다">플랫폼별 비용 (호출 기록 기준)</div>
+        <div class="table-scroll">
+            <table>
+                <thead>
+                    <tr><th>플랫폼</th><th class="num">이 기간</th><th class="num">이번 달</th><th class="num">호출</th><th class="num">크레딧</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var p in Model.Platforms)
+                    {
+                        var unpriced = p.UnpricedCalls > 0 ? $"단가 없는 호출 {p.UnpricedCalls}건은 금액에 없음" : null;
+                        <tr>
+                            <td>@p.Name @if (p.NoCharge) { <span class="badge" title="구독 · 로컬이라 따로 청구되지 않는다. 합계에 넣지 않는다">청구 없음</span> }</td>
+                            @if (p.NoCharge)
+                            {
+                                <td class="num muted" title="API 단가로 환산한 값 · @Model.Pricing.Format(p.PeriodUsd, 2)">-</td>
+                                <td class="num muted" title="API 단가로 환산한 값 · @Model.Pricing.Format(p.MonthUsd, 2)">-</td>
+                            }
+                            else
+                            {
+                                <td class="num" title="@unpriced">@Model.Pricing.Format(p.PeriodUsd, 2)</td>
+                                <td class="num">@Model.Pricing.Format(p.MonthUsd, 2)</td>
+                            }
+                            <td class="num">@p.PeriodCalls.ToString("N0")</td>
+                            @if (p.Credit is { } credit)
+                            {
+                                <td class="num @(credit.NearLimit || credit.UnpricedCalls > 0 ? "err" : "")" title="지난 갱신일부터 호출 기록으로 센 값. 실제 잔액은 콘솔이 기준이다">$@credit.UsedUsd.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) / $@credit.LimitUsd.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) (@credit.Percent%) · @credit.Renews.ToString("MM-dd") 갱신@(credit.UnpricedCalls > 0 ? $" · 단가 없음 {credit.UnpricedCalls}건 빠짐" : "")</td>
+                            }
+                            else
+                            {
+                                <td class="num muted">-</td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+}
 
 @if (Model.Daily.Count > 1)
 {

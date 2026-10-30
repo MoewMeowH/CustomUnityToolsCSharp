@@ -64,7 +64,14 @@ public sealed class IndexModel(IOptions<DashboardOptions> options, PricingServic
     public int Failures => Calls.Count(c => !c.Success);
     public double AvgSeconds => Calls.Count == 0 ? 0 : Calls.Average(c => c.ElapsedMs) / 1000.0;
 
-    public decimal? TotalCost => pricing.TotalOf(Calls);
+    /// <summary>걸러진 기록 중 따로 청구되는 것 (FreeProviders 제외 — 구독 Codex를 API 단가로 합치면 실제로 나가지 않는 돈이 섞인다).</summary>
+    public List<CallRecord> PaidCalls { get; private set; } = [];
+
+    /// <summary>청구되는 기록이 없으면 0 ("값 없음"과 "낼 돈 없음"을 가른다). 단가를 모르면 null.</summary>
+    public decimal? TotalCost => PaidCalls.Count == 0 && Calls.Count > 0 ? 0m : pricing.TotalOf(PaidCalls);
+
+    /// <summary>플랫폼별 비용. 표끼리 비교하려는 것이라 기간만 따르고 모드 · 제공사 · 검색 필터는 따르지 않는다.</summary>
+    public IReadOnlyList<PlatformCost> Platforms { get; private set; } = [];
 
     /// <summary>
     /// 오늘(로컬 0시부터) 사용 토큰 (FreeProviders 제외). 화면 필터와 상관없이 전체 기록에서 센다 (하루 상한은 없음).
@@ -142,13 +149,14 @@ public sealed class IndexModel(IOptions<DashboardOptions> options, PricingServic
         TodayEstimateNote = pricing.EstimateNote(todayCalls, 2, estimated => budget.CountedCost(estimated, pricing.Current));
 
         var since = DateTimeOffset.Now.AddDays(-Days);
-        Calls = all
-            .Where(c => Days <= 0 || c.Timestamp >= since)
+        var inDays = all.Where(c => Days <= 0 || c.Timestamp >= since).ToList();
+        Calls = inDays
             .Where(c => string.IsNullOrEmpty(Tool) || c.Tool == Tool)
             .Where(c => string.IsNullOrEmpty(Provider) || ProviderOf(c) == Provider)
             .Where(c => string.IsNullOrWhiteSpace(Run) || (c.RunId?.StartsWith(Run.Trim(), StringComparison.OrdinalIgnoreCase) ?? false))
             .Where(c => string.IsNullOrWhiteSpace(Q) || Matches(c, Q.Trim()))
             .ToList();
+        PaidCalls = Calls.Where(c => !budget.IsFree(ProviderOf(c))).ToList();
 
         P = Math.Clamp(P, 1, PageCount);
         PageCalls = Calls.Skip((P - 1) * PageSize).Take(PageSize).ToList();
@@ -162,9 +170,12 @@ public sealed class IndexModel(IOptions<DashboardOptions> options, PricingServic
         _verdictCounts = verdicts.Latest.GroupBy(v => v.RunId).ToDictionary(g => g.Key, g => g.Count());
         UnrecordedSubagents = subagents.UnrecordedRecent(all);
 
-        _cliProviders = modes.McpOptionsOrDefault().Providers
+        var providers = modes.McpOptionsOrDefault().Providers;
+        _cliProviders = providers
             .Where(p => string.Equals(p.Value.Type, Agents.Providers.ClaudeCliProvider.TypeName, StringComparison.OrdinalIgnoreCase))
             .Select(p => p.Key).ToHashSet(StringComparer.Ordinal);
+        // 설정을 잠깐 못 읽으면(빈 설정) 키로 묶지 못해 표가 달라 보인다 — 그때는 표를 그리지 않는다
+        Platforms = providers.Count > 0 ? PlatformCosts.Build(all, inDays, ProviderOf, pricing.CostOf, providers, budget, DateTimeOffset.Now) : [];
         var monthStart = new DateTimeOffset(new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1));
         var subMonth = all.Where(c => IsSubReview(c) && c.Timestamp >= monthStart).ToList();
         SubReviewMonthRuns = subMonth.Select(c => c.RunId ?? c.Id).Distinct().Count();
