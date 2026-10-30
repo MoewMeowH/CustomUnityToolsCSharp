@@ -1669,6 +1669,9 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     /// <summary>실행 결과를 방에 남긴다. 세션 기록 크기는 이 앱이 쓴 뒤의 값으로 (다음 말 때 밖에서 바뀌었는지 볼 기준).</summary>
     private RunResult Record(Room room, RunResult result, bool forked = false)
     {
+        // 앱을 끄느라 끊긴 실행은 사용자 중지처럼 적지 않는다 — RunStartedAt · 세션 기록 크기를 그대로 둬 다음 말에 "앞 실행이 앱 종료로 끊겼습니다"가 뜨게
+        // (강제 종료와 같은 길, 서버 재시작 실측 2026-10-30: 정상 종료면 중지로 적혀 아무 안내가 없었다)
+        if (_disposed && result.Cancelled) return result;
         var size = transcripts.Size(room.SessionId);
         var forkRead = forked ? ForkReadUpTo(room.SessionId) : null;
         try

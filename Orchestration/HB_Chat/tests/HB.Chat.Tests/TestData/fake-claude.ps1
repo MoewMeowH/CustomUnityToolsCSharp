@@ -284,6 +284,14 @@ switch ($mode) {
         Start-Sleep -Seconds 120
         exit 0
     }
+    'hangpid' {
+        # server restart test: write this process id (<tasks>/pid-<session>), append a line to the transcript like a real turn, then wait on a Bash approval
+        New-Item -ItemType Directory -Force $TasksRoot | Out-Null
+        [IO.File]::WriteAllText((Join-Path $TasksRoot ('pid-' + $Sid)), [string]$PID)
+        if ($Transcript) { New-Item -ItemType Directory -Force (Split-Path $Transcript) | Out-Null; Add-Content -Path $Transcript -Value '{"type":"user"}' }
+        $d = Ask 'req_hang' '{"subtype":"can_use_tool","tool_name":"Bash","display_name":"Bash","input":{"command":"git status","description":"Show status"},"tool_use_id":"toolu_hang"}'
+        Finish $d 'Bash' 'after restart?'
+    }
     'hb-selftest' {
         # card self-test (CliSelfTest): Bash approval for the mkdir in the prompt (allowed -> the folder is made, like the real CLI) ->
         # AskUserQuestion -> text piece -> result (permission_denials = what was denied, like the real CLI).
