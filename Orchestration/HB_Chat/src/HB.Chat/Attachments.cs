@@ -6,8 +6,8 @@ namespace HB.Chat;
 /// <summary>
 /// 방 첨부. 끌어 놓기 · 캡처 붙여 넣기 · 첨부 단추로 올린 파일을 데이터 폴더 attachments/&lt;방ID&gt;에 저장하고,
 /// 보낼 때 본문 끝에 <c>[첨부] 절대 경로</c> 줄을 붙인다. 실행 인자에 그 폴더를 --add-dir로 더해 지휘자가 Read로 연다
-/// (2-2 0번 실측: 그림도 모델에 보임). 대화 단계 방은 첨부를 받지 않는다 (사용자 결정).
-/// 편집 · 명령 방은 그 폴더 편집을 막는다 — 추가 폴더의 .claude/skills를 CLI가 불러오기 때문 (/self-review 0c3b7e3514 C2 실측).
+/// (2-2 0번 실측: 그림도 모델에 보임).
+/// 명령 방은 그 폴더 편집을 막는다 — 추가 폴더의 .claude/skills를 CLI가 불러오기 때문 (/self-review 0c3b7e3514 C2 실측).
 /// </summary>
 public static partial class Attachments
 {

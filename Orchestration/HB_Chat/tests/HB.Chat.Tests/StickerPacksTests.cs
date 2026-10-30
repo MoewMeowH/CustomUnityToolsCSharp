@@ -62,7 +62,7 @@ public sealed class StickerPacksTests : IDisposable
     public void Effective_RoomThenGlobalThenDefault()
     {
         var packs = new StickerPacks(_stickers, _profiles);
-        var room = new Room { Id = "0123456789ab", SessionId = Guid.NewGuid().ToString(), Workspace = "ws", Level = PermissionLevel.Chat, Model = "opus", CreatedAt = DateTimeOffset.Now };
+        var room = new Room { Id = "0123456789ab", SessionId = Guid.NewGuid().ToString(), Workspace = "ws", Level = PermissionLevel.Read, Model = "opus", CreatedAt = DateTimeOffset.Now };
         Assert.Null(packs.Effective(room));
         Assert.Null(_profiles.SetStickerPack("dog"));
         Assert.Equal("dog", packs.Effective(room));

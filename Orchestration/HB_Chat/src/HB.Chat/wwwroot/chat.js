@@ -2117,7 +2117,7 @@
             if (uploading > 0) attachBox.append(el("span", "muted", "올리는 중 " + uploading + "개…"));
         }
         async function upload(files) {
-            // 막힌 이유는 서버가 준다 — 대화 단계 · 휴지통 (C8)
+            // 막힌 이유는 서버가 준다 — 휴지통 (C8)
             if (!canAttach) { if (files.length) alert(composer.dataset.attachWhy || "이 방은 첨부를 받지 않습니다."); return; }
             for (const f of files) {
                 if (attached.length + uploading >= attachMax) { alert("첨부는 한 말에 " + attachMax + "개까지입니다."); return; }
@@ -2292,14 +2292,13 @@
         cmdBox.setAttribute("role", "listbox");
         form.before(cmdBox);
         const cmdKinds = { command: "명령", skill: "스킬", builtin: "기본", terminal: "터미널" };
-        let commands = [], cmdChatOnly = false, cmdShown = [], cmdIndex = 0;
+        let commands = [], cmdShown = [], cmdIndex = 0;
         async function loadCommands() {
             try {
                 const res = await fetch(self + "?handler=Commands", { cache: "no-store" });
                 if (!res.ok || disposed) return;
                 const data = await res.json();
                 commands = Array.isArray(data.commands) ? data.commands : [];
-                cmdChatOnly = !!data.chat;
                 updateCmd();
             } catch { /* 목록이 없어도 보내기는 그대로 */ }
         }
@@ -2319,7 +2318,7 @@
                 row.addEventListener("mousedown", (e) => { e.preventDefault(); pickCmd(i); }); // 입력칸 blur보다 먼저
                 return row;
             });
-            cmdBox.replaceChildren(...(cmdChatOnly ? [el("div", "cmd-note", "대화 단계 방은 도구가 없어 파일 · 명령이 필요한 명령은 제대로 돌지 않습니다")] : []), ...rows);
+            cmdBox.replaceChildren(...rows);
             cmdBox.hidden = false;
         }
         function pickCmd(i) {

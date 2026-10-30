@@ -11,7 +11,7 @@ namespace HB.Chat.Pages;
 public sealed class IndexModel(RoomStore store, RoomHub hub, RoomList list, ChatTranscripts transcripts, IOptions<ChatOptions> options, GroupChat groups) : PageModel
 {
     /// <summary>
-    /// 새 단톡방 (1단계): 구성원 이름 · 역할 줄들, 대화 · 읽기 단계만. 구성원마다 숨은 자식 방이 생긴다.
+    /// 새 단톡방 (1단계): 구성원 이름 · 역할 줄들. 구성원마다 숨은 자식 방이 생긴다.
     /// </summary>
     /// <summary>Codex 구성원 모델 목록 (이 계정 — ~/.codex/models_cache.json). 비면 "Codex 기본"만.</summary>
     public IReadOnlyList<CodexModels.Model> CodexModelList => CodexModels.Available();

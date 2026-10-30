@@ -108,7 +108,6 @@ public sealed class ApprovalFlowTests : IDisposable
     }
 
     [Theory]
-    [InlineData(PermissionLevel.Edit, "acceptEdits")]
     [InlineData(PermissionLevel.Command, "default")]
     public async Task PlanCard_AllowRestoresLevelMode_AndTurnsPlanNextOff(PermissionLevel level, string mode)
     {
@@ -317,7 +316,7 @@ public sealed class ApprovalFlowTests : IDisposable
     public async Task PlanRequest_WithoutPlanFirst_DeniedWithoutCard()
     {
         // 지휘자 검토 S1: 계획 모드로 시작하지 않은 실행의 ExitPlanMode는 카드 없이 거절
-        var room = _store.Create("ws", PermissionLevel.Edit, "opus", null);
+        var room = _store.Create("ws", PermissionLevel.Command, "opus", null);
         var ch = _hub.Subscribe(room.Id);
         _hub.Send(room.Id, "plan acceptEdits");
         var seen = await Until(ch, e => e.Kind == "idle");
@@ -399,7 +398,7 @@ public sealed class ApprovalFlowTests : IDisposable
     [Fact]
     public async Task PlanCard_DenyPassesReasonToReplan()
     {
-        var room = _store.Create("ws", PermissionLevel.Edit, "opus", null);
+        var room = _store.Create("ws", PermissionLevel.Command, "opus", null);
         _store.Update(room.Id, r => r with { PlanNext = true });
         var ch = _hub.Subscribe(room.Id);
         _hub.Send(room.Id, "plan please");
@@ -415,7 +414,7 @@ public sealed class ApprovalFlowTests : IDisposable
     [Fact]
     public async Task PlanCard_LoweredBelowEdit_CanOnlyBeDenied()
     {
-        var room = _store.Create("ws", PermissionLevel.Edit, "opus", null);
+        var room = _store.Create("ws", PermissionLevel.Command, "opus", null);
         _store.Update(room.Id, r => r with { PlanNext = true });
         var ch = _hub.Subscribe(room.Id);
         _hub.Send(room.Id, "plan please");
@@ -874,8 +873,8 @@ public sealed class ApprovalFlowTests : IDisposable
     [Fact]
     public async Task OtherApprovalRequests_AreDeniedWithoutCard()
     {
-        // 편집 방의 작업 폴더 밖 쓰기는 묻지 않고 거절 — 편집 단계는 작업 폴더 안만 (명령 방은 아래 OutsideWrite_CommandRoom_Card)
-        foreach (var level in new[] { PermissionLevel.Edit })
+        // 읽기 방에 혹시 쓰기 요청이 와도 묻지 않고 거절 (명령 방은 아래 OutsideWrite_CommandRoom_Card)
+        foreach (var level in new[] { PermissionLevel.Read })
         {
             var room = _store.Create("ws", level, "opus", null);
             var ch = _hub.Subscribe(room.Id);
@@ -938,8 +937,8 @@ public sealed class ApprovalFlowTests : IDisposable
         Assert.Null(_hub.Decide(room.Id, port.Id, ApprovalChoice.Deny, null));
         await Until(ch, e => e.Kind == "idle");
 
-        // 다른 방은 따로 기억 · 편집 방에서도 같은 카드
-        var room2 = _store.Create("ws", PermissionLevel.Edit, "opus", null);
+        // 다른 방은 따로 기억 · 명령 방에서도 같은 카드
+        var room2 = _store.Create("ws", PermissionLevel.Command, "opus", null);
         var ch2 = _hub.Subscribe(room2.Id);
         _hub.Send(room2.Id, "webfetch https://example.com/a");
         Assert.Equal("https://example.com/a", (await Until(ch2, e => e.Kind == "approval")).Last().Approval!.Summary);
@@ -948,38 +947,6 @@ public sealed class ApprovalFlowTests : IDisposable
         _hub.ForgetCommands(room.Id);
         _hub.Send(room.Id, "webfetch https://example.com/again");
         Assert.Equal("https://example.com/again", (await Until(ch, e => e.Kind == "approval")).Last().Approval!.Summary);
-    }
-
-    /// <summary>
-    /// 실행 중 대화 단계로 내리면 그 턴의 웹 검색 · 이미 허용한 사이트 가져오기도 카드 없이 거절 (/cross-review 909a5c575e · ff36c478db C1).
-    /// 웹 가져오기 카드는 읽기 단계에서 허용을 받지만, 카드가 뜬 뒤 대화로 내리면 거절만.
-    /// </summary>
-    [Fact]
-    public async Task WebTools_DowngradedMidRun_Denied()
-    {
-        var room = _store.Create("ws", PermissionLevel.Read, "opus", null);
-        var ch = _hub.Subscribe(room.Id);
-        _hub.Send(room.Id, "webfetch https://example.com/a");
-        var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
-        Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null));
-        await Until(ch, e => e.Kind == "idle");
-
-        _hub.Send(room.Id, "askthenweb");
-        var q = (await Until(ch, e => e.Kind == "question")).Last().Question!;
-        _store.Update(room.Id, r => r with { Level = PermissionLevel.Chat }); // 곁칸에서 대화로 내림 (실행 중)
-        Assert.Null(_hub.Answer(room.Id, q.Id, new Dictionary<string, string> { ["go?"] = "yes" }));
-        var seen = await Until(ch, e => e.Kind == "idle");
-        Assert.Contains("search=deny fetch=deny", seen.Single(e => e.Kind == "end").Text);
-        Assert.All(seen.Where(e => e.Kind == "denied"), d => Assert.Contains("대화 단계", d.Text));
-
-        // 카드가 뜬 뒤 대화로 내리면 허용을 받지 않는다
-        _store.Update(room.Id, r => r with { Level = PermissionLevel.Read });
-        _hub.Send(room.Id, "webfetch https://other.example.org/");
-        var other = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
-        _store.Update(room.Id, r => r with { Level = PermissionLevel.Chat });
-        Assert.NotNull(_hub.Decide(room.Id, other.Id, ApprovalChoice.Allow, null));
-        Assert.Null(_hub.Decide(room.Id, other.Id, ApprovalChoice.Deny, null));
-        await Until(ch, e => e.Kind == "idle");
     }
 
     [Theory]
@@ -1138,8 +1105,8 @@ public sealed class ApprovalFlowTests : IDisposable
     [Fact]
     public async Task CommandOutsideCommandRoom_IsDeniedWithoutCard()
     {
-        // 편집 방에는 명령 도구가 없지만, 혹시 승인 요청이 와도 카드 없이 거절한다
-        var room = _store.Create("ws", PermissionLevel.Edit, "opus", null);
+        // 읽기 방에는 명령 도구가 없지만, 혹시 승인 요청이 와도 카드 없이 거절한다
+        var room = _store.Create("ws", PermissionLevel.Read, "opus", null);
         var ch = _hub.Subscribe(room.Id);
         _hub.Send(room.Id, "approve please");
         var seen = await Until(ch, e => e.Kind == "idle");
@@ -1185,7 +1152,7 @@ public sealed class ApprovalFlowTests : IDisposable
     public async Task Question_InEditRoom_AnswersReachClaude()
     {
         // 가짜 claude는 updatedInput에 질문 둘과 answers가 없으면 거절로 끝난다 — 성공이면 답이 그대로 갔다
-        var room = _store.Create("ws", PermissionLevel.Edit, "opus", null);
+        var room = _store.Create("ws", PermissionLevel.Command, "opus", null);
         var ch = _hub.Subscribe(room.Id);
         _hub.Send(room.Id, "ask me");
         var q = (await Until(ch, e => e.Kind == "question")).Last().Question!;
@@ -1231,18 +1198,6 @@ public sealed class ApprovalFlowTests : IDisposable
         await Until(ch, e => e.Kind == "idle");
     }
 
-    [Fact]
-    public async Task Question_InChatRoom_IsDenied()
-    {
-        // 대화 단계는 도구가 없다 — 혹시 질문 요청이 와도 카드 없이 거절
-        var room = _store.Create("ws", PermissionLevel.Chat, "opus", null);
-        var ch = _hub.Subscribe(room.Id);
-        _hub.Send(room.Id, "ask me");
-        var seen = await Until(ch, e => e.Kind == "idle");
-        Assert.DoesNotContain(seen, e => e.Kind == "question");
-        Assert.Contains(ClaudeRunner.NoApprover, seen.Single(e => e.Kind == "end").Text);
-    }
-
     // ---- 방별 서버 도구 ----
 
     [Fact]
@@ -1266,7 +1221,7 @@ public sealed class ApprovalFlowTests : IDisposable
         Assert.Contains("Debug.Log(1);", card.Summary);
 
         // 카드를 기다리는 사이 권한을 내리면 카드 허용도 막히고(기존 장치), 그 뒤 Unity 호출은 카드 없이 거절된다 (미리 허용하지 않으므로)
-        _store.Update(room.Id, r => r with { Level = PermissionLevel.Edit });
+        _store.Update(room.Id, r => r with { Level = PermissionLevel.Read });
         Assert.NotNull(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null));
         Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Deny, null));
         var seen = await Until(ch, e => e.Kind == "idle");
@@ -1395,16 +1350,4 @@ public sealed class ApprovalFlowTests : IDisposable
         Assert.Equal(["*=low"], sent["reasoning"]!.AsArray().Select(n => (string)n!));
     }
 
-    [Fact]
-    public async Task RunModeCard_LoweredToChat_CanOnlyBeDenied()
-    {
-        var room = ModeRoom();
-        var ch = _hub.Subscribe(room.Id);
-        _hub.Send(room.Id, "runmode");
-        var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
-        _store.Update(room.Id, r => r with { Level = PermissionLevel.Chat });
-        Assert.NotNull(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null));
-        Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Deny, null));
-        Assert.False((await Until(ch, e => e.Kind == "idle")).Single(e => e.Kind == "end").Ok);
-    }
 }

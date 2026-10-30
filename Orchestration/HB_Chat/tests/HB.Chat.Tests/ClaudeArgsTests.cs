@@ -14,17 +14,6 @@ public sealed class ClaudeArgsTests
     private static string Joined(IReadOnlyList<string> args) => string.Join(" | ", args);
 
     [Fact]
-    public void Chat_HasNoToolsAndNoMcp()
-    {
-        var args = ClaudeArgs.Build(Spec(PermissionLevel.Chat, mcp: null), Models);
-        Assert.Equal(
-            "-p | --input-format | stream-json | --output-format | stream-json | --include-partial-messages | --verbose | --model | opus | --session-id | " + Sid +
-            " | --append-system-prompt | 규칙 | --tools |  | --strict-mcp-config | --permission-prompt-tool | stdio",
-            Joined(args));
-        Assert.DoesNotContain("--mcp-config", args);
-    }
-
-    [Fact]
     public void Effort_AddedAfterModel_OnlyKnownLevels()
     {
         // Claude 앱 기능 B: 추론 강도 — 목록 값은 --effort, 없으면 넣지 않음, 모르는 값은 실행 전에 막음
@@ -36,24 +25,18 @@ public sealed class ClaudeArgsTests
     }
 
     [Fact]
-    public void Plan_PermissionModePlan_AndExitPlanModeTool_EditCommandOnly()
+    public void Plan_PermissionModePlan_AndExitPlanModeTool_CommandOnly()
     {
-        // Claude 앱 기능 C (2.1.312 실측): 계획 모드 + 승인 도구 ExitPlanMode. 편집은 acceptEdits 대신 plan
-        var edit = Joined(ClaudeArgs.Build(Spec(PermissionLevel.Edit) with { Plan = true }, Models));
-        Assert.Contains("TaskUpdate,WebSearch,WebFetch,Agent,ExitPlanMode | --permission-mode | plan", edit);
-        Assert.DoesNotContain("acceptEdits", edit);
+        // Claude 앱 기능 C (2.1.312 실측): 계획 모드 + 승인 도구 ExitPlanMode
         var command = Joined(ClaudeArgs.Build(Spec(PermissionLevel.Command) with { Plan = true }, Models));
         Assert.Contains("TaskUpdate,WebSearch,WebFetch,ExitPlanMode | --permission-mode | plan", command);
-        // 서브에이전트는 읽기 · 편집 방만 — 명령 방은 정의의 acceptEdits가 명령 카드를 건너뛰었다 (/self-review security 42f9d47dc4 C1)
+        // 서브에이전트는 읽기 방만 — 명령 방은 정의의 acceptEdits가 명령 카드를 건너뛰었다 (/self-review security 42f9d47dc4 C1)
         Assert.DoesNotContain(",Agent", Joined(ClaudeArgs.Build(Spec(PermissionLevel.Command), Models)));
         Assert.DoesNotContain(",Agent", command);
-        Assert.Equal((true, true, false, false), (ClaudeArgs.AllowsAgents(PermissionLevel.Read), ClaudeArgs.AllowsAgents(PermissionLevel.Edit),
-            ClaudeArgs.AllowsAgents(PermissionLevel.Command), ClaudeArgs.AllowsAgents(PermissionLevel.Chat)));
-        Assert.DoesNotContain("ExitPlanMode", Joined(ClaudeArgs.Build(Spec(PermissionLevel.Edit), Models))); // 끄면 없음
+        Assert.Equal((true, false), (ClaudeArgs.AllowsAgents(PermissionLevel.Read), ClaudeArgs.AllowsAgents(PermissionLevel.Command)));
+        Assert.DoesNotContain("ExitPlanMode", Joined(ClaudeArgs.Build(Spec(PermissionLevel.Command), Models))); // 끄면 없음
         Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Read) with { Plan = true }, Models));
-        Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Chat, mcp: null) with { Plan = true }, Models));
-        Assert.Equal(("acceptEdits", "default", (string?)null, (string?)null),
-            (ClaudeArgs.PlanMode(PermissionLevel.Edit), ClaudeArgs.PlanMode(PermissionLevel.Command), ClaudeArgs.PlanMode(PermissionLevel.Read), ClaudeArgs.PlanMode(PermissionLevel.Chat)));
+        Assert.Equal(("default", (string?)null), (ClaudeArgs.PlanMode(PermissionLevel.Command), ClaudeArgs.PlanMode(PermissionLevel.Read)));
     }
 
     [Fact]
@@ -72,12 +55,12 @@ public sealed class ClaudeArgsTests
         Assert.Equal("""{"plan":"p","planFilePath":"f"}""", ApprovalRequest.PlanInput("""{"plan":"p","planFilePath":"f","allowedPrompts":[{"tool":"Bash"}],"x":1}"""));
         Assert.Equal("{}", ApprovalRequest.PlanInput("not json"));
 
-        using var doc = System.Text.Json.JsonDocument.Parse(PermissionDecision.AllowPlan("""{"plan":"p"}""", "acceptEdits"));
+        using var doc = System.Text.Json.JsonDocument.Parse(PermissionDecision.AllowPlan("""{"plan":"p"}""", "default"));
         var r = doc.RootElement;
         Assert.Equal("allow", r.GetProperty("behavior").GetString());
         Assert.Equal("p", r.GetProperty("updatedInput").GetProperty("plan").GetString());
         var perm = r.GetProperty("updatedPermissions")[0];
-        Assert.Equal(("setMode", "acceptEdits", "session"), (perm.GetProperty("type").GetString(), perm.GetProperty("mode").GetString(), perm.GetProperty("destination").GetString()));
+        Assert.Equal(("setMode", "default", "session"), (perm.GetProperty("type").GetString(), perm.GetProperty("mode").GetString(), perm.GetProperty("destination").GetString()));
     }
 
     [Theory]
@@ -94,17 +77,17 @@ public sealed class ClaudeArgsTests
     {
         // 갈래 방 첫 실행 (2-2 c, 0번 실측: fork-session + session-id → 그 ID로 갈라짐)
         const string source = "2ac92fd3-e819-408f-a834-c33490b7c038";
-        var args = ClaudeArgs.Build(Spec(PermissionLevel.Chat, mcp: null) with { ForkFrom = source }, Models);
+        var args = ClaudeArgs.Build(Spec(PermissionLevel.Read) with { ForkFrom = source }, Models);
         Assert.Contains("--resume | " + source + " | --fork-session | --session-id | " + Sid, Joined(args));
         Assert.Single(args, a => a == "--session-id");
 
         // 이어 쓰기(resume)면 갈래 인자를 쓰지 않는다
-        var resumed = ClaudeArgs.Build(Spec(PermissionLevel.Chat, resume: true, mcp: null) with { ForkFrom = source }, Models);
+        var resumed = ClaudeArgs.Build(Spec(PermissionLevel.Read, resume: true) with { ForkFrom = source }, Models);
         Assert.DoesNotContain("--fork-session", resumed);
         Assert.Contains("--resume | " + Sid, Joined(resumed));
 
-        Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Chat, mcp: null) with { ForkFrom = "not-a-uuid" }, Models));
-        Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Chat, mcp: null) with { ForkFrom = Sid }, Models));
+        Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Read) with { ForkFrom = "not-a-uuid" }, Models));
+        Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Read) with { ForkFrom = Sid }, Models));
     }
 
     [Fact]
@@ -129,19 +112,10 @@ public sealed class ClaudeArgsTests
     }
 
     [Fact]
-    public void Edit_AddsEditToolsAndAcceptEdits_ButNoBash()
-    {
-        var args = ClaudeArgs.Build(Spec(PermissionLevel.Edit), Models);
-        Assert.Contains("--tools | Read,Grep,Glob,Edit,Write,AskUserQuestion,TaskCreate,TaskGet,TaskList,TaskUpdate,WebSearch,WebFetch,Agent | --permission-mode | acceptEdits", Joined(args));
-        Assert.DoesNotContain(args, a => a.Contains("Bash", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains("--strict-mcp-config", args);
-    }
-
-    [Fact]
-    public void Edit_DeniesSettingsScriptsAndInstructionFiles()
+    public void Command_DeniesSettingsScriptsAndInstructionFiles()
     {
         // 편집 금지 경로는 --disallowedTools 바로 뒤에 Edit(…)으로 이어지고, 다음 인자는 다른 플래그다 (가변 인자가 끝나는 곳).
-        var args = ClaudeArgs.Build(Spec(PermissionLevel.Edit), Models).ToList();
+        var args = ClaudeArgs.Build(Spec(PermissionLevel.Command), Models).ToList();
         var at = args.IndexOf("--disallowedTools");
         Assert.True(at > 0);
         var rules = args.Skip(at + 1).TakeWhile(a => !a.StartsWith("--", StringComparison.Ordinal)).ToList();
@@ -149,7 +123,7 @@ public sealed class ClaudeArgsTests
         foreach (var must in new[] { "Edit(Orchestration/HB_Chat/**)", "Edit(**/appsettings*.json)", "Edit(**/CLAUDE.md)", "Edit(**/*.bat)", "Edit(Orchestration/Publish_Output/**)" })
             Assert.Contains(must, rules);
 
-        // 읽기 · 대화 단계에는 편집 도구가 없어 금지 규칙도 없다.
+        // 읽기 단계에는 편집 도구가 없어 금지 규칙도 없다.
         Assert.DoesNotContain("--disallowedTools", ClaudeArgs.Build(Spec(PermissionLevel.Read), Models));
     }
 
@@ -157,7 +131,7 @@ public sealed class ClaudeArgsTests
     public void Resume_UsesResumeAndKeepsRoomRules()
     {
         // 방 규칙은 매 말 넣는다 — 안 넣으면 대화가 압축된 뒤 규칙이 빠진다 (/self-review 0a3b1d5155 C2).
-        var args = ClaudeArgs.Build(Spec(PermissionLevel.Chat, resume: true, mcp: null), Models);
+        var args = ClaudeArgs.Build(Spec(PermissionLevel.Read, resume: true), Models);
         Assert.Contains("--resume | " + Sid, Joined(args));
         Assert.DoesNotContain("--session-id", args);
         Assert.Contains("--append-system-prompt | 규칙", Joined(args));
@@ -165,24 +139,24 @@ public sealed class ClaudeArgsTests
 
     [Fact]
     public void RejectsModelOutsideList() =>
-        Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Chat, model: "sonnet"), Models));
+        Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Read, model: "sonnet"), Models));
 
     [Fact]
     public void RejectsUnsafeModelEvenIfListed()
     {
         const string model = "opus --dangerously-skip-permissions";
-        Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Chat, model: model), [.. Models, model]));
+        Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Read, model: model), [.. Models, model]));
     }
 
     [Fact]
     public void RejectsNonUuidSession() =>
-        Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Chat) with { SessionId = "../x" }, Models));
+        Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Read) with { SessionId = "../x" }, Models));
 
     [Fact]
-    public void ReadAndEditNeedMcpConfig()
+    public void ReadAndCommandNeedMcpConfig()
     {
         Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Read, mcp: null), Models));
-        Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Edit, mcp: " "), Models));
+        Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Command, mcp: " "), Models));
     }
 
     [Fact]

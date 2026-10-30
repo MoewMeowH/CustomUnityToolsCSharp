@@ -67,9 +67,7 @@
                     </label>
                     <label>권한
                         <select name="level">
-                            <option value="Chat">대화</option>
                             <option value="Read" selected>읽기</option>
-                            <option value="Edit">편집</option>
                             <option value="Command">명령 (승인)</option>
                         </select>
                     </label>
@@ -96,9 +94,7 @@
                 </form>
                 <p class="muted" style="margin:6px 0 0;font-size:12.5px">작업 폴더는 <a href="/Settings">설정</a>에서 더할 수 있습니다.</p>
                 <p class="muted" style="margin:8px 0 0;font-size:12.5px">
-                    대화: @RoomRules.Describe(PermissionLevel.Chat).<br />
                     읽기: @RoomRules.Describe(PermissionLevel.Read).<br />
-                    편집: @RoomRules.Describe(PermissionLevel.Edit).<br />
                     명령: @RoomRules.Describe(PermissionLevel.Command).<br />
                     방의 세션은 이 앱 전용입니다 — Claude 앱 · CLI에서 이어 쓰지 마세요.
                 </p>
@@ -136,11 +132,9 @@
                         <div class="group-member-row" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
                             <input type="text" name="names" placeholder="@(optional ? "구성원 이름 (선택)" : "구성원 이름 (예: " + (i == 0 ? "A" : "B") + ")")" maxlength="20" required="@(!optional)" style="width:140px" />
                             <input type="text" name="roles" placeholder="@(i switch { 0 => "역할 (예: 내 코드의 위험을 찾는다)", 1 => "역할 (예: A의 의견에 반박한다)", _ => "역할" })" maxlength="@GroupChat.RoleMaxChars" style="flex:1;min-width:200px" />
-                            @* 단계 (단톡방 ⑤ — 구성원마다): 편집 · 명령 구성원이 낀 말은 차례로 돈다. Codex는 읽기만 *@
+                            @* 단계 (단톡방 ⑤ — 구성원마다): 명령 구성원이 낀 말은 차례로 돈다. Codex는 읽기만 *@
                             <select name="levels" title="이 구성원의 권한 단계 (Codex는 읽기만)">
-                                <option value="Chat">대화</option>
                                 <option value="Read" selected>읽기</option>
-                                <option value="Edit">편집</option>
                                 <option value="Command">명령</option>
                             </select>
                             @* 엔진 (단톡방 ②): Codex는 설정에서 고른 작업 폴더에서만 · 읽기 전용 *@
@@ -177,7 +171,7 @@
                 </form>
                 <p class="muted" style="margin:6px 0 0;font-size:12.5px">
                     부른 구성원만 답합니다 (@@이름 · 여러 명 · @@All은 동시에, 같은 대화를 받고). 구성원마다 세션이 따로 돌고, 단톡방 대화를 함께 받습니다.
-                    편집 · 명령 구성원이 낀 말은 구성원 순서대로 하나씩 돌고, 뒤 구성원은 앞 답을 받습니다. 승인 · 질문 카드는 단톡방 화면에 구성원 이름으로 나옵니다.
+                    명령 구성원이 낀 말은 구성원 순서대로 하나씩 돌고, 뒤 구성원은 앞 답을 받습니다. 승인 · 질문 카드는 단톡방 화면에 구성원 이름으로 나옵니다.
                     구성원마다 작업 폴더를 고를 수 있습니다 — 구성원은 자기 작업 폴더에서 돌고, 다른 구성원 폴더의 파일은 보지 못할 수 있습니다.
                     Codex 구성원은 <a href="/Settings">설정</a>에서 고른 작업 폴더에서만 됩니다 (지금: @(Model.CodexWorkspaces.Count == 0 ? "없음" : string.Join(", ", Model.CodexWorkspaces))) — 읽기 전용이지만 디스크 전체를 읽을 수 있습니다.
                 </p>

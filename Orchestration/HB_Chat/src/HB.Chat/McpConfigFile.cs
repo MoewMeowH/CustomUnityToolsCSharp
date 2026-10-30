@@ -5,7 +5,7 @@ using System.Text.Json.Nodes;
 namespace HB.Chat;
 
 /// <summary>
-/// 읽기 · 편집 단계의 --mcp-config 파일: 작업 폴더 .mcp.json에서 서버 하나(hb-orchestration)만 골라 앱 데이터 폴더에 쓴다.
+/// 읽기 · 명령 단계의 --mcp-config 파일: 작업 폴더 .mcp.json에서 서버 하나(hb-orchestration)만 골라 앱 데이터 폴더에 쓴다.
 /// .mcp.json을 그대로 넘기면 거기 더해진 다른 서버도 붙는다. --strict-mcp-config와 같이 써서 claude.ai 커넥터 · 사용자 MCP도 막는다 (0번 실측 B · C).
 /// 항목은 고치지 않고 옮긴다 (env의 ${VAR:-} 자리표시는 claude가 푼다 — 0번 실측 C에서 연결 확인). 실행마다 다시 써서 .mcp.json 변경을 따라간다.
 /// </summary>

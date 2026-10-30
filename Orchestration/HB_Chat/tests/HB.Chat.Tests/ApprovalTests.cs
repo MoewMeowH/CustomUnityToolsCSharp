@@ -149,14 +149,10 @@ public sealed class ApprovalTests
     [Fact]
     public void OtherLevels_HaveNoCommandToolsOrHook()
     {
-        foreach (var level in new[] { PermissionLevel.Chat, PermissionLevel.Read, PermissionLevel.Edit })
-        {
-            var spec = CommandSpec() with { Level = level };
-            var args = ClaudeArgs.Build(spec, ["opus"]);
-            Assert.DoesNotContain("--settings", args);
-            Assert.DoesNotContain(args, a => a.Contains("Bash", StringComparison.Ordinal));
-            Assert.Equal("stdio", args[args.ToList().IndexOf("--permission-prompt-tool") + 1]); // 거절도 호스트가 한다
-        }
+        var args = ClaudeArgs.Build(CommandSpec() with { Level = PermissionLevel.Read }, ["opus"]);
+        Assert.DoesNotContain("--settings", args);
+        Assert.DoesNotContain(args, a => a.Contains("Bash", StringComparison.Ordinal));
+        Assert.Equal("stdio", args[args.ToList().IndexOf("--permission-prompt-tool") + 1]); // 거절도 호스트가 한다
     }
 
     [Fact]

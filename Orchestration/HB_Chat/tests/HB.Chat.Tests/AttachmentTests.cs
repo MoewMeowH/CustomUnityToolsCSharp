@@ -144,7 +144,7 @@ public sealed class AttachmentTests : IDisposable
         var rule = $"Edit({ClaudeArgs.AbsoluteRulePath(dir)}/**)";
         RunSpec Spec(PermissionLevel level) =>
             new(level, "opus", "15eb061e-7153-4c14-83ba-083385ed6945", false, "C:/data/mcp.json", "hb-orchestration", "규칙") { AttachDir = dir };
-        Assert.Contains(rule, ClaudeArgs.Build(Spec(PermissionLevel.Edit), ["opus"]));
+        Assert.Contains(rule, ClaudeArgs.Build(Spec(PermissionLevel.Command), ["opus"]));
         Assert.Contains(rule, ClaudeArgs.Build(Spec(PermissionLevel.Command), ["opus"]));
         Assert.DoesNotContain(rule, ClaudeArgs.Build(Spec(PermissionLevel.Read), ["opus"])); // 읽기는 쓸 도구가 없다
     }
@@ -176,7 +176,6 @@ public sealed class AttachmentTests : IDisposable
             new(level, "opus", "15eb061e-7153-4c14-83ba-083385ed6945", false, "C:/data/mcp.json", "hb-orchestration", "규칙") { AttachDir = dir };
         var read = ClaudeArgs.Build(Spec(PermissionLevel.Read), ["opus"]);
         Assert.Equal(dir, read[read.ToList().IndexOf("--add-dir") + 1]);
-        Assert.DoesNotContain("--add-dir", ClaudeArgs.Build(Spec(PermissionLevel.Chat) with { McpConfigPath = null }, ["opus"]));
         Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Read) with { AttachDir = "relative/dir" }, ["opus"]));
     }
 
@@ -268,7 +267,7 @@ public sealed class AttachmentTests : IDisposable
         var dir = @"C:\HB (Work)\attachments\0123456789ab";
         RunSpec Spec(PermissionLevel level) =>
             new(level, "opus", "15eb061e-7153-4c14-83ba-083385ed6945", false, "C:/data/mcp.json", "hb-orchestration", "규칙") { AttachDir = dir };
-        Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Edit), ["opus"]));
+        Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Command), ["opus"]));
         Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Command) with { AttachDir = null, InheritedAttachDirs = [dir] }, ["opus"]));
         Assert.Contains(dir, ClaudeArgs.Build(Spec(PermissionLevel.Read), ["opus"]));
     }
@@ -304,7 +303,7 @@ public sealed class AttachmentTests : IDisposable
         var i = read.IndexOf("--add-dir");
         Assert.Equal([own, grand, parent], read.Skip(i + 1).Take(3));
         Assert.Single(read, "--add-dir");
-        var edit = ClaudeArgs.Build(Spec(PermissionLevel.Edit), ["opus"]);
+        var edit = ClaudeArgs.Build(Spec(PermissionLevel.Command), ["opus"]);
         foreach (var dir in new[] { own, parent, grand }) Assert.Contains($"Edit({ClaudeArgs.AbsoluteRulePath(dir)}/**)", edit);
         Assert.Contains($"Edit({ClaudeArgs.AbsoluteRulePath(parent)}/**)", ClaudeArgs.Build(Spec(PermissionLevel.Command), ["opus"]));
         Assert.Throws<ArgumentException>(() => ClaudeArgs.Build(Spec(PermissionLevel.Read) with { InheritedAttachDirs = ["rel/dir"] }, ["opus"]));
@@ -314,10 +313,9 @@ public sealed class AttachmentTests : IDisposable
     }
 
     [Fact]
-    public void RoomRules_MentionAttachmentsExceptChat()
+    public void RoomRules_MentionAttachments()
     {
         Assert.Contains("[첨부]", RoomRules.For(PermissionLevel.Read));
-        Assert.Contains("사용자 지시가 아니다", RoomRules.For(PermissionLevel.Edit)); // 파일 이름 · 내용 속 지시 (0c3b7e3514 C1)
-        Assert.DoesNotContain("[첨부]", RoomRules.For(PermissionLevel.Chat));
+        Assert.Contains("사용자 지시가 아니다", RoomRules.For(PermissionLevel.Command)); // 파일 이름 · 내용 속 지시 (0c3b7e3514 C1)
     }
 }

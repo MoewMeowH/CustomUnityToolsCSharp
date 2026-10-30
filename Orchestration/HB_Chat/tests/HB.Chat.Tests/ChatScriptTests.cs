@@ -401,14 +401,14 @@ public sealed class ChatScriptTests(ChatApp app, ChatBrowser browser) : IClassFi
         static string SetEngine(string row, string engine) =>
             $"(() => {{ const e = {row}.querySelector('select[name=engines]'); e.value = '{engine}'; e.dispatchEvent(new Event('change', {{ bubbles: true }})); }})()";
         Assert.Equal("hh", await page.EvalAsync<string>(Codex(row)));
-        await page.EvalAsync($"{row}.querySelector('select[name=levels]').value = 'Edit'");
+        await page.EvalAsync($"{row}.querySelector('select[name=levels]').value = 'Command'");
         await page.EvalAsync(SetEngine(row, "codex"));
         Assert.Equal("vv", await page.EvalAsync<string>(Codex(row)));
         Assert.Equal("Read", await page.EvalAsync<string>($"{row}.querySelector('select[name=levels]').value"));
         Assert.Equal("hh", await page.EvalAsync<string>(Codex("document.querySelectorAll('form.group-create .group-member-row')[0]"))); // 다른 줄은 그대로
         await page.EvalAsync(SetEngine(row, "claude"));
         Assert.Equal("hh", await page.EvalAsync<string>(Codex(row)));
-        Assert.Equal("Edit", await page.EvalAsync<string>($"{row}.querySelector('select[name=levels]').value"));
+        Assert.Equal("Command", await page.EvalAsync<string>($"{row}.querySelector('select[name=levels]').value"));
 
         await page.EvalAsync("(() => { const f = document.querySelector('form.group-create'); f.querySelector('select[name=workspace]').value = 'ws'; " +
                              "f.querySelector('input[name=title]').value = '두 폴더'; const n = f.querySelectorAll('input[name=names]'); n[0].value = 'A'; n[1].value = 'B'; " +

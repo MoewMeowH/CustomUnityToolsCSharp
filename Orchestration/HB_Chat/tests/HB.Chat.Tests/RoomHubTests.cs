@@ -21,6 +21,7 @@ public sealed class RoomHubTests : IDisposable
     {
         Directory.CreateDirectory(Path.Combine(_dir, "ws"));
         Directory.CreateDirectory(Path.Combine(_dir, "projects"));
+        File.WriteAllText(Path.Combine(_dir, "ws", ".mcp.json"), """{"mcpServers":{"hb-orchestration":{"command":"dotnet"}}}""");
         var options = _options = new ChatOptions
         {
             DataDir = Path.Combine(_dir, "data"),
@@ -54,7 +55,7 @@ public sealed class RoomHubTests : IDisposable
         try { Directory.Delete(_dir, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
 
-    private Room NewRoom() => _store.Create("ws", PermissionLevel.Chat, "opus", null);
+    private Room NewRoom() => _store.Create("ws", PermissionLevel.Read, "opus", null);
 
     private static async Task<List<string>> Collect(Channel<string> ch, int count)
     {
@@ -113,7 +114,7 @@ public sealed class RoomHubTests : IDisposable
     public async Task BlockedBeforeRun_EndCarriesPrompt()
     {
         // 4차 C2: claude를 띄우기 전에 막힌 말은 end에 Prompt를 실어 화면이 남긴다 (세션 기록에 없으므로). 돈 턴은 싣지 않는다.
-        var blocked = _store.Create("없는폴더", PermissionLevel.Chat, "opus", null);
+        var blocked = _store.Create("없는폴더", PermissionLevel.Read, "opus", null);
         var ch = _hub.Subscribe(blocked.Id);
         Assert.Null(_hub.Send(blocked.Id, "여기 말"));
         var end = (await Until(ch, e => e.Kind == "idle")).Single(e => e.Kind == "end");
@@ -179,7 +180,7 @@ public sealed class RoomHubTests : IDisposable
     public async Task ForkRoom_FirstRunForks_ThenClears()
     {
         const string source = "2ac92fd3-e819-408f-a834-c33490b7c038";
-        var room = _store.Create("ws", PermissionLevel.Chat, "opus", "갈래", forkOf: source);
+        var room = _store.Create("ws", PermissionLevel.Read, "opus", "갈래", forkOf: source);
         Assert.Null(room.ReadUpTo); // 이어받은 말은 읽은 것으로
         var ch = _hub.Subscribe(room.Id);
         Assert.Null(_hub.Send(room.Id, "hello fork"));
@@ -196,7 +197,7 @@ public sealed class RoomHubTests : IDisposable
     public async Task ForkRoom_RecordAlreadyThere_ResumesAndClearsFork()
     {
         // 중지 등으로 갈래 기록이 이미 생긴 방: 다음 실행은 resume이고 갈래 표시는 비운다 (중복 갈래 없음)
-        var room = _store.Create("ws", PermissionLevel.Chat, "opus", null, forkOf: "2ac92fd3-e819-408f-a834-c33490b7c038");
+        var room = _store.Create("ws", PermissionLevel.Read, "opus", null, forkOf: "2ac92fd3-e819-408f-a834-c33490b7c038");
         var dir = Path.Combine(_dir, "projects", "ws");
         Directory.CreateDirectory(dir);
         File.WriteAllText(Path.Combine(dir, room.SessionId + ".jsonl"),
@@ -276,14 +277,14 @@ public sealed class RoomHubTests : IDisposable
     public async Task TaskTools_SendStepsFromTasksFolder()
     {
         // 할 일 도구 뒤 출력 · 턴 끝에 폴더를 다시 읽어 steps 알림 (3차 b, 0번 실측 B 모양) — 칩은 할 일 제목 · 번호 → 상태.
-        // 할 일 도구가 있는 단계(편집)로 — 대화 단계는 도구가 없다 (/self-review ea28ba9185 C7)
+        // 할 일 도구가 있는 단계로 (/self-review ea28ba9185 C7)
         File.WriteAllText(Path.Combine(_dir, "ws", ".mcp.json"), """{"mcpServers":{"hb-orchestration":{"command":"dotnet"}}}""");
-        var room = _store.Create("ws", PermissionLevel.Edit, "opus", null);
+        var room = _store.Create("ws", PermissionLevel.Command, "opus", null);
         var ch = _hub.Subscribe(room.Id);
         Assert.Empty((await Until(ch, e => e.Kind == "snapshot")).Last().Steps!); // 아직 할 일 없음
         Assert.Null(_hub.Send(room.Id, "tasks please"));
         var seen = await Until(ch, e => e.Kind == "idle");
-        Assert.Equal(PermissionLevel.Edit, _specs.Last().Level);
+        Assert.Equal(PermissionLevel.Command, _specs.Last().Level);
         Assert.Equal(["alpha", "beta", "#1 → in_progress"], seen.Where(e => e.Kind == "tool").Select(e => e.Detail));
         Assert.Null(_hub.StepProgress(room.Id)); // 쉬는 방은 목록에 진행 글을 붙이지 않는다
         var last = seen.Last(e => e.Kind == "steps").Steps!;
@@ -310,7 +311,7 @@ public sealed class RoomHubTests : IDisposable
     [Fact]
     public async Task AttachDir_InSpecWhenFolderExists()
     {
-        // 첨부는 읽기 단계 이상 (대화 단계는 받지 않음) — 읽기 방은 작업 폴더 .mcp.json이 있어야 돈다
+        // 읽기 방은 작업 폴더 .mcp.json이 있어야 돈다
         File.WriteAllText(Path.Combine(_dir, "ws", ".mcp.json"), """{"mcpServers":{"hb-orchestration":{"command":"dotnet","args":["x.dll"]}}}""");
         var room = _store.Create("ws", PermissionLevel.Read, "opus", null);
         var ch = _hub.Subscribe(room.Id);
@@ -347,8 +348,8 @@ public sealed class RoomHubTests : IDisposable
     [Fact]
     public void Search_SkipsTrash()
     {
-        var kept = _store.Create("ws", PermissionLevel.Chat, "opus", "빌드 방 하나");
-        var trashed = _store.Create("ws", PermissionLevel.Chat, "opus", "빌드 방 둘");
+        var kept = _store.Create("ws", PermissionLevel.Read, "opus", "빌드 방 하나");
+        var trashed = _store.Create("ws", PermissionLevel.Read, "opus", "빌드 방 둘");
         _store.Update(trashed.Id, r => r with { DeletedAt = DateTimeOffset.Now });
         var hits = new RoomList(_store, _hub, new ChatTranscripts(() => Path.Combine(_dir, "projects"))).Search("빌드");
         Assert.Equal([kept.Id], hits.Select(h => h.RoomId));
@@ -362,7 +363,7 @@ public sealed class RoomHubTests : IDisposable
         Assert.Null(_hub.Send(source.Id, "sleep please"));
         await Until(sourceCh, e => e.Kind == "delta");
 
-        var fork = _store.Create("ws", PermissionLevel.Chat, "opus", null, forkOf: source.SessionId);
+        var fork = _store.Create("ws", PermissionLevel.Read, "opus", null, forkOf: source.SessionId);
         var ch = _hub.Subscribe(fork.Id);
         Assert.Null(_hub.Send(fork.Id, "hello fork"));
         var end = (await Until(ch, e => e.Kind == "idle")).Single(e => e.Kind == "end");
@@ -376,7 +377,7 @@ public sealed class RoomHubTests : IDisposable
     [Fact]
     public async Task ForkRoom_FailedFirstRun_KeepsFork()
     {
-        var room = _store.Create("ws", PermissionLevel.Chat, "opus", null, forkOf: "2ac92fd3-e819-408f-a834-c33490b7c038");
+        var room = _store.Create("ws", PermissionLevel.Read, "opus", null, forkOf: "2ac92fd3-e819-408f-a834-c33490b7c038");
         var ch = _hub.Subscribe(room.Id);
         Assert.Null(_hub.Send(room.Id, "fail now"));
         await Until(ch, e => e.Kind == "idle");
@@ -550,7 +551,7 @@ public sealed class RoomHubTests : IDisposable
     [Fact]
     public async Task WorkspaceOutsideList_Fails()
     {
-        var room = _store.Create("nope", PermissionLevel.Chat, "opus", null);
+        var room = _store.Create("nope", PermissionLevel.Read, "opus", null);
         var ch = _hub.Subscribe(room.Id);
         _hub.Send(room.Id, "hello");
         var end = (await Until(ch, e => e.Kind == "idle")).Single(e => e.Kind == "end");
@@ -756,20 +757,19 @@ public sealed class RoomHubTests : IDisposable
         _hub.Send(room.Id, "echo first");
         var first = await Echoed(ch);
         Assert.StartsWith("<system-reminder>", first);
-        Assert.Contains(RoomRules.For(PermissionLevel.Chat), first);
+        Assert.Contains(RoomRules.For(PermissionLevel.Read, modeCard: true), first);
         Assert.EndsWith("echo first", first);
-        Assert.Equal(RoomRules.Hash(RoomRules.For(PermissionLevel.Chat)), _store.Get(room.Id)!.RulesHash);
+        Assert.Equal(RoomRules.Hash(RoomRules.For(PermissionLevel.Read, modeCard: true)), _store.Get(room.Id)!.RulesHash);
 
         // 그대로면 붙이지 않는다
         _hub.Send(room.Id, "echo second");
         Assert.Equal("echo second", await Echoed(ch));
 
         // 단계를 바꾸면 다시 한 번 — 새 단계의 규칙으로
-        _store.Update(room.Id, r => r with { Level = PermissionLevel.Read });
-        File.WriteAllText(Path.Combine(_dir, "ws", ".mcp.json"), """{"mcpServers":{"hb-orchestration":{"command":"dotnet"}}}""");
+        _store.Update(room.Id, r => r with { Level = PermissionLevel.Command });
         _hub.Send(room.Id, "echo third");
         var third = await Echoed(ch);
-        Assert.Contains(RoomRules.Describe(PermissionLevel.Read), third);
+        Assert.Contains(RoomRules.Describe(PermissionLevel.Command), third);
         Assert.EndsWith("echo third", third);
     }
 
@@ -874,6 +874,7 @@ public sealed class RoomHubTests : IDisposable
     [Fact]
     public async Task ReadRoom_WithoutMcpJson_FailsBeforeRunning()
     {
+        File.Delete(Path.Combine(_dir, "ws", ".mcp.json"));
         var room = _store.Create("ws", PermissionLevel.Read, "opus", null);
         var ch = _hub.Subscribe(room.Id);
         _hub.Send(room.Id, "hello");

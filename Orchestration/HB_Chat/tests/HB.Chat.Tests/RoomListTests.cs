@@ -243,9 +243,9 @@ public sealed class RoomListTests : IDisposable
         var data = Path.Combine(_dir, "data");
         var store = new RoomStore(Path.Combine(data, "rooms.json"));
         var now = DateTimeOffset.Now;
-        var old = store.Create("ws", PermissionLevel.Chat, "haiku", "오래됨");
-        var recent = store.Create("ws", PermissionLevel.Chat, "haiku", "최근");
-        var alive = store.Create("ws", PermissionLevel.Chat, "haiku", "살아 있음");
+        var old = store.Create("ws", PermissionLevel.Read, "haiku", "오래됨");
+        var recent = store.Create("ws", PermissionLevel.Read, "haiku", "최근");
+        var alive = store.Create("ws", PermissionLevel.Read, "haiku", "살아 있음");
         store.Update(old.Id, r => r with { DeletedAt = now.AddDays(-31) });
         store.Update(recent.Id, r => r with { DeletedAt = now.AddDays(-29) });
         Directory.CreateDirectory(Path.Combine(data, "attachments", old.Id));
@@ -329,9 +329,9 @@ public sealed class RoomListTests : IDisposable
         var data = Path.Combine(_dir, "data");
         var store = new RoomStore(Path.Combine(data, "rooms.json"));
         var now = DateTimeOffset.Now;
-        var a = store.Create("ws", PermissionLevel.Chat, "haiku", "a");
-        var b = store.Create("ws", PermissionLevel.Chat, "haiku", "b");
-        var alive = store.Create("ws", PermissionLevel.Chat, "haiku", "살아 있음");
+        var a = store.Create("ws", PermissionLevel.Read, "haiku", "a");
+        var b = store.Create("ws", PermissionLevel.Read, "haiku", "b");
+        var alive = store.Create("ws", PermissionLevel.Read, "haiku", "살아 있음");
         store.Update(a.Id, r => r with { DeletedAt = now });
         store.Update(b.Id, r => r with { DeletedAt = now });
         Directory.CreateDirectory(Path.Combine(data, "attachments", a.Id));
@@ -342,7 +342,7 @@ public sealed class RoomListTests : IDisposable
         Assert.False(Directory.Exists(Path.Combine(data, "attachments", a.Id)));
 
         // 비우기는 화면에 보인 방만 — 그사이 휴지통에 들어온 방은 남는다 (bd52c6f0d1 C3)
-        var late = store.Create("ws", PermissionLevel.Chat, "haiku", "늦게 넣음");
+        var late = store.Create("ws", PermissionLevel.Read, "haiku", "늦게 넣음");
         store.Update(late.Id, r => r with { DeletedAt = now });
         Assert.Equal([b.Id], Trash.DeleteNow(store, data, [b.Id, alive.Id]));
         Assert.NotNull(store.Get(late.Id));
@@ -375,8 +375,8 @@ public sealed class RoomListTests : IDisposable
     public void RoomStore_RemoveWhere_SavesAndChecksUnderLock()
     {
         var store = new RoomStore(Path.Combine(_dir, "rm", "rooms.json"));
-        var a = store.Create("ws", PermissionLevel.Chat, "haiku", null);
-        var b = store.Create("ws", PermissionLevel.Chat, "haiku", null);
+        var a = store.Create("ws", PermissionLevel.Read, "haiku", null);
+        var b = store.Create("ws", PermissionLevel.Read, "haiku", null);
         Assert.Equal([a.Id], store.RemoveWhere(r => r.Id == a.Id));
         Assert.Empty(store.RemoveWhere(r => r.Id == "ffffffffffff"));
         Assert.Equal([b.Id], new RoomStore(Path.Combine(_dir, "rm", "rooms.json")).All().Select(r => r.Id));
@@ -389,7 +389,7 @@ public sealed class RoomListTests : IDisposable
         var data = Path.Combine(_dir, "data2");
         var store = new RoomStore(Path.Combine(data, "rooms.json"));
         var now = DateTimeOffset.Now;
-        var room = store.Create("ws", PermissionLevel.Chat, "haiku", null);
+        var room = store.Create("ws", PermissionLevel.Read, "haiku", null);
         store.Update(room.Id, r => r with { DeletedAt = now.AddDays(-40) });
         store.Update(room.Id, r => r with { DeletedAt = null }); // 되살림
         Assert.Empty(Trash.Purge(store, data, now));
@@ -433,7 +433,7 @@ public sealed class RoomListTests : IDisposable
     public void MarkLegacyRead_SkipsUnforkedForkRoom()
     {
         var store = new RoomStore(Path.Combine(_dir, "fk", "rooms.json"));
-        var fork = store.Create("ws", PermissionLevel.Chat, "haiku", null, forkOf: Guid.NewGuid().ToString("D"), forkSourceSize: 10);
+        var fork = store.Create("ws", PermissionLevel.Read, "haiku", null, forkOf: Guid.NewGuid().ToString("D"), forkSourceSize: 10);
         Assert.Equal(10, fork.ForkSourceSize);
         Assert.Equal(0, RoomList.MarkLegacyRead(store, new ChatTranscripts(() => Path.Combine(_dir, "none"))));
         Assert.Null(store.Get(fork.Id)!.ReadUpTo); // 첫 턴이 끝날 때 정한다 (95e8b1c242 C1)
@@ -463,10 +463,10 @@ public sealed class RoomListTests : IDisposable
     {
         var path = Path.Combine(_dir, "rooms.json");
         var store = new RoomStore(path);
-        var fresh = store.Create("ws", PermissionLevel.Chat, "haiku", null);
+        var fresh = store.Create("ws", PermissionLevel.Read, "haiku", null);
         Assert.Equal(0, fresh.ReadUpTo); // 새 방은 0 = 아무것도 안 읽음
 
-        var legacy = store.Create("ws", PermissionLevel.Chat, "haiku", null);
+        var legacy = store.Create("ws", PermissionLevel.Read, "haiku", null);
         store.Update(legacy.Id, r => r with { ReadUpTo = null });
         var projects = Path.Combine(_dir, "projects", "p");
         Directory.CreateDirectory(projects);

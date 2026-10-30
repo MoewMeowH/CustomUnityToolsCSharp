@@ -4,7 +4,7 @@ namespace HB.Chat;
 
 /// <summary>
 /// 실행 하나의 입력. Resume이면 --resume, 아니면 --session-id로 새 세션을 앱이 정한 ID로 만든다.
-/// McpConfigPath는 읽기 · 편집 · 명령 단계에 필요하다 (hb-orchestration 항목만 담은 파일, <see cref="McpConfigFile"/>).
+/// McpConfigPath는 읽기 · 명령 단계에 필요하다 (hb-orchestration 항목만 담은 파일, <see cref="McpConfigFile"/>).
 /// </summary>
 public sealed record RunSpec(
     PermissionLevel Level,
@@ -18,11 +18,11 @@ public sealed record RunSpec(
     /// <summary>갈래 방의 첫 실행: 이어받을 원래 세션 ID (Resume이 아닐 때만 쓴다).</summary>
     public string? ForkFrom { get; init; }
 
-    /// <summary>그 방 첨부 폴더 (절대 경로). 대화 단계가 아니면 --add-dir로 더해 Read로 열 수 있게 한다.</summary>
+    /// <summary>그 방 첨부 폴더 (절대 경로). --add-dir로 더해 Read로 열 수 있게 한다.</summary>
     public string? AttachDir { get; init; }
 
     /// <summary>
-    /// 갈래 방이 이어받은 방들의 첨부 폴더 (절대 경로). AttachDir와 같이 --add-dir로 읽게 하고, 편집 · 명령 방은 편집을 막는다
+    /// 갈래 방이 이어받은 방들의 첨부 폴더 (절대 경로). AttachDir와 같이 --add-dir로 읽게 하고, 명령 방은 편집을 막는다
     /// (2-2 리뷰 C6이 보류한 "다른 방 폴더에 쓸 수 있게 됨"을 Edit 금지로).
     /// </summary>
     public IReadOnlyList<string> InheritedAttachDirs { get; init; } = [];
@@ -30,7 +30,7 @@ public sealed record RunSpec(
     /// <summary>추론 강도 (--effort, <see cref="RoomEffort.Levels"/>). null이면 넣지 않는다.</summary>
     public string? Effort { get; init; }
 
-    /// <summary>계획 모드로 시작 (Claude 앱 기능 C — "계획 먼저"). 편집 · 명령 단계만 (<see cref="ClaudeArgs.PlanMode"/>).</summary>
+    /// <summary>계획 모드로 시작 (Claude 앱 기능 C — "계획 먼저"). 명령 단계만 (<see cref="ClaudeArgs.PlanMode"/>).</summary>
     public bool Plan { get; init; }
 
     /// <summary>
@@ -50,13 +50,13 @@ public sealed record RunSpec(
 }
 
 /// <summary>
-/// 권한 단계 → claude 인자 (+ 0번 실측: 읽기 · 편집도 --strict-mcp-config로 claude.ai 커넥터 · 사용자 MCP를 막는다).
+/// 권한 단계 → claude 인자 (+ 0번 실측: 읽기도 --strict-mcp-config로 claude.ai 커넥터 · 사용자 MCP를 막는다).
 /// 인자는 이 표에서만 만든다. 위험 우회 인자(dangerously · bypass)가 생기면 예외 (CodePet assertSafeArgv와 같은 장치).
 /// </summary>
 public static partial class ClaudeArgs
 {
     /// <summary>
-    /// 편집 단계에서 Edit · Write를 막는 경로 (작업 폴더 기준 gitignore 모양, /self-review security b19234c862 C1).
+    /// 명령 단계에서 Edit · Write를 막는 경로 (작업 폴더 기준 gitignore 모양, /self-review security b19234c862 C1).
     /// 고치면 다음 실행에 명령 실행 · 권한 확장 · 다른 세션 지시 변경으로 이어지는 파일들: 이 앱 자신(설정 · 코드), MCP 서버 게시 폴더(설정 · modes.json),
     /// 모든 appsettings, 지휘자 지시 파일, 스크립트. `.claude/` · `.mcp.json`은 CLI가 보호 경로로 따로 막지만(문서) 겹쳐 둔다.
     /// Edit(…) 규칙은 Write 도구에도 걸린다 (2026-10-28 실측, 2.1.311).
@@ -100,30 +100,27 @@ public static partial class ClaudeArgs
             if (!RoomEffort.Levels.Contains(effort, StringComparer.Ordinal)) throw new ArgumentException($"알 수 없는 추론 강도: {effort}");
             args.AddRange(["--effort", effort]);
         }
-        // 첨부 폴더: 작업 폴더 밖이라 없으면 Read가 거절된다 (2-2 0번 실측). 대화 단계는 도구가 없어 넣지 않는다 (사용자 결정).
+        // 첨부 폴더: 작업 폴더 밖이라 없으면 Read가 거절된다 (2-2 0번 실측).
         // --add-dir는 여러 값을 받으므로 바로 뒤에 다른 플래그가 온다.
         var attachDeny = new List<string>();
-        if (spec.Level != PermissionLevel.Chat)
+        // 그 방 첨부 폴더 + 갈래 방이 이어받은 방들의 첨부 폴더
+        var dirs = (spec.AttachDir is { } own ? [own] : Array.Empty<string>()).Concat(spec.InheritedAttachDirs).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        foreach (var dir in dirs)
         {
-            // 그 방 첨부 폴더 + 갈래 방이 이어받은 방들의 첨부 폴더
-            var dirs = (spec.AttachDir is { } own ? [own] : Array.Empty<string>()).Concat(spec.InheritedAttachDirs).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            foreach (var dir in dirs)
-            {
-                if (!Path.IsPathFullyQualified(dir)) throw new ArgumentException($"첨부 폴더는 절대 경로여야 한다: {dir}");
-                // 편집 · 명령 방은 Edit(…) 금지가 걸려야 연다 — 규칙 괄호 안에서 뜻이 달라질 글자가 든 경로는 막는다 (RoomHub가 먼저 걸러 알림,
-                // /self-review security 4c300badae C3)
-                if (spec.Level is PermissionLevel.Edit or PermissionLevel.Command && !IsRuleSafePath(dir))
-                    throw new ArgumentException($"편집 금지 규칙에 쓸 수 없는 글자가 든 첨부 폴더: {dir}");
-            }
-            if (dirs.Count > 0)
-            {
-                args.Add("--add-dir");
-                args.AddRange(dirs);
-            }
-            // 편집 · 명령 방은 그 폴더 편집을 막는다: 추가 폴더의 .claude/skills를 CLI가 불러와, 써 두면 다음 턴부터 실린다
-            // (/self-review 0c3b7e3514 C2 실측). 편집 금지 목록 끝에 붙는다.
-            attachDeny.AddRange(dirs.Select(dir => $"Edit({AbsoluteRulePath(dir)}/**)"));
+            if (!Path.IsPathFullyQualified(dir)) throw new ArgumentException($"첨부 폴더는 절대 경로여야 한다: {dir}");
+            // 명령 방은 Edit(…) 금지가 걸려야 연다 — 규칙 괄호 안에서 뜻이 달라질 글자가 든 경로는 막는다 (RoomHub가 먼저 걸러 알림,
+            // /self-review security 4c300badae C3)
+            if (spec.Level == PermissionLevel.Command && !IsRuleSafePath(dir))
+                throw new ArgumentException($"편집 금지 규칙에 쓸 수 없는 글자가 든 첨부 폴더: {dir}");
         }
+        if (dirs.Count > 0)
+        {
+            args.Add("--add-dir");
+            args.AddRange(dirs);
+        }
+        // 명령 방은 그 폴더 편집을 막는다: 추가 폴더의 .claude/skills를 CLI가 불러와, 써 두면 다음 턴부터 실린다
+        // (/self-review 0c3b7e3514 C2 실측). 편집 금지 목록 끝에 붙는다.
+        attachDeny.AddRange(dirs.Select(dir => $"Edit({AbsoluteRulePath(dir)}/**)"));
         if (spec.Resume) args.AddRange(["--resume", spec.SessionId]);
         else if (spec.ForkFrom is { } source)
         {
@@ -144,23 +141,12 @@ public static partial class ClaudeArgs
         var planTool = spec.Plan ? "," + ApprovalRequest.PlanTool : "";
         switch (spec.Level)
         {
-            case PermissionLevel.Chat:
-                // --tools ""여도 MCP 도구는 남는다 (0번 실측 C) → MCP는 --strict-mcp-config로 하나도 안 붙인다.
-                args.AddRange(["--tools", "", "--strict-mcp-config"]);
-                break;
             case PermissionLevel.Read:
                 args.AddRange(["--tools", "Read,Grep,Glob," + HostTools + "," + WebTools + "," + AgentTool]);
                 AddMcp(args, spec);
                 break;
-            case PermissionLevel.Edit:
-                args.AddRange(["--tools", "Read,Grep,Glob,Edit,Write," + HostTools + "," + WebTools + "," + AgentTool + planTool, "--permission-mode", spec.Plan ? "plan" : "acceptEdits"]);
-                args.Add("--disallowedTools");
-                args.AddRange(EditDenied.Select(p => $"Edit({p})"));
-                args.AddRange(attachDeny);
-                AddMcp(args, spec);
-                break;
             case PermissionLevel.Command:
-                // 편집 단계 + 명령 도구. 명령은 stdio 호스트(앱)의 승인 카드로 묻는다 (3차 a — 그 전에는 PermissionRequest HTTP 훅).
+                // 읽기 도구 + 편집 · 명령 도구. 명령은 stdio 호스트(앱)의 승인 카드로 묻는다 (3차 a — 그 전에는 PermissionRequest HTTP 훅).
                 // acceptEdits는 쓰지 않는다: 그 모드는 작업 폴더 안 cp · mv 같은 파일 명령을 묻지 않고 허용해, 편집 금지 규칙(Edit 도구에만 걸림)과
                 // 카드를 둘 다 지나치게 한다 (/self-review 36e4e20e04 C1). 대신 작업 폴더 안 편집만 `Edit(**)`로 미리 허용한다 —
                 // 실측(2026-10-28): 작업 폴더 안 Write는 묻지 않음, 밖 Write는 거절, Bash cp는 승인 요청으로 옴.
@@ -205,15 +191,14 @@ public static partial class ClaudeArgs
     }
 
     /// <summary>
-    /// 계획 모드를 쓸 수 있는 단계와, 계획 승인 뒤 돌아갈 권한 모드: 편집 acceptEdits(평소 인자와 같음) · 명령 default(평소 --permission-mode 없음).
-    /// 대화 · 읽기는 null — 계획 뒤 고칠 도구가 없다 (결정 "편집 · 명령 방만").
+    /// 계획 모드를 쓸 수 있는 단계와, 계획 승인 뒤 돌아갈 권한 모드: 명령 default(평소 --permission-mode 없음).
+    /// 읽기는 null — 계획 뒤 고칠 도구가 없다.
     /// </summary>
-    /// <summary>서브에이전트를 쓸 수 있는 단계 (읽기 · 편집 — <see cref="AgentTool"/>).</summary>
-    public static bool AllowsAgents(PermissionLevel level) => level is PermissionLevel.Read or PermissionLevel.Edit;
+    /// <summary>서브에이전트를 쓸 수 있는 단계 (읽기 — <see cref="AgentTool"/>).</summary>
+    public static bool AllowsAgents(PermissionLevel level) => level == PermissionLevel.Read;
 
     public static string? PlanMode(PermissionLevel level) => level switch
     {
-        PermissionLevel.Edit => "acceptEdits",
         PermissionLevel.Command => "default",
         _ => null,
     };
@@ -229,13 +214,13 @@ public static partial class ClaudeArgs
 
     /// <summary>
     /// 질문 + 할 일 도구 (3차 b — 진행 단계). 2.1.312에는 TodoWrite가 없고 Task* 넷이 승인 없이 돈다 (0번 실측 B). 상태는 ~/.claude/tasks에만 쓴다.
-    /// 읽기 · 편집 · 명령 단계의 --tools 끝에 붙는다.
+    /// 읽기 · 명령 단계의 --tools 끝에 붙는다.
     /// </summary>
     public const string HostTools = AskTool + ",TaskCreate,TaskGet,TaskList,TaskUpdate";
 
     /// <summary>
-    /// 웹 도구 (사용자 결정 "읽기 · 편집 · 명령"): WebSearch는 카드 없이(검색어만 Anthropic으로), WebFetch는 사이트마다 카드 · 로컬 · 사설망 주소는 거절 —
-    /// 승인 요청은 앱이 답한다 (RoomHub.DecideToolAsync). 대화 단계는 없음.
+    /// 웹 도구 (사용자 결정): WebSearch는 카드 없이(검색어만 Anthropic으로), WebFetch는 사이트마다 카드 · 로컬 · 사설망 주소는 거절 —
+    /// 승인 요청은 앱이 답한다 (RoomHub.DecideToolAsync).
     /// claude에 내장된 공식 문서 사이트(2.1.312 기준 약 95개 — learn.microsoft.com · docs.python.org …)는 CLI가 묻지 않고 가져와 앱 카드 · 기록을 거치지 않는다
     /// (사용자 실측 2026-10-30, 목록은 판마다 바뀔 수 있음 — 카드 자가 시험의 웹 가져오기 단계가 목록 밖 사이트를 묻는지 본다).
     /// 사용자 · 작업 폴더 설정의 WebFetch(domain:…) 허용 규칙에 든 사이트도 묻지 않아 앱의 주소 검사(로컬 · 사설망)를 거치지 않는다 (/cross-review 909a5c575e C6).
@@ -243,9 +228,9 @@ public static partial class ClaudeArgs
     public const string WebSearchTool = "WebSearch", WebFetchTool = "WebFetch", WebTools = WebSearchTool + "," + WebFetchTool;
 
     /// <summary>
-    /// 서브에이전트 도구 (Claude 앱 기능 D) — 읽기 · 편집 단계만 (결정: /self-review security 42f9d47dc4 C1 "명령 방은 서브에이전트 끄기").
+    /// 서브에이전트 도구 (Claude 앱 기능 D) — 읽기 단계만 (결정: /self-review security 42f9d47dc4 C1 "명령 방은 서브에이전트 끄기").
     /// 2.1.312 실측: 서브에이전트는 세션 --tools · 금지 규칙 · 승인 요청(agent_id)을 따르지만, 작업 폴더 정의의 permissionMode: acceptEdits는 먹어서
-    /// 명령 방에서는 mkdir · cp가 카드 없이 돌았다(36e4e20e04 C1로 막은 길). 읽기(Bash · Edit 없음) · 편집(이미 acceptEdits, Bash 없음)은 넓어지지 않는다.
+    /// 명령 방에서는 mkdir · cp가 카드 없이 돌았다(36e4e20e04 C1로 막은 길). 읽기(Bash · Edit 없음)는 넓어지지 않는다.
     /// bypassPermissions는 무시, 정의의 mcpServers는 --strict-mcp-config 아래 붙지 않음, hooks는 돌지 않음(같은 실측).
     /// </summary>
     public const string AgentTool = "Agent";

@@ -51,7 +51,7 @@ public sealed class GroupTests : IDisposable
     }
 
     private Room NewGroup(string a = "A", string b = "B") =>
-        _groups.Create("ws", PermissionLevel.Chat, "opus", null, "팀", [(a, "위험을 찾는다"), (b, "A에 반박한다")]) is { Group: { } g } ? g
+        _groups.Create("ws", PermissionLevel.Read, "opus", null, "팀", [(a, "위험을 찾는다"), (b, "A에 반박한다")]) is { Group: { } g } ? g
             : throw new InvalidOperationException("단톡방을 만들지 못함");
 
     private async Task<GroupEntry> AnswerAsync(string groupId, string memberName, int after)
@@ -274,9 +274,9 @@ public sealed class GroupTests : IDisposable
 
     [Theory]
     [InlineData((PermissionLevel)9, "A", "B", "권한 단계")] // 편집 · 명령은 ⑤에서 열림 — 모르는 단계만 거절
-    [InlineData(PermissionLevel.Chat, "A", "", "2명 이상")]
-    [InlineData(PermissionLevel.Chat, "All", "B", "쓸 수 없습니다")]
-    [InlineData(PermissionLevel.Chat, "A", "a", "겹칩니다")]
+    [InlineData(PermissionLevel.Read, "A", "", "2명 이상")]
+    [InlineData(PermissionLevel.Read, "All", "B", "쓸 수 없습니다")]
+    [InlineData(PermissionLevel.Read, "A", "a", "겹칩니다")]
     public void Create_Rejects(PermissionLevel level, string a, string b, string expected)
     {
         var (group, error) = _groups.Create("ws", level, "opus", null, "팀", [(a, ""), (b, "")]);
@@ -289,10 +289,10 @@ public sealed class GroupTests : IDisposable
     public void Create_TwoToFourMembers()
     {
         // ③ 결정은 2~4명 — 화면을 거치지 않은 요청도 서버가 막는다 (Codex 리뷰). 빈 이름 칸은 빠진다
-        var (group, error) = _groups.Create("ws", PermissionLevel.Chat, "opus", null, "팀", [("A", ""), ("B", ""), ("C", ""), ("D", ""), ("E", "")]);
+        var (group, error) = _groups.Create("ws", PermissionLevel.Read, "opus", null, "팀", [("A", ""), ("B", ""), ("C", ""), ("D", ""), ("E", "")]);
         Assert.Null(group);
         Assert.Contains("4명까지", error);
-        var (four, _) = _groups.Create("ws", PermissionLevel.Chat, "opus", null, "팀", [("A", ""), ("B", ""), ("C", ""), ("D", ""), ("", "")]);
+        var (four, _) = _groups.Create("ws", PermissionLevel.Read, "opus", null, "팀", [("A", ""), ("B", ""), ("C", ""), ("D", ""), ("", "")]);
         Assert.Equal(4, four!.Members.Count);
     }
 
@@ -416,7 +416,7 @@ public sealed class GroupTests : IDisposable
     [Fact]
     public async Task Chain_LimitSixRuns_OncePerMember_AllInAnswerNotChained()
     {
-        var (group, _) = _groups.Create("ws", PermissionLevel.Chat, "opus", null, "넷", [("A", ""), ("B", ""), ("C", ""), ("D", "")]);
+        var (group, _) = _groups.Create("ws", PermissionLevel.Read, "opus", null, "넷", [("A", ""), ("B", ""), ("C", ""), ("D", "")]);
         Assert.Null(_groups.Send(group!.Id, "call @All #All #A #B #C #D"));
         await WaitAllIdleAsync(group);
         lock (_specs) Assert.Equal(GroupChat.MaxRunsPerMessage, _specs.Count);
@@ -498,7 +498,7 @@ public sealed class GroupTests : IDisposable
     [Fact]
     public async Task Send_All_FourMembers()
     {
-        var (group, error) = _groups.Create("ws", PermissionLevel.Chat, "opus", null, "넷", [("A", ""), ("B", ""), ("C", ""), ("D", "")]);
+        var (group, error) = _groups.Create("ws", PermissionLevel.Read, "opus", null, "넷", [("A", ""), ("B", ""), ("C", ""), ("D", "")]);
         Assert.Null(error);
         Assert.Null(_groups.Send(group!.Id, "@All 다들"));
         var line = _log.Read(group.Id).Single(e => e.Kind == GroupEntryKind.User).Line;
@@ -573,7 +573,7 @@ public sealed class GroupTests : IDisposable
     }
 
     /// <summary>A = 쓰는 구성원(편집 · 명령), B = 읽기.</summary>
-    private Room WriterGroup(PermissionLevel writer = PermissionLevel.Edit) =>
+    private Room WriterGroup(PermissionLevel writer = PermissionLevel.Command) =>
         _groups.Create("ws", PermissionLevel.Read, "opus", null, "작업", [new GroupMemberSpec("A", "코드 작업", Level: writer), new GroupMemberSpec("B", "리뷰")])
             is { Group: { } g } ? g : throw new InvalidOperationException("단톡방을 만들지 못함");
 
@@ -598,12 +598,12 @@ public sealed class GroupTests : IDisposable
         Assert.DoesNotContain("차례로", GroupRules.For(_store, _store.Get(NewGroup().Members[0].RoomId)!)); // 쓰는 구성원이 없으면 규칙 그대로
 
         var checking = new GroupChat(_store, _hub, _log, null, Options.Create(_options));
-        GroupMemberSpec[] members = [new("A", "", Level: PermissionLevel.Edit), new("B", "")];
+        GroupMemberSpec[] members = [new("A", "", Level: PermissionLevel.Command), new("B", "")];
         Assert.Contains(".mcp.json", checking.Create("ws", PermissionLevel.Read, "opus", null, "켬", members, baseMcp: true).Error);
         File.WriteAllText(Path.Combine(_dir, "ws", ".mcp.json"), "{\"mcpServers\":{\"" + _options.McpServer + "\":{\"command\":\"cmd\"}}}");
         var (on, error) = checking.Create("ws", PermissionLevel.Read, "opus", null, "켬", members, baseMcp: true);
         Assert.Null(error);
-        Assert.All(on!.Members, m => Assert.Empty(_store.Get(m.RoomId)!.McpOff));
+        Assert.All(on!.Members, m => Assert.DoesNotContain(_options.McpServer, _store.Get(m.RoomId)!.McpOff));
     }
 
     /// <summary>
@@ -614,7 +614,7 @@ public sealed class GroupTests : IDisposable
     public void Create_PerMemberWorkspace()
     {
         var checking = new GroupChat(_store, _hub, _log, null, Options.Create(_options));
-        GroupMemberSpec[] members = [new("A", "코드", Level: PermissionLevel.Edit, Workspace: "ws2"), new("B", "리뷰")];
+        GroupMemberSpec[] members = [new("A", "코드", Level: PermissionLevel.Command, Workspace: "ws2"), new("B", "리뷰")];
         Assert.Contains("허용 목록에 없는 작업 폴더입니다: nope", checking.Create("ws", PermissionLevel.Read, "opus", null, "섞임", [members[0] with { Workspace = "nope" }, members[1]]).Error);
 
         // 기본 MCP: 단톡방 폴더에만 항목이 있으면 A(ws2)에서 거절
@@ -632,7 +632,7 @@ public sealed class GroupTests : IDisposable
         Assert.Equal(["ws2", "ws"], GroupChat.Workspaces(_store, group)); // 구성원 순서
 
         var rulesB = GroupRules.For(_store, b)!;
-        Assert.Contains("A(코드 · 편집 · 작업 폴더 ws2)", rulesB);
+        Assert.Contains("A(코드 · 명령 · 작업 폴더 ws2)", rulesB);
         Assert.Contains("너의 작업 폴더는 ws다", rulesB);
         Assert.Contains("다른 구성원이 파일을 바꿨을 수 있으니", rulesB); // 섞여도 좁히지 않음 (128de5a971 C2)
         Assert.Contains("너의 작업 폴더는 ws2다", GroupRules.For(_store, a));
@@ -733,7 +733,7 @@ public sealed class GroupTests : IDisposable
     public async Task Chain_ToWriter_WaitsForRunningMembers()
     {
         var (group, error) = _groups.Create("ws", PermissionLevel.Read, "opus", null, "셋",
-            [new GroupMemberSpec("A", ""), new GroupMemberSpec("B", ""), new GroupMemberSpec("C", "", Level: PermissionLevel.Edit)]);
+            [new GroupMemberSpec("A", ""), new GroupMemberSpec("B", ""), new GroupMemberSpec("C", "", Level: PermissionLevel.Command)]);
         Assert.Null(error);
         var c = group!.Members[2];
         Assert.Null(_groups.Send(group.Id, "call @A SLOW"));
@@ -931,7 +931,7 @@ public sealed class GroupTests : IDisposable
     public async Task Writer_CallAllQueued_MergedWithoutLimitNote()
     {
         var (group, error) = _groups.Create("ws", PermissionLevel.Read, "opus", null, "넷",
-            [new GroupMemberSpec("A", "", Level: PermissionLevel.Edit), new GroupMemberSpec("B", ""), new GroupMemberSpec("C", ""), new GroupMemberSpec("D", "")]);
+            [new GroupMemberSpec("A", "", Level: PermissionLevel.Command), new GroupMemberSpec("B", ""), new GroupMemberSpec("C", ""), new GroupMemberSpec("D", "")]);
         Assert.Null(error);
         Assert.Null(_groups.Send(group!.Id, "(probe) @A @B @C @D"));
         await WaitAllIdleAsync(group);

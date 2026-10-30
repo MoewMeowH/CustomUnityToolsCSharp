@@ -268,7 +268,6 @@ public sealed class ModeCardTests : IDisposable
         // 785ebb5e97 C7: 기본 서버가 붙은 보통 방에만
         Assert.DoesNotContain(ModeCard.HeaderMarker, RoomRules.For(PermissionLevel.Read));
         Assert.Contains(ModeCard.HeaderMarker, RoomRules.For(PermissionLevel.Read, modeCard: true));
-        Assert.DoesNotContain(ModeCard.HeaderMarker, RoomRules.For(PermissionLevel.Chat, modeCard: true));
     }
 
     [Fact]

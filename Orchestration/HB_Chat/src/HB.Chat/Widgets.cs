@@ -23,7 +23,7 @@ public static class Widgets
         await next();
     });
 
-    /// <summary>방 규칙에 넣는 형식 안내 (대화 단계 포함 모든 방).</summary>
+    /// <summary>방 규칙에 넣는 형식 안내 (모든 방).</summary>
     public const string Rule =
         " 도표 · 그림 · 작은 계산기처럼 상호작용이나 그림이 필요한 것은 ```widget 코드 블록에 HTML 한 장으로 쓴다 — 말풍선 안 격리된 틀에 그려진다 " +
         "(인라인 CSS · JS와 data: 그림만, 외부 파일 · 네트워크 · 폼 전송 · 새 창 · 저장소는 막힌다. 스크립트는 사용자가 '실행'을 눌러야 돈다). " +

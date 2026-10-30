@@ -20,7 +20,7 @@ public sealed class StoreAndGuardTests : IDisposable
     {
         var path = Path.Combine(_dir, "rooms.json");
         var store = new RoomStore(path);
-        var room = store.Create("ToolWithCS", PermissionLevel.Edit, "opus", "  제목  ");
+        var room = store.Create("ToolWithCS", PermissionLevel.Command, "opus", "  제목  ");
         Assert.True(RoomStore.IsRoomId(room.Id));
         Assert.True(Guid.TryParseExact(room.SessionId, "D", out _));
         Assert.Equal("제목", room.Title);
@@ -31,8 +31,8 @@ public sealed class StoreAndGuardTests : IDisposable
         var again = new RoomStore(path).Get(room.Id);
         Assert.NotNull(again);
         Assert.Equal(42, again.KnownSize);
-        Assert.Equal(PermissionLevel.Edit, again.Level);
-        Assert.Contains("\"Edit\"", File.ReadAllText(path), StringComparison.OrdinalIgnoreCase); // 사람이 읽는 값
+        Assert.Equal(PermissionLevel.Command, again.Level);
+        Assert.Contains("\"Command\"", File.ReadAllText(path), StringComparison.OrdinalIgnoreCase); // 사람이 읽는 값
         Assert.False(File.Exists(path + ".tmp"));
     }
 
@@ -47,7 +47,7 @@ public sealed class StoreAndGuardTests : IDisposable
         store.Update(room.Id, r => r with { Model = "haiku", Effort = null, Level = PermissionLevel.Command });
         var again = new RoomStore(path).Get(room.Id)!;
         Assert.Equal(("haiku", (string?)null, PermissionLevel.Command), (again.Model, again.Effort, again.Level));
-        Assert.Null(store.Create("w", PermissionLevel.Chat, "opus", null).Effort);
+        Assert.Null(store.Create("w", PermissionLevel.Read, "opus", null).Effort);
     }
 
     [Fact]
@@ -58,7 +58,7 @@ public sealed class StoreAndGuardTests : IDisposable
         var store = new RoomStore(path);
         Assert.NotNull(store.LoadError);
         Assert.Empty(store.All());
-        Assert.Throws<InvalidOperationException>(() => store.Create("w", PermissionLevel.Chat, "opus", null));
+        Assert.Throws<InvalidOperationException>(() => store.Create("w", PermissionLevel.Read, "opus", null));
         Assert.Equal("{ broken", File.ReadAllText(path));
     }
 
@@ -67,14 +67,14 @@ public sealed class StoreAndGuardTests : IDisposable
     {
         // rooms.json 자리에 폴더가 있으면 바꾸기(File.Move)가 실패한다 → 만들기 · 고치기가 메모리에도 남지 않아야 한다 (0a3b1d5155 C6).
         var good = new RoomStore(Path.Combine(_dir, "ok.json"));
-        var room = good.Create("w", PermissionLevel.Chat, "opus", null);
+        var room = good.Create("w", PermissionLevel.Read, "opus", null);
 
         var path = Path.Combine(_dir, "blocked.json");
         File.Copy(Path.Combine(_dir, "ok.json"), path);
         var store = new RoomStore(path);
         File.Delete(path);
         Directory.CreateDirectory(path);
-        Assert.ThrowsAny<Exception>(() => store.Create("w", PermissionLevel.Chat, "opus", null));
+        Assert.ThrowsAny<Exception>(() => store.Create("w", PermissionLevel.Read, "opus", null));
         Assert.Single(store.All());
         Assert.ThrowsAny<Exception>(() => store.Update(room.Id, r => r with { KnownSize = 7 }));
         Assert.Null(store.Get(room.Id)!.KnownSize);

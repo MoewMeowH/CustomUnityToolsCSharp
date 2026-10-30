@@ -257,8 +257,8 @@ public static class PermissionDecision
     public static string Deny(string message) => JsonSerializer.Serialize(new { behavior = "deny", message });
 
     /// <summary>
-    /// 계획 승인 허용 (Claude 앱 기능 C): 입력 그대로 + 세션 권한 모드를 그 방 단계의 원래 모드로 (편집 acceptEdits · 명령 default).
-    /// 2.1.312 실측: setMode가 없으면 허용 뒤 default가 되어 편집 방의 Edit도 승인을 물어 와 앱이 거절했다.
+    /// 계획 승인 허용 (Claude 앱 기능 C): 입력 그대로 + 세션 권한 모드를 그 방 단계의 원래 모드로 (명령 default).
+    /// 2.1.312 실측: 계획 모드를 끝내려면 setMode가 있어야 한다.
     /// </summary>
     public static string AllowPlan(string updatedInputJson, string mode) => new JsonObject
     {

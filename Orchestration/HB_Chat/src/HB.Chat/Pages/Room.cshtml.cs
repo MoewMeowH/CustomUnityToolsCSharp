@@ -33,7 +33,7 @@ public sealed partial class RoomModel(
     /// <summary>구성원 상태 한 줄 (생각 중 · 답을 기다림 · 차례 기다림 · null).</summary>
     public string? MemberState(GroupMember m) => groups.MemberState(m.RoomId);
 
-    /// <summary>구성원 단계 표시: 쓰는 구성원(편집 · 명령)만 — 그 구성원이 낀 말은 차례로 돈다 (⑤).</summary>
+    /// <summary>구성원 단계 표시: 쓰는 구성원(명령)만 — 그 구성원이 낀 말은 차례로 돈다 (⑤).</summary>
     public string? WriterLabel(GroupMember m) => store.Get(m.RoomId) is { } child && GroupChat.IsWriter(child) ? RoomRules.LevelName(child.Level) : null;
 
     /// <summary>
@@ -114,11 +114,10 @@ public sealed partial class RoomModel(
                     .Select(t => (t[$"mcp__{name}__".Length..], (string?)null)).Order(),
             ];
             string Transport(string name) => ws is not null && McpConfigFile.Entry(ws, name)?["url"] is not null ? "http" : "stdio";
-            var readUp = room.Level != PermissionLevel.Chat;
             var rows = new List<Connection>
             {
                 new(o.McpServer, "base", ws is null ? "?" : Transport(o.McpServer), ws is null ? null : WorkspaceStore.McpCommand(ws, o.McpServer),
-                    !room.McpOff.Contains(o.McpServer), readUp, readUp ? null : "대화 방은 MCP를 붙이지 않습니다",
+                    !room.McpOff.Contains(o.McpServer), true, null,
                     Init(o.McpServer), probe.Last(room.Id, o.McpServer), probe.IsRunning(room.Id, o.McpServer)) { InitTools = InitTools(o.McpServer) },
                 new(TerminalMcp.Server, "app", "http", "이 앱 (터미널 · 지휘자 브라우저 도구)", !room.McpOff.Contains(TerminalMcp.Server),
                     room.Level == PermissionLevel.Command, room.Level == PermissionLevel.Command ? null : "명령 방에서만 붙습니다",
@@ -133,13 +132,11 @@ public sealed partial class RoomModel(
                 var inWorkspace = names.Contains(name);
                 var app = appServers.FirstOrDefault(a => a.Name == name).Entry;
                 var exists = inWorkspace || app is not null;
-                var note = !exists ? "작업 폴더 .mcp.json에도 앱 서버 목록에도 없어졌습니다 — 끄면 목록에서 빠집니다"
-                    : !readUp ? "대화 방은 MCP를 붙이지 않습니다"
-                    : null;
+                var note = !exists ? "작업 폴더 .mcp.json에도 앱 서버 목록에도 없어졌습니다 — 끄면 목록에서 빠집니다" : null;
                 rows.Add(new(name, inWorkspace || app is null ? "extra" : "appserver",
                     inWorkspace ? Transport(name) : app is not null ? AppMcpStore.TransportOf(app) : "?",
                     inWorkspace ? WorkspaceStore.McpCommand(ws!, name) : app is not null ? AppMcpStore.Describe(app) : null,
-                    room.McpExtra.Contains(name), readUp && exists, note,
+                    room.McpExtra.Contains(name), exists, note,
                     Init(name), probe.Last(room.Id, name), probe.IsRunning(room.Id, name))
                 {
                     InitTools = InitTools(name),
@@ -205,8 +202,6 @@ public sealed partial class RoomModel(
         if (!RoomStore.IsRoomId(id) || store.Get(id) is not { } room) return NotFound();
         var o = options.Value;
         if (string.IsNullOrWhiteSpace(name) || !ClaudeArgs.IsServerName(name) || name == TerminalMcp.Server) return BadRequest("확인할 수 없는 연결입니다.");
-        // 대화 방은 MCP를 하나도 띄우지 않는 단계 — 확인도 띄우지 않는다 (지휘자 검토 K2)
-        if (room.Level == PermissionLevel.Chat) return BadRequest("대화 방은 MCP를 붙이지 않아 확인하지 않습니다.");
         if (o.WorkspacePath(room.Workspace) is not { } ws || !Directory.Exists(ws)) return BadRequest("작업 폴더가 없습니다.");
         System.Text.Json.Nodes.JsonObject? entry;
         if (name == McpConfigFile.UnityServer)
@@ -386,7 +381,7 @@ public sealed partial class RoomModel(
         if (!RoomStore.IsRoomId(id) || store.Get(id) is not { } room) return NotFound();
         var user = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude");
         var workspace = options.Value.WorkspacePath(room.Workspace);
-        return new JsonResult(new { chat = room.Level == PermissionLevel.Chat, commands = CommandCatalog.Build(hub.Commands(id), workspace, user) });
+        return new JsonResult(new { commands = CommandCatalog.Build(hub.Commands(id), workspace, user) });
     }
 
     /// <summary>명령 방: 작업 폴더 · 사용자 설정이 이미 미리 허용한 명령 (카드 없이 실행됨).</summary>
@@ -528,12 +523,12 @@ public sealed partial class RoomModel(
     }
 
     /// <summary>
-    /// "계획 먼저" 켜기 · 끄기 (Claude 앱 기능 C — 입력칸 토글): 다음 실행을 계획 모드로. 편집 · 명령 단계만 켤 수 있다. 계획을 승인하면 서버가 끈다.
+    /// "계획 먼저" 켜기 · 끄기 (Claude 앱 기능 C — 입력칸 토글): 다음 실행을 계획 모드로. 명령 단계만 켤 수 있다. 계획을 승인하면 서버가 끈다.
     /// </summary>
     public IActionResult OnPostPlanNext(string id, bool on)
     {
         if (!RoomStore.IsRoomId(id) || store.Get(id) is not { } room) return NotFound();
-        if (on && ClaudeArgs.PlanMode(room.Level) is null) return BadRequest("계획 모드는 편집 · 명령 방에서만 쓸 수 있습니다.");
+        if (on && ClaudeArgs.PlanMode(room.Level) is null) return BadRequest("계획 모드는 명령 방에서만 쓸 수 있습니다.");
         return Change(id, r => r with { PlanNext = on }, "계획 먼저를 바꾸지 못했습니다");
     }
 
@@ -571,7 +566,6 @@ public sealed partial class RoomModel(
     {
         if (!RoomStore.IsRoomId(id) || store.Get(id) is not { } room) return NotFound();
         if (room.IsGroup || room.GroupId is not null) return BadRequest("단톡방에서는 외부 에이전트 요청 창을 쓰지 않습니다.");
-        if (room.Level == PermissionLevel.Chat) return BadRequest("대화 단계 방은 외부 에이전트를 부를 도구가 없습니다.");
         if (room.McpOff.Contains(options.Value.McpServer)) return BadRequest($"이 방은 {options.Value.McpServer} 연결을 꺼 두었습니다 — 곁칸에서 켜 주세요.");
         if (string.IsNullOrWhiteSpace(text)) return BadRequest("요청 글을 써 주세요.");
         var list = ModesFor(room);
@@ -679,7 +673,7 @@ public sealed partial class RoomModel(
     }
 
     /// <summary>
-    /// 단톡방 · 구성원 자식 방의 단계 · 모델 · 연결은 바꾸지 않는다 — 1단계는 만들 때 정한 대화 · 읽기 단계로만 돈다(결정 ①). 과정 보기 화면의 곁칸에서
+    /// 단톡방 · 구성원 자식 방의 단계 · 모델 · 연결은 바꾸지 않는다 — 만들 때 정한 단계로만 돈다(결정 ①). 과정 보기 화면의 곁칸에서
     /// 자식 방을 명령 단계로 올릴 수 있었다 (b8697252eb C1 · Codex 리뷰).
     /// </summary>
     private static string? GroupSettingsRefusal(Room room) =>
@@ -761,7 +755,7 @@ public sealed partial class RoomModel(
     /// <summary>
     /// 입력칸 + 메뉴의 "외부 에이전트 요청" · "외부 요청 전에 묻기" 스위치를 보일지: 읽기 이상 단계 · 기본 MCP 서버가 켜진 보통 방.
     /// </summary>
-    public bool CanModeRequest => Room.Level != PermissionLevel.Chat && Room.DeletedAt is null && !Room.IsGroup && Room.GroupId is null
+    public bool CanModeRequest => Room.DeletedAt is null && !Room.IsGroup && Room.GroupId is null
                                   && Room.Engine is null && !Room.McpOff.Contains(options.Value.McpServer);
 
     /// <summary>방 머리 · 곁칸의 모델 글: Codex 방(단톡방 구성원 과정 보기)이면 "Codex · 모델"(빈 모델 = 기본 모델 — ② K4), 그 밖은 모델 이름.</summary>
@@ -971,12 +965,11 @@ public sealed partial class RoomModel(
 
     /// <summary>
     /// 파일 첨부: 하나씩 받아 그 방 첨부 폴더에 저장하고 절대 경로를 돌려준다 — 화면이 보낼 때 [첨부] 줄로 붙인다.
-    /// 대화 단계 방 · 휴지통 방은 받지 않는다. 20MB 넘으면 거절.
+    /// 휴지통 방은 받지 않는다. 20MB 넘으면 거절.
     /// </summary>
     public async Task<IActionResult> OnPostAttach(string id, IFormFile? file)
     {
         if (!RoomStore.IsRoomId(id) || store.Get(id) is not { } room) return NotFound();
-        if (room.Level == PermissionLevel.Chat) return BadRequest("대화 단계 방은 파일을 열 도구가 없어 첨부를 받지 않습니다.");
         if (room.DeletedAt is not null) return BadRequest("휴지통에 있는 방입니다.");
         if (Request.ContentLength is > Attachments.MaxBytes + 64 * 1024 || file is { Length: > Attachments.MaxBytes })
             return StatusCode(StatusCodes.Status413PayloadTooLarge, $"파일 하나는 {Attachments.MaxBytes / 1024 / 1024}MB까지입니다.");

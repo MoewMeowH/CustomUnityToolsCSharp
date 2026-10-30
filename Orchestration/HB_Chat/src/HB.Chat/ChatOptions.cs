@@ -5,14 +5,28 @@ namespace HB.Chat;
 /// <summary>방마다 고르는 권한 단계 (인자 표).</summary>
 public enum PermissionLevel
 {
-    /// <summary>도구 없이 대화만. MCP도 없음.</summary>
-    Chat,
     /// <summary>작업 폴더 읽기 · 검색 + hb-orchestration MCP.</summary>
     Read,
-    /// <summary>읽기 + 작업 폴더 파일 편집(acceptEdits). 명령 실행은 없음.</summary>
-    Edit,
-    /// <summary>편집 + 명령 실행(Bash · PowerShell). 명령은 실행 전에 방의 카드로 승인한다 (2차).</summary>
+    /// <summary>읽기 + 작업 폴더 파일 편집 + 명령 실행(Bash · PowerShell). 명령은 실행 전에 방의 카드로 승인한다 (2차).</summary>
     Command,
+}
+
+/// <summary>
+/// 방 · 단톡방 기록의 단계. 없앤 대화 · 편집 단계는 읽기로 읽는다 — 저장 파일을 그대로 열면서 권한이 말없이 오르지 않게.
+/// 모르는 값은 오류로 둔다 (읽지 못한 색인은 덮어쓰지 않는다).
+/// </summary>
+public sealed class PermissionLevelConverter : System.Text.Json.Serialization.JsonConverter<PermissionLevel>
+{
+    public override PermissionLevel Read(ref System.Text.Json.Utf8JsonReader reader, Type typeToConvert, System.Text.Json.JsonSerializerOptions options) =>
+        reader.TokenType == System.Text.Json.JsonTokenType.String ? reader.GetString() switch
+        {
+            "Chat" or "Edit" or nameof(PermissionLevel.Read) => PermissionLevel.Read,
+            nameof(PermissionLevel.Command) => PermissionLevel.Command,
+            var other => throw new System.Text.Json.JsonException($"알 수 없는 권한 단계: {other}"),
+        } : throw new System.Text.Json.JsonException("권한 단계는 글자여야 한다");
+
+    public override void Write(System.Text.Json.Utf8JsonWriter writer, PermissionLevel value, System.Text.Json.JsonSerializerOptions options) =>
+        writer.WriteStringValue(value.ToString());
 }
 
 /// <summary>
@@ -73,7 +87,7 @@ public sealed class ChatOptions
 
     public string DefaultModel { get; set; } = "opus";
 
-    /// <summary>읽기 · 편집 단계에 붙이는 MCP 서버 이름 (작업 폴더 .mcp.json의 항목).</summary>
+    /// <summary>읽기 · 명령 단계에 붙이는 MCP 서버 이름 (작업 폴더 .mcp.json의 항목).</summary>
     public string McpServer { get; set; } = "hb-orchestration";
 
     /// <summary>대시보드 주소 (방 화면의 "대시보드에서 보기" 링크). 비우면 링크 없음.</summary>

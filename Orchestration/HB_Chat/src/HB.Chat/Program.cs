@@ -3,7 +3,7 @@ using HB.Chat;
 using HB.Orchestration.ChatUi;
 using Microsoft.Extensions.Options;
 
-// 설정은 켤 때 한 번만 읽는다 (/self-review security b19234c862 C1): 편집 방이 설정 파일을 고쳐도(ClaudePath · Workspaces · AllowedHosts)
+// 설정은 켤 때 한 번만 읽는다 (/self-review security b19234c862 C1): 명령 방이 설정 파일을 고쳐도(ClaudePath · Workspaces · AllowedHosts)
 // 돌고 있는 앱에는 반영되지 않는다. 설정 파일은 편집 금지 경로(ClaudeArgs.EditDenied)이기도 하다 — 두 겹.
 var builder = WebApplication.CreateBuilder([.. args, "--hostBuilder:reloadConfigOnChange=false"]);
 

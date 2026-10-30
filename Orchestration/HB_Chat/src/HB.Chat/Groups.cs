@@ -68,7 +68,7 @@ public sealed class GroupLog(Func<string> dataFolder)
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {
-        Converters = { new JsonStringEnumConverter() },
+        Converters = { new PermissionLevelConverter(), new JsonStringEnumConverter() },
         Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping, // 사람이 읽는 로컬 기록 (HTML에 넣지 않음)
     };
 
@@ -294,7 +294,7 @@ public static class GroupRules
     {
         if (room.GroupId is not { } groupId || store.Get(groupId) is not { IsGroup: true } group) return null;
         if (group.Members.FirstOrDefault(m => m.Id == room.MemberId) is not { } me) return null;
-        // 쓰는 구성원(편집 · 명령, ⑤)은 단계를 같이 — 그 구성원이 낀 말은 차례로 돌고 파일이 바뀌어 있을 수 있다
+        // 쓰는 구성원(명령, ⑤)은 단계를 같이 — 그 구성원이 낀 말은 차례로 돌고 파일이 바뀌어 있을 수 있다
         var writers = group.Members.Where(m => GroupChat.IsWriter(store.Get(m.RoomId))).Select(m => m.Id).ToHashSet(StringComparer.Ordinal);
         // 구성원 작업 폴더가 섞인 단톡방만 폴더를 알린다 — 모두 같으면 문장이 그대로라 이미 있는 단톡방의 규칙 지문이 바뀌지 않는다
         var mixed = GroupChat.Workspaces(store, group).Count > 1;
@@ -317,7 +317,7 @@ public static class GroupRules
                " 부를 뜻이 없으면 @ 없이 이름만 쓴다. 다른 구성원이 불러서 온 말에 답할 때는 다시 부를 수 없다." +
                // ⑤ 결정 "모두 차례로, 뒤는 앞 답을 받음" — 쓰는 구성원이 없는 단톡방은 규칙이 그대로(규칙 바뀜 안내가 가지 않게)
                (writers.Count == 0 ? "" :
-                   " 작업 폴더에 쓰는 구성원(편집 · 명령)이 낀 말은 구성원이 차례로 하나씩 답하고, 같은 말에 너보다 먼저 답한 구성원의 답은 단톡방 안내 블록 끝에 따로 온다." +
+                   " 작업 폴더에 쓰는 구성원(명령)이 낀 말은 구성원이 차례로 하나씩 답하고, 같은 말에 너보다 먼저 답한 구성원의 답은 단톡방 안내 블록 끝에 따로 온다." +
                    // 폴더가 섞여도 좁히지 않는다 — 이름이 다른 같은 경로 · 안에 든 폴더 · 명령 구성원의 폴더 밖 수정이 있을 수 있다 (/self-review 128de5a971 C2)
                    " 다른 구성원이 파일을 바꿨을 수 있으니 답하기 전에 필요한 파일을 다시 읽는다.");
     }
@@ -363,9 +363,9 @@ public sealed partial class GroupChat
 
     private string McpServer => _options?.Value.McpServer ?? new ChatOptions().McpServer;
 
-    /// <summary>작업 폴더에 쓰는 구성원 방(편집 · 명령 단계 Claude) — 그 구성원이 낀 말은 차례로 돈다. Codex는 늘 읽기 전용.</summary>
+    /// <summary>작업 폴더에 쓰는 구성원 방(명령 단계 Claude) — 그 구성원이 낀 말은 차례로 돈다. Codex는 늘 읽기 전용.</summary>
     public static bool IsWriter(Room? room) =>
-        room is { Level: PermissionLevel.Edit or PermissionLevel.Command } && room.Engine != RoomEngines.Codex;
+        room is { Level: PermissionLevel.Command } && room.Engine != RoomEngines.Codex;
 
     /// <summary>Codex 구성원을 켤 수 있는 작업 폴더 (없으면 Codex 구성원을 만들지 않음).</summary>
     public CodexSettings? CodexSettings { get; }
@@ -410,13 +410,13 @@ public sealed partial class GroupChat
                 Workspace = string.IsNullOrWhiteSpace(m.Workspace) ? workspace : m.Workspace.Trim(),
             }).ToList();
         var codex = clean.Where(m => m.Engine == RoomEngines.Codex).ToList();
-        // Codex는 칸이 비면 읽기 — 다른 단계를 고르면 거절(Codex는 늘 파일을 읽을 수 있어 대화 단계도, 승인 카드를 낼 곳이 없어 편집 · 명령도 안 됨)
+        // Codex는 칸이 비면 읽기 — 다른 단계를 고르면 거절(승인 카드를 낼 곳이 없어 명령은 안 됨)
         PermissionLevel LevelOf(GroupMemberSpec m) => m.Level ?? (m.Engine == RoomEngines.Codex ? PermissionLevel.Read : level);
         var server = McpServer;
         // 작업 폴더 검사는 구성원마다 그 구성원 폴더로 — 실행(RoomHub)도 자식 방 폴더를 본다
         var unknownWorkspace = _options is { } known ? clean.FirstOrDefault(m => known.Value.WorkspacePath(m.Workspace) is null) : null;
         var mcpMissing = baseMcp && _options is { } o
-            ? clean.FirstOrDefault(m => m.Engine is null && LevelOf(m) != PermissionLevel.Chat
+            ? clean.FirstOrDefault(m => m.Engine is null
                 && (o.Value.WorkspacePath(m.Workspace) is not { } wsPath || McpConfigFile.Entry(wsPath, server) is null))
             : null;
         var codexModels = codex.Any(m => m.Model is not null) ? (CodexModelList?.Invoke() ?? CodexModels.Available()) : [];
@@ -427,7 +427,7 @@ public sealed partial class GroupChat
                 : CodexEfforts.Contains(e, StringComparer.Ordinal));
         var error = !Enum.IsDefined(level) || clean.Any(m => !Enum.IsDefined(LevelOf(m))) ? "알 수 없는 권한 단계입니다."
             : clean.FirstOrDefault(m => m.Engine is not null and not RoomEngines.Codex) is { } unknownEngine ? $"알 수 없는 엔진입니다: {unknownEngine.Engine}"
-            // Codex는 늘 파일을 읽고 명령을 돌린다 — "도구 없이 대화만"인 대화 단계와 맞지 않는다 (59063d4106 C1). 편집 · 명령은 승인 카드를 낼 곳이 없다
+            // 명령 단계는 승인 카드를 낼 곳이 없다
             : codex.FirstOrDefault(m => LevelOf(m) != PermissionLevel.Read) is { } codexLevel ? $"Codex 구성원 '{codexLevel.Name}'은 읽기 단계만 됩니다 (읽기 전용 · 승인 카드 없음)."
             : unknownWorkspace is not null ? $"허용 목록에 없는 작업 폴더입니다: {unknownWorkspace.Workspace}"
             : mcpMissing is not null ? $"작업 폴더 '{mcpMissing.Workspace}'의 .mcp.json에 {server} 항목이 없습니다 ({mcpMissing.Name}) — 구성원 기본 MCP를 끄거나 .mcp.json을 두세요."
@@ -525,7 +525,7 @@ public sealed partial class GroupChat
         }
 
         // 모두 같은 대화 범위 — 이 사용자 말 앞까지 (먼저 끝난 답을 이번 턴의 다른 구성원에게 끼우지 않음, 설계 검토 5 · ③ 결정).
-        // 쓰는 구성원(편집 · 명령)이 끼면 차례로: 첫 구성원만 지금 보내고 나머지는 차례 대기열 — 차례가 오면 앞 답까지 붙여 보낸다(StartQueued)
+        // 쓰는 구성원(명령)이 끼면 차례로: 첫 구성원만 지금 보내고 나머지는 차례 대기열 — 차례가 오면 앞 답까지 붙여 보낸다(StartQueued)
         var serial = targets.Any(m => IsWriter(_store.Get(m.RoomId)));
         var log = _log.Read(groupId);
         var prompts = new List<(GroupMember Member, string Prompt)>();

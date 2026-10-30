@@ -71,12 +71,12 @@
     <div class="composer">
         <form id="send-form" autocomplete="off">
             @Html.AntiForgeryToken()
-            <textarea id="text" name="text" placeholder="@("@이름 · @All로 구성원 부르기 (Enter 보내기 · Shift+Enter 줄바꿈) — " + (room.Members.Any(m => Model.WriterLabel(m) is not null) ? "편집 · 명령 구성원이 낀 말은 차례로" : "여러 명은 동시에"))" maxlength="@RoomHub.MaxPromptChars"></textarea>
+            <textarea id="text" name="text" placeholder="@("@이름 · @All로 구성원 부르기 (Enter 보내기 · Shift+Enter 줄바꿈) — " + (room.Members.Any(m => Model.WriterLabel(m) is not null) ? "명령 구성원이 낀 말은 차례로" : "여러 명은 동시에"))" maxlength="@RoomHub.MaxPromptChars"></textarea>
             <button class="btn primary" type="submit" id="send">@Icons.Svg("send") 보내기</button>
             <button class="btn" type="button" id="stop" disabled="@(!room.Members.Any(Model.AnyMemberBusy))">@Icons.Svg("stop") 중지</button>
         </form>
         <details class="hint"><summary>단톡방: @RoomRules.LevelName(room.Level)</summary>
-            부른 구성원만 답합니다. 구성원은 마지막으로 본 뒤의 단톡방 대화를 함께 받습니다. 편집 · 명령 구성원이 낀 말은 구성원 순서대로 하나씩 돌고, 뒤 구성원은 앞 답을 받습니다.
+            부른 구성원만 답합니다. 구성원은 마지막으로 본 뒤의 단톡방 대화를 함께 받습니다. 명령 구성원이 낀 말은 구성원 순서대로 하나씩 돌고, 뒤 구성원은 앞 답을 받습니다.
             구성원의 승인 · 질문 카드는 이 화면에 구성원 이름으로 나옵니다.
             @RoomRules.Describe(room.Level)
         </details>

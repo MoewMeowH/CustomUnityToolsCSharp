@@ -154,12 +154,11 @@ public sealed class CodexTests : IDisposable
         // 모델이 받지 않는 강도 (gpt-test는 low · medium만 — 59063d4106 C2)
         Assert.Contains("받지 않습니다", _groups.Create("ws", PermissionLevel.Read, "opus", null, "팀", [members[0], members[1] with { Effort = "high" }]).Error);
         // Codex 구성원은 읽기 단계만 — 대화(59063d4106 C1) · 편집 · 명령(승인 카드 없음, ⑤)을 고르면 거절
-        Assert.Contains("읽기 단계", _groups.Create("ws", PermissionLevel.Read, "opus", null, "팀", [members[0], members[1] with { Level = PermissionLevel.Chat }]).Error);
-        Assert.Contains("읽기 단계", _groups.Create("ws", PermissionLevel.Read, "opus", null, "팀", [members[0], members[1] with { Level = PermissionLevel.Edit }]).Error);
+        Assert.Contains("읽기 단계", _groups.Create("ws", PermissionLevel.Read, "opus", null, "팀", [members[0], members[1] with { Level = PermissionLevel.Command }]).Error);
         // 칸이 비면 기본 단계가 대화여도 Codex는 읽기 (⑤ — 구성원마다 단계)
-        var (chatDefault, chatError) = _groups.Create("ws", PermissionLevel.Chat, "opus", null, "팀", members);
+        var (chatDefault, chatError) = _groups.Create("ws", PermissionLevel.Read, "opus", null, "팀", members);
         Assert.Null(chatError);
-        Assert.Equal((PermissionLevel.Chat, PermissionLevel.Read), (_store.Get(chatDefault!.Members[0].RoomId)!.Level, _store.Get(chatDefault.Members[1].RoomId)!.Level));
+        Assert.Equal((PermissionLevel.Read, PermissionLevel.Read), (_store.Get(chatDefault!.Members[0].RoomId)!.Level, _store.Get(chatDefault.Members[1].RoomId)!.Level));
         Assert.Equal(PermissionLevel.Read, chatDefault.Level); // 단톡방 단계 = 구성원 중 가장 높은 단계
         Assert.Contains("엔진", _groups.Create("ws", PermissionLevel.Read, "opus", null, "팀", [members[0], members[1] with { Engine = "gemini" }]).Error);
 

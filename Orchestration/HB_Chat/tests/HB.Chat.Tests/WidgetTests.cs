@@ -21,9 +21,9 @@ public sealed class WidgetTests
     }
 
     [Theory]
-    [InlineData(PermissionLevel.Chat)]
     [InlineData(PermissionLevel.Read)]
-    [InlineData(PermissionLevel.Edit)]
+    [InlineData(PermissionLevel.Read)]
+    [InlineData(PermissionLevel.Command)]
     [InlineData(PermissionLevel.Command)]
     public void RoomRules_TellWidgetFormat(PermissionLevel level)
     {
@@ -70,7 +70,7 @@ public sealed class WidgetTests
     [Fact]
     public void RoomRules_TellChartFormat()
     {
-        var rules = RoomRules.For(PermissionLevel.Chat);
+        var rules = RoomRules.For(PermissionLevel.Read);
         Assert.Contains("```chart", rules);
         Assert.Contains("Chart.js 설정 JSON", rules);
         Assert.Contains("```slides", rules); // 슬라이드 시안

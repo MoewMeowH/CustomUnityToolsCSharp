@@ -115,9 +115,8 @@
     </div>
 
     @{
-        var canAttach = room.Level != PermissionLevel.Chat && room.DeletedAt is null;
-        var noAttachWhy = room.DeletedAt is not null ? "휴지통에 있는 방입니다 — 되살린 뒤 첨부하세요."
-            : "대화 단계 방은 파일을 열 도구가 없어 첨부를 받지 않습니다.";
+        var canAttach = room.DeletedAt is null;
+        var noAttachWhy = "휴지통에 있는 방입니다 — 되살린 뒤 첨부하세요.";
     }
     <div class="composer" @(Model.ParentGroup is not null ? "hidden" : null) data-attach="@(canAttach ? "1" : "0")" data-attach-why="@(canAttach ? null : noAttachWhy)"
          data-attach-max="@Attachments.MaxPerMessage" data-attach-bytes="@Attachments.MaxBytes">
@@ -131,7 +130,7 @@
         </div>
         @* 첨부 칩 (2-2 d): 끌어 놓기 · 캡처 붙여 넣기 · 첨부 단추로 올리면 바로 그 방 첨부 폴더에 저장되고, 보낼 때 [첨부] 줄로 붙는다 *@
         <div class="attach-chips" id="attach-chips" hidden></div>
-        @* 계획 먼저 (Claude 앱 기능 C, 결정 "입력칸 토글" · "편집 · 명령 방만"): 다음 말을 계획 모드로 — 계획을 승인하면 저절로 꺼진다 *@
+        @* 계획 먼저 (Claude 앱 기능 C, 결정 "입력칸 토글" · "명령 방만"): 다음 말을 계획 모드로 — 계획을 승인하면 저절로 꺼진다 *@
         @{
             var showPlan = ClaudeArgs.PlanMode(room.Level) is not null && room.DeletedAt is null;
         }

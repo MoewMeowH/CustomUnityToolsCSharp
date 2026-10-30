@@ -197,7 +197,7 @@ public sealed class TerminalsTests : IDisposable
         Assert.DoesNotContain("명령 프롬프트", tools.List()); // 내 셸은 지휘자에게 안 보인다
         Assert.Contains("프로그램 출력", tools.Read("web"));
 
-        store.Update(room.Id, r => r with { Level = PermissionLevel.Edit }); // 단계를 내리면 도구 거절
+        store.Update(room.Id, r => r with { Level = PermissionLevel.Read }); // 단계를 내리면 도구 거절
         Assert.StartsWith("[거절]", tools.Stop("web"));
         store.Update(room.Id, r => r with { Level = PermissionLevel.Command });
         Assert.StartsWith("중지함", tools.Stop("web"));
@@ -230,7 +230,7 @@ public sealed class TerminalsTests : IDisposable
         Assert.Contains("mcp__hb-chat__browser_read | Edit(**)", args);
         Assert.DoesNotContain("terminal_start", args);
         Assert.DoesNotContain("browser_open", args); // 열기는 호스트가 사이트를 본다
-        Assert.DoesNotContain("mcp-terminal", string.Join(" | ", ClaudeArgs.Build(spec with { Level = PermissionLevel.Edit }, ["opus"])));
+        Assert.DoesNotContain("mcp-terminal", string.Join(" | ", ClaudeArgs.Build(spec with { Level = PermissionLevel.Read }, ["opus"])));
 
         // 방 규칙의 터미널 안내는 앱 MCP를 붙인 실행에만 (지휘자 검토 K3)
         Assert.Contains("terminal_start", RoomRules.For(PermissionLevel.Command, terminal: true));
