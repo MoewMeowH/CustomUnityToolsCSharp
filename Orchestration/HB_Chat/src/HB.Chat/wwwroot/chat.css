@@ -12,6 +12,10 @@ a { color: var(--accent); }
 .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px;
          border: 1px solid var(--line); background: var(--code); }
 .badge.warn { color: var(--warn); border-color: var(--warn); }
+/* claude CLI 판 띠 (사이드바 맨 위 · 설정) — 확인하지 않은 판 · 자가 시험 실패 */
+.cli-banner { display: block; margin: 6px 8px; padding: 6px 10px; border: 1px solid var(--warn); border-radius: 6px; color: var(--warn); font-size: 12.5px; text-decoration: none; overflow-wrap: anywhere; }
+.cli-steps { margin: 6px 0 0; padding-left: 18px; font-size: 13px; }
+.cli-steps .fail { color: var(--err); } .cli-steps .miss { color: var(--warn); } .cli-steps .pass { color: var(--ok); }
 .badge.err { color: var(--err); border-color: var(--err); }
 .ok { color: var(--ok); } .err { color: var(--err); }
 pre { background: var(--code); padding: 12px 14px; border-radius: 8px; overflow-x: auto;

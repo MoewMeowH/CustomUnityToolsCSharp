@@ -2,6 +2,7 @@
 @inject FaceCatalog Faces
 @inject StickerPacks Packs
 @inject ProfileView Profiles
+@inject CliVersions CliState
 @*
     방 목록 줄: 아바타(상태 점) · 제목 · 시각 · 미리보기 · 안 읽은 수. 미리보기는 RoomList.Preview로 걷은 글자 그대로 (Razor 인코딩).
 *@
@@ -68,6 +69,15 @@
     }
 }
 <nav id="room-list" data-trash="@Model.TrashCount">
+    @* claude CLI 판 띠 (결정 "사이드바 + 설정"): 확인한 판과 다르거나 지금 판의 자가 시험이 실패했으면 — 목록과 같이 다시 받는다 *@
+    @if (CliState.Read() is { NeedsCheck: true } cli)
+    {
+        <a class="cli-banner" id="cli-banner" href="/Settings#cli" title="카드(승인 · 질문)는 claude CLI의 제어 요청 모양에 기댄다 — 설정에서 자가 시험">
+            @(cli.LastTest is { Passed: false } t && t.Version == cli.Seen
+                ? $"claude CLI {cli.Seen}: 카드 자가 시험 실패 — 설정에서 확인"
+                : $"claude CLI {cli.Checked ?? "?"} → {cli.Seen}: 카드를 아직 확인하지 않은 판 — 설정 › 카드 자가 시험")
+        </a>
+    }
     @* 작업 폴더가 둘 이상이면 폴더별로 접는 묶음 (3차 d — 노션 "채팅방 세션 폴더 별 묶음"). 접힘은 화면이 브라우저에 저장한다 (data-ws). *@
     @foreach (var (ws, rooms) in RoomList.Groups(Model.Rooms))
     {

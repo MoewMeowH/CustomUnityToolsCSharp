@@ -245,6 +245,9 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     /// <summary>구독 한도 (실행이 알려 준 rate_limit_event를 남김). 없으면 남기지 않음.</summary>
     public UsageLimits? Limits { get; init; }
 
+    /// <summary>claude CLI 판 기록 — 실행 init마다 본 판을 적는다 (확인하지 않은 판 띠). 없으면(시험) 적지 않는다.</summary>
+    public CliVersions? Cli { get; init; }
+
     /// <summary>
     /// 터미널 곁칸. 있으면 명령 방 실행에 앱 MCP(터미널 도구)를 붙이고, 출력 · 목록 변화를 방 알림으로 흘린다.
     /// 설정하면 이벤트를 구독한다 (앱에 하나).
@@ -416,6 +419,15 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             foreach (var ch in _appSubscribers) ch.Writer.TryWrite(roomId);
             foreach (var ch in _roomListeners) ch.Writer.TryWrite(new LiveEvent("rooms") { Text = roomId });
         }
+    }
+
+    /// <summary>
+    /// 방 줄이 아니라 사이드바 전체가 바뀌었을 때(예 CLI 판 띠) 열린 화면이 목록을 다시 받게 한다 — 목록 알림은 방 ID를 달고 가므로 보이는 방 하나로 낸다.
+    /// 방이 없으면 다시 받을 목록도 없다.
+    /// </summary>
+    public void TouchAll()
+    {
+        if (store.All().FirstOrDefault(r => r.GroupId is null && r.DeletedAt is null) is { } any) Touch(any.Id);
     }
 
     /// <summary>
@@ -1574,6 +1586,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             {
                 _commandSets[room.Id] = commands;
                 KeepMcpStatus(room.Id, live, generation, commands);
+                if (Cli?.Note(commands.Version) == true) TouchAll(); // CLI 판이 바뀌면 사이드바 띠
             }
             if (unityName is not null) KeepUnityShots(room.Id, ev, captures);
             if (ev is RateLimitEvent limits) Limits?.SaveClaude(limits); // 사이드바 한도 줄은 목록을 다시 그릴 때 읽는다

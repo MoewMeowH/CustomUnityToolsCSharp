@@ -49,6 +49,8 @@ builder.Services.AddSingleton(sp => new AgentBrowser(() => sp.GetRequiredService
 builder.Services.AddMcpServer().WithHttpTransport(o => o.Stateless = true).WithTools<TerminalTools>().WithTools<BrowserTools>();
 // 구독 한도: Claude는 실행 때 받은 값을 데이터 폴더에, Codex는 ~/.codex 세션 기록에서
 builder.Services.AddSingleton(sp => new UsageLimits(() => sp.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder));
+// claude CLI 판 기록 (카드 자가 시험 · 확인하지 않은 판 띠)
+builder.Services.AddSingleton(sp => new CliVersions(() => sp.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder));
 builder.Services.AddSingleton(sp =>
 {
     var options = sp.GetRequiredService<IOptions<ChatOptions>>();
@@ -56,6 +58,7 @@ builder.Services.AddSingleton(sp =>
     {
         Log = new ApprovalLog(() => options.Value.DataFolder),
         Limits = sp.GetRequiredService<UsageLimits>(),
+        Cli = sp.GetRequiredService<CliVersions>(),
         Terminals = sp.GetRequiredService<Terminals>(),
         Browser = sp.GetRequiredService<AgentBrowser>(),
         SelfUrl = () => TerminalMcp.LoopbackUrl(sp.GetRequiredService<Microsoft.AspNetCore.Hosting.Server.IServer>()),
@@ -130,6 +133,15 @@ if (ProcessJob.AttachCurrentProcess() is { } jobError)
 
 // 단톡방: 처음부터 만들어 둔다 — 구성원 자식 방의 턴 끝 · 활동 알림을 구독해야 답이 단톡방에 올라간다
 app.Services.GetRequiredService<GroupChat>();
+
+// claude CLI 판을 켤 때 한 번 (토큰 없음, 백그라운드) — 첫 말 전에도 "확인하지 않은 판" 띠가 보이게. 못 읽으면 첫 실행 init에서 적힌다
+_ = Task.Run(async () =>
+{
+    var chatOptions = app.Services.GetRequiredService<IOptions<ChatOptions>>().Value;
+    if (await CliVersions.AskVersionAsync(chatOptions.ResolveClaude(), TimeSpan.FromSeconds(15)) is { } version
+        && app.Services.GetRequiredService<CliVersions>().Note(version))
+        app.Services.GetRequiredService<RoomHub>().TouchAll();
+});
 
 // 이 필드 전에 만든 방은 마지막 줄까지 읽음으로 (안 그러면 업그레이드 직후 기존 방이 전부 안 읽음 — /self-review 5225b1ffaf C4).
 try

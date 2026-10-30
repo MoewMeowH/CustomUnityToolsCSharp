@@ -46,7 +46,7 @@ function Finish($d, [string]$tool, [string]$okText) {
 }
 
 $useSid = if ($mode -eq 'other') { '00000000-0000-0000-0000-000000000000' } else { $Sid }
-Emit ('{"type":"system","subtype":"init","session_id":"' + $useSid + '","claude_code_version":"fake","mcp_servers":[]}')
+Emit ('{"type":"system","subtype":"init","session_id":"' + $useSid + '","claude_code_version":"0.0.0-fake","mcp_servers":[]}')
 
 switch ($mode) {
     { $_ -in 'echo', '/echo' } {
@@ -283,6 +283,35 @@ switch ($mode) {
         Emit '{"type":"result","subtype":"success","is_error":false,"result":"server up","total_cost_usd":0.001,"permission_denials":[]}'
         Start-Sleep -Seconds 120
         exit 0
+    }
+    'hb-selftest' {
+        # card self-test (CliSelfTest): Bash approval for the mkdir in the prompt (allowed -> the folder is made, like the real CLI) ->
+        # AskUserQuestion -> text piece -> result (permission_denials = what was denied, like the real CLI).
+        # The test passes a variant in place of TasksRoot (self-test does not use tasks):
+        #   badcmd: asks a different mkdir | noask: skips the question | ignoreallow: allowed but the folder is not made (answer did not take)
+        #   preallowed: no approval request, the folder is made anyway (user allow rule) | extra: one more Bash (ls) after the mkdir
+        #   denyanswer: the question answer is counted as a denial
+        $v = $TasksRoot
+        $nonce = [regex]::Match($prompt, 'mkdir hb-selftest-([0-9a-f]+)').Groups[1].Value
+        $dir = 'hb-selftest-' + $nonce
+        $denials = @()
+        if ($v -eq 'preallowed') { New-Item -ItemType Directory -Force (Join-Path (Get-Location) $dir) | Out-Null }
+        else {
+            $cmd = if ($v -eq 'badcmd') { 'mkdir something-else' } else { 'mkdir ' + $dir }
+            $d1 = Ask 'req_st1' ('{"subtype":"can_use_tool","tool_name":"Bash","display_name":"Bash","input":{"command":"' + $cmd + '","description":"self test"},"tool_use_id":"toolu_st1"}')
+            if ($d1 -and $d1.behavior -eq 'allow') { if ($v -ne 'ignoreallow') { New-Item -ItemType Directory -Force (Join-Path (Get-Location) $dir) | Out-Null } }
+            else { $denials += '{"tool_name":"Bash"}' }
+        }
+        if ($v -eq 'extra') {
+            $dx = Ask 'req_stx' '{"subtype":"can_use_tool","tool_name":"Bash","display_name":"Bash","input":{"command":"ls","description":"check"},"tool_use_id":"toolu_stx"}'
+            if (-not $dx -or $dx.behavior -ne 'allow') { $denials += '{"tool_name":"Bash"}' }
+        }
+        if ($v -ne 'noask') {
+            $d2 = Ask 'req_st2' '{"subtype":"can_use_tool","tool_name":"AskUserQuestion","display_name":"AskUserQuestion","input":{"questions":[{"question":"self test question","header":"test","options":[{"label":"yes"},{"label":"no"}],"multiSelect":false}]},"tool_use_id":"toolu_st2"}'
+            if ($v -eq 'denyanswer' -or -not $d2 -or $d2.behavior -ne 'allow') { $denials += '{"tool_name":"AskUserQuestion"}' }
+        }
+        Emit '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"self test done"}}}'
+        Emit ('{"type":"result","subtype":"success","is_error":false,"result":"self test done","total_cost_usd":0.0001,"permission_denials":[' + ($denials -join ',') + ']}')
     }
     'readout' {
         # Read outside the workspace: the app has no read card - denied without a card, with the reason (user report 2026-10-30)

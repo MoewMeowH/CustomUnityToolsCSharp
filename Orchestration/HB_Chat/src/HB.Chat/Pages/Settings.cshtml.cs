@@ -10,7 +10,7 @@ namespace HB.Chat.Pages;
 /// </summary>
 public sealed class SettingsModel(
     RoomStore store, RoomHub hub, RoomList list, ChatTranscripts transcripts, IOptions<ChatOptions> options,
-    ProfileView profiles, FaceCatalog faces, RoomRuns runs, StickerPacks packs, CodexSettings codexSettings) : PageModel
+    ProfileView profiles, FaceCatalog faces, RoomRuns runs, StickerPacks packs, CodexSettings codexSettings, CliVersions cliVersions) : PageModel
 {
     // ---- Codex 구성원: 켤 수 있는 작업 폴더 · 실행 파일 · 이 계정 모델 ----
 
@@ -164,8 +164,36 @@ public sealed class SettingsModel(
         "mcp-secret" => "MCP 서버를 더했습니다 — 다만 확인할 점이 있습니다 (평문 토큰 · 원격 http · 원격으로 보내는 환경 변수 — 목록의 경고 줄). 토큰은 ${변수} 자리표시를 권합니다.",
         "mcp-removed" => "MCP 서버를 목록에서 뺐고, 켜 두었던 방에서도 껐습니다.",
         "codex" => "Codex 구성원을 켤 작업 폴더를 저장했습니다.",
+        "cli" => Cli.LastTest is { } t ? t.Passed ? $"카드 자가 시험 통과 — claude CLI {t.Version}을 확인한 판으로 적었습니다." : "카드 자가 시험이 통과하지 못했습니다 — 아래 단계를 보세요." : null,
         _ => null,
     };
+
+    // ---- claude CLI 판 · 카드 자가 시험 (결정 "설정 단추로만") ----
+
+    public CliVersions.State Cli => cliVersions.Read();
+    public bool CliTestRunning => CliSelfTest.Running;
+
+    /// <summary>
+    /// 카드 자가 시험 — 임시 작업 폴더에서 claude를 명령 단계로 한 턴 (haiku, 없으면 모델 목록 첫 값). 끝날 때까지(최대 2분) 기다렸다가 결과를 cli.json에 남긴다.
+    /// </summary>
+    public async Task<IActionResult> OnPostCliSelfTest()
+    {
+        var o = options.Value;
+        var model = o.ModelList.Contains("haiku", StringComparer.Ordinal) ? "haiku" : o.ModelList[0];
+        var result = await CliSelfTest.RunAsync(o.DataFolder, model, o.McpServer,
+            (spec, workspace) => new ProcessSpec(o.ResolveClaude(), ClaudeArgs.Build(spec, [.. o.ModelList]), workspace), HttpContext.RequestAborted);
+        if (result.Error == CliSelfTest.BusyError)
+        {
+            Error = result.Error;
+            Fill();
+            return Page();
+        }
+        // 화면을 떠나 취소된 시험은 실패가 아니다 — 기록하지 않는다 (/self-review 5ccb0f709a C2)
+        if (result.Error == CliSelfTest.AbortedError) return new EmptyResult();
+        cliVersions.Save(result);
+        hub.TouchAll(); // 사이드바 띠
+        return Redirect("/Settings?done=cli#cli");
+    }
 
     /// <summary>요청을 받기 전에 막힌 오류 (리다이렉트 뒤 한 줄, 4차 B2) — Done처럼 코드만 받고 문구는 여기서 고른다.</summary>
     [BindProperty(SupportsGet = true)]
