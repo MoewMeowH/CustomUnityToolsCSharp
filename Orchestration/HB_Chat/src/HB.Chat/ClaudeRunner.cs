@@ -62,12 +62,23 @@ public static class ClaudeRunner
     public const string NoApprover = "승인할 사람이 없어 자동으로 거절했습니다. 다시 시도하지 말고, 무엇이 필요한지 사용자에게 말하세요.";
 
     /// <summary>
-    /// CLI가 스스로 허용하지 않은 파일 쓰기(작업 폴더 밖 · 보호된 파일)를 거절할 때 — 이 앱은 쓰기 승인 카드가 없다. 무엇을 할지 알린다
-    /// (사용자 보고 2026-10-30: 단톡방에서 %TEMP%에 Write가 카드 없이 거절돼 "승인을 못 받는다"로 보였다).
+    /// 편집 방에서 CLI가 스스로 허용하지 않은 파일 쓰기(작업 폴더 밖 · 보호된 파일)를 거절할 때 — 편집 단계는 작업 폴더 안만 고친다 (명령 방은 카드로 묻는다).
+    /// 무엇을 할지 알린다 (사용자 보고 2026-10-30: 단톡방에서 %TEMP%에 Write가 카드 없이 거절돼 "승인을 못 받는다"로 보였다).
     /// </summary>
     public const string NoWriteApprover =
-        "이 방에서는 작업 폴더 밖이거나 보호된 파일을 Write · Edit로 쓸 수 없어 자동으로 거절했습니다 (파일 쓰기 승인 카드 없음). " +
+        "이 방(편집 단계)에서는 작업 폴더 밖이거나 보호된 파일을 Write · Edit로 쓸 수 없어 자동으로 거절했습니다 (명령 단계 방이면 승인 카드로 묻습니다). " +
         "같은 쓰기를 다시 시도하지 말고, 작업 폴더 안에 쓰거나 무엇이 필요한지 사용자에게 말하세요.";
+
+    /// <summary>
+    /// CLI가 스스로 허용하지 않은 읽기(작업 폴더 · 첨부 폴더 밖)를 거절할 때 — 이 앱에는 읽기 승인 카드가 없다. "승인할 사람이 없다"로 보이면 화면 앞의 사용자와
+    /// 지휘자가 헷갈려(사용자 보고 2026-10-30) 까닭을 그대로 적는다.
+    /// </summary>
+    public const string NoReadApprover =
+        "작업 폴더 밖 파일 · 폴더 읽기는 이 방에서 받지 않아 자동으로 거절했습니다 (읽기 승인 카드 없음 — 작업 폴더 · 첨부 파일은 읽을 수 있음). " +
+        "같은 읽기를 다시 시도하지 말고, 필요하면 사용자에게 그 파일을 첨부하거나 작업 폴더로 옮겨 달라고 말하세요.";
+
+    /// <summary>읽기 도구 — 승인 요청까지 왔으면 <see cref="NoReadApprover"/>로 거절한다.</summary>
+    public static readonly IReadOnlySet<string> ReadTools = new HashSet<string>(StringComparer.Ordinal) { "Read", "Grep", "Glob", "NotebookRead", "LS" };
 
     /// <summary>파일 쓰기 도구 — 승인 요청까지 왔으면 <see cref="NoWriteApprover"/>로 거절한다.</summary>
     public static readonly IReadOnlySet<string> WriteTools = new HashSet<string>(StringComparer.Ordinal) { "Write", "Edit", "MultiEdit", "NotebookEdit" };

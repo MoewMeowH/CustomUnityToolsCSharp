@@ -670,8 +670,10 @@
             card.append(head, el("div", "cmd", a.summary));
             // 터미널 시작 · 브라우저 사이트 카드의 설명은 앱이 쓴 안내다 — 지휘자 설명으로 보이지 않게
             if (a.description) card.append(el("div", "desc", (a.tool === "터미널" || a.tool === "브라우저" ? "" : "Claude 설명: ") + a.description));
+            // 작업 폴더 밖 파일 쓰기 (명령 방): 경로가 위, 쓸 내용은 앞부분만 — 잘려도 허용 (결정 "앞 2,000자 · 잘려도 허용")
+            if (a.outsideWrite) card.append(el("div", "warn-line", "작업 폴더 밖 파일 쓰기입니다 — 허용하면 위 경로의 파일이 만들어지거나 바뀝니다. 항상 허용은 없습니다."));
             // 명령 밖의 입력도 허용하면 같이 실행된다 — 본 것 = 허용되는 것 (/self-review 5e747ff851 C1)
-            if (a.extra) card.append(el("div", "cmd", "추가 입력: " + a.extra));
+            if (a.extra) card.append(el("div", "cmd", (a.outsideWrite ? "쓸 내용: " : "추가 입력: ") + a.extra));
             // 백그라운드 실행 명령 — 답이 끝난 뒤에도 돈다 (결정 "넣음")
             if (a.backgroundMinutes) card.append(el("div", "warn-line",
                 `백그라운드: 답이 끝난 뒤에도 최대 ${a.backgroundMinutes}분 계속 돕니다 — 대화 아래 '지금 끝내기'로 먼저 정리할 수 있습니다.`));

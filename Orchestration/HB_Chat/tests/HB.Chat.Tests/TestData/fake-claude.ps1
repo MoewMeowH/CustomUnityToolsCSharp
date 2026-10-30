@@ -284,6 +284,20 @@ switch ($mode) {
         Start-Sleep -Seconds 120
         exit 0
     }
+    'readout' {
+        # Read outside the workspace: the app has no read card - denied without a card, with the reason (user report 2026-10-30)
+        $d = Ask 'req_ro' '{"subtype":"can_use_tool","tool_name":"Read","display_name":"Read","input":{"file_path":"C:\\outside\\a.txt"},"tool_use_id":"toolu_ro"}'
+        Finish $d 'Read' 'read'
+    }
+    'writeto' {
+        # outside-workspace write card (command rooms): 'writeto <path>' asks Write for that path with long content (over the 2,000-char preview).
+        # Allow must carry the input back unchanged.
+        $path = ($body.Trim() -split '\s+')[1]
+        $content = 'x' * 2500
+        $d = Ask 'req_wt' ('{"subtype":"can_use_tool","tool_name":"Write","display_name":"Write","input":{"file_path":' + (ConvertTo-Json $path -Compress) + ',"content":"' + $content + '"},"tool_use_id":"toolu_wt"}')
+        if ($d -and $d.behavior -eq 'allow' -and ($d.updatedInput.file_path -ne $path -or $d.updatedInput.content -ne $content)) { $d = [pscustomobject]@{ behavior = 'deny'; message = 'updatedInput changed' } }
+        Finish $d 'Write' 'written'
+    }
     'write' {
         # 앱이 카드로 받지 않는 승인 요청 (작업 폴더 밖 쓰기) — 카드 없이 거절돼야 한다
         $d = Ask 'req_write' '{"subtype":"can_use_tool","tool_name":"Write","display_name":"Write","input":{"file_path":"C:\\outside\\x.txt","content":"x"},"tool_use_id":"toolu_fake3"}'

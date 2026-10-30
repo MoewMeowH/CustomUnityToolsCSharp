@@ -237,6 +237,132 @@ public sealed partial class WorkspaceStore
         return false;
     }
 
+    /// <summary>
+    /// 명령 방의 작업 폴더 밖 파일 쓰기(Write · Edit 카드)를 카드로 물어도 되는지 — 안 되면 까닭 (카드 없이 거절). 이 목록의 보호 폴더
+    /// (이 앱 · 그 저장소 · 데이터 · Claude 설정 · 설정 작업 폴더 기준 편집 금지 폴더)를 쓴다.
+    /// </summary>
+    public string? WhyNoWrite(string? filePath, string? workspace = null) => WhyNoWrite(filePath, _protectedFolders, workspace);
+
+    /// <summary>
+    /// <see cref="WhyNoWrite(string?, string?)"/>의 본체: 드라이브 문자 절대 경로만 · 이름을 다르게 읽히게 하는 표기(드라이브 뒤 <c>:</c> 스트림 · <c>~숫자</c> 짧은 이름 ·
+    /// 끝 점/공백) 아님 · 네트워크 드라이브 아님 · 있는 조상 폴더와 파일 자신이 링크 · 정션 아님 · 쓰지 않는 이름(<see cref="WriteBlockedName"/>)이 아님 —
+    /// 입력 경로와, 짧은 이름 · 링크를 푼 최종 경로 둘 다 (/cross-review a43e6f3e7b 1-F1) · 작업 폴더(<paramref name="workspace"/>) · 시스템 폴더 ·
+    /// <paramref name="guarded"/> · 시작프로그램 폴더 밖. 편집 금지 규칙(EditDenied)은 작업 폴더 기준이라 그 밖에는 걸리지 않아 같은 것을 여기서 본다.
+    /// </summary>
+    /// <param name="workspace">방 작업 폴더 경로 — 그 안 쓰기가 호스트에 왔으면(계획 모드 · CLI 보호 파일) 이 카드로 묻지 않는다 (sub_self dfe83d0bb5 C4).</param>
+    public static string? WhyNoWrite(string? filePath, IEnumerable<string> guarded, string? workspace = null)
+    {
+        if (string.IsNullOrWhiteSpace(filePath) || !DriveLetterPath().IsMatch(filePath.Trim()))
+            return "드라이브 문자부터 쓴 절대 경로가 아닙니다 (\\\\?\\ · UNC · 상대 경로는 받지 않음).";
+        var raw = filePath.Trim();
+        if (raw.IndexOf(':', 2) >= 0) return "드라이브 뒤에 ':'(대체 데이터 스트림)가 든 경로는 받지 않습니다.";
+        foreach (var part in raw[3..].Split(['\\', '/'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (part is not ("." or "..") && (part.EndsWith('.') || part.EndsWith(' '))) return $"끝이 점 · 공백인 이름은 받지 않습니다: '{part}'";
+            if (ShortName().IsMatch(part)) return $"짧은 이름(8.3) 모양의 조각은 받지 않습니다 — 원래 이름으로 쓰게 하세요: {part}";
+        }
+        if (Full(raw) is not { } full || System.IO.Path.GetDirectoryName(full) is not { Length: > 0 } folder) return "경로 모양이 올바르지 않습니다.";
+        try
+        {
+            if (new DriveInfo(full[..1]).DriveType is DriveType.Network or DriveType.NoRootDirectory) return "네트워크 · 없는 드라이브입니다.";
+        }
+        catch (ArgumentException) { return "드라이브를 알 수 없습니다."; }
+        if (WriteBlockedName(full) is { } blocked) return $"지시 · 설정 · 실행으로 이어지는 파일이라 쓰지 않습니다 ({blocked}).";
+        // 새 폴더를 만들며 쓰는 경우 — 있는 가장 가까운 폴더로 링크 · 최종 경로를 본다
+        var existing = folder;
+        while (!Directory.Exists(existing))
+            if (System.IO.Path.GetDirectoryName(existing) is { Length: > 0 } parent) existing = parent;
+            else return "있는 상위 폴더를 찾지 못했습니다.";
+        string target;
+        try
+        {
+            if (File.Exists(full) && File.GetAttributes(full).HasFlag(FileAttributes.ReparsePoint)) return "링크 파일에는 쓰지 않습니다.";
+            if (ThroughLink(existing) is { } link) return $"링크(재분석 지점 — 심볼릭 링크 · 정션)를 거치는 경로입니다: {link}";
+            if (Resolve(existing) is not { } final) return "폴더의 실제 경로를 확인하지 못했습니다.";
+            // 이미 있는 파일은 파일 핸들로 최종 이름까지 (그 파일의 짧은 이름 · 대소문자)
+            target = File.Exists(full) ? ResolveFile(full) ?? "" : System.IO.Path.GetFullPath(System.IO.Path.Combine(final, System.IO.Path.GetRelativePath(existing, full)));
+            if (target.Length == 0) return "파일의 실제 경로를 확인하지 못했습니다.";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return "파일 · 폴더 속성을 읽지 못했습니다."; }
+        if (WriteBlockedName(target) is { } real) return $"지시 · 설정 · 실행으로 이어지는 파일이라 쓰지 않습니다 ({real}).";
+        if (workspace is not null && (Resolve(workspace) ?? Full(workspace)) is { } ws && (Same(target, ws) || Inside(target, ws)))
+            return "작업 폴더 안 파일인데 묻는 쓰기라(계획 모드 · 보호 파일) 이 카드로 묻지 않습니다.";
+        foreach (var system in SystemFolders())
+            if (Same(target, system) || Inside(target, system)) return $"시스템 폴더 안입니다: {system}";
+        foreach (var start in new[] { Environment.SpecialFolder.Startup, Environment.SpecialFolder.CommonStartup }
+                     .Select(f => Environment.GetFolderPath(f)).Where(p => p.Length > 3).Select(p => Resolve(p) ?? Full(p)).OfType<string>())
+            if (Same(target, start) || Inside(target, start)) return $"시작프로그램 폴더 안입니다: {start}";
+        foreach (var guard in guarded.Select(g => Resolve(g) ?? Full(g)).OfType<string>())
+            if (Same(target, guard) || Inside(target, guard)) return $"이 앱 · 그 저장소 · 데이터 · Claude 설정 폴더 안입니다: {guard}";
+        return null;
+    }
+
+    /// <summary>8.3 짧은 이름 모양 (<c>GIT~1</c> · <c>CLAUDE~1.MD</c>) — 이름 규칙을 다르게 읽히게 해서 받지 않는다.</summary>
+    [GeneratedRegex(@"~\d")]
+    private static partial Regex ShortName();
+
+    /// <summary>
+    /// 쓰지 않는 폴더 이름 — 들어가면 다음 git 명령 · 편집기 · 셸이 그 안 파일을 실행한다 (/cross-review a43e6f3e7b — sub_self C2 · sub_security C3).
+    /// </summary>
+    private static readonly string[] WriteBlockedFolders = [".git", ".vscode", ".idea"];
+
+    /// <summary>
+    /// 쓰지 않는 파일 이름 · 확장자 — git · 셸 설정, Claude 사용자 설정(~/.claude.json), 실행 파일 · 스크립트 모듈 · 바로 가기 (같은 리뷰).
+    /// .js는 다른 프로젝트 파일에 흔해서 넣지 않는다.
+    /// </summary>
+    private static readonly string[] WriteBlockedFiles =
+    [
+        ".gitconfig", ".gitmodules", ".gitattributes", ".bashrc", ".bash_profile", ".profile", ".zshrc", ".zprofile", ".claude.json*",
+        "*.psm1", "*.psd1", "*.vbs", "*.vbe", "*.wsf", "*.wsh", "*.hta", "*.lnk", "*.exe", "*.dll", "*.scr", "*.com", "*.msi", "*.reg", "*.jse", "*.pif",
+    ];
+
+    /// <summary>
+    /// 쓰지 않는 이름이면 그 이름 — 편집 금지 규칙(<see cref="ClaudeArgs.EditDenied"/>) 중 이름 규칙(<c>**/이름</c> · <c>**/폴더/**</c>)과 같은 것
+    /// (지시 파일 · .claude · .mcp*.json · appsettings · 스크립트) + <see cref="WriteBlockedFolders"/> · <see cref="WriteBlockedFiles"/>. 대소문자는 가리지 않는다.
+    /// </summary>
+    public static string? WriteBlockedName(string fullPath)
+    {
+        var parts = fullPath.Split(['\\', '/'], StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0) return null;
+        var name = parts[^1];
+        static bool Like(string value, string glob) => Regex.IsMatch(value, "^" + Regex.Escape(glob).Replace(@"\*", ".*") + "$", RegexOptions.IgnoreCase);
+        foreach (var dir in parts[..^1])
+            if (WriteBlockedFolders.FirstOrDefault(f => dir.Equals(f, StringComparison.OrdinalIgnoreCase)) is { } folder) return folder + " 폴더";
+        if (WriteBlockedFiles.FirstOrDefault(f => Like(name, f)) is not null) return name;
+        foreach (var rule in ClaudeArgs.EditDenied.Where(r => r.StartsWith("**/", StringComparison.Ordinal)))
+        {
+            var rest = rule[3..];
+            if (rest.EndsWith("/**", StringComparison.Ordinal))
+            {
+                if (parts[..^1].Any(d => d.Equals(rest[..^3], StringComparison.OrdinalIgnoreCase))) return rest[..^3] + " 폴더";
+            }
+            else if (!rest.Contains('/') && Like(name, rest))
+                return name;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// 이 앱이 작업 폴더 · 쓰기 대상으로 막는 보호 폴더 — 이 앱(콘텐츠 · 실행 폴더) · 그 git 저장소 · 데이터 폴더 · Claude 설정 폴더(세션 기록 폴더의 부모 · ~/.claude) ·
+    /// 설정 작업 폴더 기준 편집 금지 폴더. Program과 RoomHub(앱 목록이 없을 때)가 같이 쓴다 (sub_self dfe83d0bb5 C5).
+    /// </summary>
+    public static IReadOnlyList<string> GuardedFolders(ChatOptions chat, string contentRoot)
+    {
+        var guarded = new List<string> { contentRoot, AppContext.BaseDirectory, chat.DataFolder };
+        // 앱이 든 git 저장소 전체 (공유 라이브러리 · 데스크톱 · MCP 게시 폴더 — 다음 빌드 · 실행에 들어간다)
+        for (var dir = new DirectoryInfo(contentRoot); dir is not null; dir = dir.Parent)
+            if (Directory.Exists(System.IO.Path.Combine(dir.FullName, ".git")) || File.Exists(System.IO.Path.Combine(dir.FullName, ".git"))) { guarded.Add(dir.FullName); break; }
+        // Claude 설정 폴더 (세션 기록 · 할 일 · settings.json 훅): 세션 기록 폴더의 부모(CLAUDE_CONFIG_DIR 반영)와 ~/.claude
+        if (System.IO.Path.GetDirectoryName(System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetFullPath(chat.ProjectsRoot))) is { Length: > 0 } claudeDir)
+            guarded.Add(claudeDir);
+        guarded.Add(System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude"));
+        // 설정 파일 작업 폴더 기준 편집 금지 폴더 (Orchestration/HB_Chat · Orchestration/Publish_Output)
+        foreach (var ws in chat.Workspaces.Values.Where(v => !string.IsNullOrWhiteSpace(v)))
+            foreach (var rule in ClaudeArgs.EditDenied.Where(r => !r.StartsWith("**", StringComparison.Ordinal) && r.EndsWith("/**", StringComparison.Ordinal)))
+                guarded.Add(System.IO.Path.Combine(ws.Trim(), rule[..^3]));
+        return guarded;
+    }
+
     private static IEnumerable<string> SystemFolders() =>
         new[] { Environment.SpecialFolder.Windows, Environment.SpecialFolder.ProgramFiles, Environment.SpecialFolder.ProgramFilesX86, Environment.SpecialFolder.System }
             .Select(f => Environment.GetFolderPath(f)).Where(p => p.Length > 3).Select(p => Resolve(p) ?? Full(p)).OfType<string>()
@@ -273,6 +399,21 @@ public sealed partial class WorkspaceStore
         if (result.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase)) return null;
         if (result.StartsWith(@"\\?\", StringComparison.Ordinal)) result = result[4..];
         return System.IO.Path.TrimEndingDirectorySeparator(result);
+    }
+
+    /// <summary>있는 파일의 최종 경로 (짧은 이름 · 대소문자가 풀린 드라이브 문자 경로). 못 풀면 null. 다른 OS는 GetFullPath 그대로.</summary>
+    private static string? ResolveFile(string path)
+    {
+        if (Full(path) is not { } full || !File.Exists(full)) return null;
+        if (!OperatingSystem.IsWindows()) return full;
+        using var handle = CreateFileW(full, 0, FileShare.ReadWrite | FileShare.Delete, IntPtr.Zero, FileMode.Open, BackupSemantics, IntPtr.Zero);
+        if (handle.IsInvalid) return null;
+        var buffer = new StringBuilder(1024);
+        var length = GetFinalPathNameByHandleW(handle, buffer, (uint)buffer.Capacity, 0);
+        if (length == 0 || length >= buffer.Capacity) return null;
+        var result = buffer.ToString();
+        if (result.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase)) return null;
+        return result.StartsWith(@"\\?\", StringComparison.Ordinal) ? result[4..] : result;
     }
 
     private const uint BackupSemantics = 0x02000000; // FILE_FLAG_BACKUP_SEMANTICS — 폴더 핸들을 열 때 필요

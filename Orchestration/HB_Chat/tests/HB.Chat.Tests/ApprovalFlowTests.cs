@@ -667,8 +667,8 @@ public sealed class ApprovalFlowTests : IDisposable
     [Fact]
     public async Task OtherApprovalRequests_AreDeniedWithoutCard()
     {
-        // 카드로 받지 않는 승인 요청(작업 폴더 밖 쓰기 등)은 묻지 않고 거절 — 그 전 --permission-prompts none과 같은 동작
-        foreach (var level in new[] { PermissionLevel.Edit, PermissionLevel.Command })
+        // 편집 방의 작업 폴더 밖 쓰기는 묻지 않고 거절 — 편집 단계는 작업 폴더 안만 (명령 방은 아래 OutsideWrite_CommandRoom_Card)
+        foreach (var level in new[] { PermissionLevel.Edit })
         {
             var room = _store.Create("ws", level, "opus", null);
             var ch = _hub.Subscribe(room.Id);
@@ -683,6 +683,132 @@ public sealed class ApprovalFlowTests : IDisposable
             Assert.False(end.Ok);
             Assert.Contains(ClaudeRunner.NoWriteApprover, end.Text);
         }
+    }
+
+    /// <summary>
+    /// 작업 폴더 밖 Read는 어느 단계든 카드 없이 거절하되 까닭을 정확히 — "승인할 사람이 없다"가 아니라 "작업 폴더 밖 읽기" (사용자 보고 2026-10-30).
+    /// </summary>
+    [Fact]
+    public async Task OutsideRead_DeniedWithReason()
+    {
+        foreach (var level in new[] { PermissionLevel.Read, PermissionLevel.Command })
+        {
+            var room = _store.Create("ws", level, "opus", null);
+            var ch = _hub.Subscribe(room.Id);
+            _hub.Send(room.Id, "readout");
+            var seen = await Until(ch, e => e.Kind == "idle");
+            Assert.DoesNotContain(seen, e => e.Kind == "approval");
+            var denied = seen.Single(e => e.Kind == "denied").Text;
+            Assert.Contains(@"Read C:\outside\a.txt", denied);
+            Assert.Contains("작업 폴더 밖 읽기", denied);
+            var end = seen.Single(e => e.Kind == "end");
+            Assert.Contains(ClaudeRunner.NoReadApprover, end.Text);
+            Assert.DoesNotContain(ClaudeRunner.NoApprover, end.Text);
+        }
+    }
+
+    /// <summary>
+    /// 명령 방의 작업 폴더 밖 Write는 카드로 묻는다 (결정 "명령 단계만"): 요약 = 경로, 쓸 내용은 앞 2,000자 미리보기라도 허용을 받고(결정 "잘려도 허용"),
+    /// 항상 허용은 없다. 허용 답은 입력 그대로. 거절하면 거절 답.
+    /// </summary>
+    [Fact]
+    public async Task OutsideWrite_CommandRoom_Card()
+    {
+        var outside = Path.Combine(_dir, "elsewhere", "note.txt");
+        foreach (var choice in new[] { ApprovalChoice.Allow, ApprovalChoice.Deny })
+        {
+            var room = _store.Create("ws", PermissionLevel.Command, "opus", null);
+            var ch = _hub.Subscribe(room.Id);
+            _hub.Send(room.Id, "writeto " + outside);
+            var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+            Assert.Equal(("Write", outside), (card.Tool, card.Summary));
+            Assert.True(card.OutsideWrite);
+            Assert.False(card.Truncated);
+            Assert.Null(card.Rule);
+            Assert.Contains("앞 2,000자만", card.Extra);
+            Assert.NotNull(_hub.Decide(room.Id, card.Id, ApprovalChoice.AlwaysAllow, null)); // 항상 허용 없음
+            Assert.Null(_hub.Decide(room.Id, card.Id, choice, null));
+            var end = (await Until(ch, e => e.Kind == "idle")).Single(e => e.Kind == "end");
+            Assert.Equal(choice == ApprovalChoice.Allow, end.Ok); // 허용이면 가짜 claude가 입력이 그대로 돌아왔는지도 본다
+        }
+    }
+
+    /// <summary>쓰기 대상 검사의 모양: 상대 · UNC 경로 거절, 보통 경로는 통과, 이름 규칙은 편집 금지 목록의 이름 규칙과 같다 (+ .git).</summary>
+    [Fact]
+    public void WhyNoWrite_Shapes()
+    {
+        Assert.NotNull(WorkspaceStore.WhyNoWrite(@"rel\x.txt", []));
+        Assert.NotNull(WorkspaceStore.WhyNoWrite(@"\\server\share\x.txt", []));
+        Assert.Null(WorkspaceStore.WhyNoWrite(Path.Combine(_dir, "new", "deeper", "x.txt"), []));
+        Assert.NotNull(WorkspaceStore.WhyNoWrite(Path.Combine(_dir, "new", "x.txt"), [_dir]));
+        Assert.Equal(".mcp.local.json", WorkspaceStore.WriteBlockedName(@"C:\x\.mcp.local.json"));
+        Assert.Equal("appsettings.Development.json", WorkspaceStore.WriteBlockedName(@"C:\x\appsettings.Development.json"));
+        Assert.Equal("MISTAKES.md", WorkspaceStore.WriteBlockedName(@"C:\x\MISTAKES.md"));
+        Assert.Equal(".claude 폴더", WorkspaceStore.WriteBlockedName(@"C:\x\.Claude\agents\a.md"));
+        Assert.Null(WorkspaceStore.WriteBlockedName(@"C:\x\notes.md"));
+        // 실행으로 이어지는 설정 · 실행 파일 (/cross-review a43e6f3e7b — sub_self C2 · sub_security C3)
+        Assert.Equal(".vscode 폴더", WorkspaceStore.WriteBlockedName(@"C:\p\.vscode\tasks.json"));
+        Assert.Equal(".gitconfig", WorkspaceStore.WriteBlockedName(@"C:\Users\x\.gitconfig"));
+        Assert.Equal(".claude.json", WorkspaceStore.WriteBlockedName(@"C:\Users\x\.claude.json"));
+        Assert.Equal("go.lnk", WorkspaceStore.WriteBlockedName(@"C:\x\go.lnk"));
+        Assert.Null(WorkspaceStore.WriteBlockedName(@"C:\x\app.js"));
+        // 이름을 다르게 읽히게 하는 표기 (1-F1): 스트림 · 짧은 이름 · 끝 점/공백
+        var dir = Path.Combine(_dir, "new");
+        Assert.Contains("스트림", WorkspaceStore.WhyNoWrite(Path.Combine(dir, "CLAUDE.md::$DATA"), []));
+        Assert.Contains("짧은 이름", WorkspaceStore.WhyNoWrite(Path.Combine(dir, "CLAUDE~1.MD"), []));
+        Assert.Contains("짧은 이름", WorkspaceStore.WhyNoWrite(Path.Combine(dir, "GIT~1", "hooks", "pre-commit"), []));
+        Assert.Contains("끝이 점", WorkspaceStore.WhyNoWrite(Path.Combine(dir, "CLAUDE.md."), []));
+        // 작업 폴더 안 쓰기는 이 카드로 묻지 않는다 (sub_self C4)
+        Assert.Contains("작업 폴더 안", WorkspaceStore.WhyNoWrite(Path.Combine(_dir, "ws", "x.txt"), [], Path.Combine(_dir, "ws")));
+        // 이미 있는 파일은 최종 이름으로도 본다 (대소문자 · 짧은 이름이 풀린 이름)
+        Directory.CreateDirectory(Path.Combine(_dir, "proj"));
+        File.WriteAllText(Path.Combine(_dir, "proj", "Claude.md"), "");
+        Assert.Contains("CLAUDE.md", WorkspaceStore.WhyNoWrite(Path.Combine(_dir, "proj", "claude.MD"), []), StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// 쓰기 카드 미리보기 (1-F 리뷰 sub_self C3 · sub_security C4): 짧은 값(replace_all)은 먼저 다 보이고, 써질 내용(new_string)이 old_string보다 먼저,
+    /// 긴 값은 키마다 나눠 잘리며 잘린 키와 전체 길이를 적는다. NotebookEdit는 notebook_path만 경로로 보고, 다른 경로 키가 같이 오면 경로 없음.
+    /// </summary>
+    [Fact]
+    public void WriteCard_PreviewOrder_PathKey()
+    {
+        var edit = System.Text.Json.JsonSerializer.Serialize(new { file_path = @"C:\x\a.txt", old_string = new string('o', 3000), new_string = new string('n', 3000), replace_all = true });
+        var card = ApprovalRequest.ForWrite("Edit", edit, @"C:\x\a.txt")!;
+        var lines = card.Extra!.Split('\n');
+        Assert.Equal("replace_all=true", lines[0]);
+        Assert.StartsWith("new_string=nnn", lines[1]);
+        Assert.Contains("new_string 앞 1,000자만 보임 — 전체 3,000자", card.Extra);
+        Assert.True(card.Extra.IndexOf("new_string=", StringComparison.Ordinal) < card.Extra.IndexOf("old_string=", StringComparison.Ordinal));
+        Assert.False(card.Truncated);
+
+        var notebook = """{"notebook_path":"C:\\x\\n.ipynb","new_source":"print(1)","edit_mode":"delete"}""";
+        Assert.Equal(@"C:\x\n.ipynb", ApprovalRequest.WritePath("NotebookEdit", notebook));
+        Assert.Contains("edit_mode=delete", ApprovalRequest.ForWrite("NotebookEdit", notebook, @"C:\x\n.ipynb")!.Extra);
+        Assert.Null(ApprovalRequest.WritePath("NotebookEdit", """{"notebook_path":"C:\\x\\n.ipynb","file_path":"C:\\x\\CLAUDE.md"}"""));
+        Assert.Null(ApprovalRequest.WritePath("Write", """{"file_path":"C:\\x\\a.txt","notebook_path":"C:\\x\\b"}"""));
+        Assert.Equal(@"C:\x\a.txt", ApprovalRequest.WritePath("Write", """{"file_path":"C:\\x\\a.txt","content":"x"}"""));
+    }
+
+    /// <summary>명령 방이어도 위험한 곳(데이터 폴더 · 지시 · 스크립트 이름 · .git)은 카드 없이 거절하고 까닭을 알린다.</summary>
+    [Theory]
+    [InlineData("data", "rooms.json", "데이터")]
+    [InlineData("other", "CLAUDE.md", "CLAUDE.md")]
+    [InlineData("other", "run.ps1", "run.ps1")]
+    [InlineData("other/.git/hooks", "pre-commit", ".git")]
+    [InlineData("other/.claude", "settings.json", ".claude")]
+    public async Task OutsideWrite_BlockedPlace_NoCard(string folder, string name, string why)
+    {
+        var path = Path.Combine(_dir, folder, name);
+        var room = _store.Create("ws", PermissionLevel.Command, "opus", null);
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "writeto " + path);
+        var seen = await Until(ch, e => e.Kind == "idle");
+        Assert.DoesNotContain(seen, e => e.Kind == "approval");
+        Assert.Contains(why, seen.Single(e => e.Kind == "denied").Text);
+        var end = seen.Single(e => e.Kind == "end");
+        Assert.False(end.Ok);
+        Assert.Contains("이 파일은 쓰지 않습니다", end.Text);
     }
 
     [Fact]

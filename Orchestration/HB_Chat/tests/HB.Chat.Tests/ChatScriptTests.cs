@@ -195,6 +195,28 @@ public sealed class ChatScriptTests(ChatApp app, ChatBrowser browser) : IClassFi
         again.AssertNoErrors();
     }
 
+    /// <summary>명령 방의 작업 폴더 밖 쓰기 카드: 경로 · 안내 줄 · "쓸 내용" 미리보기, "항상 허용" 단추 없음, 허용 단추가 있다(잘려도 허용). 거절하면 카드가 닫힌다.</summary>
+    [Fact]
+    public async Task OutsideWriteCard_ShowsPathPreviewNoAlways()
+    {
+        if (!browser.Available) return;
+        var room = app.Store.Create("ws", PermissionLevel.Command, "opus", "밖 쓰기");
+        // 시험 앱 폴더 밖 — 그 폴더는 세션 기록 폴더(projects)의 부모라 "Claude 설정 폴더"로 막힌다. 가짜 claude는 실제로 쓰지 않는다
+        var path = Path.Combine(Path.GetTempPath(), "hbchat-outside-" + Guid.NewGuid().ToString("N")[..8], "note.txt");
+        await using var page = await browser.OpenAsync(app.RoomUrl(room));
+        await page.SendAsync("writeto " + path);
+        await page.WaitForAsync("!!document.querySelector('#live .approval')", "쓰기 카드", ChatPage.TurnWait);
+        Assert.Equal(path, await page.EvalAsync<string>("document.querySelector('#live .approval .cmd').textContent"));
+        Assert.Contains("작업 폴더 밖 파일 쓰기", await page.EvalAsync<string>("document.querySelector('#live .approval .warn-line').textContent"));
+        Assert.StartsWith("쓸 내용: content=", await page.EvalAsync<string>("document.querySelectorAll('#live .approval .cmd')[1].textContent"));
+        var buttons = await page.EvalAsync<string>("[...document.querySelectorAll('#live .approval button')].map(b => b.textContent).join('|')");
+        Assert.Contains("허용", buttons);
+        Assert.DoesNotContain("항상 허용", buttons);
+        await page.EvalAsync("[...document.querySelectorAll('#live .approval button')].find(b => b.textContent === '거절').click()");
+        await page.WaitForAsync("!document.querySelector('#live .approval')", "카드 닫힘", ChatPage.TurnWait);
+        page.AssertNoErrors();
+    }
+
     /// <summary>
     /// 단톡방 답 실시간 표시: 부른 구성원의 글 조각 · 도구 칩이 진행 칸 임시 말풍선에 흐르고, 새로 연 화면(다시 붙음)도 쌓인 글을 받는다.
     /// 끝나면 임시 말풍선이 사라지고 대화 줄 말풍선 하나만 남는다. 가짜 claude 'stream'은 go 파일을 기다린다.

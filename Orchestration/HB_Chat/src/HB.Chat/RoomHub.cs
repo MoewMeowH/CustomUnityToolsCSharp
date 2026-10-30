@@ -93,6 +93,9 @@ public sealed record ApprovalView(string Id, string Tool, string Summary, string
 
     /// <summary>run_mode 모델 선택 카드. 아니면 null.</summary>
     public ModeCard? Mode { get; init; }
+
+    /// <summary>작업 폴더 밖 파일 쓰기 카드 (Summary = 경로, Extra = 쓸 내용 미리보기 — 잘려도 허용).</summary>
+    public bool OutsideWrite { get; init; }
 }
 
 /// <summary>
@@ -171,6 +174,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         {
             Mode = Request.Mode,
             Extra = Request.Extra,
+            OutsideWrite = Request.OutsideWrite,
             Risky = Request.Risky,
             Plan = Request.IsPlan,
             FromAgent = Request.FromAgent,
@@ -664,9 +668,41 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         var target = summary is { Length: > 0 } s ? $" {(s.Length > 120 ? s[..120] + "…" : s)}" : "";
         if (ClaudeRunner.WriteTools.Contains(ask.Tool))
         {
-            // CLI가 스스로 허용하지 않은 파일 쓰기 — 이 앱에는 쓰기 카드가 없다. 화면 줄 · 지휘자에게 까닭을 알린다 (카드로 묻기는 나중 일)
+            // CLI가 스스로 허용하지 않은 파일 쓰기(작업 폴더 밖 등). 명령 방은 카드로 묻는다 (결정 "명령 단계만" — 명령으로 이미 카드를 거쳐 폴더 밖에
+            // 쓸 수 있는 단계라 권한이 넓어지지 않는다). 위험한 곳(앱 · 설정 폴더 · 지시 · 스크립트 이름 · 링크)은 카드 없이 거절. 편집 방은 "작업 폴더 안만" 그대로
+            if (room.Level == PermissionLevel.Command && store.Get(room.Id) is { Level: PermissionLevel.Command })
+            {
+                var o = options.Value;
+                var path = ApprovalRequest.WritePath(ask.Tool, ask.InputJson);
+                // 앱 보호 목록이 없을 때(시험)도 Program과 같은 보호 폴더로 (sub_self dfe83d0bb5 C5)
+                string? Why() => path is null ? "쓸 파일 경로를 읽지 못했습니다 (경로 키가 없거나 둘 이상)."
+                    : o.AppWorkspaces is { } guard ? guard.WhyNoWrite(path, workspace)
+                    : WorkspaceStore.WhyNoWrite(path, WorkspaceStore.GuardedFolders(o, AppContext.BaseDirectory), workspace);
+                var why = Why();
+                if (why is null && ApprovalRequest.ForWrite(ask.Tool, ask.InputJson, path!) is { } card)
+                {
+                    var answer = await RequestApprovalAsync(room.Id, live, generation, card, aborted);
+                    // 카드를 기다리는 사이 경로가 바뀌었으면(정션 · 링크로 바꿈) 허용하지 않는다 (/cross-review a43e6f3e7b 1-F2). 쓰는 순간의 경쟁은 CLI 쪽이라 남는다
+                    if (answer is { Allow: true } && Why() is { } changed)
+                    {
+                        HostDenied(room, live, generation, ask.Tool, summary, "허용 뒤 경로 바뀜", $"{ask.Tool}{target}: 허용 뒤 다시 보니 {changed} — 거절");
+                        return PermissionDecision.Deny($"허용한 뒤 다시 확인해 보니 쓰지 않는 곳입니다: {changed} 같은 쓰기를 다시 시도하지 말고 사용자에게 말하세요.");
+                    }
+                    return (answer ?? new ApprovalAnswer(false, "실행이 이미 끝나 거절했습니다.")).ToDecisionJson(ask.InputJson);
+                }
+                why ??= "쓰기 입력을 읽지 못했습니다.";
+                HostDenied(room, live, generation, ask.Tool, summary, "쓰지 않는 곳", $"{ask.Tool}{target}: {why} — 카드 없이 거절");
+                return PermissionDecision.Deny($"{why} 이 파일은 쓰지 않습니다. 같은 쓰기를 다시 시도하지 말고, 무엇이 필요한지 사용자에게 말하세요.");
+            }
+            // 편집 방 — 이 앱에는 그 단계의 쓰기 카드가 없다. 화면 줄 · 지휘자에게 까닭을 알린다
             HostDenied(room, live, generation, ask.Tool, summary, "작업 폴더 밖 쓰기", $"{ask.Tool}{target}: 작업 폴더 밖 · 보호된 파일 쓰기는 카드가 없어 자동 거절");
             return PermissionDecision.Deny(ClaudeRunner.NoWriteApprover);
+        }
+        if (ClaudeRunner.ReadTools.Contains(ask.Tool))
+        {
+            // 작업 폴더 · 첨부 폴더 밖 읽기 — 막는 것은 그대로, 까닭을 정확히 (사용자 보고 2026-10-30: "승인할 사람이 없다"가 화면 앞 사용자와 지휘자를 헷갈리게 함)
+            HostDenied(room, live, generation, ask.Tool, summary, "작업 폴더 밖 읽기", $"{ask.Tool}{target}: 작업 폴더 밖 읽기는 받지 않아 자동 거절");
+            return PermissionDecision.Deny(ClaudeRunner.NoReadApprover);
         }
         HostDenied(room, live, generation, ask.Tool, summary, "승인할 곳 없음", $"{ask.Tool}{target}: 승인할 곳이 없어 자동 거절");
         return PermissionDecision.Deny(ClaudeRunner.NoApprover);
@@ -1880,7 +1916,8 @@ public static class RoomRules
         PermissionLevel.Command =>
             "읽기 단계 + 작업 폴더 파일 편집(묻지 않음) + 명령 실행(Bash · PowerShell). 명령은 실행 전에 방의 카드로 사용자가 허용 · 거절한다 " +
             "(답이 없으면 약 10분 뒤 거절, 읽기 전용 명령과 작업 폴더 설정이 미리 허용한 명령은 묻지 않음). 편집 금지 경로는 Edit · Write 도구에만 걸리고, " +
-            "명령으로 쓰는 것은 카드가 막는다. \"이 방에서 항상 허용\" 규칙은 이 방에만 적용되며, 그 명령이 돌리는 파일이 바뀌어도 다시 묻지 않는다",
+            "명령으로 쓰는 것은 카드가 막는다. 작업 폴더 밖 파일을 Write · Edit로 쓰는 것도 카드로 묻는다(이 앱 · 설정 · 시작프로그램 폴더, 지시 · 설정 · 실행으로 이어지는 파일(.git · .vscode · .gitconfig · 스크립트 · 실행 파일 등), 짧은 이름 · 스트림 표기 경로는 카드 없이 거절). " +
+            "\"이 방에서 항상 허용\" 규칙은 이 방에만 적용되며, 그 명령이 돌리는 파일이 바뀌어도 다시 묻지 않는다",
         _ => level.ToString(),
     };
 }

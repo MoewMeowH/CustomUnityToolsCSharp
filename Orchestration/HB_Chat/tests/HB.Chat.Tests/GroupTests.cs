@@ -783,6 +783,29 @@ public sealed class GroupTests : IDisposable
         finally { _hub.Unsubscribe(group.Id, events); }
     }
 
+    /// <summary>명령 구성원의 작업 폴더 밖 쓰기 카드도 단톡방 알림으로 온다 (Detail = 구성원 ID, OutsideWrite).</summary>
+    [Fact]
+    public async Task Writer_OutsideWriteCard_ForwardedToGroup()
+    {
+        var group = WriterGroup(PermissionLevel.Command);
+        var a = group.Members[0];
+        var events = _hub.Subscribe(group.Id);
+        try
+        {
+            // 시험 폴더 밖 — 그 폴더는 세션 기록 폴더(projects)의 부모라 "Claude 설정 폴더"로 막힌다 (가짜 claude는 실제로 쓰지 않음)
+            var path = Path.Combine(Path.GetTempPath(), "hbchat-outside-" + Guid.NewGuid().ToString("N")[..8], "note.txt");
+            Assert.Null(_groups.Send(group.Id, $"writeto {path} @A"));
+            using var cts = new CancellationTokenSource(Wait);
+            LiveEvent card;
+            do card = await events.Reader.ReadAsync(cts.Token); while (card.Kind != "approval");
+            Assert.Equal((a.Id, path, true), (card.Detail, card.Approval!.Summary, card.Approval.OutsideWrite));
+            Assert.Null(_hub.Decide(a.RoomId, card.Approval.Id, ApprovalChoice.Deny, null));
+            var user = _log.Read(group.Id).Single(e => e.Kind == GroupEntryKind.User).Line;
+            Assert.True((await AnswerAsync(group.Id, "A", user)).Failed);
+        }
+        finally { _hub.Unsubscribe(group.Id, events); }
+    }
+
     /// <summary>
     /// 답 실시간 표시: 구성원 자식 방의 도구 · 글 조각이 단톡방 알림 member-tool · member-delta(Member = 구성원 ID)로 오고, 실행 중에 새로 구독하면
     /// 같은 채널 처음에 쌓인 글(member-reset) · 마지막 도구가 온다 (7e68bf5791 C1). 끝난 뒤 구독에는 없다. 가짜 claude 'stream'은 go 파일을 기다린다.

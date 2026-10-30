@@ -99,17 +99,8 @@ if (builder.Configuration["Chat:StickerSettingsDir"] is { Length: > 0 } configur
 // 앱 · MCP 서버 · Claude 설정을 고칠 수 있게 되므로 (/self-review security eee1adb777 C2 · 460430d647 C1 · C2).
 {
     var chat = app.Services.GetRequiredService<IOptions<ChatOptions>>().Value;
-    var guarded = new List<string> { app.Environment.ContentRootPath, AppContext.BaseDirectory, chat.DataFolder };
-    // 앱이 든 git 저장소 전체 (공유 라이브러리 · 데스크톱 · MCP 게시 폴더 — 다음 빌드 · 실행에 들어간다)
-    for (var dir = new DirectoryInfo(app.Environment.ContentRootPath); dir is not null; dir = dir.Parent)
-        if (Directory.Exists(Path.Combine(dir.FullName, ".git")) || File.Exists(Path.Combine(dir.FullName, ".git"))) { guarded.Add(dir.FullName); break; }
-    // Claude 설정 폴더 (세션 기록 · 할 일 · settings.json 훅): 세션 기록 폴더의 부모(CLAUDE_CONFIG_DIR 반영)와 ~/.claude
-    if (Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(Path.GetFullPath(chat.ProjectsRoot))) is { Length: > 0 } claudeDir) guarded.Add(claudeDir);
-    guarded.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude"));
-    // 설정 파일 작업 폴더 기준 편집 금지 폴더 (Orchestration/HB_Chat · Orchestration/Publish_Output)
-    foreach (var ws in chat.Workspaces.Values.Where(v => !string.IsNullOrWhiteSpace(v)))
-        foreach (var rule in ClaudeArgs.EditDenied.Where(r => !r.StartsWith("**", StringComparison.Ordinal) && r.EndsWith("/**", StringComparison.Ordinal)))
-            guarded.Add(Path.Combine(ws.Trim(), rule[..^3]));
+    // 보호 폴더: 이 앱 · 그 git 저장소 · 데이터 · Claude 설정 폴더 · 설정 작업 폴더 기준 편집 금지 폴더 (쓰기 카드 검사와 같은 함수)
+    var guarded = WorkspaceStore.GuardedFolders(chat, app.Environment.ContentRootPath);
     chat.AppWorkspaces = new WorkspaceStore(Path.Combine(chat.DataFolder, "workspaces.json"), chat.Workspaces, guarded);
     if (chat.AppWorkspaces.LoadError is { } wsError)
         app.Logger.LogWarning("앱에서 더한 작업 폴더(workspaces.json)를 읽지 못했습니다 — 덮어쓰지 않고 설정 파일 것만 씁니다: {Error}", wsError);

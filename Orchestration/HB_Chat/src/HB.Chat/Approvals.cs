@@ -41,6 +41,78 @@ public sealed record ApprovalRequest(string Tool, string Summary, string? Descri
     /// <summary>run_mode 모델 선택 카드 — 허가하면 고른 교체 · 강도로 입력을 다시 쓴다. 아니면 null.</summary>
     public ModeCard? Mode { get; init; }
 
+    /// <summary>명령 방의 작업 폴더 밖 파일 쓰기 카드 (<see cref="ForWrite"/>) — 화면이 "쓸 내용 미리보기"와 안내 줄을 보인다.</summary>
+    public bool OutsideWrite { get; init; }
+
+    /// <summary>작업 폴더 밖 쓰기 카드의 내용 미리보기 상한 (글자, 결정 "앞 2,000자 · 잘려도 허용").</summary>
+    public const int WritePreviewChars = 2_000;
+
+    /// <summary>쓰기 도구가 쓰는 경로 키 — NotebookEdit는 notebook_path, 그 밖은 file_path.</summary>
+    private static string PathKey(string tool) => tool == "NotebookEdit" ? "notebook_path" : "file_path";
+
+    /// <summary>
+    /// 쓰기 도구 입력의 대상 경로 — 그 도구가 쓰는 키(<see cref="PathKey"/>)만 본다. 다른 경로 키가 같이 있으면 null: 검사 · 카드에 보인 경로와 실제로 쓰는
+    /// 경로가 달라질 수 있다 (/cross-review a43e6f3e7b 자료 요청 1-N3). 없거나 읽지 못해도 null.
+    /// </summary>
+    public static string? WritePath(string tool, string inputJson)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(inputJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return null;
+            var key = PathKey(tool);
+            var other = key == "file_path" ? "notebook_path" : "file_path";
+            return doc.RootElement.TryGetProperty(other, out _) ? null : Str(doc.RootElement, key);
+        }
+        catch (JsonException) { return null; }
+    }
+
+    /// <summary>미리보기에서 짧은 값으로 보는 길이 — 이보다 짧은 값(replace_all · edit_mode · cell_type …)은 잘리지 않게 먼저 보인다.</summary>
+    private const int ShortValueChars = 200;
+
+    /// <summary>긴 값을 보일 차례 — 실제로 써질 내용이 먼저 (old_string은 뒤).</summary>
+    private static readonly string[] BodyOrder = ["content", "new_string", "new_source", "edits", "old_string"];
+
+    /// <summary>
+    /// 명령 방의 작업 폴더 밖 파일 쓰기 카드 (Write · Edit · MultiEdit · NotebookEdit): 요약 = 대상 경로, 추가 입력 = 쓸 내용(경로 밖의 입력) 미리보기.
+    /// 짧은 값(동작 플래그)을 먼저 다 보이고, 긴 값은 써질 내용부터 키마다 2,000자를 나눠 앞부분을 보인다 — 잘린 값은 키 이름과 전체 길이를 적는다
+    /// (/cross-review a43e6f3e7b — 앞 값이 길면 new_string · replace_all이 가려졌다). 명령 카드와 달리 잘려도 허용을 받는다 (결정 "앞 2,000자 · 잘려도 허용" —
+    /// 위험은 대상 경로에 있고, 위험한 이름 · 폴더는 앞에서 카드 없이 거절). 위험한 이름의 입력(dangerously · bypass)이 있으면 거절만. "항상 허용"은 없다.
+    /// 입력을 읽지 못하면 null.
+    /// </summary>
+    public static ApprovalRequest? ForWrite(string tool, string inputJson, string path)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(inputJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return null;
+            var values = new List<(string Name, string Text)>();
+            var risky = false;
+            foreach (var p in doc.RootElement.EnumerateObject().Where(p => p.Name != PathKey(tool)))
+            {
+                values.Add((p.Name, p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString()! : p.Value.GetRawText()));
+                if (ApprovalRules.IsDangerousName(p.Name) && p.Value.ValueKind is not (JsonValueKind.False or JsonValueKind.Null)) risky = true;
+            }
+            var lines = values.Where(v => v.Text.Length <= ShortValueChars).Select(v => $"{v.Name}={v.Text}").ToList();
+            var bodies = values.Where(v => v.Text.Length > ShortValueChars)
+                .OrderBy(v => Array.IndexOf(BodyOrder, v.Name) is var i and >= 0 ? i : BodyOrder.Length).ToList();
+            var share = bodies.Count == 0 ? 0 : Math.Max(300, WritePreviewChars / bodies.Count);
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            foreach (var (name, text) in bodies)
+                lines.Add(text.Length <= share
+                    ? $"{name}={text}"
+                    : $"{name}={text[..share]}\n… ({name} 앞 {share.ToString("N0", inv)}자만 보임 — 전체 {text.Length.ToString("N0", inv)}자)");
+            var preview = string.Join("\n", lines);
+            return new ApprovalRequest(tool, path, null, null)
+            {
+                Extra = preview.Length == 0 ? null : preview,
+                Risky = risky,
+                OutsideWrite = true,
+            };
+        }
+        catch (JsonException) { return null; }
+    }
+
     /// <summary>계획 모드에서 지휘자가 계획 승인을 묻는 도구.</summary>
     public const string PlanTool = "ExitPlanMode";
 
