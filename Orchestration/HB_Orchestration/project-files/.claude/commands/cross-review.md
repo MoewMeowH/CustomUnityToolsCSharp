@@ -1,6 +1,7 @@
 ---
 description: Claude와 외부 에이전트가 독립적으로 리뷰한 뒤 결과를 종합한다
 argument-hint: [main|high] [파일/커밋 범위, 비우면 현재 미커밋 변경]
+disable-model-invocation: true
 ---
 
 인자: $ARGUMENTS

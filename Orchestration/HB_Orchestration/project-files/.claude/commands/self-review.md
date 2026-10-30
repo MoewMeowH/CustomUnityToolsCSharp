@@ -1,6 +1,7 @@
 ---
 description: Claude 지휘자와 검토형 리뷰어(기본 API 리뷰 sub_* — 코드 · perf · security · direction, 서브에이전트는 sub로 고르거나 크레딧 소진 때)가 독립적으로 리뷰한 뒤 결과를 종합한다 (다른 회사 외부 에이전트 없음)
 argument-hint: [sub] [perf|security|direction|trace] [파일/커밋 범위 또는 계획서 · 지시서, 비우면 현재 미커밋 변경]
+disable-model-invocation: true
 ---
 
 인자: $ARGUMENTS
@@ -84,7 +85,7 @@ argument-hint: [sub] [perf|security|direction|trace] [파일/커밋 범위 또�
   * 검토형(self · perf · security)은 대상 파일을 고르는 대신 저장소 추적 사본 `repo/`를 준다 (`subagent_copy_tracked.py`, 위 2-2 — diff + 직접 찾기). direction은 그대로 요청 원문 · 계획서만.
   * 읽기 차단 훅(`.claude/scripts/subagent_read_guard.py`)이 `subagent_in/` 밖을 막는다. 이전 리뷰·작업 로그·호출 기록을 넣지 않는다.
   * `CLAUDE.md`가 검토 대상이면 `CLAUDE.md.txt`처럼 이름을 바꿔 복사한다 (그대로 두면 지휘자 규칙이 서브에이전트에 자동으로 실린다 — H6이 막음). 링크가 아니라 내용을 복사한다. 부르기 전에 복사를 끝내고, 서브에이전트가 도는 동안에는 `subagent_in/`에 복사하지 않는다 (H6은 부르는 순간만 본다).
-  * 그 서브에이전트의 `.claude/mistakes/<이름>.md`에 항목(주석 밖 `- ` 줄)이 있으면 `_SUBAGENT_MISTAKES.md`로 함께 복사한다 (검토 대상인 프로젝트 `MISTAKES.md`와 겹치지 않는 이름). web-searcher는 파일을 못 읽으므로 주석 밖 `- ` 줄만 위임 메시지 끝 `## 자주 하는 실수` 절로 붙인다 (CLAUDE.md "실수 기록").
+  * 그 서브에이전트의 `.claude/mistakes/<이름>.md`에 항목(주석 밖 `- ` 줄)이 있으면 `_SUBAGENT_MISTAKES.md`로 함께 복사한다 (검토 대상인 프로젝트 `MISTAKES.md`와 겹치지 않는 이름). web-searcher는 파일을 못 읽으므로 주석 밖 `- ` 줄만 위임 메시지 끝 `## 자주 하는 실수` 절로 붙인다 (`/record-rules` "실수 기록").
   * 위임 메시지에는 대상·의도·제약만 쓴다. 너의 결론·의심 지점·검증 결과는 넣지 않는다 (CLAUDE.md "input — 독립성").
   * `subagent_in/`은 프로젝트마다 `.gitignore`에 등록한다. 끝나면 지운다.
 * 결과가 정해진 형식을 어겼거나, 중단됐거나, `## 읽은 파일`에 폴더 밖 경로가 있으면 그 단계에서 멈추고 사용자에게 알린다. 다시 부르거나 대신 쓸지는 사용자가 정한다.

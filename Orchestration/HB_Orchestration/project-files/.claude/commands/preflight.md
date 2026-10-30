@@ -1,6 +1,7 @@
 ---
 description: 큰 작업을 실행하기 전 점검(preflight). P0 정책 질문 → P1 → P2 → 사용자 확정 → P3 → P4 지휘자 종합 → P5a 최종 검사 · P5b 성능 검사. 단계마다 멈추고 보고한다.
 argument-hint: <요청> [첨부 파일 경로 ...]
+disable-model-invocation: true
 ---
 
 # /preflight — 실행 전 점검

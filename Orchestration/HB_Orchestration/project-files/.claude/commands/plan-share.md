@@ -1,12 +1,13 @@
 ---
 description: 계획서를 Slack #review 스레드에 올린다 (SlackPlanBot slackplan CLI). 먼저 dry-run 결과를 보이고 사용자 확인 뒤에만 올린다
 argument-hint: <docs/plans/계획서.md>
+disable-model-invocation: true
 ---
 
 인자: $ARGUMENTS
 - 계획서 경로 하나(프로젝트 루트 기준). 비었거나 파일이 없으면 무엇을 올릴지 한 줄로 묻고 멈춘다.
 
-이 명령은 **사용자가 직접 입력했을 때만** 쓴다. 지휘자는 계획서를 쓴 뒤 이 명령을 제안만 한다 (CLAUDE.md "계획서와 작업 로그" 1단계).
+이 명령은 **사용자가 직접 입력했을 때만** 쓴다. 지휘자는 계획서를 쓴 뒤 이 명령을 제안만 한다 (`/record-rules` 1단계).
 계획서 원문이 회사 밖 서비스(Slack)로 나가므로, 직접 입력했더라도 3단계 확인은 건너뛰지 않는다.
 
 ## 실행 형식

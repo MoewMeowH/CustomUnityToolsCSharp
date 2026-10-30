@@ -46,7 +46,7 @@ argument-hint: [agent|human] <요청> [첨부 파일 경로 ...]
 7. **저장·출력**
    - agent 폴더: `list_modes` 결과에 `지시서 폴더: <경로>` 줄이 있으면 그 경로, 없거나 `[주의] WorkOrders.Folder`면 `docs/work-orders/`. 프로젝트 루트 기준이다.
    - agent 파일 이름: `YYYY-MM-DD_HHmm_<제목>.md` (제목은 요청을 줄인 말, 공백은 `-`). 이미 있으면 덮지 않고 끝에 `_2`를 붙인다.
-   - human: 대상 프로젝트 폴더의 `docs/plans/YYYY-MM-DD_<제목>.md` (CLAUDE.md "계획서와 작업 로그" 자리 · 이름). 이미 있으면 덮지 않고 `_2`. 색인 `docs/worklog.md`에 한 줄 (상태 "지시서 · 사용자 구현 중").
+   - human: 대상 프로젝트 폴더의 `docs/plans/YYYY-MM-DD_<제목>.md` (`/record-rules` 1단계). 이미 있으면 덮지 않고 `_2`. 색인 `docs/worklog.md`에 한 줄 (상태 "지시서 · 사용자 구현 중").
    - UTF-8로 저장한 뒤 지시서 전문을 대화에 출력하고, 마지막 줄에 저장 경로를 적는다.
 
 ## 양식 (agent)

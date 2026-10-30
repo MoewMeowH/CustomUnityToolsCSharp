@@ -1,5 +1,5 @@
 ---
-description: 외부 에이전트 모드를 실행한다 (design_main, research_main, parallel_main 등). crash_main · research_main · design_high 절차와 에이전트(모델) 교체 형식도 이 파일에 있다
+description: 외부 에이전트 모드를 실행한다 (design_main, research_main, parallel_main 등). crash_main · research_main · design_high 절차와 에이전트(모델) 교체 형식도 이 파일에 있다. `run_mode`를 부르기 전에 읽는다
 argument-hint: <모드 이름> <요청>
 ---
 
