@@ -195,6 +195,56 @@ public sealed class ChatScriptTests(ChatApp app, ChatBrowser browser) : IClassFi
         again.AssertNoErrors();
     }
 
+    /// <summary>명령 카드의 "이 턴 동안 묻지 않기": 다음 명령 카드가 사라지고 켜짐 줄이 뜨며, 꼭 묻는 명령 카드에는 단추가 없고, 끄기로 줄이 닫힌다.</summary>
+    [Fact]
+    public async Task TurnAllow_CardButton_LineAndOff()
+    {
+        if (!browser.Available) return;
+        var room = app.Services.GetRequiredService<RoomStore>().Create("ws", PermissionLevel.Command, "opus", null);
+        await using var page = await browser.OpenAsync(app.RoomUrl(room));
+        await page.SendAsync("approve3");
+        await page.WaitForAsync("document.querySelector('#live .approval .cmd')?.textContent === 'echo one'", "첫 명령 카드", ChatPage.TurnWait);
+        await page.EvalAsync("[...document.querySelectorAll('#live .approval button')].find(b => b.textContent === '이 턴 동안 묻지 않기').click()");
+        await page.WaitForAsync("document.querySelector('#live .approval .cmd')?.textContent === 'git push'", "꼭 묻는 명령 카드", ChatPage.TurnWait);
+        Assert.False(await page.EvalAsync<bool>("[...document.querySelectorAll('#live .approval button')].some(b => b.textContent === '이 턴 동안 묻지 않기')"));
+        await page.WaitForAsync("document.querySelector('#live .bg-wait')?.textContent.includes('이 턴은 명령을 묻지 않습니다')", "켜짐 줄", ChatPage.TurnWait);
+        // 허용한 카드는 거절 줄로 보이지 않는다
+        Assert.True(await page.EvalAsync<bool>("[...document.querySelectorAll('#live .approval-line')].some(l => l.textContent.includes('이 턴 허용') && !l.classList.contains('denied'))"));
+        await page.EvalAsync("[...document.querySelectorAll('#live .bg-wait button')].find(b => b.textContent === '끄기').click()");
+        await page.WaitForAsync("!document.querySelector('#live .bg-wait')", "끄기로 줄 닫힘", ChatPage.TurnWait);
+        await page.EvalAsync("[...document.querySelectorAll('#live .approval button')].find(b => b.textContent === '허용').click()");
+        await page.WaitForAsync("!document.querySelector('#live .approval')", "카드 닫힘", ChatPage.TurnWait);
+        page.AssertNoErrors();
+    }
+
+    /// <summary>단톡방 구성원 카드에서도 같은 단추 · 구성원 이름의 켜짐 줄 · 끄기 (자식 방으로 보냄).</summary>
+    [Fact]
+    public async Task Group_TurnAllow_MemberLineAndOff()
+    {
+        if (!browser.Available) return;
+        var (group, error) = app.Services.GetRequiredService<GroupChat>()
+            .Create("ws", PermissionLevel.Read, "opus", null, "작업", [new GroupMemberSpec("A", "코드 작업", Level: PermissionLevel.Command), new GroupMemberSpec("B", "리뷰")]);
+        Assert.Null(error);
+        await using var page = await browser.OpenAsync(app.RoomUrl(group!));
+        await page.SendAsync("approve3 @A");
+        await page.WaitForAsync("document.querySelector('#live .approval .cmd')?.textContent === 'echo one'", "첫 명령 카드", ChatPage.TurnWait);
+        await page.EvalAsync("[...document.querySelectorAll('#live .approval button')].find(b => b.textContent === '이 턴 동안 묻지 않기').click()");
+        await page.WaitForAsync("document.querySelector('#live .approval .cmd')?.textContent === 'git push'", "꼭 묻는 명령 카드", ChatPage.TurnWait);
+        await page.WaitForAsync("document.querySelector('#live .bg-wait')?.textContent.includes('A: 이 턴은 명령을 묻지 않습니다')", "구성원 켜짐 줄", ChatPage.TurnWait);
+
+        // 다시 열어도 켜짐 줄을 서버에서 받는다 (GroupCards)
+        await using var again = await browser.OpenAsync(app.RoomUrl(group!));
+        await again.WaitForAsync("!!document.querySelector('#live .bg-wait')", "다시 연 화면의 줄", ChatPage.TurnWait);
+
+        await page.EvalAsync("[...document.querySelectorAll('#live .bg-wait button')].find(b => b.textContent === '끄기').click()");
+        await page.WaitForAsync("!document.querySelector('#live .bg-wait')", "끄기로 줄 닫힘", ChatPage.TurnWait);
+        await again.WaitForAsync("!document.querySelector('#live .bg-wait')", "다른 화면의 줄도 닫힘", ChatPage.TurnWait);
+        await page.EvalAsync("[...document.querySelectorAll('#live .approval button')].find(b => b.textContent === '허용').click()");
+        await page.WaitForAsync("[...document.querySelectorAll('#chat .msg.group-member .body')].some(b => b.textContent.trim() === 'allowed')", "A의 답", ChatPage.TurnWait);
+        page.AssertNoErrors();
+        again.AssertNoErrors();
+    }
+
     /// <summary>
     /// 첨부 그림 칩을 누르면 새 창(데스크톱은 같은 탭으로 가서 닫을 길이 없었다 — 사용자 보고) 대신 화면 위 크게 보기 — ✕로 닫힌다. 그림이 아닌 첨부는 링크 그대로.
     /// </summary>

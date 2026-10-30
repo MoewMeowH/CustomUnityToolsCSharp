@@ -1154,7 +1154,8 @@ public sealed partial class GroupChat
         {
             var (approvals, questions) = _hub.WaitingCards(m.RoomId);
             return approvals.Select(a => new LiveEvent("approval") { Approval = a, Detail = m.Id })
-                .Concat(questions.Select(q => new LiveEvent("question") { Question = q, Detail = m.Id }));
+                .Concat(questions.Select(q => new LiveEvent("question") { Question = q, Detail = m.Id }))
+                .Concat(_hub.TurnTrusted(m.RoomId) ? [new LiveEvent("trust") { Trust = true, Detail = m.Id }] : []);
         }),
     ];
 

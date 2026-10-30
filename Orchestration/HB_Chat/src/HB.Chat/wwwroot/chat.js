@@ -696,6 +696,7 @@
             if (!denyOnly) {
                 button("허용", "allow", "primary");
                 if (a.rule) button(opts.always || "이 방에서 항상 허용", "always");
+                if (a.turnAllow) button("이 턴 동안 묻지 않기", "turn");
             }
             const reasonBox = el("input", "reason");
             reasonBox.type = "text"; reasonBox.maxLength = 500; reasonBox.placeholder = "거절 이유 (선택, 지휘자에게 전해짐)";
@@ -805,7 +806,7 @@
             }
             // approval-line: 턴이 끝나 기록을 다시 그리면 지운다 — 같은 줄이 기록 속 제자리(방 기록 줄)에 있다
             // 모델 선택 카드의 허가는 "허용 (바꾼 줄)"로 온다
-            const allowed = label === "허용" || label === "항상 허용" || (a.mode && label?.startsWith("허용"));
+            const allowed = label === "허용" || label === "항상 허용" || label === "이 턴 허용" || (a.mode && label?.startsWith("허용"));
             card.replaceWith(line(a, "approval-line" + (allowed ? "" : " denied"),
                 who(a) + "승인 " + (label || "끝남") + " — " + (a.mode ? "외부 에이전트 " + a.mode.mode : a.tool + ": " + a.summary.slice(0, 120))));
         }
@@ -1853,6 +1854,20 @@
             if (atBottom()) toBottom();
         }
 
+        // "이 턴 동안 묻지 않기" 켜짐 줄 · 끄기. 턴 끝 · 중지 · 단계 내림에 서버가 trust 알림으로 끈다.
+        let trustLine = null;
+        function showTrust(on) {
+            if (!on) { trustLine?.remove(); trustLine = null; return; }
+            if (trustLine?.isConnected) return;
+            trustLine = el("div", "live-line bg-wait");
+            trustLine.append(el("span", null, "이 턴은 명령을 묻지 않습니다 "));
+            const off = el("button", "btn", "끄기");
+            off.type = "button";
+            off.addEventListener("click", async () => { off.disabled = true; if (!await post("TrustOff", new FormData(), true)) off.disabled = false; });
+            trustLine.append(off);
+            live.prepend(trustLine);
+        }
+
         // 이 방의 "항상 허용" 목록: 처음엔 서버가 그리고, 바뀌면 rules 알림으로 다시 그린다 (/self-review 36e4e20e04 C9).
         function removeButton(rule) {
             const b = el("button", "btn rule-remove");
@@ -1909,6 +1924,7 @@
                     renderSteps(ev.steps);
                     if (ev.status) showStatus(ev.status);
                     if (ev.busy && ev.backgroundUntil) showBackground(ev.backgroundCount || 0, ev.backgroundUntil); else clearBackground();
+                    showTrust(ev.trust === true);
                     renderTerms(ev.terminals);
                     for (const v of termViews.values()) loadBuffer(v); // 끊긴 사이 출력은 알림으로 오지 않았다
                     renderBrowser(ev.browser);
@@ -1918,6 +1934,9 @@
                     break;
                 case "background":
                     showBackground(ev.backgroundCount, ev.backgroundUntil);
+                    break;
+                case "trust":
+                    showTrust(ev.trust === true);
                     break;
                 case "terminals":
                     renderTerms(ev.terminals);
@@ -2530,8 +2549,37 @@
                 const list = await res.json();
                 if (disposed) return;
                 kit.clear();
-                for (const ev of list) ev.kind === "question" ? kit.showQuestion({ ...ev.question, detail: ev.detail }) : kit.showApproval({ ...ev.approval, detail: ev.detail });
+                trustLines.forEach(l => l.remove()); trustLines.clear();
+                for (const ev of list)
+                    ev.kind === "trust" ? showTrust(ev.detail, true)
+                        : ev.kind === "question" ? kit.showQuestion({ ...ev.question, detail: ev.detail })
+                        : kit.showApproval({ ...ev.approval, detail: ev.detail });
             } catch { }
+        }
+        // 구성원 "이 턴 동안 묻지 않기" 켜짐 줄 · 끄기 — 끄기는 그 구성원 자식 방으로 보낸다
+        const trustLines = new Map();
+        function showTrust(id, on) {
+            const old = trustLines.get(id);
+            if (!on) { old?.remove(); trustLines.delete(id); return; }
+            if (old?.isConnected) return;
+            const row = el("div", "live-line bg-wait");
+            row.append(el("span", null, (memberChip(id)?.dataset.name || "구성원") + ": 이 턴은 명령을 묻지 않습니다 "));
+            const off = el("button", "btn", "끄기");
+            off.type = "button";
+            off.addEventListener("click", async () => {
+                const child = memberChip(id)?.dataset.room;
+                if (!child) return;
+                off.disabled = true;
+                const data = new FormData();
+                data.append("__RequestVerificationToken", token);
+                try {
+                    const res = await fetch("/Room/" + encodeURIComponent(child) + "?handler=TrustOff", { method: "POST", body: data });
+                    if (!res.ok) off.disabled = false;
+                } catch { off.disabled = false; }
+            });
+            row.append(off);
+            trustLines.set(id, row);
+            live.prepend(row);
         }
         // 구성원 상태를 서버에서 다시 받아 맞춘다 — 다시 붙었을 때 · 대화 줄이 바뀔 때 (끊긴 사이 놓친 member 알림, b8697252eb C4)
         async function syncMembers() {
@@ -2568,6 +2616,7 @@
                 case "approval-done": chain = chain.then(() => disposed ? null : kit.doneApproval({ ...ev.approval, detail: ev.detail }, ev.text)).catch(() => { }); break;
                 case "question": chain = chain.then(() => disposed ? null : kit.showQuestion({ ...ev.question, detail: ev.detail })).catch(() => { }); break;
                 case "question-done": chain = chain.then(() => disposed ? null : kit.doneQuestion({ ...ev.question, detail: ev.detail }, ev.text, ev.ok === true, ev.answers)).catch(() => { }); break;
+                case "trust": chain = chain.then(() => disposed ? null : showTrust(ev.detail, ev.trust === true)).catch(() => { }); break;
             }
         };
 

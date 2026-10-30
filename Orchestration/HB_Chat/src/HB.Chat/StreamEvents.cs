@@ -51,8 +51,8 @@ public sealed record DeltaEvent(string Text) : StreamEvent;
 /// <summary>도구 호출 시작 (stream_event content_block_start / tool_use).</summary>
 public sealed record ToolEvent(string Name) : StreamEvent;
 
-/// <summary>system/permission_denied: 승인이 필요해 자동으로 거절된 호출.</summary>
-public sealed record DeniedEvent(string? Tool, string? Reason) : StreamEvent;
+/// <summary>system/permission_denied: 승인이 필요해 자동으로 거절된 호출. 이유는 비어 올 수 있다.</summary>
+public sealed record DeniedEvent(string? Tool, string? Reason, string? ToolUseId = null) : StreamEvent;
 
 /// <summary>system/api_retry: API 재시도.</summary>
 public sealed record RetryEvent(int Attempt, string? Error) : StreamEvent;
@@ -172,7 +172,7 @@ public static class StreamParser
                         Kind = Cap(Str(e, "task_type"), 40),
                         OutputFile = Cap(Str(e, "output_file"), 1000),
                     },
-                "system" when subtype == "permission_denied" => new DeniedEvent(Str(e, "tool_name"), Str(e, "decision_reason")),
+                "system" when subtype == "permission_denied" => new DeniedEvent(Str(e, "tool_name"), Str(e, "decision_reason"), Str(e, "tool_use_id")),
                 "system" when subtype == "api_retry" => new RetryEvent(Int(e, "attempt") ?? 0, Str(e, "error")),
                 "system" when subtype == "post_turn_summary" =>
                     new StatusEvent(Cap(Str(e, "status_category"), 40), Cap(Str(e, "status_detail"), StatusChars), Cap(Str(e, "needs_action"), StatusChars)),

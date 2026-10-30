@@ -70,6 +70,9 @@ public sealed record LiveEvent(string Kind)
 
     /// <summary>단톡방 member-delta · member-tool 알림: 그 글 조각 · 도구를 낸 구성원 ID (tool의 Detail은 도구 대상 그대로).</summary>
     public string? Member { get; init; }
+
+    /// <summary>trust 알림 · snapshot: 이 턴 동안 명령을 묻지 않는 중인지.</summary>
+    public bool? Trust { get; init; }
 }
 
 /// <summary>
@@ -96,6 +99,9 @@ public sealed record ApprovalView(string Id, string Tool, string Summary, string
 
     /// <summary>작업 폴더 밖 파일 쓰기 카드 (Summary = 경로, Extra = 쓸 내용 미리보기 — 잘려도 허용).</summary>
     public bool OutsideWrite { get; init; }
+
+    /// <summary>"이 턴 동안 묻지 않기" 단추를 보이는 명령 카드 (<see cref="ApprovalRequest.TurnAllowable"/>).</summary>
+    public bool TurnAllow { get; init; }
 }
 
 /// <summary>
@@ -144,6 +150,12 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         /// </summary>
         public ModePick? CurrentPick;
         public bool PickUsed;
+
+        /// <summary>
+        /// "이 턴 동안 묻지 않기": 켜져 있으면 명령을 카드 없이 허용한다. 저장하지 않는다 — 턴이 끝날 때 · 중지 · 명령 아래로 내릴 때 · 화면의 끄기로 꺼진다.
+        /// 바꿀 때는 <see cref="SetTrust"/>로 (화면 표시).
+        /// </summary>
+        public bool TrustCommands;
         public readonly Dictionary<string, PendingApproval> Approvals = [];
         public readonly Dictionary<string, PendingQuestion> Questions = [];
 
@@ -178,6 +190,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             Risky = Request.Risky,
             Plan = Request.IsPlan,
             FromAgent = Request.FromAgent,
+            TurnAllow = Request.TurnAllowable,
             // 서브에이전트가 낸 요청이면 그 서브에이전트를 기다리는 상한(30분)까지 돈다 (/self-review 6f64f4b039 C5)
             BackgroundMinutes = !Request.Background ? null
                 : Request.FromAgent ? ClaudeRunner.BackgroundAgentMinutes : ClaudeRunner.BackgroundBashMinutes,
@@ -572,6 +585,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         {
             live.Generation++;
             live.Pending.Clear();
+            SetTrust(live, false);
             EndApprovals(live, "중지됨");
             live.Cts?.Cancel();
         }
@@ -868,14 +882,24 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     private async Task<ApprovalAnswer?> RequestApprovalAsync(string roomId, Live live, int generation, ApprovalRequest request, CancellationToken aborted)
     {
         var timeout = TimeSpan.FromSeconds(Math.Max(1, options.Value.ApprovalTimeoutSeconds));
-        PendingApproval pending;
+        PendingApproval? waiting = null;
         lock (live.Gate)
         {
             if (live.Cts is null || live.Generation != generation) return null;
-            pending = new PendingApproval(request, DateTimeOffset.Now + timeout);
-            live.Approvals[pending.Id] = pending;
-            Broadcast(live, new LiveEvent("approval") { Approval = pending.View });
-            SetFace(live, Face.Approval);
+            // "이 턴 동안 묻지 않기": 켜기와 같은 잠금에서 보아 일괄 허용을 비껴간 요청이 카드로 남지 않게 (/cross-review 240769947f F1).
+            // 단계도 Decide처럼 잠금 안에서 다시 본다 — 그사이 내렸으면 카드로 간다 (109f21e330 C3)
+            if (!(live.TrustCommands && request.TurnAllowable && store.Get(roomId)?.Level == PermissionLevel.Command))
+            {
+                waiting = new PendingApproval(request, DateTimeOffset.Now + timeout);
+                live.Approvals[waiting.Id] = waiting;
+                Broadcast(live, new LiveEvent("approval") { Approval = waiting.View });
+                SetFace(live, Face.Approval);
+            }
+        }
+        if (waiting is not { } pending)
+        {
+            Log?.Write(roomId, request, TurnAllowLabel);
+            return new ApprovalAnswer(true, null);
         }
 
         using var wait = CancellationTokenSource.CreateLinkedTokenSource(aborted);
@@ -972,6 +996,46 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     public const string QuestionDone = "이미 끝난 질문입니다.";
     public const string ApprovalDone = "이미 끝난 승인 요청입니다.";
 
+    /// <summary>CLI가 이유 없이 거절했을 때 보이는 문구 (이유가 비어 오는 일이 있다 — 사용자 보고 2026-10-30).</summary>
+    public const string CliDeniedReason = "CLI 규칙으로 거절";
+
+    /// <summary>
+    /// CLI가 앱에 묻지 않고 거절한 호출 (system/permission_denied — 호스트 거절에는 이 줄이 없어 겹치지 않는다).
+    /// 승인 기록에도 남겨 턴 끝에 사라지지 않고 제자리 방 기록 줄(주황)로 보인다.
+    /// </summary>
+    private void CliDenied(Room room, Live live, int generation, DeniedEvent d, IReadOnlyDictionary<string, string?> targets)
+    {
+        var tool = d.Tool is { Length: > 0 } name ? name : "도구";
+        var why = string.IsNullOrWhiteSpace(d.Reason) ? CliDeniedReason : d.Reason.Trim();
+        var target = d.ToolUseId is { } id && targets.GetValueOrDefault(id) is { Length: > 0 } detail ? detail : "";
+        HostDenied(room, live, generation, tool, target, why, target.Length > 0 ? $"{tool} {target}: {why}" : $"{tool}: {why}");
+    }
+
+    /// <summary>"이 턴 동안 묻지 않기"로 허용한 명령의 기록 문구.</summary>
+    public const string TurnAllowLabel = "이 턴 허용";
+
+    /// <summary>"이 턴 동안 묻지 않기"를 켠다 · 끈다 (잠금 안에서 부른다). 바뀔 때만 화면에 알린다.</summary>
+    private void SetTrust(Live live, bool on)
+    {
+        if (live.TrustCommands == on) return;
+        live.TrustCommands = on;
+        Broadcast(live, new LiveEvent("trust") { Trust = on });
+    }
+
+    /// <summary>"이 턴 동안 묻지 않기"를 끈다 (화면의 끄기 · 명령 아래로 내릴 때).</summary>
+    public void EndTurnTrust(string roomId)
+    {
+        if (!_rooms.TryGetValue(roomId, out var live)) return;
+        lock (live.Gate) SetTrust(live, false);
+    }
+
+    /// <summary>지금 "이 턴 동안 묻지 않기"가 켜져 있는지 (단톡방 화면이 다시 붙을 때).</summary>
+    public bool TurnTrusted(string roomId)
+    {
+        if (!_rooms.TryGetValue(roomId, out var live)) return false;
+        lock (live.Gate) return live.TrustCommands;
+    }
+
     /// <summary>
     /// 질문 카드의 답 (화면). answers가 null이면 "답하지 않기". 오류 문구(null이면 받음).
     /// </summary>
@@ -1022,11 +1086,26 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                     : "명령이나 입력이 너무 길어 다 보이지 않습니다 — 거절만 할 수 있습니다.";
             if (choice == ApprovalChoice.AlwaysAllow && (rule = pending.Request.Rule) is null)
                 return "이 요청에는 항상 허용할 규칙이 없습니다.";
-            var label = choice switch { ApprovalChoice.Allow => "허용", ApprovalChoice.AlwaysAllow => "항상 허용", _ => "거절" };
+            if (choice == ApprovalChoice.AllowTurn && !pending.Request.TurnAllowable)
+                return "이 요청에는 '이 턴 동안 묻지 않기'를 쓸 수 없습니다.";
+            var label = choice switch
+            {
+                ApprovalChoice.Allow => "허용",
+                ApprovalChoice.AlwaysAllow => "항상 허용",
+                ApprovalChoice.AllowTurn => TurnAllowLabel,
+                _ => "거절",
+            };
             var message = string.IsNullOrWhiteSpace(reason) ? "사용자가 거절했습니다." : $"사용자가 거절했습니다: {reason.Trim()}";
             if (!pending.Answer.TrySetResult(new ApprovalAnswer(choice != ApprovalChoice.Deny, choice == ApprovalChoice.Deny ? message : null)))
                 return ApprovalDone;
             pending.Label = label;
+            if (choice == ApprovalChoice.AllowTurn)
+            {
+                SetTrust(live, true);
+                // 같은 턴에 떠 있는 다른 명령 카드도 같이 — 거절만 받는 카드 · 꼭 묻는 명령은 그대로
+                foreach (var other in live.Approvals.Values.Where(p => p != pending && p.Request.TurnAllowable))
+                    if (other.Answer.TrySetResult(new ApprovalAnswer(true, null))) other.Label = TurnAllowLabel;
+            }
         }
         if (rule is null) return null;
         try
@@ -1046,6 +1125,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         IReadOnlyDictionary<string, ModeRowPick>? picks)
     {
         if (choice == ApprovalChoice.AlwaysAllow) return "이 요청에는 항상 허용할 규칙이 없습니다.";
+        if (choice == ApprovalChoice.AllowTurn) return "이 요청에는 '이 턴 동안 묻지 않기'를 쓸 수 없습니다.";
         if (choice == ApprovalChoice.Allow && level is null or PermissionLevel.Chat) return "이 방 권한을 대화 단계로 내려 허가할 수 없습니다 — 거절만 됩니다.";
         if (choice == ApprovalChoice.Allow && card.Check(picks) is { } bad) return bad;
         var message = string.IsNullOrWhiteSpace(reason) ? "사용자가 거절했습니다." : $"사용자가 거절했습니다: {reason.Trim()}";
@@ -1159,6 +1239,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 Status = room?.Status,
                 BackgroundCount = live.Busy && live.BackgroundUntil is not null ? live.BackgroundCount : null,
                 BackgroundUntil = live.Busy ? live.BackgroundUntil : null,
+                Trust = live.TrustCommands,
                 Terminals = _terminals?.List(roomId), // 곁칸 터미널 탭 — 출력은 탭을 열 때 버퍼로 받는다
                 Browser = _browser?.View(roomId), // 곁칸 브라우저 탭 — 마지막 화면은 탭을 열 때 받는다
             });
@@ -1195,6 +1276,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             CancellationTokenSource cts, wrapUp;
             lock (live.Gate)
             {
+                SetTrust(live, false); // 턴마다 다시 — 다음 말로 넘어가지 않는다
                 if (live.Generation != generation || live.Pending.Count == 0 || _disposed)
                 {
                     live.Busy = false;
@@ -1632,6 +1714,8 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         string? mismatch = null;
         // Unity 캡처 도구 호출 id → 이름 (결과 그림을 기록에 남길 것만, 결정 3)
         var captures = new Dictionary<string, string>(StringComparer.Ordinal);
+        // 도구 호출 id → 대상 (CLI가 거절한 호출의 기록 줄에 파일 · 명령을 보인다)
+        var toolTargets = new Dictionary<string, string?>(StringComparer.Ordinal);
         using var stopOnMismatch = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var result = await ClaudeRunner.RunAsync(process, prompt, ev =>
         {
@@ -1651,6 +1735,10 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             }
             if (unityName is not null) KeepUnityShots(room.Id, ev, captures);
             if (ev is RateLimitEvent limits) Limits?.SaveClaude(limits); // 사이드바 한도 줄은 목록을 다시 그릴 때 읽는다
+            if (ev is UsageEvent calls)
+                foreach (var call in calls.Tools)
+                    if (call.Id is { } callId) toolTargets[callId] = call.Detail;
+            if (ev is DeniedEvent denied) CliDenied(room, live, generation, denied, toolTargets);
             // 할 일 도구를 쓴 뒤의 출력이면 그 사이 도구가 돌아 파일이 바뀌었을 수 있다 — 잠금 밖에서 읽는다 (3차 b).
             // 잦은 stream_event(글 · 도구 입력 · 생각 조각)에서는 읽지 않고, 300ms 안에 다시 읽지 않는다 — 마지막 상태는 턴 끝 읽기가 맞춘다 (/self-review ea28ba9185 C1).
             var fragment = ev is DeltaEvent || (ev is OtherEvent other && other.Type.StartsWith("stream_event", StringComparison.Ordinal));
@@ -1671,7 +1759,6 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 var shown = ev switch
                 {
                     DeltaEvent d => AppendPartial(live, d.Text),
-                    DeniedEvent d => new LiveEvent("denied") { Text = $"{d.Tool}: {d.Reason}" },
                     RetryEvent r => new LiveEvent("retry") { Text = $"API 재시도 {r.Attempt}회 ({r.Error})" },
                     StatusEvent s => new LiveEvent("status") { Status = new RoomStatus(s.Category, s.Detail, s.NeedsAction) },
                     TaskEvent t => new LiveEvent("agent") { Task = t }, // 서브에이전트 · 백그라운드 명령 진행 줄 (Claude 앱 기능 D)
@@ -1831,7 +1918,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     /// <summary>한 턴이 끝남 (end 알림 뒤, 잠금 밖) — 단톡방이 구성원 답을 대화 줄에 올린다.</summary>
     public event Action<string, RunResult>? TurnEnded;
 
-    private static readonly HashSet<string> CardKinds = ["approval", "approval-done", "question", "question-done"];
+    private static readonly HashSet<string> CardKinds = ["approval", "approval-done", "question", "question-done", "trust"];
 
     /// <summary>
     /// 승인 · 질문 카드 알림 (나옴 · 끝남) — 단톡방이 구성원 카드를 단톡방 화면에도 보인다 (⑤).
@@ -1923,6 +2010,8 @@ public static class RoomRules
             : "") +
         (level == PermissionLevel.Command
             ? "명령을 실행하면 사용자가 그 자리에서 카드로 허용 · 거절한다. 거절되면 같은 명령을 다시 시도하지 말고, 거절 이유를 보고 다른 방법을 묻는다." +
+              // 카드 수를 줄인다 (사용자 "승인을 한 20번을 누르는느낌")
+              " 명령마다 카드가 하나씩 뜨므로 되도록 한 번에 묶어 실행하고, 읽기 · 찾기는 Read · Grep으로 먼저 한다." +
               // 백그라운드 명령
               $" 백그라운드 실행(run_in_background)은 그 턴에서만 산다 — 끝나는 작업(테스트 · 빌드)은 끝나면 이어서 결과를 알려 주고, 서버처럼 안 끝나는 것은 필요한 확인을 마치고 답을 끝내면 앱이 최대 {ClaudeRunner.BackgroundBashMinutes}분 뒤(또는 사용자가 '지금 끝내기'를 누르면) 정리한다." +
               // 터미널 곁칸 — 앱 MCP를 붙인 실행에만
@@ -2002,7 +2091,9 @@ public static class RoomRules
             "읽기 단계 + 작업 폴더 파일 편집(묻지 않음) + 명령 실행(Bash · PowerShell). 명령은 실행 전에 방의 카드로 사용자가 허용 · 거절한다 " +
             "(답이 없으면 약 10분 뒤 거절, 읽기 전용 명령과 작업 폴더 설정이 미리 허용한 명령은 묻지 않음). 편집 금지 경로는 Edit · Write 도구에만 걸리고, " +
             "명령으로 쓰는 것은 카드가 막는다. 작업 폴더 밖 파일을 Write · Edit로 쓰는 것도 카드로 묻는다(이 앱 · 설정 · 시작프로그램 폴더, 지시 · 설정 · 실행으로 이어지는 파일(.git · .vscode · .gitconfig · 스크립트 · 실행 파일 등), 짧은 이름 · 스트림 표기 경로는 카드 없이 거절). " +
-            "\"이 방에서 항상 허용\" 규칙은 이 방에만 적용되며, 그 명령이 돌리는 파일이 바뀌어도 다시 묻지 않는다",
+            "\"이 방에서 항상 허용\" 규칙은 이 방에만 적용되며, 그 명령이 돌리는 파일이 바뀌어도 다시 묻지 않는다. " +
+            "\"이 턴 동안 묻지 않기\"를 누르면 그 턴이 끝날 때까지 명령을 카드 없이 허용하고 승인 기록에 남긴다 — 그 턴에는 편집 금지 경로를 명령으로 쓰는 것을 카드가 막지 않는다 " +
+            "(git push · git clean · reset --hard · 재귀 삭제 · 지시 · 설정 파일을 건드리는 모양과 잘린 명령은 그래도 묻지만 글자 검사라 비껴갈 수 있다)",
         _ => level.ToString(),
     };
 }

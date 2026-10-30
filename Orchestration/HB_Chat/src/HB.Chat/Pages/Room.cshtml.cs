@@ -518,6 +518,7 @@ public sealed partial class RoomModel(
         // 명령 아래로 내리면 지휘자가 띄운 프로세스도 끝낸다 — "명령 실행 없음" 단계에서 돌던 서버가 남지 않게 (/self-review 57b59ef134 C1 · a3a9dd85c1 C1). 내 셸은 그대로
         if (lv != PermissionLevel.Command && expectedLevel == PermissionLevel.Command)
         {
+            hub.EndTurnTrust(id);
             terminals.StopRoom(id, "권한 낮춤", TerminalKind.Agent);
             browser.Close(id, "권한 낮춤"); // 지휘자 브라우저도 명령 방만
         }
@@ -889,7 +890,15 @@ public sealed partial class RoomModel(
         return terminals.Remove(id, term) ? new JsonResult(new { ok = true }) : BadRequest("돌고 있는 터미널은 먼저 중지하세요.");
     }
 
-    /// <summary>승인 카드 단추: choice = allow · always · deny, reason은 거절 이유 (선택), picks는 모델 선택 카드에서 고른 값 (JSON, 선택).</summary>
+    /// <summary>"이 턴 동안 묻지 않기" 끄기.</summary>
+    public IActionResult OnPostTrustOff(string id)
+    {
+        if (!RoomStore.IsRoomId(id)) return NotFound();
+        hub.EndTurnTrust(id);
+        return new JsonResult(new { ok = true });
+    }
+
+    /// <summary>승인 카드 단추: choice = allow · always · turn · deny, reason은 거절 이유 (선택), picks는 모델 선택 카드에서 고른 값 (JSON, 선택).</summary>
     public IActionResult OnPostApprove(string id, string? approval, string? choice, string? reason, string? picks)
     {
         if (!RoomStore.IsRoomId(id) || string.IsNullOrEmpty(approval)) return NotFound();
@@ -898,6 +907,7 @@ public sealed partial class RoomModel(
         {
             "allow" => ApprovalChoice.Allow,
             "always" => ApprovalChoice.AlwaysAllow,
+            "turn" => ApprovalChoice.AllowTurn,
             "deny" => ApprovalChoice.Deny,
             _ => null,
         };

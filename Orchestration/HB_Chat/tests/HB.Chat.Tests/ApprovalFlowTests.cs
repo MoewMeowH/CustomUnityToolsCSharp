@@ -631,6 +631,206 @@ public sealed class ApprovalFlowTests : IDisposable
         Assert.NotNull(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null)); // 끝난 카드는 받지 않는다
     }
 
+    /// <summary>"이 턴 동안 묻지 않기": 다음 명령은 카드 없이 · 꼭 묻는 명령은 카드 · 승인 기록에 남음 · 다음 턴에는 다시 카드.</summary>
+    [Fact]
+    public async Task TurnAllow_SkipsCardsUntilTurnEnds()
+    {
+        var room = CommandRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "approve3");
+        var first = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        Assert.Equal("echo one", first.Summary);
+        Assert.True(first.TurnAllow);
+        Assert.Null(_hub.Decide(room.Id, first.Id, ApprovalChoice.AllowTurn, null));
+
+        var seen = await Until(ch, e => e.Kind == "approval"); // 둘째(echo two)는 건너뛰고 셋째 git push
+        Assert.True(seen.Single(e => e.Kind == "trust").Trust);
+        var push = seen.Last().Approval!;
+        Assert.Equal("git push", push.Summary);
+        Assert.False(push.TurnAllow);
+        Assert.True(_hub.TurnTrusted(room.Id));
+        Assert.NotNull(_hub.Decide(room.Id, push.Id, ApprovalChoice.AllowTurn, null));
+        Assert.Null(_hub.Decide(room.Id, push.Id, ApprovalChoice.Allow, null));
+
+        var end = await Until(ch, e => e.Kind == "idle");
+        Assert.True(end.Single(e => e.Kind == "end").Ok);
+        Assert.False(end.Single(e => e.Kind == "trust").Trust);
+        Assert.False(_hub.TurnTrusted(room.Id));
+        var log = Log();
+        Assert.Contains("echo two", log);
+        Assert.Equal(2, System.Text.RegularExpressions.Regex.Count(log, "\"decision\":\"" + RoomHub.TurnAllowLabel + "\""));
+        var (_, note) = RoomNotes.Parse(log.Split('\n').First(l => l.Contains("echo two")))!.Value;
+        Assert.False(note.Denied); // 방 기록에서 거절 줄로 보이지 않는다
+
+        _hub.Send(room.Id, "approve please");
+        Assert.Equal("git status", (await Until(ch, e => e.Kind == "approval")).Last().Approval!.Summary);
+        _hub.Stop(room.Id);
+        await Until(ch, e => e.Kind == "idle");
+    }
+
+    /// <summary>끄기 · 중지로 바로 꺼진다 (화면 표시도).</summary>
+    [Fact]
+    public async Task TurnAllow_OffAndStop_EndTrust()
+    {
+        var room = CommandRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "approve3");
+        var first = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        Assert.Null(_hub.Decide(room.Id, first.Id, ApprovalChoice.AllowTurn, null));
+        await Until(ch, e => e.Kind == "approval");
+        _hub.EndTurnTrust(room.Id);
+        Assert.False(_hub.TurnTrusted(room.Id));
+        Assert.False((await Until(ch, e => e.Kind == "trust")).Last().Trust);
+        _hub.Stop(room.Id);
+        await Until(ch, e => e.Kind == "idle");
+
+        _hub.Send(room.Id, "approve3");
+        first = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        Assert.Null(_hub.Decide(room.Id, first.Id, ApprovalChoice.AllowTurn, null));
+        await Until(ch, e => e.Kind == "approval");
+        Assert.True(_hub.TurnTrusted(room.Id));
+        _hub.Stop(room.Id);
+        Assert.False(_hub.TurnTrusted(room.Id));
+        await Until(ch, e => e.Kind == "idle");
+    }
+
+    /// <summary>누르는 순간 떠 있는 다른 명령 카드도 같이 허용 — 거절만 받는 카드 · 웹 카드는 그대로.</summary>
+    [Fact]
+    public async Task TurnAllow_AnswersOtherOpenCommandCards()
+    {
+        var room = CommandRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "approve3");
+        var first = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        var other = _hub.RequestApprovalAsync(room.Id, new ApprovalRequest("Bash", "echo other", null, null), default);
+        var cut = _hub.RequestApprovalAsync(room.Id, new ApprovalRequest("Bash", "echo cut…", null, null, true), default);
+        var web = _hub.RequestApprovalAsync(room.Id, new ApprovalRequest("웹 가져오기", "https://example.com/", null, null) { Web = true }, default);
+        await Until(ch, e => e.Kind == "approval" && e.Approval!.Summary == "https://example.com/");
+
+        Assert.Null(_hub.Decide(room.Id, first.Id, ApprovalChoice.AllowTurn, null));
+        Assert.True((await other.WaitAsync(Wait))!.Allow);
+        Assert.False(cut.IsCompleted);
+        Assert.False(web.IsCompleted);
+
+        _hub.Stop(room.Id);
+        Assert.False((await cut.WaitAsync(Wait))!.Allow);
+        Assert.False((await web.WaitAsync(Wait))!.Allow);
+        await Until(ch, e => e.Kind == "idle");
+    }
+
+    [Theory]
+    [InlineData("git push")]
+    [InlineData("git -C x push origin main")]
+    [InlineData("git reset --hard HEAD~1")]
+    [InlineData("rm -rf build")]
+    [InlineData("rm -r x")]
+    [InlineData("rm --recursive x")]
+    [InlineData("Remove-Item -LiteralPath x -Recurse -Force")]
+    [InlineData("ri x -r")]
+    [InlineData("rd /s /q x")]
+    [InlineData("del /s x")]
+    [InlineData("[IO.Directory]::Delete('x', $true)")]
+    [InlineData("python -c \"import shutil; shutil.rmtree('x')\"")]
+    [InlineData("notepad .claude/settings.json")]
+    [InlineData(@"type C:\Users\x\.claude\settings.json")]
+    [InlineData("cat .mcp.json")]
+    [InlineData("echo x >> CLAUDE.md")]
+    [InlineData("dir\ngit push")]
+    [InlineData("git clean -fdx")]
+    [InlineData("Get-ChildItem x -Recurse -Filter *.meta | Remove-Item -Force")]
+    [InlineData("gci -r | ri")]
+    [InlineData("ls -r | % { rm $_ }")]
+    [InlineData("rd x /q/s")]
+    [InlineData("find . -name x -delete")]
+    [InlineData("powershell -enc aGVsbG8=")]
+    [InlineData("iex (Get-Content x -Raw)")]
+    [InlineData("type CLAUDE.local.md")]
+    [InlineData("Add-Content PROJECT.md x")]
+    [InlineData("Set-Content REVIEW_GUIDELINES.md x")]
+    [InlineData("echo x >> src/appsettings.Development.json")]
+    [InlineData("copy x Orchestration/Publish_Output/modes.json")]
+    [InlineData("echo x > .git/hooks/pre-commit")]
+    [InlineData("code .vscode/tasks.json")]
+    [InlineData(@"copy x ""C:\Users\x\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\y.lnk""")]
+    public void MustAsk_Listed(string command)
+    {
+        Assert.True(ApprovalRules.MustAsk(command));
+        Assert.False(new ApprovalRequest("Bash", command, null, null).TurnAllowable);
+    }
+
+    [Theory]
+    [InlineData("git status")]
+    [InlineData("git log --oneline")]
+    [InlineData("dotnet test --filter X")]
+    [InlineData("Get-ChildItem")]
+    [InlineData("rm file.txt")]
+    [InlineData("Remove-Item x.txt -Force")]
+    [InlineData("del x.txt")]
+    [InlineData("$p = Join-Path $env:LOCALAPPDATA 'x'\nGet-Content $p")]
+    [InlineData(@"dotnet test Orchestration\HB_Chat\tests\HB.Chat.Tests")] // 평소 경로 · 스크립트는 뺐다 (결정)
+    [InlineData("powershell -File build.ps1")]
+    [InlineData("Get-ChildItem x -Recurse | Select-Object Name")]
+    public void MustAsk_Others(string command)
+    {
+        Assert.False(ApprovalRules.MustAsk(command));
+        Assert.True(new ApprovalRequest("PowerShell", command, null, null).TurnAllowable);
+    }
+
+    /// <summary>CLI가 스스로 거절한 호출: 승인 기록에 남아 방 기록의 주황 줄이 되고, 이유 · 도구 이름이 비면 기본 문구, 대상은 도구 호출에서.</summary>
+    [Fact]
+    public async Task CliDenied_LoggedWithDefaultReason()
+    {
+        var room = CommandRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "clideny");
+        var denied = (await Until(ch, e => e.Kind == "idle")).Where(e => e.Kind == "denied").ToList();
+        Assert.Equal(2, denied.Count);
+        Assert.All(denied, d => Assert.True(d.Logged)); // 턴 끝에 진행 칸 줄을 지우고 기록 줄로
+        Assert.Contains("denied.md", denied[0].Text);
+        Assert.EndsWith(": " + RoomHub.CliDeniedReason, denied[0].Text);
+        Assert.Equal("도구: " + RoomHub.CliDeniedReason, denied[1].Text);
+
+        var notes = Log().Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(l => RoomNotes.Parse(l)!.Value.Item2).ToList();
+        Assert.Equal(2, notes.Count);
+        Assert.All(notes, n => Assert.True(n.Denied));
+        Assert.Contains(RoomHub.CliDeniedReason, notes[0].Text);
+        Assert.Contains("denied.md", notes[0].Text);
+    }
+
+    /// <summary>켜져 있으면 카드 없이 허용 · 기록하고, 단계를 내린 뒤에는(곁칸 끄기 전이라도) 카드로 간다 — 카드에서도 허용은 받지 않는다.</summary>
+    [Fact]
+    public async Task TurnAllow_RechecksLevel()
+    {
+        var room = CommandRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "approve3");
+        var first = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        Assert.Null(_hub.Decide(room.Id, first.Id, ApprovalChoice.AllowTurn, null));
+        await Until(ch, e => e.Kind == "approval"); // git push에서 멈춰 턴이 이어진다
+
+        Assert.True((await _hub.RequestApprovalAsync(room.Id, new ApprovalRequest("Bash", "echo auto", null, null), default))!.Allow);
+        Assert.Contains("echo auto", Log());
+
+        _store.Update(room.Id, r => r with { Level = PermissionLevel.Read });
+        Assert.True(_hub.TurnTrusted(room.Id));
+        var late = _hub.RequestApprovalAsync(room.Id, new ApprovalRequest("Bash", "echo late", null, null), default);
+        var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        Assert.Equal("echo late", card.Summary);
+        Assert.NotNull(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null));
+        _hub.Stop(room.Id);
+        Assert.False((await late.WaitAsync(Wait))!.Allow);
+        await Until(ch, e => e.Kind == "idle");
+    }
+
+    /// <summary>명령 도구 밖 · 거절만 받는 카드에는 쓰지 못한다.</summary>
+    [Fact]
+    public void TurnAllowable_CommandCardsOnly()
+    {
+        Assert.False(new ApprovalRequest("Write", "x.txt", null, null).TurnAllowable);
+        Assert.False(new ApprovalRequest("Bash", "echo", null, null, true).TurnAllowable);
+        Assert.False(new ApprovalRequest("Bash", "echo", null, null) { Risky = true }.TurnAllowable);
+    }
+
     [Fact]
     public async Task Interrupt_DeniesPendingCard()
     {
@@ -845,6 +1045,8 @@ public sealed class ApprovalFlowTests : IDisposable
             Assert.Null(card.Rule);
             Assert.Contains("앞 2,000자만", card.Extra);
             Assert.NotNull(_hub.Decide(room.Id, card.Id, ApprovalChoice.AlwaysAllow, null)); // 항상 허용 없음
+            Assert.False(card.TurnAllow);
+            Assert.NotNull(_hub.Decide(room.Id, card.Id, ApprovalChoice.AllowTurn, null)); // 이 턴 묻지 않기도 명령 카드만
             Assert.Null(_hub.Decide(room.Id, card.Id, choice, null));
             var end = (await Until(ch, e => e.Kind == "idle")).Single(e => e.Kind == "end");
             Assert.Equal(choice == ApprovalChoice.Allow, end.Ok); // 허용이면 가짜 claude가 입력이 그대로 돌아왔는지도 본다

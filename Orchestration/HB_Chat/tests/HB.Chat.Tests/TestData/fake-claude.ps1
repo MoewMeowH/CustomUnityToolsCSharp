@@ -139,6 +139,22 @@ switch ($mode) {
         if ($d -and $d.behavior -eq 'allow' -and $d.updatedInput.command -ne 'git status') { $d = [pscustomobject]@{ behavior = 'deny'; message = 'updatedInput changed' } }
         Finish $d 'Bash' 'allowed'
     }
+    'approve3' {
+        # turn trust: three commands - first asks, second skips the card once trusted, third (git push) always asks.
+        $d = $null
+        foreach ($c in @(@('req_1', 'echo one'), @('req_2', 'echo two'), @('req_3', 'git push'))) {
+            $d = Ask $c[0] ('{"subtype":"can_use_tool","tool_name":"Bash","display_name":"Bash","input":{"command":"' + $c[1] + '"},"tool_use_id":"toolu_' + $c[0] + '"}')
+            if (-not $d -or $d.behavior -ne 'allow') { break }
+        }
+        Finish $d 'Bash' 'allowed'
+    }
+    'clideny' {
+        # CLI's own rule denials: empty reason with a known tool call, then no reason and no tool name.
+        Emit '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t_deny","name":"Edit","input":{"file_path":"C:\\ws\\denied.md"}}]}}'
+        Emit '{"type":"system","subtype":"permission_denied","tool_name":"Edit","tool_use_id":"t_deny","decision_reason":""}'
+        Emit '{"type":"system","subtype":"permission_denied"}'
+        Finish ([pscustomobject]@{ behavior = 'allow' }) 'Edit' 'done'
+    }
     'terminal' {
         # terminal side panel: app MCP terminal_start permission request (step-0 probe shape). Allow must carry only name + command back.
         $d = Ask 'req_term' '{"subtype":"can_use_tool","tool_name":"mcp__hb-chat__terminal_start","display_name":"terminal_start","input":{"name":"web","command":"python -m http.server 8000","extra":"x"},"tool_use_id":"toolu_fake11"}'

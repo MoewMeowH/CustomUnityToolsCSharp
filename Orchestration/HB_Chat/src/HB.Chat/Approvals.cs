@@ -32,6 +32,12 @@ public sealed record ApprovalRequest(string Tool, string Summary, string? Descri
     /// <summary>카드에 보이는 것이 허용될 입력 전부가 아니어서 거절만 받는지.</summary>
     public bool DenyOnly => !IsPlan && (Truncated || Risky);
 
+    /// <summary>
+    /// "이 턴 동안 묻지 않기"로 풀 수 있는 명령 카드 (사용자 결정: Bash · PowerShell만, 백그라운드 · 서브에이전트 명령 포함).
+    /// 거절만 받는 카드와 꼭 묻는 명령(<see cref="ApprovalRules.MustAsk"/>)은 켜져 있어도 카드로 간다.
+    /// </summary>
+    public bool TurnAllowable => ClaudeArgs.CommandTools.Contains(Tool) && !DenyOnly && !ApprovalRules.MustAsk(Summary);
+
     /// <summary>서브에이전트가 낸 요청 (request의 agent_id — Claude 앱 기능 D). 카드에 "서브에이전트"로 보인다. 허용 · 규칙은 같다.</summary>
     public bool FromAgent { get; init; }
 
@@ -245,6 +251,8 @@ public enum ApprovalChoice
     Allow,
     /// <summary>허용 + 제안 규칙을 방에 저장 (다음 실행부터 묻지 않음).</summary>
     AlwaysAllow,
+    /// <summary>허용 + 이 턴이 끝날 때까지 명령을 묻지 않음 (저장하지 않음).</summary>
+    AllowTurn,
     Deny,
 }
 
@@ -303,6 +311,17 @@ public static partial class ApprovalRules
         return content.Trim().Length > 0 && !content.Contains('*') && Balanced(content) && !Dangerous().IsMatch(rule);
     }
 
+    /// <summary>
+    /// "이 턴 동안 묻지 않기"가 켜져 있어도 카드로 묻는 명령 (사용자 결정 "짧은 목록 유지" · "넓히되 일상 경로는 뺀"): git push · clean · reset --hard, 재귀 삭제,
+    /// 숨긴 실행(-EncodedCommand · iex), 지시 · 설정 · 다음 실행으로 이어지는 파일을 건드리는 모양. 편집 금지 목록의 이 앱 폴더 · 스크립트 확장자는 뺐다 — 평소 명령마다 걸려 단추가 소용없어진다.
+    /// 글자 검사라 스크립트 · 변수로 비껴갈 수 있다 — 실수를 막는 장치이지 보안 경계가 아니다. 애매하면 카드 쪽으로 (읽기만 해도 걸릴 수 있음, 시간 초과도).
+    /// </summary>
+    public static bool MustAsk(string command)
+    {
+        try { return MustAskPattern().IsMatch(command); }
+        catch (RegexMatchTimeoutException) { return true; }
+    }
+
     /// <summary>입력 이름이 우회 · 위험 인자 모양인지 (예 dangerouslyDisableSandbox).</summary>
     public static bool IsDangerousName(string name) => Dangerous().IsMatch(name);
 
@@ -319,6 +338,17 @@ public static partial class ApprovalRules
 
     [GeneratedRegex(@"^(Bash|PowerShell)\(([^\r\n]+)\)$")]
     private static partial Regex RuleShape();
+
+    [GeneratedRegex(@"\bgit\b[^\n;|&]*\b(?:push|clean|reset\b[^\n;|&]*--hard)\b" +
+        @"|\brm\b[^\n;|&]*\s(?:-[a-z]*r|--recursive)" +
+        @"|\b(?:Remove-Item|ri|del|erase|rd|rmdir)\b[^\n;|&]*(?:\s-r[a-z]*\b|/s\b)" +
+        @"|\s-r[a-z]*\b[^\n;&]*\|[^\n]*\b(?:Remove-Item|ri|rm|del|erase)\b" +
+        @"|\bfind\b[^\n;|&]*\s-delete\b|\bDirectory\]?::Delete\b|\bshutil\.rmtree\b" +
+        @"|\s-(?:ec|enc|encodedcommand)\b|\biex\b|\bInvoke-Expression\b" +
+        @"|\.claude\b|\.mcp[^\s'""]*\.json\b|\bCLAUDE(?:\.local)?\.md\b|\b(?:PROJECT|MISTAKES|REVIEW_GUIDELINES)\.md\b" +
+        @"|\bappsettings[^\s'""]*\.json\b|\bPublish_Output\b|\.git[\\/]hooks\b|\.gitconfig\b|\.vscode\b" +
+        @"|[\\/]Programs[\\/]Startup\b|shell:startup", RegexOptions.IgnoreCase, matchTimeoutMilliseconds: 200)]
+    private static partial Regex MustAskPattern();
 
     [GeneratedRegex("dangerously|bypass", RegexOptions.IgnoreCase)]
     private static partial Regex Dangerous();
