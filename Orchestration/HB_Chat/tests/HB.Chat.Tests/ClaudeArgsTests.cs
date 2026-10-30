@@ -131,7 +131,7 @@ public sealed class ClaudeArgsTests
     [Fact]
     public void App_AutoMode_KeepsCardsByAskRules_AndGuardsHooks()
     {
-        var args = ClaudeArgs.Build(Spec(PermissionLevel.App), Models).ToList();
+        var args = ClaudeArgs.Build(Spec(PermissionLevel.App) with { ExtraMcpServers = ["unity"], ProtectedWorkspaces = [@"F:\AI\Other"] }, Models).ToList();
         Assert.Equal("auto", args[args.IndexOf("--permission-mode") + 1]);
         var tools = args[args.IndexOf("--tools") + 1].Split(',');
         Assert.Contains("Bash", tools);
@@ -139,11 +139,14 @@ public sealed class ClaudeArgsTests
         Assert.Contains("Agent", tools);
 
         var ask = args[args.IndexOf("--settings") + 1];
-        foreach (var tool in new[] { "mcp__hb-orchestration__run_mode", "mcp__hb-chat__terminal_start", "mcp__hb-chat__browser_open", "WebFetch", "mcp__unity__eval" })
+        foreach (var tool in new[] { "mcp__hb-orchestration__run_mode", "mcp__hb-chat__terminal_start", "mcp__hb-chat__browser_open", "WebFetch", "\"mcp__unity\"" })
             Assert.Contains(tool, ask);
 
         var denied = args.Skip(args.IndexOf("--disallowedTools") + 1).TakeWhile(a => !a.StartsWith("--", StringComparison.Ordinal)).ToList();
-        Assert.Equal(["Edit(**/.claude/**)", "Edit(**/.mcp*.json)"], denied);
+        foreach (var rule in new[] { "Edit(**/.claude/**)", "Edit(**/.mcp*.json)", "Edit(~/.claude/settings*.json)", "Edit(~/.claude.json)", "Edit(//f/AI/Other/.claude/**)", "Edit(//f/AI/Other/.mcp*.json)" })
+            Assert.Contains(rule, denied);
+        Assert.DoesNotContain(denied, r => r.Contains("HB_Chat", StringComparison.Ordinal) || r.Contains("CLAUDE.md", StringComparison.Ordinal) && !r.Contains("~/", StringComparison.Ordinal));
+        Assert.DoesNotContain("Edit(~/.claude/**)", denied); // 메모리는 쓸 수 있어야 한다
 
         // run_mode가 카드로 가야 한다 — 서버 전체를 미리 허용하지 않는다
         var allowed = args.Skip(args.IndexOf("--allowedTools") + 1).TakeWhile(a => !a.StartsWith("--", StringComparison.Ordinal)).ToList();

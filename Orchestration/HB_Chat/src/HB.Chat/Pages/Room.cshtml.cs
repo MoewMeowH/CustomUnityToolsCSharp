@@ -512,7 +512,7 @@ public sealed partial class RoomModel(
         hub.ForgetCommands(id); // 단계 · 모델이 바뀌면 다음 실행의 init이 새 목록 (db1b130ff2 C7)
         // 명령 아래로 내리면 지휘자가 띄운 프로세스도 끝낸다 — "명령 실행 없음" 단계에서 돌던 서버가 남지 않게 (/self-review 57b59ef134 C1 · a3a9dd85c1 C1). 내 셸은 그대로
         // 앱 단계는 CLI가 묻지 않고 판단해 앱이 막을 자리가 없다 — 내리면 지금 턴을 멈춘다
-        if (expectedLevel == PermissionLevel.App && lv != PermissionLevel.App) hub.Stop(id);
+        if (expectedLevel == PermissionLevel.App && lv != PermissionLevel.App) hub.StopTurn(id);
         if (lv == PermissionLevel.Read && expectedLevel != PermissionLevel.Read)
         {
             hub.EndTurnTrust(id);

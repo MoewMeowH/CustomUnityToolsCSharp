@@ -584,13 +584,18 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     }
 
     /// <summary>중지: 큐를 비우고 진행 중 실행을 끝낸다. 기다리던 승인은 거절로 돌려준다.</summary>
-    public void Stop(string roomId)
+    public void Stop(string roomId) => EndTurn(roomId, keepQueue: false);
+
+    /// <summary>지금 턴만 끝낸다 — 기다리는 말은 그대로 다음 실행으로 간다 (앱 단계에서 내릴 때).</summary>
+    public void StopTurn(string roomId) => EndTurn(roomId, keepQueue: true);
+
+    private void EndTurn(string roomId, bool keepQueue)
     {
         if (!_rooms.TryGetValue(roomId, out var live)) return;
         lock (live.Gate)
         {
             live.Generation++;
-            live.Pending.Clear();
+            if (!keepQueue) live.Pending.Clear();
             SetTrust(live, false);
             EndApprovals(live, "중지됨");
             live.Cts?.Cancel();
@@ -620,8 +625,9 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             if (answer is { Allow: true })
             {
                 // 허용 직전에 지금 단계를 다시 본다 — 카드에 답한 뒤 단계를 내렸으면 거절, 돌아갈 모드도 지금 단계 기준 (/self-review security d3dd55b237 C2)
-                if (store.Get(room.Id) is not { } now || ClaudeArgs.PlanMode(now.Level) is not { } mode)
-                    return PermissionDecision.Deny("사용자가 이 방 권한을 명령 단계 아래로 내렸습니다 — 계획대로 진행하지 않습니다.");
+                // 단계를 바꿨으면 거절 — 명령 인자로 띄운 실행을 앱 단계로 올리면 ask 규칙 없이 auto가 된다 (/self-review security dfd2bed027 C1)
+                if (store.Get(room.Id) is not { } now || now.Level != room.Level || ClaudeArgs.PlanMode(now.Level) is not { } mode)
+                    return PermissionDecision.Deny("사용자가 이 방 권한을 바꿨습니다 — 계획대로 진행하지 않습니다.");
                 try
                 {
                     store.Update(room.Id, r => r with { PlanNext = false });
@@ -1010,8 +1016,8 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     /// <summary>"이 턴 동안 묻지 않기"로 허용한 명령의 기록 문구.</summary>
     public const string TurnAllowLabel = "이 턴 허용";
 
-    /// <summary>앱 단계에서 카드 없이 부른 도구의 승인 기록 라벨. 채팅 줄에는 보이지 않는다 — 도구 칩이 이미 있다.</summary>
-    public const string AppRanLabel = "앱 단계";
+    /// <summary>앱 단계 도구 호출의 승인 기록 라벨. 채팅 줄에는 보이지 않는다 — 도구 칩이 이미 있다.</summary>
+    public const string AppCallLabel = "앱 단계 호출";
 
     /// <summary>"이 턴 동안 묻지 않기"를 켠다 · 끈다 (잠금 안에서 부른다). 바뀔 때만 화면에 알린다.</summary>
     private void SetTrust(Live live, bool on)
@@ -1648,6 +1654,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             Effort = room.Effort, // 곁칸에서 바꾸면 다음 실행부터 (Claude 앱 기능 B)
             Plan = room.PlanNext && ClaudeArgs.PlanMode(room.Level) is not null, // "계획 먼저" (C) — 명령 단계만
             AskRunMode = room.AskRunMode || runPick is not null, // 외부 요청 전에 묻기 · + 요청 창 말
+            ProtectedWorkspaces = room.Level == PermissionLevel.App ? [.. o.AllWorkspaces.Select(w => w.Path)] : [],
             TerminalMcpConfigPath = terminalConfig, // 명령 방: 앱 MCP(터미널 도구)
         };
         ProcessSpec process;
@@ -1711,12 +1718,11 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                     foreach (var tool in u.Tools)
                     {
                         Broadcast(live, SetTool(live, tool));
-                        // 앱 단계: 카드를 거치지 않는 도구도 승인 기록에 남긴다 (호출 기록 — 판정 거절은 denied 줄로 따로)
-                        if (room.Level == PermissionLevel.App && !ClaudeRunner.ReadTools.Contains(tool.Name) && !ClaudeArgs.AppAskTools(o.McpServer).Contains(tool.Name)
-                            && tool.Name is not (ClaudeArgs.AskTool or ApprovalRequest.PlanTool or "TaskCreate" or "TaskGet" or "TaskList" or "TaskUpdate"))
-                            Log?.Write(room.Id, new ApprovalRequest(tool.Name, tool.Detail ?? "", null), AppRanLabel);
+                        LogAppCall(room, tool);
                         if (tool.Name is "TaskCreate" or "TaskUpdate") live.StepsWatch = true; // 목록을 바꾸는 도구만
                     }
+                if (ev is SubagentToolsEvent subagent)
+                    foreach (var tool in subagent.Tools) LogAppCall(room, tool);
                 if (ev is UsageEvent blocks)
                 {
                     // 서버가 요약한 중간 글 — Partial에 넣지 않는다: 일반 방은 다시 열면 세션 기록으로 그려진다 (단톡방은 ReplayLive의 also로 다시 보낸다)
@@ -1842,6 +1848,17 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         live.Partial.Clear();
         live.PartialLogged = 0;
         live.TurnLogged = false;
+    }
+
+    /// <summary>
+    /// 앱 단계의 도구 호출을 승인 기록에 남긴다 (서브에이전트 호출 포함). 호출 시점의 기록이다 — 판정이 거절한 호출도 남고, 거절은 denied 줄로 따로 남는다.
+    /// 읽기 · 할 일 · 질문 · 계획은 뺀다.
+    /// </summary>
+    private void LogAppCall(Room room, ToolUse tool)
+    {
+        if (room.Level == PermissionLevel.App && !ClaudeRunner.ReadTools.Contains(tool.Name)
+            && tool.Name is not (ClaudeArgs.AskTool or ApprovalRequest.PlanTool or "TaskCreate" or "TaskGet" or "TaskList" or "TaskUpdate"))
+            Log?.Write(room.Id, new ApprovalRequest(tool.Name, tool.Detail ?? "", null), AppCallLabel);
     }
 
     private static LiveEvent SetTool(Live live, ToolUse tool)
@@ -2081,8 +2098,9 @@ public static class RoomRules
             "\"이 턴 동안 묻지 않기\"를 누르면 그 턴이 끝날 때까지 명령을 카드 없이 허용하고 승인 기록에 남긴다 — 그 턴에는 편집 금지 경로를 명령으로 쓰는 것을 카드가 막지 않는다 " +
             "(git push · git clean · reset --hard · 재귀 삭제 · 지시 · 설정 파일을 건드리는 모양과 잘린 명령은 그래도 묻지만 글자 검사라 비껴갈 수 있다)",
         PermissionLevel.App =>
-            "Claude 앱과 같은 쓰임: 작업 폴더 편집 · 명령 실행 · 스킬 · 서브에이전트 · 폴더 밖 읽기를 묻지 않고 쓴다. 위험한 명령은 CLI auto 판정이 거절하지만 폴더 밖 쓰기는 막지 않는다. " +
-            "외부 에이전트(run_mode) · 터미널 · 지휘자 브라우저 · 웹 페이지 가져오기 · Unity 코드 실행은 카드로 묻고, .claude · .mcp.json은 편집이 막힌다. 프로젝트 훅은 그대로 돈다",
+            "Claude 앱과 같은 쓰임: 작업 폴더 편집 · 명령 실행 · 스킬 · 서브에이전트 · 폴더 밖 읽기를 묻지 않고 쓴다. 위험한 명령은 CLI auto 판정이 거절하지만 폴더 밖 쓰기는 막지 않고, " +
+            "명령으로 하는 네트워크 접근은 카드 · 주소 검사를 거치지 않는다. 외부 에이전트(run_mode) · 터미널 · 지휘자 브라우저 · 웹 페이지 가져오기 · Unity 코드 실행은 카드로 묻고, " +
+            ".claude · .mcp.json · 사용자 설정은 Write · Edit로 고칠 수 없다. 프로젝트 훅은 그대로 돈다. 앱 설정 · 스크립트는 고칠 수 있다",
         _ => level.ToString(),
     };
 }

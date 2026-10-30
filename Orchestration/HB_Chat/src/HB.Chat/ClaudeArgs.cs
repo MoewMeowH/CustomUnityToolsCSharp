@@ -47,6 +47,9 @@ public sealed record RunSpec(
     /// 여기서는 이름 모양만 검사한다.
     /// </summary>
     public IReadOnlyList<string> ExtraMcpServers { get; init; } = [];
+
+    /// <summary>앱 단계: 이 앱의 작업 폴더들 (절대 경로). 그 폴더의 .claude · .mcp.json 편집을 막는다 — 상대 규칙은 지금 작업 폴더 밖에 걸리지 않는다.</summary>
+    public IReadOnlyList<string> ProtectedWorkspaces { get; init; } = [];
 }
 
 /// <summary>
@@ -71,22 +74,28 @@ public static partial class ClaudeArgs
 
     /// <summary>
     /// 앱 단계의 편집 금지: 프로젝트 훅 · MCP 설정만. auto 판정은 시키지 않은 .claude/settings.json 덮어쓰기를 막지 못했다 — 훅이 그대로 꺼졌다 (2.1.312 실측).
-    /// 이 규칙은 Write와 Bash 리다이렉션을 둘 다 거절했다 (같은 실측).
+    /// 이 규칙은 Write와 Bash 리다이렉션을 둘 다 거절했다 (같은 실측). 상대 규칙은 지금 작업 폴더 밖에 걸리지 않아 사용자 폴더는 ~ 규칙, 다른 작업 폴더는
+    /// <see cref="RunSpec.ProtectedWorkspaces"/>로 막는다 (/cross-review a30ebb2d3a 실측). 사용자 폴더는 설정 · 지시 · 확장만 — 메모리는 쓸 수 있어야 한다.
     /// </summary>
-    public static readonly IReadOnlyList<string> AppDenied = ["**/.claude/**", "**/.mcp*.json"];
+    public static readonly IReadOnlyList<string> AppDenied =
+    [
+        "**/.claude/**", "**/.mcp*.json",
+        "~/.claude/settings*.json", "~/.claude/CLAUDE.md", "~/.claude/skills/**", "~/.claude/commands/**", "~/.claude/agents/**", "~/.claude/hooks/**", "~/.claude/plugins/**", "~/.claude.json",
+    ];
 
     /// <summary>편집 · 명령을 쓸 수 있는 단계 — 터미널 · 지휘자 브라우저 · Unity도 이 단계에 붙는다.</summary>
     public static bool RunsCommands(PermissionLevel level) => level is PermissionLevel.Command or PermissionLevel.App;
 
     /// <summary>
-    /// 앱 단계에서도 카드로 묻는 도구. auto는 AskUserQuestion 말고는 호스트에 묻지 않아, ask 규칙이 없으면 모델 선택 · 사이트 검사 · 터미널 표 · Unity 코드 카드가 모두 사라진다 (2.1.312 실측).
+    /// 앱 단계에서도 호스트에 묻는 도구. auto는 AskUserQuestion 말고는 호스트에 묻지 않아, ask 규칙이 없으면 모델 선택 · 사이트 검사 · 터미널 표 카드가 사라진다 (2.1.312 실측).
+    /// 방별 서버는 서버 단위로 — 호스트가 지금 연결을 다시 보고 Unity 코드 실행만 카드로 묻는다 (<see cref="RunSpec.ExtraMcpServers"/>, /cross-review a30ebb2d3a 1-F1).
     /// </summary>
-    public static IReadOnlyList<string> AppAskTools(string server) =>
-        [$"mcp__{server}__{RunModeTool}", TerminalMcp.StartTool, TerminalMcp.BrowserOpenTool, WebFetchTool, .. RoomHub.UnityCardTools];
+    public static IReadOnlyList<string> AppAskTools(RunSpec spec) =>
+        [$"mcp__{spec.McpServer}__{RunModeTool}", TerminalMcp.StartTool, TerminalMcp.BrowserOpenTool, WebFetchTool, .. spec.ExtraMcpServers.Select(s => $"mcp__{s}")];
 
     /// <summary>--settings 값: <see cref="AppAskTools"/>를 ask 규칙으로.</summary>
-    public static string AppSettings(string server) =>
-        System.Text.Json.JsonSerializer.Serialize(new { permissions = new { ask = AppAskTools(server) } });
+    public static string AppSettings(RunSpec spec) =>
+        System.Text.Json.JsonSerializer.Serialize(new { permissions = new { ask = AppAskTools(spec) } });
 
     /// <summary>모델 · MCP 서버 이름에 쓸 수 있는 모양인지 (인자 · 파일 이름에 들어간다).</summary>
     public static bool IsSafeName(string? value) => value is not null && SafeOption().IsMatch(value);
@@ -181,9 +190,11 @@ public static partial class ClaudeArgs
             case PermissionLevel.App:
                 // Claude 앱과 같은 쓰임: 편집 · 명령은 CLI auto 판정. --allowedTools로 미리 허용하지 않아도 auto가 돌린다.
                 args.AddRange(["--tools", "Read,Grep,Glob,Edit,Write,Bash,PowerShell," + HostTools + "," + WebTools + "," + AgentTool + "," + SkillTool + planTool,
-                    "--permission-mode", spec.Plan ? "plan" : "auto", "--settings", AppSettings(spec.McpServer)]);
+                    "--permission-mode", spec.Plan ? "plan" : "auto", "--settings", AppSettings(spec)]);
                 args.Add("--disallowedTools");
                 args.AddRange(AppDenied.Select(p => $"Edit({p})"));
+                foreach (var dir in spec.ProtectedWorkspaces.Where(IsRuleSafePath).Select(AbsoluteRulePath))
+                    args.AddRange([$"Edit({dir}/.claude/**)", $"Edit({dir}/.mcp*.json)"]);
                 args.AddRange(attachDeny);
                 AddMcp(args, spec);
                 break;

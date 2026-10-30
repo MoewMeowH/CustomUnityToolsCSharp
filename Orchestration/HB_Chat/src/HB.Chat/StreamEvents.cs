@@ -55,6 +55,9 @@ public sealed record TextBlockStartEvent : StreamEvent;
 /// <summary>도구 호출 시작 (stream_event content_block_start / tool_use).</summary>
 public sealed record ToolEvent(string Name) : StreamEvent;
 
+/// <summary>서브에이전트가 부른 도구 (parent_tool_use_id가 있는 assistant 줄). 컨텍스트 · 화면에는 넣지 않고 앱 단계 승인 기록에만 쓴다.</summary>
+public sealed record SubagentToolsEvent(IReadOnlyList<ToolUse> Tools) : StreamEvent;
+
 /// <summary>system/permission_denied: 승인이 필요해 자동으로 거절된 호출. 이유는 비어 올 수 있다.</summary>
 public sealed record DeniedEvent(string? Tool, string? Reason, string? ToolUseId = null) : StreamEvent;
 
@@ -251,7 +254,10 @@ public static class StreamParser
 
     private static StreamEvent ParseUsage(JsonElement e)
     {
-        if (e.TryGetProperty("parent_tool_use_id", out var parent) && parent.ValueKind == JsonValueKind.String) return new OtherEvent("assistant/subagent");
+        if (e.TryGetProperty("parent_tool_use_id", out var parent) && parent.ValueKind == JsonValueKind.String)
+            return e.TryGetProperty("message", out var sub) && sub.ValueKind == JsonValueKind.Object && ToolUses(sub) is { Count: > 0 } subTools
+                ? new SubagentToolsEvent(subTools)
+                : new OtherEvent("assistant/subagent");
         if (!e.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object) return new OtherEvent("assistant");
         var total = message.TryGetProperty("usage", out var usage) && usage.ValueKind == JsonValueKind.Object
             ? Long(usage, "input_tokens") + Long(usage, "cache_creation_input_tokens") + Long(usage, "cache_read_input_tokens") + Long(usage, "output_tokens")

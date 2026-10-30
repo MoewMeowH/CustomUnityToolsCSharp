@@ -17,6 +17,7 @@ public sealed class PermissionLevelMigrationTests : IDisposable
     [InlineData("Read", PermissionLevel.Read)]
     [InlineData("Command", PermissionLevel.Command)]
     [InlineData("App", PermissionLevel.App)]
+    [InlineData("command", PermissionLevel.Command)] // 이전 변환기처럼 대소문자를 가리지 않는다
     public void OldIndex_LoadsWithLoweredLevel_AndNextSaveDropsOldValues(string stored, PermissionLevel expected)
     {
         var path = Path.Combine(_dir, "rooms.json");

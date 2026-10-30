@@ -128,7 +128,7 @@ public sealed class RoomNotes(Func<string> dataFolder)
             if (!e.TryGetProperty("at", out var atEl) || atEl.ValueKind != JsonValueKind.String || !atEl.TryGetDateTimeOffset(out var at)) return null;
             if (tool == ClaudeArgs.AskTool) return null; // 질문 카드 답은 '나' 말풍선으로 이미 있다
             var decision = Str(e, "decision") ?? "";
-            if (decision == RoomHub.AppRanLabel) return null; // 앱 단계 호출은 설정 › 승인 기록에만
+            if (decision == RoomHub.AppCallLabel) return null; // 앱 단계 호출은 설정 › 승인 기록에만
             var summary = FirstLine(Str(e, "summary") ?? "", 120);
             if (tool is BrowserShotTool or UnityShotTool) return (room, new RoomNote(at, decision, false) { Image = Str(e, "summary") });
             var text = tool switch

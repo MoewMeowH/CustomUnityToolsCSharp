@@ -23,11 +23,11 @@ public enum PermissionLevel
 public sealed class PermissionLevelConverter : System.Text.Json.Serialization.JsonConverter<PermissionLevel>
 {
     public override PermissionLevel Read(ref System.Text.Json.Utf8JsonReader reader, Type typeToConvert, System.Text.Json.JsonSerializerOptions options) =>
-        reader.TokenType == System.Text.Json.JsonTokenType.String ? reader.GetString() switch
+        reader.TokenType == System.Text.Json.JsonTokenType.String ? reader.GetString()?.ToLowerInvariant() switch // 대소문자는 이전 변환기처럼 가리지 않는다
         {
-            "Chat" or "Edit" or nameof(PermissionLevel.Read) => PermissionLevel.Read,
-            nameof(PermissionLevel.Command) => PermissionLevel.Command,
-            nameof(PermissionLevel.App) => PermissionLevel.App,
+            "chat" or "edit" or "read" => PermissionLevel.Read,
+            "command" => PermissionLevel.Command,
+            "app" => PermissionLevel.App,
             var other => throw new System.Text.Json.JsonException($"알 수 없는 권한 단계: {other}"),
         } : throw new System.Text.Json.JsonException("권한 단계는 글자여야 한다");
 

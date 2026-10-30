@@ -5,6 +5,16 @@ namespace HB.Chat.Tests;
 /// <summary>stream-json 줄 읽기. 줄 모양은 0번 실측(Claude Code 2.1.311) 출력에서 경로 · 긴 값만 줄인 것.</summary>
 public sealed class StreamParserTests
 {
+    /// <summary>서브에이전트가 부른 도구는 컨텍스트 · 칩에 넣지 않고 앱 단계 승인 기록용 이벤트로만 나온다.</summary>
+    [Fact]
+    public void Subagent_ToolUse_IsSeparateEvent()
+    {
+        var ev = Assert.IsType<SubagentToolsEvent>(StreamParser.Parse(
+            """{"type":"assistant","parent_tool_use_id":"toolu_1","message":{"content":[{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"echo sub"}}],"usage":{"input_tokens":9}}}"""));
+        Assert.Equal("Bash", Assert.Single(ev.Tools).Name);
+        Assert.IsType<OtherEvent>(StreamParser.Parse("""{"type":"assistant","parent_tool_use_id":"toolu_1","message":{"content":[{"type":"text","text":"hi"}]}}"""));
+    }
+
     [Fact]
     public void Init_ReadsSessionVersionAndMcp()
     {
@@ -50,8 +60,8 @@ public sealed class StreamParserTests
         Assert.Equal(StreamParser.DetailChars + 1, StreamParser.Detail("PowerShell", longCmd.RootElement)!.Length);
         using var other = System.Text.Json.JsonDocument.Parse("""{"x":1}""");
         Assert.Null(StreamParser.Detail("Mystery", other.RootElement));
-        // 서브에이전트 줄의 도구는 넣지 않는다
-        Assert.IsType<OtherEvent>(StreamParser.Parse("""{"type":"assistant","parent_tool_use_id":"t","message":{"content":[{"type":"tool_use","name":"Read","input":{}}]}}"""));
+        // 서브에이전트 줄의 도구는 칩 · 컨텍스트에 넣지 않는다
+        Assert.IsType<SubagentToolsEvent>(StreamParser.Parse("""{"type":"assistant","parent_tool_use_id":"t","message":{"content":[{"type":"tool_use","name":"Read","input":{}}]}}"""));
     }
 
     [Fact]

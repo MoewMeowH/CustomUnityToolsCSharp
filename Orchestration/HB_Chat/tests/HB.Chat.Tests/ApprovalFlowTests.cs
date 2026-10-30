@@ -129,6 +129,35 @@ public sealed class ApprovalFlowTests : IDisposable
         lock (_specs) Assert.True(_specs.Last().Plan);
     }
 
+    /// <summary>계획 카드가 뜬 사이 단계를 올리면 거절 — 명령 인자로 띄운 실행이 ask 규칙 없이 auto가 되면 안 된다 (/self-review security dfd2bed027 C1).</summary>
+    [Fact]
+    public async Task PlanCard_LevelRaisedWhileWaiting_IsDenied()
+    {
+        var room = CommandRoom();
+        _store.Update(room.Id, r => r with { PlanNext = true });
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "plan default");
+        var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        _store.Update(room.Id, r => r with { Level = PermissionLevel.App });
+        Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null));
+        await Until(ch, e => e.Kind == "idle");
+        Assert.True(_store.Get(room.Id)!.PlanNext); // 승인되지 않았다
+    }
+
+    /// <summary>앱 단계에서 내릴 때 쓰는 턴 끝내기: 기다리는 말은 남는다.</summary>
+    [Fact]
+    public async Task StopTurn_KeepsQueuedMessage()
+    {
+        var room = CommandRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "approve please");
+        await Until(ch, e => e.Kind == "approval");
+        _hub.Send(room.Id, "hello");
+        _hub.StopTurn(room.Id);
+        var seen = await Until(ch, e => e.Kind == "idle");
+        Assert.Single(seen, e => e.Kind == "start"); // 첫 start는 카드까지 읽을 때 지나갔다 — 기다리던 말이 돈 것
+    }
+
     [Fact]
     public async Task Subagent_ProgressLines_AndCardMarkedFromAgent()
     {
