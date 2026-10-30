@@ -38,6 +38,19 @@ public sealed record GroupEntry(int Line, DateTimeOffset At, GroupEntryKind Kind
     public int? ReplyTo { get; init; }
     public bool Failed { get; init; }
 
+    /// <summary>서버가 요약한 구성원의 중간 글 ("요약" 표시 — 구성원이 쓴 원문이 아니다).</summary>
+    public bool Narration { get; init; }
+
+    /// <summary>구성원이 도구 호출 사이에 직접 쓴 글 (글 블록). 턴의 마지막 글은 답이므로 여기 들지 않는다.</summary>
+    public bool Middle { get; init; }
+
+    /// <summary>
+    /// 답이 아닌 중간 글 (결정 "단톡방 대화에도 올림"). 화면에만 보인다 — ReplyTo를 달지 않고(답 판정 · 이어 부르기 밖),
+    /// 다른 구성원에게 가는 맥락 · 미리보기에도 넣지 않는다.
+    /// </summary>
+    [JsonIgnore]
+    public bool IsMiddle => Narration || Middle;
+
     /// <summary>
     /// 구성원 답이 불렀지만 따로 이어 부르지 않은 구성원 — 차례로 도는 말(⑤)에서 아직 차례를 기다리던 구성원은 자기 차례 답으로 갈음한다
     /// (⑤ 리뷰 전 결정 "B의 차례로 갈음"). 화면은 To와 같이 "→ @B"로 보이고 이어 답 없음 판정은 하지 않는다.
@@ -338,6 +351,7 @@ public sealed partial class GroupChat
         _options = options;
         CodexSettings = codexSettings;
         hub.TurnEnded += OnTurnEnded;
+        hub.TextBlock += OnTextBlock;
         hub.ActivityChanged += OnActivity;
         hub.CardChanged += OnCard;
         hub.Streamed += OnStreamed;
@@ -654,7 +668,7 @@ public sealed partial class GroupChat
         var from = fresh ? 0 : member.SeenUpTo;
         // 이어 부르기의 부른 답 줄(keep)은 이미 본 줄이어도 넣는다 — 차례로 도는 말(⑤)에서 앞 차례에 그 답을 받은 구성원이 이어 불리면
         // 안내 블록에 정작 부른 답이 없었다 (5291 실측: B "A의 답 본문이 이 안내에는 없어서")
-        var seen = log.Where(e => (e.Line >= from || e.Line == keep) && e.Line != turn && (fresh || e.Kind != GroupEntryKind.Member || e.MemberId != member.Id)).ToList();
+        var seen = log.Where(e => !e.IsMiddle && (e.Line >= from || e.Line == keep) && e.Line != turn && (fresh || e.Kind != GroupEntryKind.Member || e.MemberId != member.Id)).ToList();
         return Delta(group, seen, fresh, keep, turn, calledBy) + text;
     }
 
@@ -864,6 +878,7 @@ public sealed partial class GroupChat
 
     private void OnTurnEnded(string roomId, RunResult result)
     {
+        _middles.TryRemove(roomId, out var said); // 이 턴 몫 — 답을 올리지 않는 길로 나가도 다음 턴에 섞이지 않게
         if (_store.Get(roomId) is not { GroupId: { } groupId }) return;
         // 앱을 끄느라 끊긴 턴은 답 줄을 쓰지 않는다 — 다시 켜면 "답이 없습니다 (실행이 끊김)"으로 보인다 (방의 RoomHub.Record와 같은 처리, 서버 재시작 실측 2026-10-30)
         if (result.Cancelled && _hub.ShuttingDown) return;
@@ -877,7 +892,7 @@ public sealed partial class GroupChat
             if (!_pending.TryUpdate(roomId, posting, pending)) return;
             try
             {
-                PostAnswer(groupId, roomId, pending, result);
+                PostAnswer(groupId, roomId, pending, result, said);
                 // 이 구성원이 답하는 동안 다른 구성원이 불렀으면 이제 이어서. 옛 기다림을 지우기 전에 — 새 기다림이 덮어 쓰므로
                 // 기다림이 없는 틈이 생기지 않는다(그 틈에 화면이 찍으면 "이어 답이 없습니다"가 남았다 — 4단계 리뷰 지휘자 K1)
                 StartDeferred(groupId, roomId);
@@ -888,8 +903,26 @@ public sealed partial class GroupChat
         Announce(groupId);
     }
 
+    /// <summary>
+    /// 턴 동안 모은 중간 글을 답 앞 대화 줄로 (시각은 받은 때). 마지막 글 블록은 곧 답이라 뺀다. 표시용 줄이라 못 써도 답은 그대로 올린다.
+    /// </summary>
+    private void PostMiddles(string groupId, string memberId, IEnumerable<MiddleText>? said, string answer)
+    {
+        var lines = said?.ToList() ?? [];
+        while (lines is [.., { Narration: false } last] && answer.TrimEnd().EndsWith(last.Text.Trim(), StringComparison.Ordinal))
+            lines.RemoveAt(lines.Count - 1);
+        try
+        {
+            foreach (var line in lines)
+                _log.Append(groupId, new GroupEntry(0, line.At, GroupEntryKind.Member, memberId, line.Text) { Narration = line.Narration, Middle = !line.Narration });
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+        }
+    }
+
     /// <summary>답을 대화 줄에 올린다. 사용자가 부른 답(깊이 0)에 다른 구성원 @이름이 있으면 그 구성원을 이어 부른다 (④). 단톡방 잠금 안에서.</summary>
-    private void PostAnswer(string groupId, string roomId, Pending pending, RunResult result)
+    private void PostAnswer(string groupId, string roomId, Pending pending, RunResult result, IEnumerable<MiddleText>? said)
     {
         if (_store.Get(roomId) is not { MemberId: { } memberId }) return;
         var text = result.Ok ? (string.IsNullOrWhiteSpace(result.Text) ? "(빈 답)" : result.Text!)
@@ -925,6 +958,7 @@ public sealed partial class GroupChat
         foreach (var c in queued) _pending[c.RoomId] = new Pending(-1, DateTimeOffset.UtcNow, c.SeenUpTo, Depth: 1, Queued: true);
         var holds = now.Select(c => (c.RoomId, Hold: new Pending(-1, DateTimeOffset.UtcNow, c.SeenUpTo, Depth: 1))).ToList();
         foreach (var (room, hold) in holds) _pending[room] = hold;
+        PostMiddles(groupId, memberId, said, text);
         GroupEntry posted;
         try
         {
@@ -1131,10 +1165,25 @@ public sealed partial class GroupChat
     private void OnStreamed(string roomId, LiveEvent ev)
     {
         var owner = _owners.GetOrAdd(roomId, id => _store.Get(id) is { GroupId: { } g, MemberId: { } m } ? (g, m) : null);
-        if (owner is { } o) _hub.Announce(o.GroupId, ev with { Kind = "member-" + ev.Kind, Member = o.MemberId });
+        if (owner is not { } o) return;
+        if (ev is { Kind: "narration", Text: { } said }) _middles.GetOrAdd(roomId, _ => new()).Enqueue(new MiddleText(DateTimeOffset.Now, said, true));
+        _hub.Announce(o.GroupId, ev with { Kind = "member-" + ev.Kind, Member = o.MemberId });
+    }
+
+    /// <summary>구성원이 쓴 글 블록 — 턴이 끝나면 답을 뺀 나머지가 대화 줄이 된다. 화면에는 글 조각으로 이미 흘렀다.</summary>
+    private void OnTextBlock(string roomId, string text)
+    {
+        var owner = _owners.GetOrAdd(roomId, id => _store.Get(id) is { GroupId: { } g, MemberId: { } m } ? (g, m) : null);
+        if (owner is not null) _middles.GetOrAdd(roomId, _ => new()).Enqueue(new MiddleText(DateTimeOffset.Now, text, false));
     }
 
     private readonly ConcurrentDictionary<string, (string GroupId, string MemberId)?> _owners = new(StringComparer.Ordinal);
+
+    /// <summary>턴 동안 받은 구성원의 중간 글 하나. Narration이면 서버 요약, 아니면 구성원이 쓴 글 블록.</summary>
+    private sealed record MiddleText(DateTimeOffset At, string Text, bool Narration);
+
+    /// <summary>구성원 자식 방 → 이번 턴의 중간 글 (차례대로). 넣는 쪽은 자식 방 잠금 안 — 다시 붙을 때 보내기(ReplayLive)와 겹치지 않는다.</summary>
+    private readonly ConcurrentDictionary<string, ConcurrentQueue<MiddleText>> _middles = new(StringComparer.Ordinal);
 
     /// <summary>
     /// 단톡방 화면이 SSE를 붙이면(처음 · 다시 붙음) 실행 중인 구성원의 쌓인 글 · 마지막 도구를 member-reset · member-tool로 그 채널에 넣는다 —
@@ -1144,7 +1193,11 @@ public sealed partial class GroupChat
     {
         if (_store.Get(roomId) is not { IsGroup: true } group) return;
         foreach (var m in group.Members.Where(m => m.RoomId.Length > 0))
-            _hub.ReplayLive(m.RoomId, to, ev => ev with { Kind = "member-" + ev.Kind, Member = m.Id });
+            _hub.ReplayLive(m.RoomId, to, ev => ev with { Kind = "member-" + ev.Kind, Member = m.Id }, () =>
+                // 서버 요약은 Partial에 없다 — 대화 줄은 턴 끝에 생기므로 임시 말풍선에 다시 넣는다
+                _middles.TryGetValue(m.RoomId, out var said)
+                    ? said.Where(s => s.Narration).Select(s => new LiveEvent("narration") { Text = s.Text })
+                    : []);
     }
 
     /// <summary>단톡방 화면이 다시 붙을 때 받을 기다리는 카드 (구성원 순서, approval · question 알림 모양 — Detail = 구성원 ID).</summary>

@@ -41,11 +41,15 @@
         }
         var member = Model.MemberOf(e.MemberId);
         var name = member?.Name ?? "구성원";
-        <div class="msg conductor group-member@(e.Failed ? " error" : "")" data-line="@e.Line" data-speaker="conductor" data-member="@e.MemberId">
+        <div class="msg conductor group-member@(e.Failed ? " error" : "")@(e.Narration ? " narration" : "")" data-line="@e.Line" data-speaker="conductor" data-member="@e.MemberId">
             @Profiles.Avatar(ProfileStore.AgentKey(name), name)
             <div class="bubble">
                 <div class="who">
                     <b>@name</b>
+                    @if (e.Narration)
+                    {
+                        <span class="detail" title="서버가 요약한 중간 글 — 구성원이 쓴 원문이 아닙니다">요약</span>
+                    }
                     @if (member is { Role.Length: > 0 })
                     {
                         <span class="detail" title="@member.Role">@(member.Role.Length > 30 ? member.Role[..30] + "…" : member.Role)</span>

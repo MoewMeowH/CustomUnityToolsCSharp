@@ -776,6 +776,21 @@ public sealed class ApprovalFlowTests : IDisposable
         Assert.True(new ApprovalRequest("PowerShell", command, null, null).TurnAllowable);
     }
 
+    /// <summary>서버 요약 중간 글이 진행 중 화면으로 간다 — 다시 열 때 보낼 글(Partial)에는 넣지 않는다, 기록으로 그려진다.</summary>
+    [Fact]
+    public async Task Narration_Broadcast_NotInPartial()
+    {
+        var room = CommandRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "narrate");
+        var seen = await Until(ch, e => e.Kind == "approval");
+        Assert.Equal("middle summary", seen.Single(e => e.Kind == "narration").Text);
+        var snapshot = (await Until(_hub.Subscribe(room.Id), e => e.Kind == "snapshot")).Last();
+        Assert.Equal("", snapshot.Text);
+        _hub.Stop(room.Id);
+        await Until(ch, e => e.Kind == "idle");
+    }
+
     /// <summary>턴 도중 방을 다시 열면 세션 기록에 들어간 말 · 글은 snapshot이 다시 보내지 않는다 — 기록에 없을 때는 내 말을 그대로 보낸다.</summary>
     [Fact]
     public async Task Snapshot_SkipsWhatTheTranscriptHas()
@@ -790,7 +805,8 @@ public sealed class ApprovalFlowTests : IDisposable
         await Until(ch, e => e.Kind == "idle");
 
         _hub.Send(room.Id, "commit");
-        await Until(ch, e => e.Kind == "approval");
+        var live = await Until(ch, e => e.Kind == "approval");
+        Assert.Equal(["one", "\n\n", "two"], live.Where(e => e.Kind == "delta").Select(e => e.Text)); // 글 블록 사이는 빈 줄로 — 첫 블록 앞은 띄우지 않는다
         var snapshot = (await Until(_hub.Subscribe(room.Id), e => e.Kind == "snapshot")).Last();
         Assert.Null(snapshot.Prompt);
         Assert.Equal("two", snapshot.Text); // "one"은 기록에 있다

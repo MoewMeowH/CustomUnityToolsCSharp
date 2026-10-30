@@ -42,7 +42,7 @@ public static class ChatExport
                 sb.Append("> 안내 · ").Append(when).Append(": ").Append(e.Text.Replace("\n", " ")).Append("\n\n");
                 continue;
             }
-            sb.Append("### ").Append(e.Speaker == ChatSpeaker.User ? "나" : "지휘자").Append(" · ").Append(when).Append("\n\n");
+            sb.Append("### ").Append(e.Speaker == ChatSpeaker.User ? "나" : "지휘자").Append(e.Narration ? " (요약)" : "").Append(" · ").Append(when).Append("\n\n");
             sb.Append(e.Text.TrimEnd()).Append("\n\n");
         }
         AppendPlaced(sb, runs.Trailing, answers.Trailing, notes.Trailing);

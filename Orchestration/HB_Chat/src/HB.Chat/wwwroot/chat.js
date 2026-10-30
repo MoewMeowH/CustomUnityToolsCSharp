@@ -1183,6 +1183,15 @@
             stream = bubble("conductor", profiles.conductor?.name || "지휘자", null);
             stream.dataset.empty = "1"; stream.append(typing());
         }
+        // 서버가 요약한 중간 글 (기록의 _Messages와 같은 모양). 글 없이 '입력 중'만 있는 말풍선이 있으면 그 위에 — 이어지는 글은 그 말풍선에 나온다
+        function addNarration(text) {
+            const body = bubble("conductor narration", profiles.conductor?.name || "지휘자", text);
+            const msg = body.closest(".msg");
+            const tag = el("span", "detail", "요약");
+            tag.title = "서버가 요약한 중간 글 — 지휘자가 쓴 원문이 아닙니다";
+            msg.querySelector(".who").append(" ", tag);
+            if (stream?.dataset.empty && chips?.hidden) stream.closest(".msg").before(msg);
+        }
         function addChip(name) {
             if (!chips) return;
             chips.hidden = false;
@@ -1341,6 +1350,8 @@
                 if (Number(fresh.dataset.lastLine) < Number(chat.dataset.lastLine)) return await reloadMessages(follow);
                 // 기록의 질문 답 말풍선이 오면 진행 중 칸의 실시간 답은 지운다 — 턴 도중 새 말 받기에 같은 답이 두 번 보이지 않게 (e8091295fe C3)
                 if (fresh.querySelector(":scope > .msg.answer")) live.querySelectorAll(":scope > .msg.answer").forEach(m => m.remove());
+                // 서버 요약 중간 글도 같다 — 턴 도중 새 말 받기(방 이름 바꾸기)로 기록에 나타나면 진행 중 칸의 것을 지운다
+                if (fresh.querySelector(":scope > .msg.narration")) live.querySelectorAll(":scope > .msg.narration").forEach(m => m.remove());
                 // 새 말이 한 쪽보다 많으면(갈래 첫 턴 등) 서버가 맨 끝 쪽을 준다 — 붙이지 않고 쪽을 바꾼다 (95e8b1c242 C3)
                 if (fresh.dataset.reset) {
                     decorate(fresh);
@@ -1995,8 +2006,18 @@
                 case "delta": {
                     const follow = atBottom();
                     followStream();
+                    // 글 블록 사이 빈 줄 — 새 말풍선 맨 앞이면 띄울 것이 없다
+                    const text = stream.dataset.empty ? ev.text.trimStart() : ev.text;
+                    if (!text) break;
                     if (stream.dataset.empty) { stream.textContent = ""; delete stream.dataset.empty; }
-                    stream.append(ev.text); // 글 조각을 텍스트 노드로 덧붙인다 (+= 는 매번 전체를 다시 만든다 — C11)
+                    stream.append(text); // 글 조각을 텍스트 노드로 덧붙인다 (+= 는 매번 전체를 다시 만든다 — C11)
+                    if (follow) toBottom();
+                    break;
+                }
+                case "narration": {
+                    const follow = atBottom();
+                    if (!stream) startTurn(null, "", null);
+                    addNarration(ev.text);
                     if (follow) toBottom();
                     break;
                 }
@@ -2510,8 +2531,22 @@
             const s = streamOf(id);
             if (!s || !text) return;
             const follow = atBottom();
+            const part = s.body.dataset.empty ? text.trimStart() : text; // 글 블록 사이 빈 줄 — 맨 앞이면 띄울 것이 없다
+            if (!part) return;
             if (s.body.dataset.empty) { s.body.textContent = ""; delete s.body.dataset.empty; }
-            s.body.append(text); // 텍스트 노드로 — 일반 방과 같음 (C11)
+            s.body.append(part); // 텍스트 노드로 — 일반 방과 같음 (C11)
+            if (follow) toBottom();
+        }
+        // 구성원의 서버 요약 중간 글 (임시 말풍선 안 흐린 줄) — 턴이 끝나면 대화 줄로 바뀐다
+        function streamNarration(id, text) {
+            const s = streamOf(id);
+            if (!s || !text) return;
+            const follow = atBottom();
+            if (s.body.dataset.empty) { s.body.textContent = ""; delete s.body.dataset.empty; }
+            const said = el("div", "narration-line"), tag = el("span", "detail", "요약");
+            tag.title = "서버가 요약한 중간 글 — 구성원이 쓴 원문이 아닙니다";
+            said.append(tag, " ", text);
+            s.body.append(said);
             if (follow) toBottom();
         }
         // SSE를 붙일 때 서버가 같은 채널로 주는 쌓인 글 (member-reset) — 본문을 통째로 바꾸고 칩을 비운다(마지막 도구는 뒤따르는 member-tool로).
@@ -2628,6 +2663,7 @@
                 // 구성원 상태 · 글 조각 · 도구도 차례(chain) 안에서 — 답 말풍선 받기(refresh)보다 먼저 지우거나, 늦게 그려 지운 말풍선이 되살아나지 않게
                 case "member": chain = chain.then(() => disposed ? null : setMember(ev.detail, ev.text)).catch(() => { }); break;
                 case "member-delta": chain = chain.then(() => disposed ? null : streamText(ev.member, ev.text)).catch(() => { }); break;
+                case "member-narration": chain = chain.then(() => disposed ? null : streamNarration(ev.member, ev.text)).catch(() => { }); break;
                 case "member-reset": chain = chain.then(() => disposed ? null : resetStream(ev.member, ev.text)).catch(() => { }); break;
                 case "member-tool": chain = chain.then(() => disposed ? null : streamTool(ev.member, ev.text, ev.detail)).catch(() => { }); break;
                 // 구성원 카드 — 차례(chain) 뒤에: snapshot의 syncCards가 지운 뒤 그리게. 실패해도 차례가 끊기지 않게 catch (⑤ 리뷰 C4)

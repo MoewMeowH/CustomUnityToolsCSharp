@@ -345,13 +345,15 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     /// 이 방 잠금 안에서 써서, 같은 채널로 오는 이 방의 글 조각(<see cref="Streamed"/>)과 겹치거나 빠지지 않는다 (/self-review 7e68bf5791 C1 —
     /// 따로 HTTP로 받으면 그 사이 조각이 두 번 붙었다). <paramref name="shape"/>: 알림 모양을 바꾼다 (단톡방 — member- 종류 · 구성원 ID).
     /// </summary>
-    public void ReplayLive(string roomId, ChannelWriter<LiveEvent> to, Func<LiveEvent, LiveEvent> shape)
+    /// <param name="also">같은 잠금 안에서 reset 뒤에 더 보낼 알림 (단톡방 — 서버 요약 중간 글).</param>
+    public void ReplayLive(string roomId, ChannelWriter<LiveEvent> to, Func<LiveEvent, LiveEvent> shape, Func<IEnumerable<LiveEvent>>? also = null)
     {
         if (!_rooms.TryGetValue(roomId, out var live)) return;
         lock (live.Gate)
         {
             if (!live.Busy) return;
             to.TryWrite(shape(new LiveEvent("reset") { Text = live.Partial.ToString() }));
+            foreach (var ev in also?.Invoke() ?? []) to.TryWrite(shape(ev));
             if (live.Tool is { } tool) to.TryWrite(shape(new LiveEvent("tool") { Text = tool.Name, Detail = tool.Detail }));
         }
     }
@@ -1240,7 +1242,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             {
                 Face = face.ToString(),
                 Busy = live.Busy,
-                Text = live.Busy ? live.Partial.ToString(live.PartialLogged, live.Partial.Length - live.PartialLogged) : null,
+                Text = live.Busy ? live.Partial.ToString(live.PartialLogged, live.Partial.Length - live.PartialLogged).TrimStart() : null,
                 Prompt = live.TurnLogged ? null : live.Current,
                 Steps = live.Steps,
                 Status = room?.Status,
@@ -1748,7 +1750,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             if (ev is DeniedEvent denied) CliDenied(room, live, generation, denied, toolTargets);
             // 할 일 도구를 쓴 뒤의 출력이면 그 사이 도구가 돌아 파일이 바뀌었을 수 있다 — 잠금 밖에서 읽는다 (3차 b).
             // 잦은 stream_event(글 · 도구 입력 · 생각 조각)에서는 읽지 않고, 300ms 안에 다시 읽지 않는다 — 마지막 상태는 턴 끝 읽기가 맞춘다 (/self-review ea28ba9185 C1).
-            var fragment = ev is DeltaEvent || (ev is OtherEvent other && other.Type.StartsWith("stream_event", StringComparison.Ordinal));
+            var fragment = ev is DeltaEvent or TextBlockStartEvent || (ev is OtherEvent other && other.Type.StartsWith("stream_event", StringComparison.Ordinal));
             var steps = fragment ? null : RefreshSteps(room, live, generation);
             lock (live.Gate)
             {
@@ -1769,9 +1771,17 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                         Broadcast(live, SetTool(live, tool));
                         if (tool.Name is "TaskCreate" or "TaskUpdate") live.StepsWatch = true; // 목록을 바꾸는 도구만
                     }
+                if (ev is UsageEvent blocks)
+                {
+                    // 서버가 요약한 중간 글 — Partial에 넣지 않는다: 일반 방은 다시 열면 세션 기록으로 그려진다 (단톡방은 ReplayLive의 also로 다시 보낸다)
+                    foreach (var said in blocks.Narrations) Broadcast(live, new LiveEvent("narration") { Text = said });
+                    foreach (var text in blocks.Texts)
+                        try { TextBlock?.Invoke(live.Id, text); } catch (Exception ex) when (ex is InvalidOperationException or IOException) { }
+                }
                 var shown = ev switch
                 {
                     DeltaEvent d => AppendPartial(live, d.Text),
+                    TextBlockStartEvent => BlockGap(live),
                     RetryEvent r => new LiveEvent("retry") { Text = $"API 재시도 {r.Attempt}회 ({r.Error})" },
                     StatusEvent s => new LiveEvent("status") { Status = new RoomStatus(s.Category, s.Detail, s.NeedsAction) },
                     TaskEvent t => new LiveEvent("agent") { Task = t }, // 서브에이전트 · 백그라운드 명령 진행 줄 (Claude 앱 기능 D)
@@ -1874,6 +1884,13 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         return new LiveEvent("delta") { Text = text };
     }
 
+    /// <summary>
+    /// 글 블록 사이를 빈 줄로 띄운다 — 진행 중 말풍선에서 블록이 "…주세요.진행 칸…"처럼 붙어 긴 작업을 읽기 어려웠다 (사용자 보고 2026-10-30).
+    /// 끝난 턴은 세션 기록으로 다시 그려 블록이 나뉜다.
+    /// </summary>
+    private static LiveEvent? BlockGap(Live live) =>
+        live.Partial.Length == 0 || live.Partial[live.Partial.Length - 1] == '\n' ? null : AppendPartial(live, "\n\n");
+
     private static void ClearPartial(Live live)
     {
         live.Partial.Clear();
@@ -1951,12 +1968,15 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     /// </summary>
     public event Action<string, LiveEvent>? CardChanged;
 
-    private static readonly HashSet<string> StreamKinds = ["delta", "tool"];
+    private static readonly HashSet<string> StreamKinds = ["delta", "tool", "narration"];
 
     /// <summary>
     /// 글 조각 · 도구 알림 — 단톡방이 구성원 임시 말풍선에 흘린다. 방 잠금 안에서 부르므로 받는 쪽은 짧게 (CardChanged와 같음).
     /// </summary>
     public event Action<string, LiveEvent>? Streamed;
+
+    /// <summary>완성된 글 블록 하나 (assistant 줄) — 단톡방이 답 앞 중간 글로 모은다. 화면은 글 조각으로 받으므로 알림은 없다. 방 잠금 안에서 부른다.</summary>
+    public event Action<string, string>? TextBlock;
 
     /// <summary>그 방이 답을 기다리는 승인 · 질문 카드 (단톡방 화면이 다시 붙을 때).</summary>
     public (IReadOnlyList<ApprovalView> Approvals, IReadOnlyList<QuestionView> Questions) WaitingCards(string roomId)

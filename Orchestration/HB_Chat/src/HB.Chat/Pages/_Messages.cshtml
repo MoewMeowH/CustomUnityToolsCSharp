@@ -166,11 +166,15 @@
         // 나 · 지휘자 프로필 (3차 e)
         var who = e.Speaker == ChatSpeaker.User ? Profiles.UserName : Profiles.ConductorName;
         @* data-speaker: 답장 인용 머리는 보이는 이름 대신 고정 "나" · "지휘자" (프로필 이름이 지휘자에게 가는 글에 섞이지 않게) *@
-        <div class="msg @RoomModel.RoleClass(e.Speaker)" data-line="@e.Line" data-speaker="@(e.Speaker == ChatSpeaker.User ? "user" : "conductor")">
+        <div class="msg @RoomModel.RoleClass(e.Speaker)@(e.Narration ? " narration" : "")" data-line="@e.Line" data-speaker="@(e.Speaker == ChatSpeaker.User ? "user" : "conductor")">
             @Profiles.Avatar(e.Speaker == ChatSpeaker.User ? ProfileStore.User : ProfileStore.Conductor, who)
             <div class="bubble">
                 <div class="who">
                     <b>@who</b>
+                    @if (e.Narration)
+                    {
+                        <span class="detail" title="서버가 요약한 중간 글 — 지휘자가 쓴 원문이 아닙니다">요약</span>
+                    }
                     <span class="when">@e.Timestamp?.ToLocalTime().ToString("MM-dd HH:mm:ss")</span>
                     <button class="reply" type="button" title="이 말에 답장 (인용)" aria-label="답장">@Icons.Svg("reply")</button>
                 </div>

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using HB.Orchestration.Shared;
 
 namespace HB.Chat;
 
@@ -48,6 +49,9 @@ public sealed record BackgroundWaitEvent(int Count, DateTimeOffset? Until) : Str
 /// <summary>흘림 글 조각 (stream_event content_block_delta / text_delta).</summary>
 public sealed record DeltaEvent(string Text) : StreamEvent;
 
+/// <summary>글 블록 시작 (stream_event content_block_start / text) — 앞 글과 붙지 않게 띄운다.</summary>
+public sealed record TextBlockStartEvent : StreamEvent;
+
 /// <summary>도구 호출 시작 (stream_event content_block_start / tool_use).</summary>
 public sealed record ToolEvent(string Name) : StreamEvent;
 
@@ -70,6 +74,12 @@ public sealed record UsageEvent(long ContextTokens) : StreamEvent
     /// 그 메시지의 도구 호출 (content의 tool_use — 입력 전체가 여기 온다, 도구 실행 전, 3차 0번 실측 C). ContextTokens가 0이면 usage가 없던 줄이다.
     /// </summary>
     public IReadOnlyList<ToolUse> Tools { get; init; } = [];
+
+    /// <summary>그 메시지의 서버 요약 중간 글 (<see cref="ClaudeThinking"/>) — 글 블록 없이 생각 블록으로 온다 (2.1.312 실측).</summary>
+    public IReadOnlyList<string> Narrations { get; init; } = [];
+
+    /// <summary>그 메시지의 글 블록 (message.content의 text). 블록마다 assistant 줄이 따로 온다 (2.1.312 실측).</summary>
+    public IReadOnlyList<string> Texts { get; init; } = [];
 }
 
 /// <summary>도구 호출 하나: 이름 · 화면에 보일 짧은 대상(파일 이름 · 명령 첫 줄 · 검색어 · 모드 — 없으면 null, 3차 b).</summary>
@@ -225,8 +235,11 @@ public static class StreamParser
         var type = Str(inner, "type");
         if (type == "content_block_delta" && inner.TryGetProperty("delta", out var delta) && Str(delta, "type") == "text_delta")
             return new DeltaEvent(Str(delta, "text") ?? "");
-        if (type == "content_block_start" && inner.TryGetProperty("content_block", out var block) && Str(block, "type") == "tool_use")
-            return new ToolEvent(Str(block, "name") ?? "?");
+        if (type == "content_block_start" && inner.TryGetProperty("content_block", out var block))
+        {
+            if (Str(block, "type") == "tool_use") return new ToolEvent(Str(block, "name") ?? "?");
+            if (Str(block, "type") == "text") return new TextBlockStartEvent();
+        }
         return new OtherEvent($"stream_event/{type}");
     }
 
@@ -244,7 +257,32 @@ public static class StreamParser
             ? Long(usage, "input_tokens") + Long(usage, "cache_creation_input_tokens") + Long(usage, "cache_read_input_tokens") + Long(usage, "output_tokens")
             : 0;
         var tools = ToolUses(message);
-        return total > 0 || tools.Count > 0 ? new UsageEvent(total) { Model = Str(message, "model"), Tools = tools } : new OtherEvent("assistant");
+        var said = Narrations(message);
+        var texts = Texts(message);
+        return total > 0 || tools.Count > 0 || said.Count > 0 || texts.Count > 0
+            ? new UsageEvent(total) { Model = Str(message, "model"), Tools = tools, Narrations = said, Texts = texts }
+            : new OtherEvent("assistant");
+    }
+
+    private static IReadOnlyList<string> Texts(JsonElement message)
+    {
+        if (!message.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array) return [];
+        var list = new List<string>();
+        foreach (var c in content.EnumerateArray())
+            if (c.ValueKind == JsonValueKind.Object && Str(c, "type") == "text" && Str(c, "text")?.Trim() is { Length: > 0 } text)
+                list.Add(text);
+        return list;
+    }
+
+    private static IReadOnlyList<string> Narrations(JsonElement message)
+    {
+        if (!message.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array) return [];
+        var list = new List<string>();
+        foreach (var c in content.EnumerateArray())
+            if (c.ValueKind == JsonValueKind.Object && Str(c, "type") == "thinking" && Str(c, "thinking")?.Trim() is { Length: > 0 } said
+                && ClaudeThinking.IsNarration(Str(c, "signature")))
+                list.Add(said);
+        return list;
     }
 
     private static IReadOnlyList<ToolUse> ToolUses(JsonElement message)

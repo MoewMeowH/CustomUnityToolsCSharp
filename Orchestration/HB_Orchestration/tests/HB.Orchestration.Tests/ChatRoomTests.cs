@@ -53,6 +53,31 @@ public sealed class ChatRoomTests : IDisposable
 
     // ── 세션 기록 본문 ──
 
+    /// <summary>서버가 요약한 도구 호출 사이 글은 생각 블록으로 온다 — 서명의 block_kind가 narration인 것만 지휘자 글로, 진짜 생각은 뺀다. 서명은 합성 값.</summary>
+    [Fact]
+    public void Reader_KeepsNarrationThinking_DropsRealThinking()
+    {
+        var path = Write(
+            User(1, "시작"),
+            Assistant(2, new { type = "thinking", thinking = "", signature = "CAQSDAoKQgh0aGlua2luZw==" }),
+            Assistant(3, new { type = "thinking", thinking = "도구 사이 요약\n\n", signature = "CAQSDQoLQgluYXJyYXRpb24=" }),
+            Assistant(4, Use("t1", "Bash", new { command = "ls" })),
+            User(5, new object[] { Result("t1", "목록") }),
+            Assistant(6, new { type = "thinking", thinking = "진짜 생각", signature = "CAQSDAoKQgh0aGlua2luZw==" }),
+            Assistant(7, Text("끝")));
+
+        var entries = ClaudeChatReader.Read(path).Entries;
+
+        Assert.Equal(["시작", "도구 사이 요약", "끝"], entries.Select(e => e.Text));
+        Assert.Equal([false, true, false], entries.Select(e => e.Narration));
+        Assert.Equal(ChatSpeaker.Conductor, entries[1].Speaker);
+
+        // 대시보드 채팅방: 본문은 그대로(Markdown이 깨지지 않게), 표시는 머리 줄에
+        var room = ChatRoomBuilder.Build(ClaudeChatReader.Read(path), [], [], [], [], _ => null);
+        var said = Assert.Single(room.Messages, m => m.Detail == "요약");
+        Assert.Equal("도구 사이 요약", said.Markdown);
+    }
+
     [Fact]
     public void Reader_KeepsUserAndConductorText_AndCountsToolsBetween()
     {

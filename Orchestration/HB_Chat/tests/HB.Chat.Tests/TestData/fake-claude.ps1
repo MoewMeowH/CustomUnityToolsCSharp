@@ -157,12 +157,27 @@ switch ($mode) {
         Finish $d 'Bash' 'allowed'
     }
     'commit' {
-        # text that reached the transcript (assistant line), then text still streaming, then a held card.
+        # text that reached the transcript (assistant line), then text still streaming, then a held card. Text blocks announce themselves (2.1.312).
+        Emit '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}'
         Emit '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"one"}}}'
         Emit '{"type":"assistant","message":{"usage":{"input_tokens":2,"output_tokens":8}}}'
+        Emit '{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}}'
         Emit '{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"two"}}}'
         $d = Ask 'req_hold' '{"subtype":"can_use_tool","tool_name":"Bash","display_name":"Bash","input":{"command":"echo hold"},"tool_use_id":"toolu_hold"}'
         Finish $d 'Bash' 'allowed'
+    }
+    'narrate' {
+        # blocks arrive one assistant line each (2.1.312): empty real thinking, a server summary, a plain text block, a held card, then the last text block = the answer.
+        Emit '{"type":"assistant","message":{"usage":{"input_tokens":2,"output_tokens":8},"content":[{"type":"thinking","thinking":"","signature":"CAQSDAoKQgh0aGlua2luZw=="}]}}'
+        Emit '{"type":"assistant","message":{"usage":{"input_tokens":2,"output_tokens":8},"content":[{"type":"thinking","thinking":"middle summary\n\n","signature":"CAQSDQoLQgluYXJyYXRpb24="}]}}'
+        Emit '{"type":"assistant","message":{"usage":{"input_tokens":2,"output_tokens":8},"content":[{"type":"text","text":"middle text"}]}}'
+        $d = Ask 'req_hold' '{"subtype":"can_use_tool","tool_name":"Bash","display_name":"Bash","input":{"command":"echo hold"},"tool_use_id":"toolu_hold"}'
+        Emit '{"type":"assistant","message":{"usage":{"input_tokens":2,"output_tokens":8},"content":[{"type":"text","text":"final answer"}]}}'
+        Finish $d 'Bash' 'final answer'
+    }
+    'echoall' {
+        # group context test: the answer is everything the member received.
+        Emit ('{"type":"result","subtype":"success","is_error":false,"result":' + (ConvertTo-Json $prompt -Compress) + ',"total_cost_usd":0.001,"permission_denials":[]}')
     }
     'clideny' {
         # CLI's own rule denials: empty reason with a known tool call, then no reason and no tool name.

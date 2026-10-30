@@ -93,6 +93,7 @@ public static class ChatRoomBuilder
                 Role = e.Speaker switch { ChatSpeaker.User => RoomRole.User, ChatSpeaker.Conductor => RoomRole.Conductor, _ => RoomRole.System },
                 Name = e.Speaker switch { ChatSpeaker.User => "나", ChatSpeaker.Conductor => "지휘자", _ => "안내" },
                 Markdown = e.Text,
+                Detail = e.Narration ? "요약" : null, // 서버가 요약한 중간 글 — 원문이 아니다
                 ToolsBefore = e.ToolsBefore,
             });
         }

@@ -61,7 +61,7 @@ public sealed class GroupTests : IDisposable
         {
             var group = _store.Get(groupId)!;
             var id = group.Members.First(m => m.Name == memberName).Id;
-            if (_log.Read(groupId).FirstOrDefault(e => e.Kind == GroupEntryKind.Member && e.MemberId == id && e.Line > after) is { } answer)
+            if (_log.Read(groupId).FirstOrDefault(e => e is { Kind: GroupEntryKind.Member, IsMiddle: false } && e.MemberId == id && e.Line > after) is { } answer)
             {
                 // 답을 올린 뒤에야 단톡방이 다음 말을 받는다 (실행 끝 처리까지 기다림)
                 while (sw.Elapsed < Wait && (_hub.IsBusy(group.Members.First(m => m.Name == memberName).RoomId) || _groups.Waiting(group.Members.First(m => m.Name == memberName).RoomId)))
@@ -749,6 +749,78 @@ public sealed class GroupTests : IDisposable
         Assert.All(answers, e => Assert.True(e.Line < fromC.Line));
         Assert.Contains("] A: call", fromC.Text);
         Assert.Contains("] B: call", fromC.Text); // 늦은 B의 답까지 받은 뒤에 돌았다
+    }
+
+    /// <summary>
+    /// 구성원의 중간 글 (결정 "단톡방 대화에도 올림"): 서버 요약은 흘림 알림이 단톡방으로 가고, 턴이 끝나면 서버 요약 · 도구 사이 글 블록이 답 앞 대화 줄로 남는다.
+    /// 마지막 글 블록은 곧 답이라 두 번 올리지 않는다. 답이 아니라 답 판정 · 미리보기에 들지 않고, 다른 구성원에게 가는 맥락에서 빠진다.
+    /// </summary>
+    [Fact]
+    public async Task Narration_PostedBeforeAnswer_NotAnAnswer()
+    {
+        var group = WriterGroup(PermissionLevel.Command);
+        var a = group.Members[0];
+        var events = _hub.Subscribe(group.Id);
+        Assert.Null(_groups.Send(group.Id, "narrate @A"));
+        using var cts = new CancellationTokenSource(Wait);
+        LiveEvent ev;
+        var said = false;
+        do
+        {
+            ev = await events.Reader.ReadAsync(cts.Token);
+            said |= ev is { Kind: "member-narration", Text: "middle summary" } && ev.Member == a.Id;
+        }
+        while (ev.Kind != "approval");
+        Assert.True(said);
+        Assert.Null(_hub.Decide(a.RoomId, ev.Approval!.Id, ApprovalChoice.Allow, null));
+        var user = _log.Read(group.Id).Single(e => e.Kind == GroupEntryKind.User).Line;
+        var answer = await AnswerAsync(group.Id, "A", user);
+        Assert.Equal("final answer", answer.Text);
+
+        var log = _log.Read(group.Id);
+        var note = log.Single(e => e.Narration);
+        Assert.Equal(("middle summary", a.Id), (note.Text, note.MemberId));
+        var text = log.Single(e => e.Middle);
+        Assert.Equal(("middle text", a.Id, false), (text.Text, text.MemberId, text.Narration));
+        Assert.Equal([note.Line, text.Line, answer.Line], log.Where(e => e.Kind == GroupEntryKind.Member).Select(e => e.Line));
+        Assert.True(note.At < answer.At); // 시각은 받은 때 (카드에서 멈춘 뒤에 답)
+        Assert.Null(note.ReplyTo);
+        Assert.Null(text.ReplyTo);
+        Assert.Single(GroupChat.AnsweredBy(log), x => x.MemberId == a.Id);
+
+        var list = new RoomList(_store, _hub, new ChatTranscripts(() => Path.Combine(_dir, "projects")), _log);
+        Assert.Contains("final answer", list.All().Single(r => r.Id == group.Id).Preview);
+
+        // 다른 구성원은 답만 받는다
+        Assert.Null(_groups.Send(group.Id, "echoall @B"));
+        await WaitAllIdleAsync(_store.Get(group.Id)!);
+        var fromB = _log.Read(group.Id).Last(e => e.MemberId == group.Members[1].Id);
+        Assert.False(fromB.Failed, fromB.Text);
+        Assert.Contains("final answer", fromB.Text);
+        Assert.DoesNotContain("middle", fromB.Text);
+    }
+
+    /// <summary>단톡방 화면이 다시 붙으면 서버 요약 중간 글도 받는다 — 대화 줄은 턴 끝에 생긴다.</summary>
+    [Fact]
+    public async Task Narration_ReplayedOnSubscribe()
+    {
+        var group = WriterGroup(PermissionLevel.Command);
+        var a = group.Members[0];
+        var events = _hub.Subscribe(group.Id);
+        Assert.Null(_groups.Send(group.Id, "narrate @A"));
+        using var cts = new CancellationTokenSource(Wait);
+        LiveEvent ev;
+        do ev = await events.Reader.ReadAsync(cts.Token); while (ev.Kind != "approval");
+
+        var again = _hub.Subscribe(group.Id);
+        var kinds = new List<LiveEvent>();
+        LiveEvent seen;
+        do { seen = await again.Reader.ReadAsync(cts.Token); kinds.Add(seen); } while (seen.Kind != "member-narration");
+        Assert.Equal(("middle summary", a.Id), (seen.Text, seen.Member));
+        Assert.Contains(kinds, e => e.Kind == "member-reset");
+
+        Assert.Null(_hub.Decide(a.RoomId, ev.Approval!.Id, ApprovalChoice.Allow, null));
+        await WaitAllIdleAsync(group);
     }
 
     /// <summary>

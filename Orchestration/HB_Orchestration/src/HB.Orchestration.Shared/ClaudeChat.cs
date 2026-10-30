@@ -25,10 +25,13 @@ public sealed record ChatEntry(int Line, DateTimeOffset? Timestamp, ChatSpeaker 
     /// <summary>Tools와 같은 차례의 짧은 대상 (<see cref="ToolTargets"/>, 모르면 null — HB_Chat 4차 C3: 끝난 턴 칩에도 대상).</summary>
     public IReadOnlyList<string?> ToolTargets { get; init; } = [];
 
+    /// <summary>서버가 요약한 도구 호출 사이 글 (<see cref="ClaudeThinking"/>) — 지휘자가 쓴 원문이 아니다.</summary>
+    public bool Narration { get; init; }
+
     /// <summary>값 비교: Tools는 목록 내용으로 (기본 레코드 비교는 참조라 이어 읽기 = 전체 읽기 검사가 깨진다).</summary>
     public bool Equals(ChatEntry? other) =>
         other is not null && Line == other.Line && Timestamp == other.Timestamp && Speaker == other.Speaker && Text == other.Text
-        && ToolsBefore == other.ToolsBefore && Tools.SequenceEqual(other.Tools) && ToolTargets.SequenceEqual(other.ToolTargets);
+        && ToolsBefore == other.ToolsBefore && Narration == other.Narration && Tools.SequenceEqual(other.Tools) && ToolTargets.SequenceEqual(other.ToolTargets);
 
     public override int GetHashCode() => HashCode.Combine(Line, Timestamp, Speaker, Text, ToolsBefore, Tools.Count);
 }
@@ -58,7 +61,7 @@ public sealed record FileMention(int Line, DateTimeOffset? Timestamp, FileMentio
 
 /// <summary>
 /// 채팅방용 세션 기록. <see cref="TranscriptSummary"/>와 달리 대화 본문을 담는다:
-/// 사용자 글 · 지휘자 글(text 블록)만. 도구 호출 · 결과 · thinking · system-reminder · isMeta 줄은 넣지 않는다.
+/// 사용자 글 · 지휘자 글(text 블록과 서버가 요약한 중간 글 — <see cref="ChatEntry.Narration"/>)만. 도구 호출 · 결과 · 생각 · system-reminder · isMeta 줄은 넣지 않는다.
 /// </summary>
 public sealed record ChatTranscript
 {
@@ -179,11 +182,11 @@ public static partial class ClaudeChatReader
             UnknownLines = Unknown,
         };
 
-        public void Add(int line, DateTimeOffset? ts, ChatSpeaker speaker, string text)
+        public void Add(int line, DateTimeOffset? ts, ChatSpeaker speaker, string text, bool narration = false)
         {
             text = text.Trim();
             if (text.Length == 0) return;
-            Entries.Add(new ChatEntry(line, ts, speaker, text, PendingTools) { Tools = [.. PendingToolNames], ToolTargets = [.. PendingToolTargets] });
+            Entries.Add(new ChatEntry(line, ts, speaker, text, PendingTools) { Tools = [.. PendingToolNames], ToolTargets = [.. PendingToolTargets], Narration = narration });
             PendingTools = 0;
             PendingToolNames.Clear();
             PendingToolTargets.Clear();
@@ -248,6 +251,9 @@ public static partial class ClaudeChatReader
             {
                 case "text" when Str(block, "text") is { } text:
                     s.Add(lineNo, ts, ChatSpeaker.Conductor, text);
+                    break;
+                case "thinking" when Str(block, "thinking") is { Length: > 0 } said && ClaudeThinking.IsNarration(Str(block, "signature")):
+                    s.Add(lineNo, ts, ChatSpeaker.Conductor, said, narration: true);
                     break;
                 case "tool_use":
                     s.PendingTools++;

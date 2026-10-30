@@ -101,7 +101,7 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
         for (var i = log.Count - 1; i >= 0; i--)
             if (log[i].Kind == GroupEntryKind.User) { from = i + 1; break; }
         var answered = log.Skip(from)
-            .Where(e => e is { Kind: GroupEntryKind.Member, Failed: false, MemberId: not null }).Select(e => e.MemberId!).Distinct()
+            .Where(e => e is { Kind: GroupEntryKind.Member, Failed: false, IsMiddle: false, MemberId: not null }).Select(e => e.MemberId!).Distinct()
             .Select(id => group.Members.FirstOrDefault(m => m.Id == id)?.Name).OfType<string>().ToList();
         return (answered.Count == 0 ? null : string.Join(", ", answered), Face.Idle);
     }
@@ -112,7 +112,7 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
         IReadOnlyList<GroupEntry> log;
         try { log = groups?.Read(room.Id) ?? []; }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { log = []; }
-        var last = log.LastOrDefault();
+        var last = log.LastOrDefault(e => !e.IsMiddle);
         var who = last is null ? null
             : last.Kind == GroupEntryKind.User ? "나"
             : room.Members.FirstOrDefault(m => m.Id == last.MemberId)?.Name;
@@ -276,11 +276,13 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
         var entries = transcript?.FormatError is null ? transcript?.Entries ?? [] : [];
         var last = entries.LastOrDefault();
         var lastAt = new[] { last?.Timestamp, room.LastRunAt, room.CreatedAt }.Max() ?? room.CreatedAt;
-        var preview = last is null ? null
-            : IsStoppedTurn(last) ? "중지된 턴"
-            : last.Speaker == ChatSpeaker.User ? "나: " + Preview(Attachments.WithoutLines(last.Text)) : Preview(last.Text); // 첨부 경로는 빼고 (2-2 d)
+        // 서버가 요약한 중간 글은 미리보기 · 안 읽은 수에 넣지 않는다 (결정 "일반 글만 셈")
+        var shown = entries.LastOrDefault(e => !e.Narration);
+        var preview = shown is null ? null
+            : IsStoppedTurn(shown) ? "중지된 턴"
+            : shown.Speaker == ChatSpeaker.User ? "나: " + Preview(Attachments.WithoutLines(shown.Text)) : Preview(shown.Text); // 첨부 경로는 빼고 (2-2 d)
         // ReadUpTo null(이 필드 전의 방, 켤 때 옮기므로 남지 않음)은 모두 읽음으로 — 잘못 세면 안 읽음이 쏟아지는 쪽보다 낫다.
-        var unread = entries.Count(e => e.Speaker == ChatSpeaker.Conductor && !IsStoppedTurn(e) && e.Line > (room.ReadUpTo ?? int.MaxValue));
+        var unread = entries.Count(e => e.Speaker == ChatSpeaker.Conductor && !e.Narration && !IsStoppedTurn(e) && e.Line > (room.ReadUpTo ?? int.MaxValue));
         return new RoomSummary(room.Id, TitleOf(room, transcript), preview, lastAt, unread, activity,
             activity == RoomActivity.Idle && room.LastError is not null, room.Level, room.Model);
     }

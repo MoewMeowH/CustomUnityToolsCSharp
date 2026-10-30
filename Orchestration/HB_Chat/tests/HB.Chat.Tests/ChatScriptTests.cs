@@ -214,6 +214,38 @@ public sealed class ChatScriptTests(ChatApp app, ChatBrowser browser) : IClassFi
         page.AssertNoErrors();
     }
 
+    /// <summary>진행 중 말풍선의 글 블록은 빈 줄로 나뉘어 보인다 — 붙어 있어 긴 작업을 읽기 어려웠다 (사용자 보고).</summary>
+    [Fact]
+    public async Task TextBlocks_SeparatedInLiveBubble()
+    {
+        if (!browser.Available) return;
+        var room = app.Services.GetRequiredService<RoomStore>().Create("ws", PermissionLevel.Command, "opus", null);
+        await using var page = await browser.OpenAsync(app.RoomUrl(room));
+        await page.SendAsync("commit");
+        await page.WaitForAsync("document.querySelector('#live .msg.conductor .body')?.textContent === 'one\\n\\ntwo'", "빈 줄로 나뉜 글", ChatPage.TurnWait);
+        Assert.Equal("pre-wrap", await page.EvalAsync<string>("getComputedStyle(document.querySelector('#live .msg.conductor .body')).whiteSpace"));
+        await page.WaitForAsync("!!document.querySelector('#live .approval')", "명령 카드", ChatPage.TurnWait);
+        await page.EvalAsync("[...document.querySelectorAll('#live .approval button')].find(b => b.textContent === '허용').click()");
+        await page.WaitForAsync("!document.querySelector('#live .approval')", "카드 닫힘", ChatPage.TurnWait);
+        page.AssertNoErrors();
+    }
+
+    /// <summary>서버 요약 중간 글: 진행 중 칸에 흐린 말풍선 + "요약" 표시, '입력 중' 말풍선은 그 아래에 남는다.</summary>
+    [Fact]
+    public async Task Narration_ShownInLiveBubble()
+    {
+        if (!browser.Available) return;
+        var room = app.Services.GetRequiredService<RoomStore>().Create("ws", PermissionLevel.Command, "opus", null);
+        await using var page = await browser.OpenAsync(app.RoomUrl(room));
+        await page.SendAsync("narrate");
+        await page.WaitForAsync("document.querySelector('#live .msg.narration .body')?.textContent === 'middle summary'", "요약 글", ChatPage.TurnWait);
+        Assert.Equal("요약", await page.EvalAsync<string>("document.querySelector('#live .msg.narration .who .detail').textContent"));
+        await page.WaitForAsync("!!document.querySelector('#live .approval')", "명령 카드", ChatPage.TurnWait);
+        await page.EvalAsync("[...document.querySelectorAll('#live .approval button')].find(b => b.textContent === '허용').click()");
+        await page.WaitForAsync("!document.querySelector('#live .approval')", "카드 닫힘", ChatPage.TurnWait);
+        page.AssertNoErrors();
+    }
+
     /// <summary>명령 카드의 "이 턴 동안 묻지 않기": 다음 명령 카드가 사라지고 켜짐 줄이 뜨며, 꼭 묻는 명령 카드에는 단추가 없고, 끄기로 줄이 닫힌다.</summary>
     [Fact]
     public async Task TurnAllow_CardButton_LineAndOff()
