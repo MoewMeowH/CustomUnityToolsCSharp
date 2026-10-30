@@ -63,6 +63,9 @@ public sealed class PetController : IDisposable
 
     public bool Visible => _settings.Visible;
 
+    /// <summary>지금 화면에 있어 말풍선을 띄울 수 있다 — 이때는 Windows 알림을 띄우지 않는다.</summary>
+    public bool Showing => _settings.Visible && _form.Visible;
+
     /// <summary>처음 보이기 (큰 창이 뜬 뒤). 설정이 꺼져 있으면 숨긴 채.</summary>
     public void Start(bool dark)
     {
@@ -95,7 +98,7 @@ public sealed class PetController : IDisposable
         _form.SetSteady(PetMood.Steady(room));
         if (burst is { } once) _form.PlayOnce(once);
         if (_sprite is null) ShowFace(room);
-        if (_settings.Visible && _form.Visible && PetMood.Bubble(notices) is { } saying) _bubble.Say(saying, _form.Bounds, _dark);
+        if (Showing && PetMood.Bubble(notices) is { } saying) _bubble.Say(saying, _form.Bounds, _dark);
     }
 
     /// <summary>채팅 서버와 끊김: 쉬는 흐린 모습.</summary>

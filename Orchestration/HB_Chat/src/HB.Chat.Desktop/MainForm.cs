@@ -411,6 +411,7 @@ public sealed class MainForm : Form
         UpdateTray();
         if (notices.Count == 0) return;
         Trace("알림 " + string.Join(", ", notices.Select(n => $"{n.Kind} {n.RoomId}"))); // 방 ID만 (제목은 남기지 않음)
+        if (_pet?.Showing == true) return; // 펫이 있으면 말풍선으로만 — 화면 구석에 둔 펫과 Windows 알림이 겹치지 않게
         if (ShowToasts(Toasts.For(notices, _notifyBody))) return;
         // 토스트를 못 띄우면(지원 안 되는 Windows · 등록 실패) 트레이 풍선으로
         var (title, text) = Notices.Balloon(notices, _notifyBody);
