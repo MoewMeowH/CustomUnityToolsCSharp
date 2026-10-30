@@ -132,6 +132,8 @@ public sealed class CodexCliTests : IDisposable
     [InlineData("workspace_owner_credits_depleted", ErrorKind.Quota, false)]
     [InlineData("insufficient_quota: Quota exceeded. Check your plan and billing details.", ErrorKind.Quota, false)]
     [InlineData("unexpected status 429 Too Many Requests", ErrorKind.RateLimit, true)]
+    [InlineData("Selected model is at capacity. Please try a different model.", ErrorKind.Server, true)]
+    [InlineData("usage limit reached while the model is at capacity", ErrorKind.Quota, false)]
     [InlineData("stream disconnected before completion", null, false)]
     public void Turn_failures_are_classified(string message, ErrorKind? kind, bool retryable)
     {
@@ -147,6 +149,31 @@ public sealed class CodexCliTests : IDisposable
         Assert.Equal(retryable, ex.Retryable);
         Assert.StartsWith("[codex-cli]", ex.Message);
         Assert.Contains(message[..10], ex.Message);
+    }
+
+    [Theory]
+    [InlineData("Selected model is at capacity.")]
+    [InlineData("unexpected status 429 Too Many Requests")]
+    public void Failure_after_the_turn_started_is_not_retried(string message)
+    {
+        var stdout = string.Join("\n",
+            Ev(new { type = "thread.started", thread_id = "t" }),
+            Ev(new { type = "item.completed", item = new { type = "command_execution", command = "rg -n Add", exit_code = 0 } }),
+            Ev(new { type = "turn.failed", error = new { message } }));
+
+        var ex = Assert.Throws<ClaudeCliException>(() => CodexCliChatClient.Parse(Ok(stdout, exit: 1), "m"));
+
+        Assert.False(ex.Retryable);                                                  // 다시 보내면 리뷰가 처음부터 돈다
+    }
+
+    [Fact]
+    public void Capacity_failure_waits_longer_before_retrying()
+    {
+        var failure = RetryClassifier.Classify(CodexCliChatClient.Failure("Selected model is at capacity.", null), CancellationToken.None);
+
+        Assert.Equal((ErrorKind.Server, true, CodexCliChatClient.CapacityRetryDelay), (failure.Kind, failure.Retryable, failure.RetryAfter));
+        Assert.True(CodexCliChatClient.CapacityRetryDelay <= RetryClassifier.MaxRetryAfter);   // 상한을 넘으면 기다리지 않고 실패한다
+        Assert.Equal(CodexCliChatClient.CapacityRetryDelay, RetryClassifier.DelayBeforeNext(failure, 1));
     }
 
     [Fact]
@@ -367,20 +394,37 @@ public sealed class CodexCliTests : IDisposable
     }
 
     [Fact]
+    public void Git_start_info_takes_stdin_instead_of_inheriting_it()   // 서버 stdin에 읽기가 걸려 있어 물려받으면 ls-files가 끝나지 않았다
+    {
+        var psi = ReviewWorkFolder.GitStartInfo("git", _dir);
+
+        Assert.True(psi.RedirectStandardInput);
+        Assert.Equal(["-c", "core.fsmonitor=false", "-c", "core.quotepath=off", "ls-files", "-z"], psi.ArgumentList);
+    }
+
+    [Theory]
+    [InlineData(128, "fatal: not a git repository (or any of the parent directories): .git", "git 저장소가 아님")]
+    [InlineData(128, "fatal: detected dubious ownership in repository at 'C:/Users/secret/repo'", "git ls-files 실패 (종료 코드 128)")]
+    public void Git_failure_reason_names_the_cause_without_local_paths(int exit, string stderr, string expected) =>
+        Assert.Equal(expected, ReviewWorkFolder.GitFailure(exit, stderr));
+
+    [Fact]
     public void Codex_folder_outside_git_has_context_files_only()
     {
         var root = Directory.CreateDirectory(Path.Combine(_dir, "plain")).FullName;
         File.WriteAllText(Path.Combine(root, "a.cs"), "class A { }\n");
         File.WriteAllText(Path.Combine(root, "b.cs"), "class B { }\n");
+        string? noCopy = null;
 
         var (folder, focus, error) = ReviewWorkFolder.Create(Path.Combine(_dir, "review_in2"), [new ContextRange("a.cs", 1, 1)], new ContextOptions(), root, default,
-            ReviewWorkFolder.Style.Codex);
+            ReviewWorkFolder.Style.Codex, why => noCopy = why);
         try
         {
             Assert.Null(error);
             Assert.True(File.Exists(Path.Combine(folder!, "a.cs")));
             Assert.False(File.Exists(Path.Combine(folder!, "b.cs")));
             Assert.Contains("지휘자가 고른 파일만", focus);
+            Assert.False(string.IsNullOrEmpty(noCopy));
         }
         finally
         {
@@ -432,6 +476,75 @@ public sealed class CodexCliTests : IDisposable
         var prompt = h.Client.Received[^1].Messages.Last().Text;
         Assert.Contains("MARK_IN_DIFF", prompt);                                       // diff 본문은 프롬프트에
         Assert.Contains($"## 변경 diff ({diff.Name})", prompt);
+        Assert.Equal(0, h.FallbackClient.Calls);
+    }
+
+    [Fact]
+    public async Task Result_says_when_the_repository_copy_was_not_made()
+    {
+        using var h = new ModeRunnerHarness(Modes, providerType: CodexCliProvider.TypeName);
+        var plain = Directory.CreateDirectory(Path.Combine(_dir, "no-git")).FullName;
+        File.WriteAllText(Path.Combine(plain, "a.cs"), "class A { }\n");
+        var repo = Repo();
+        h.Client.Script = [ScriptedChatClient.Reply("리뷰 결과"), ScriptedChatClient.Reply("리뷰 결과")];
+
+        var withoutCopy = await h.Runner.RunAsync("nofb", "의도", null, null, [new ContextRange("a.cs", 1, 1)], null, ModeRunnerHarness.DefaultReason, null, CancellationToken.None, rootDir: plain);
+        var withCopy = await h.Runner.RunAsync("nofb", "의도", null, null, [new ContextRange("Calc.cs", 1, 1)], null, ModeRunnerHarness.DefaultReason, null, CancellationToken.None, rootDir: repo);
+
+        Assert.Contains("(저장소 사본 없음:", withoutCopy);
+        Assert.DoesNotContain("저장소 사본 없음", withCopy);
+    }
+
+    [Theory]
+    [InlineData(CodexCliProvider.TypeName)]
+    [InlineData(ClaudeCliProvider.TypeName)]
+    public async Task Cli_agents_cannot_follow_up_and_the_result_says_so_early(string providerType)
+    {
+        using var h = new ModeRunnerHarness(Modes, providerType: providerType);
+        h.Options.Agents[0].StructuredOutput = StructuredOutputMode.Schema;
+        using var diff = new CwdFile("+ x\n");
+        h.Client.Script = [ScriptedChatClient.Reply("""{"findings":[],"needsInfo":[{"what":"정의","path":null,"symbol":"A","why":"확인"}]}""")];
+
+        var result = await h.Runner.RunAsync("cxrev", "의도", null, null, [new ContextRange(diff.Name, 1, 1)], null, ModeRunnerHarness.DefaultReason, null, CancellationToken.None);
+        var runId = result.Split('\n')[0]["runId: ".Length..].Trim();
+        var followUp = await h.Runner.RunFollowUpAsync("cxrev", new FollowUpRequest(runId, 1, ["1-N1"]), "보충", null, null, "자료 보충", CancellationToken.None);
+
+        Assert.Contains("자료 요청 1-N1", result);
+        Assert.Contains("(followUp 불가:", result);
+        Assert.StartsWith("[followUp 불가]", followUp);
+        Assert.Equal(1, h.Client.Calls);                                                 // 제공사를 부르지 않는다
+        Assert.Single(h.Records());                                                      // 실패 기록도 남지 않는다
+    }
+
+    [Fact]
+    public async Task Capacity_failure_retries_then_succeeds_without_fallback()
+    {
+        using var h = new ModeRunnerHarness(Modes, providerType: CodexCliProvider.TypeName, withFallbackAgent: true);
+        h.Options.Agents[0].MaxAttempts = 3;
+        using var diff = new CwdFile("+ x\n");
+        var busy = ScriptedChatClient.Throw(new ClaudeCliException("[codex-cli] 모델 용량 초과.", ErrorKind.Server, true) { RetryAfter = TimeSpan.Zero });
+        h.Client.Script = [busy, busy, ScriptedChatClient.Reply("리뷰 결과")];
+
+        var result = await h.Runner.RunAsync("cx", "의도", null, null, [new ContextRange(diff.Name, 1, 1)], null, ModeRunnerHarness.DefaultReason, null, CancellationToken.None);
+
+        Assert.Contains("리뷰 결과", result);
+        Assert.Equal(3, h.Client.Calls);
+        Assert.Equal(3, h.Records().Count);
+        Assert.Equal(0, h.FallbackClient.Calls);
+    }
+
+    [Fact]
+    public async Task Capacity_failure_after_all_attempts_does_not_use_the_paid_fallback()
+    {
+        using var h = new ModeRunnerHarness(Modes, providerType: CodexCliProvider.TypeName, withFallbackAgent: true);
+        h.Options.Agents[0].MaxAttempts = 3;
+        using var diff = new CwdFile("+ x\n");
+        var busy = ScriptedChatClient.Throw(new ClaudeCliException("[codex-cli] 모델 용량 초과.", ErrorKind.Server, true) { RetryAfter = TimeSpan.Zero });
+        h.Client.Script = [busy, busy, busy];
+
+        var result = await h.Runner.RunAsync("cx", "의도", null, null, [new ContextRange(diff.Name, 1, 1)], null, ModeRunnerHarness.DefaultReason, null, CancellationToken.None);
+
+        Assert.Contains("3/3회 시도 모두 실패", result);
         Assert.Equal(0, h.FallbackClient.Calls);
     }
 
@@ -530,6 +643,19 @@ public sealed class CodexCliTests : IDisposable
     }
 
     // ── 프로세스: 자손이 파이프를 물고 남아도 끝난다 ─────────────────────────────
+
+    [Fact]
+    public async Task Timeout_is_not_retried()   // 재시도를 켜도 시간 상한 × 시도 횟수만큼 멈추지 않게
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var powershell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
+        var inv = new ClaudeCliInvocation(powershell, ["-NoProfile", "-Command", "Start-Sleep 30"], _dir, new Dictionary<string, string?>(), "");
+
+        var ex = await Assert.ThrowsAsync<ClaudeCliException>(() => CodexCliProcess.RunAsync(inv, TimeSpan.FromSeconds(1), CancellationToken.None));
+
+        Assert.Equal((ErrorKind.Timeout, false), (ex.Kind, ex.Retryable));
+        Assert.False(RetryClassifier.Classify(ex, CancellationToken.None).Retryable);
+    }
 
     [Fact]
     public async Task Process_returns_soon_even_when_a_descendant_keeps_the_pipe()

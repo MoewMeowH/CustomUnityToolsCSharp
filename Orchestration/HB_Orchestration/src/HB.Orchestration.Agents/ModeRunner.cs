@@ -99,6 +99,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         // 작업 폴더 단계(claude-cli · codex-cli): context 파일을 통째로 작업 폴더에 복사하고, 프롬프트의 첨부 본문 대신 "주목할 범위"만 넣는다
         // (codex-cli는 저장소 추적 파일 사본 + diff 본문). 한 실행의 단계가 같은 프롬프트 입력을 나눠 쓰므로 다른 제공사와 섞지 않는다.
         string? workFolder = null;
+        string? noCopy = null;
         if (cliSteps > 0)
         {
             var cliType = plan[0].Agent.ProviderOptions?.Type ?? "";
@@ -119,7 +120,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             }
             var style = string.Equals(cliType, CodexCliProvider.TypeName, StringComparison.OrdinalIgnoreCase) ? ReviewWorkFolder.Style.Codex : ReviewWorkFolder.Style.ClaudeRead;
             // 저장소 사본(git · 복사)은 동기 작업이라 스레드 풀 밖으로 (/cross-review 90978dee2f C2).
-            var (folder, focus, folderError) = await Task.Run(() => ReviewWorkFolder.Create(ReviewWorkFolder.BaseFor(runner.LogPath), context, Options.Context, root, ct, style), ct);
+            var (folder, focus, folderError) = await Task.Run(() => ReviewWorkFolder.Create(ReviewWorkFolder.BaseFor(runner.LogPath), context, Options.Context, root, ct, style, why => noCopy = why), ct);
             if (folderError is not null) return $"[첨부 코드 오류] {folderError}";
             // Codex는 diff 본문이 프롬프트에 들어간다 — 그 길이로 입력 상한을 다시 잰다.
             if (style == ReviewWorkFolder.Style.Codex && maxChars > 0 && input.Length + focus!.Length > maxChars)
@@ -184,6 +185,16 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             note = note is null ? reasoningNote : $"{note}\n{reasoningNote}";
         if (fallbackNote is not null)
             note = note is null ? fallbackNote : $"{fallbackNote}\n{note}";
+        if (noCopy is not null)
+        {
+            var noCopyNote = $"(저장소 사본 없음: {noCopy} — 이 실행은 지휘자가 고른 파일만 봄)";
+            note = note is null ? noCopyNote : $"{noCopyNote}\n{note}";
+        }
+        if (cliSteps > 0 && results.Any(r => r.Structured?.Requests is { Count: > 0 }))
+        {
+            var noFollowUp = $"(followUp 불가: {CliFollowUpHint})";
+            note = note is null ? noFollowUp : $"{noFollowUp}\n{note}";
+        }
 
         // 겹침 후보: 서로 다른 단계가 같은 위치를 지적했으면 끝에 한 줄씩 (판단은 지휘자).
         if (FindingOverlap.Lines(results.SelectMany(r => r.Structured?.Findings ?? [])) is { Count: > 0 } overlaps)
@@ -208,6 +219,9 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     /// (12시간 → 1시간, 2차 리뷰 9ea51e562a 뒤 결정).
     /// </summary>
     public static readonly TimeSpan ClaudeCliQuotaHold = TimeSpan.FromHours(1);
+
+    /// <summary>작업 폴더 제공사는 앞 응답을 이어 받는 호출을 받지 않는다 (claude-cli · codex-cli).</summary>
+    private const string CliFollowUpHint = "claude-cli · codex-cli 에이전트는 앞 응답을 이어 받지 못합니다. 코드 자료가 더 필요하면 context를 넓혀 새로 run_mode를 부르세요.";
 
     /// <summary>작업 폴더를 쓰는 제공사 Type (claude-cli · codex-cli, 대소문자 무시 — /self-review C4 · sub_self C6).</summary>
     public static bool UsesWorkFolder(string? type) =>
@@ -563,6 +577,8 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
                 reasoningOverrides: original.ReasoningEffort is { } effort ? [$"*={effort}"] : null);
             if (planError is not null) return planError;
             var step = plan!.Steps[0];
+            // 호출해 봐야 제공사가 거절해 실패 기록만 남는다 — 앞에서 돌려준다.
+            if (UsesWorkFolder(step.Agent.ProviderOptions?.Type)) return Fail + CliFollowUpHint;
 
             var maxChars = mode.MaxInputChars ?? Options.Budget.MaxInputChars;
             var (attached, contextError) = ContextLoader.Load(context, Options.Context, Environment.CurrentDirectory, maxChars, ct);

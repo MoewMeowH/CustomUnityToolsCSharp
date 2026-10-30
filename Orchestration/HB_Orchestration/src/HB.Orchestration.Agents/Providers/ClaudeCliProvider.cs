@@ -104,7 +104,7 @@ public sealed record ClaudeCliInvocation(string Executable, IReadOnlyList<string
 
 public sealed record ClaudeCliProcessResult(int ExitCode, string Stdout, string Stderr);
 
-/// <summary>프로세스 실행 (테스트에서 바꿔 끼운다). 시간 초과는 TimeoutException, 사용자 취소는 OperationCanceledException.</summary>
+/// <summary>프로세스 실행 (테스트에서 바꿔 끼운다). 시간 초과는 claude-cli가 TimeoutException, codex-cli가 재시도 없는 ClaudeCliException. 사용자 취소는 OperationCanceledException.</summary>
 public delegate Task<ClaudeCliProcessResult> ClaudeCliRunner(ClaudeCliInvocation invocation, TimeSpan timeout, CancellationToken ct);
 
 /// <summary>실패한 실행이 이미 쓴 토큰 (결과 JSON에 usage가 있을 때). AgentRunner가 실패 기록에 남겨 비용에서 빠지지 않게 한다.</summary>
@@ -117,6 +117,9 @@ public sealed class ClaudeCliException(string message, ErrorKind? kind, bool ret
     public bool Retryable { get; } = retryable;
     public int? Status { get; } = status;
     public ClaudeCliSpent? Spent { get; } = spent;
+
+    /// <summary>다시 보내기 전 대기. null이면 기본 대기 (<see cref="RetryClassifier.DelayBeforeNext"/>).</summary>
+    public TimeSpan? RetryAfter { get; init; }
 
     /// <summary>MAF가 감쌌어도 안쪽의 ClaudeCliException을 찾는다.</summary>
     public static ClaudeCliException? Find(Exception? ex)

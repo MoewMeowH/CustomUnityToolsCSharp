@@ -36,9 +36,11 @@ public static class ReviewWorkFolder
     /// <summary>
     /// 폴더를 만들고 파일을 복사한다. Focus = 프롬프트의 첨부 절 대신 넣을 "파일 목록 + 주목할 범위" (Codex는 + diff 본문).
     /// 실패하면(예상 밖 예외 포함) 만든 폴더를 지우고 오류 문구를 돌려준다. 취소는 폴더를 지운 뒤 그대로 던진다.
+    /// <paramref name="onNoCopy"/>: Codex 저장소 사본을 만들지 못한 이유 — 프롬프트에만 남기면 지휘자 눈에 띄지 않는다.
     /// </summary>
     public static (string? Folder, string? Focus, string? Error) Create(
-        string baseDir, IReadOnlyList<ContextRange>? ranges, ContextOptions options, string rootDir, CancellationToken ct = default, Style style = Style.ClaudeRead)
+        string baseDir, IReadOnlyList<ContextRange>? ranges, ContextOptions options, string rootDir, CancellationToken ct = default, Style style = Style.ClaudeRead,
+        Action<string>? onNoCopy = null)
     {
         if (ranges is null || ranges.Count == 0)
             return (null, null, "작업 폴더를 쓰는 단계(claude-cli · codex-cli)는 context가 필요합니다 — 검토할 파일(변경이면 diff 파일 먼저)과 판단용 파일을 넘기세요.");
@@ -49,7 +51,7 @@ public static class ReviewWorkFolder
         var folder = Path.Combine(baseDir, Guid.NewGuid().ToString("N")[..12]);
         try
         {
-            return Fill(folder, ranges, options, rootDir, ct, style);
+            return Fill(folder, ranges, options, rootDir, ct, style, onNoCopy);
         }
         catch (OperationCanceledException)
         {
@@ -63,12 +65,13 @@ public static class ReviewWorkFolder
     }
 
     private static (string? Folder, string? Focus, string? Error) Fill(
-        string folder, IReadOnlyList<ContextRange> ranges, ContextOptions options, string rootDir, CancellationToken ct, Style style)
+        string folder, IReadOnlyList<ContextRange> ranges, ContextOptions options, string rootDir, CancellationToken ct, Style style, Action<string>? onNoCopy)
     {
         Directory.CreateDirectory(folder);
         var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootDir));
         // Codex: 저장소 추적 파일을 먼저 깔고 context 파일을 위에 덮는다 (작업 트리 상태라 내용은 같고, 비추적 diff 파일 · 추가 루트 파일이 여기서 들어간다).
         var tracked = style == Style.Codex ? CopyTracked(root, folder, options, ct) : default;
+        if (style == Style.Codex && tracked.Files == 0) onNoCopy?.Invoke(tracked.Note ?? "복사할 수 있는 추적 파일 없음");
         var diffs = new List<(string Inside, string Dest)>();
         var instructionSkipped = new List<string>();
         var copied = new Dictionary<string, (string Inside, string Sha, int? Lines)>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
@@ -308,6 +311,29 @@ public static class ReviewWorkFolder
     }
 
     /// <summary>
+    /// <c>git ls-files -z</c> 시작 정보. stdin은 받아서 시작 직후 닫는다 — 서버는 자기 stdin에서 다음 MCP 메시지를 읽는 중이라,
+    /// 그 stdin을 물려주면 git이 끝나지 않는다 (2026-10-30 실측: 부모의 파이프 stdin에 읽기가 걸려 있으면 멈춤, 넘기지 않으면 31ms).
+    /// </summary>
+    internal static System.Diagnostics.ProcessStartInfo GitStartInfo(string git, string root)
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo(git)
+        {
+            WorkingDirectory = root,
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardOutputEncoding = new UTF8Encoding(false),
+            CreateNoWindow = true,
+        };
+        // fsmonitor 끔: 리뷰 대상 .git/config의 core.fsmonitor 명령이 실행되지 않게. 환경도 Codex 자식과 같이 정리 (/cross-review e37c6e41c9 C4).
+        foreach (var a in new[] { "-c", "core.fsmonitor=false", "-c", "core.quotepath=off", "ls-files", "-z" }) psi.ArgumentList.Add(a);
+        foreach (var (k, v) in Providers.CodexCliChatClient.ChildEnvironment(npmMarker: false))
+            if (v is null) psi.Environment.Remove(k);
+        return psi;
+    }
+
+    /// <summary>
     /// <c>git ls-files -z</c> (루트 기준 상대 경로). git은 PATH의 절대 경로 폴더에서만 찾는다 — 서버의 현재 폴더(프로젝트 루트)의 git.exe가 실행되지 않게.
     /// </summary>
     private static (List<string>? Paths, string? Error) GitTrackedFiles(string root, CancellationToken ct)
@@ -318,31 +344,20 @@ public static class ReviewWorkFolder
             .Select(d => Path.Combine(d, name)).FirstOrDefault(File.Exists);
         if (git is null) return (null, "git을 찾지 못함");
 
-        var psi = new System.Diagnostics.ProcessStartInfo(git)
-        {
-            WorkingDirectory = root,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            StandardOutputEncoding = new UTF8Encoding(false),
-            CreateNoWindow = true,
-        };
-        // fsmonitor 끔: 리뷰 대상 .git/config의 core.fsmonitor 명령이 실행되지 않게. 환경도 Codex 자식과 같이 정리 (/cross-review e37c6e41c9 C4).
-        foreach (var a in new[] { "-c", "core.fsmonitor=false", "-c", "core.quotepath=off", "ls-files", "-z" }) psi.ArgumentList.Add(a);
-        foreach (var (k, v) in Providers.CodexCliChatClient.ChildEnvironment(npmMarker: false))
-            if (v is null) psi.Environment.Remove(k);
         try
         {
-            using var p = System.Diagnostics.Process.Start(psi);
+            using var p = System.Diagnostics.Process.Start(GitStartInfo(git, root));
             if (p is null) return (null, "git을 실행하지 못함");
+            p.StandardInput.Close();
             using var wait = CancellationTokenSource.CreateLinkedTokenSource(ct);
             wait.CancelAfter(TimeSpan.FromSeconds(30));
-            _ = p.StandardError.ReadToEndAsync(wait.Token); // 읽어 두지 않으면 stderr 파이프가 차서 git이 멈출 수 있다
-            string output;
+            var errors = p.StandardError.ReadToEndAsync(wait.Token); // 읽어 두지 않으면 stderr 파이프가 차서 git이 멈출 수 있다
+            string output, stderr;
             try
             {
                 output = p.StandardOutput.ReadToEndAsync(wait.Token).GetAwaiter().GetResult();
                 p.WaitForExitAsync(wait.Token).GetAwaiter().GetResult();
+                stderr = errors.GetAwaiter().GetResult();
             }
             catch (OperationCanceledException)
             {
@@ -352,13 +367,19 @@ public static class ReviewWorkFolder
             }
             return p.ExitCode == 0
                 ? ([.. output.Split('\0', StringSplitOptions.RemoveEmptyEntries)], null)
-                : (null, "git 저장소가 아님");
+                : (null, GitFailure(p.ExitCode, stderr));
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or InvalidOperationException)
         {
             return (null, $"git 실행 실패 ({ex.Message})");
         }
     }
+
+    /// <summary>
+    /// git 실패 이유. stderr 원문은 쓰지 않는다 — 이 문구는 프롬프트로도 가는데 dubious ownership 같은 메시지에는 로컬 경로가 든다.
+    /// </summary>
+    internal static string GitFailure(int exitCode, string stderr) =>
+        stderr.Contains("not a git repository", StringComparison.OrdinalIgnoreCase) ? "git 저장소가 아님" : $"git ls-files 실패 (종료 코드 {exitCode})";
 
     /// <summary>실패해도 무시한다 (남은 폴더는 다음 Create가 StaleAfter 뒤 지운다).</summary>
     public static void TryDelete(string? folder)

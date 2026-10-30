@@ -115,6 +115,9 @@ public sealed class CodexCliChatClient(CodexCliSettings settings, ClaudeCliRunne
     /// <summary>TOML 문자열이 Windows 명령줄 인자가 됐을 때의 길이 상한 (따옴표 · 역슬래시마다 한 글자씩 더).</summary>
     public static int CommandLineLength(string tomlValue) => tomlValue.Length + tomlValue.Count(c => c is '"' or '\\') + 2;
 
+    /// <summary>모델 용량 초과 뒤 다시 보낼 때까지의 대기 (기본 2초 · 5초는 용량이 풀리기에 짧다).</summary>
+    public static readonly TimeSpan CapacityRetryDelay = TimeSpan.FromSeconds(20);
+
     /// <summary>앞에 붙는 개발 중 기능 경고 — error 항목으로 오지만 실패가 아니다 (HB_Chat 0단계 실측).</summary>
     private const string UnstableWarning = "Under-development features enabled";
 
@@ -309,7 +312,7 @@ public sealed class CodexCliChatClient(CodexCliSettings settings, ClaudeCliRunne
         {
             var why = failed ?? lastError ?? (LastLine(result.Stderr) is { Length: > 0 } tail ? tail : null)
                       ?? itemWarning ?? $"답 없이 끝났습니다 (종료 코드 {result.ExitCode})";
-            throw Failure(why, spent);
+            throw Failure(why, spent, started: commandCount > 0 || spent is not null || answer is not null);
         }
         if (spent is null)
             throw new ClaudeCliException("[codex-cli] turn.completed의 usage가 없습니다 (Codex CLI 판이 바뀌었을 수 있음).", null, retryable: false);
@@ -333,8 +336,10 @@ public sealed class CodexCliChatClient(CodexCliSettings settings, ClaudeCliRunne
     /// 실패 문구 → 종류. 한도 소진 문구는 실제로 만들 수 없어 Codex 실행 파일 안의 오류 이름(usage_limit_reached · usage_limit_exceeded ·
     /// credits_depleted)과 사람이 읽는 문구("usage limit")로 본다 (추정 — 2026-10-29 0단계). quota · insufficient_quota · usage_not_included는
     /// /cross-review 90978dee2f C3에서 더함. 분류되지 않은 실패도 문구는 기록 오류 칸에 남는다 (나중에 키워드를 고치는 근거).
+    /// 모델 용량 초과("Selected model is at capacity", 2026-10-30 실제 문구)는 곧 풀리므로 <see cref="CapacityRetryDelay"/> 뒤 다시 보낸다.
+    /// <paramref name="started"/>: 이미 일을 시작한 뒤의 실패 — 다시 보내면 리뷰가 처음부터 돌아 시간과 구독 한도를 또 쓰므로 재시도하지 않는다.
     /// </summary>
-    public static ClaudeCliException Failure(string message, ClaudeCliSpent? spent)
+    public static ClaudeCliException Failure(string message, ClaudeCliSpent? spent, bool started = false)
     {
         var detail = Head(message.Trim(), 300);
         bool Has(params string[] words) => words.Any(w => message.Contains(w, StringComparison.OrdinalIgnoreCase));
@@ -342,8 +347,10 @@ public sealed class CodexCliChatClient(CodexCliSettings settings, ClaudeCliRunne
         {
             _ when Has("usage limit", "usage_limit", "credits_depleted", "credits depleted", "out of credits", "quota", "usage_not_included")
                 => new ClaudeCliException($"[codex-cli] 구독 한도 소진. {detail}", ErrorKind.Quota, false, null, spent),
+            _ when Has("at capacity", "overloaded")
+                => new ClaudeCliException($"[codex-cli] 모델 용량 초과. {detail}", ErrorKind.Server, !started, null, spent) { RetryAfter = CapacityRetryDelay },
             _ when Has("429", "rate limit", "rate_limit", "too many requests")
-                => new ClaudeCliException($"[codex-cli] 요청 과다. {detail}", ErrorKind.RateLimit, true, 429, spent),
+                => new ClaudeCliException($"[codex-cli] 요청 과다. {detail}", ErrorKind.RateLimit, !started, 429, spent),
             _ when Has("not supported", "model_not_found", "invalid", "unexpected argument", "unrecognized", "not logged in", "login")
                 => new ClaudeCliException($"[codex-cli] 요청 · 설정 오류. {detail}", ErrorKind.Client, false, null, spent),
             _ => new ClaudeCliException($"[codex-cli] 실패. {detail}", null, false, null, spent),
@@ -459,7 +466,8 @@ public static class CodexCliProcess
             KillAll();
             await WaitExitQuietly(process);
             if (ct.IsCancellationRequested) throw new OperationCanceledException(ct);
-            throw new TimeoutException($"[codex-cli] {timeout.TotalSeconds:0}초 안에 끝나지 않아 멈췄습니다.");
+            // TimeoutException은 재시도 대상이다 — 재시도를 켠 에이전트에서 시간 상한 × 시도 횟수만큼 멈추지 않게 재시도 없는 실패로 둔다.
+            throw new ClaudeCliException($"[codex-cli] {timeout.TotalSeconds:0}초 안에 끝나지 않아 멈췄습니다. appsettings의 TimeoutSeconds를 늘리세요.", ErrorKind.Timeout, retryable: false);
         }
 
         // 부모가 끝나도 자손이 파이프를 물고 있으면 ReapAsync가 ExitGrace 뒤 Job째 끝낸다. Job이 없으면(Attach 실패) 끝낼 수 없어
@@ -489,7 +497,8 @@ public static class CodexCliProcess
     public static async Task<string?> VersionAsync(string executable)
     {
         if (Versions.TryGetValue(executable, out var known)) return known;
-        var psi = new ProcessStartInfo(executable) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+        // stdin을 받아서 닫는다: 서버의 stdin을 물려주면 안 된다 (ReviewWorkFolder.GitStartInfo).
+        var psi = new ProcessStartInfo(executable) { UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         psi.ArgumentList.Add("--version");
         foreach (var (k, v) in CodexCliChatClient.ChildEnvironment(npmMarker: false))
             if (v is null) psi.Environment.Remove(k);
@@ -498,6 +507,7 @@ public static class CodexCliProcess
         {
             p = Process.Start(psi);
             if (p is null) return null;
+            p.StandardInput.Close();
             using var wait = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             var errors = p.StandardError.ReadToEndAsync(wait.Token);
             var text = await p.StandardOutput.ReadToEndAsync(wait.Token);
