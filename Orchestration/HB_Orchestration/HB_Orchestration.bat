@@ -160,6 +160,29 @@ if /i "%ANSWER%"=="Y" exit /b 0
 if /i "%ANSWER%"=="YES" exit /b 0
 exit /b 1
 
+:confirm_baseline
+rem Same default as confirm_stop: anything but Y keeps the baseline, so the list shows again on the next
+rem publish. "publish --yes" has no one reading the list, so it never counts as reviewed.
+if /i "%ASSUME_YES%"=="1" (
+    echo [Info] --yes given: the list above stays unreviewed and shows again on the next publish.
+    exit /b 0
+)
+set "ANSWER="
+set /p "ANSWER=Mark these as reviewed so they stop showing? [y/N] "
+if /i "%ANSWER%"=="Y" goto :update_baseline
+if /i "%ANSWER%"=="YES" goto :update_baseline
+echo [Info] Not marked. The list shows again on the next publish.
+exit /b 0
+
+:update_baseline
+set "BASELINE_FAILED="
+if not exist "%CFG_BASELINE%\" mkdir "%CFG_BASELINE%" >nul 2>nul
+for %%F in (appsettings.json modes.json) do (
+    copy /y "%MCP_SRC%\%%F" "%CFG_BASELINE%\%%F" >nul 2>nul || set "BASELINE_FAILED=1"
+)
+if defined BASELINE_FAILED echo [WARN] Could not update "%CFG_BASELINE%". The list may show again on the next publish.
+exit /b 0
+
 :publish
 echo.
 echo [Publish] %MCP_PROJ%
@@ -254,11 +277,17 @@ if not "%PUBLISH_RESULT%"=="0" (
 
 echo [OK] Publish complete.
 
-rem Tell which modes / roles / fields exist only in the source config. Files are not changed.
+rem Tell what exists only in the source config and which source values changed since the last review.
+rem The comparison changes nothing. The baseline is the source as of that review: it moves on a clean
+rem result or an explicit yes, and stays put when the comparison failed.
 echo.
-dotnet "%MCP_DLL%" --config-drift "%MCP_SRC%" "%PUBLISH_DIR%"
+set "CFG_BASELINE=%PUBLISH_DIR%\.config-baseline"
+dotnet "%MCP_DLL%" --config-drift "%MCP_SRC%" "%PUBLISH_DIR%" "%CFG_BASELINE%"
 rem Not "if errorlevel 1": an unhandled .NET exception exits with 0xE0434352, which is negative and would skip the warning.
-if not "%errorlevel%"=="0" echo [WARN] The config comparison did not finish for every file - see above. Publish itself succeeded.
+set "DRIFT_RESULT=%errorlevel%"
+if "%DRIFT_RESULT%"=="0" call :update_baseline
+if "%DRIFT_RESULT%"=="3" call :confirm_baseline
+if not "%DRIFT_RESULT%"=="0" if not "%DRIFT_RESULT%"=="3" echo [WARN] The config comparison did not finish for every file - see above. Publish itself succeeded.
 
 if defined STOPPED (
     echo.
