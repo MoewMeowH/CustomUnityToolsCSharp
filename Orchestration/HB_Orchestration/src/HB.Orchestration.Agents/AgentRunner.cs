@@ -24,6 +24,7 @@ public sealed record CallMeta(IReadOnlyList<string>? Files, IReadOnlyList<string
 
     /// <summary>claude-cli 단계의 작업 폴더 (ReviewWorkFolder). 다른 제공사는 null.</summary>
     public string? WorkFolder { get; init; }
+    public ReviewEvidenceSource? EvidenceSource { get; init; }
 }
 
 /// <summary>모드의 한 단계 실행 정보.</summary>
@@ -256,6 +257,8 @@ public sealed class AgentRunner
             // claude-cli는 작업 폴더가 있어야 돈다 (ModeRunner가 만든 폴더를 실행 옵션으로 넘긴다).
             if (call.Meta.WorkFolder is { } workFolder)
                 ((chatOptions ??= new ChatOptions()).AdditionalProperties ??= [])[Providers.ClaudeCliChatClient.WorkFolderKey] = workFolder;
+            if (call.Meta.EvidenceSource is { } evidenceSource && string.Equals(call.Agent.ProviderOptions?.Type, Providers.CodexCliProvider.TypeName, StringComparison.OrdinalIgnoreCase))
+                ((chatOptions ??= new ChatOptions()).AdditionalProperties ??= [])[Providers.CodexCliChatClient.EvidenceSourceKey] = evidenceSource;
             // codex-cli: 구조화 출력 스키마는 OpenAI 요청 옵션(StructuredRequest)으로는 닿지 않는다 → 원문 스키마를 넘겨 --output-schema로.
             if (call.Output is { } cliFormat && call.OutputMode == StructuredOutputMode.Schema
                 && string.Equals(call.Agent.ProviderOptions?.Type, Providers.CodexCliProvider.TypeName, StringComparison.OrdinalIgnoreCase))

@@ -166,13 +166,9 @@ public static class ReviewWorkFolder
             var why = tracked.Note is { } note ? $" ({note})" : "";
             text.AppendLine().AppendLine("## 작업 폴더 (서버가 복사함)")
                 .AppendLine(tracked.Files > 0
-                    ? $"지금 작업 폴더는 저장소 사본이다 — git 추적 파일 {tracked.Files:N0}개를 지금 작업 트리 상태 그대로 같은 상대 경로로 복사했다 (비추적 · 금지 패턴 · 이진 · 큰 파일 · Codex 지시 · 설정 파일은 사본에 넣지 않았다{skipped}). 아래 '중심' 목록에서 시작하고, 판단에 필요한 정의 · 호출부 · 시험은 rg로 직접 찾아 읽는다."
+                    ? $"지금 작업 폴더는 저장소 사본이다 — git 추적 파일 {tracked.Files:N0}개를 지금 작업 트리 상태 그대로 같은 상대 경로로 복사했다 (비추적 · 금지 패턴 · 이진 · 큰 파일 · Codex 지시 · 설정 파일은 사본에 넣지 않았다{skipped}). 아래 '중심' 목록에서 시작하고 판단에 필요한 정의 · 호출부 · 시험을 확인한다. 실제 읽기 도구와 허용 루트는 실행 앞부분의 안내를 따른다."
                     : $"지금 작업 폴더에는 지휘자가 고른 파일만 아래 경로 그대로 복사돼 있다{why}. 판단에 필요하면 목록의 다른 파일 · 다른 부분도 읽는다.")
-                .AppendLine("작업 폴더 밖은 읽지 않는다. 파일을 만들거나 고치지 않는다. 명령은 읽기 · 검색만 쓴다.")
-                // 샌드박스 PowerShell은 CP949로 내보내 Get-Content · 파이프를 거친 한글이 깨진다. rg를 파이프 없이 쓰면 원본 UTF-8 그대로 나온다 (0.165.0 실측).
-                .AppendLine("파일은 파이프 없이 `rg -n '^' 경로`(전체) · `rg -n -A 40 '찾을말' 경로`(범위)로 읽는다. `Get-Content`와 파이프(`|`)는 쓰지 않는다 — 한글이 깨진다.")
-                // 기본 상한은 약 1만 토큰이고 가운데가 잘린다. 서버 인자 tool_output_token_limit과 함께 두 곳을 올려야 풀린다.
-                .AppendLine("명령 출력은 기본 약 1만 토큰에서 가운데가 잘린다. 읽기 명령마다 exec 코드 첫 줄에 `// @exec: {\"max_output_tokens\": 60000}`을 쓰고, `tools.exec_command` 호출에도 `max_output_tokens: 60000`을 준다.")
+                .AppendLine("허용된 자료 범위만 확인한다. 파일을 만들거나 고치지 않는다.")
                 .AppendLine("확인할 수 없는 것은 추측하지 말고 자료 요청(needsInfo)으로 남긴다.")
                 .AppendLine().AppendLine("### 지휘자가 넘긴 파일 (경로 · SHA-256 앞 12자 · 줄 수)");
         }
@@ -201,7 +197,7 @@ public static class ReviewWorkFolder
         var indexes = new Dictionary<string, string>(copied.Comparer);
         var overBudget = new List<string>();
         var indexChars = 0;
-        // Codex는 rg로 직접 찾으므로 정의 색인을 넣지 않는다.
+        // Codex는 실행에 연결된 탐색 도구로 직접 찾으므로 정의 색인을 넣지 않는다.
         foreach (var dest in style == Style.Codex ? [] : copyOrder)
         {
             ct.ThrowIfCancellationRequested();

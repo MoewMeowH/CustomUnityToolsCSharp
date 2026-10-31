@@ -409,6 +409,12 @@ public sealed class ProviderOptions
     /// <summary>claude-cli · codex-cli 전용: 실행 파일 절대 경로. 비우면 claude는 PATH, codex는 npm 전역 설치 → PATH.</summary>
     public string? ExecutablePath { get; set; }
 
+    /// <summary>codex-cli 전용: 같은 리뷰 실행에 사본 읽기·검색 MCP 도구를 연결한다. 기본은 기존 셸 탐색.</summary>
+    public bool CodexEvidenceTools { get; set; }
+
+    /// <summary>자료 도구만 원본 루트에서 읽는다. 셸은 계속 사본에서 실행한다.</summary>
+    public bool CodexEvidenceOriginalRoot { get; set; }
+
     /// <summary>요청 하나의 네트워크 타임아웃(초). 에이전트에 값이 없을 때 쓴다. 비우면 SDK 기본값 100초.</summary>
     public int? TimeoutSeconds { get; set; }
 

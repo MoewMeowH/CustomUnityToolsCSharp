@@ -6,6 +6,29 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
+// Codex 내부 자료 서버. 일반 오케스트레이션 설정·API 키·다른 모드를 로드하지 않는다.
+if (args.Length > 0 && args[0] is "--review-evidence" or "--review-evidence-original")
+{
+    var original = args[0] == "--review-evidence-original";
+    if (args.Length != (original ? 3 : 2) || !Path.IsPathFullyQualified(args[1])) return 2;
+    string[] patterns = [];
+    if (original)
+    {
+        try { patterns = System.Text.Json.JsonSerializer.Deserialize<string[]>(Convert.FromBase64String(args[2])) ?? throw new FormatException(); }
+        catch (Exception ex) when (ex is FormatException or System.Text.Json.JsonException) { return 2; }
+        if (patterns.Any(p => string.IsNullOrWhiteSpace(p))) return 2;
+    }
+    Console.InputEncoding = new System.Text.UTF8Encoding(false);
+    Console.OutputEncoding = new System.Text.UTF8Encoding(false);
+    var evidenceBuilder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { Args = [], DisableDefaults = true });
+    evidenceBuilder.Logging.ClearProviders();
+    evidenceBuilder.Services.AddSingleton(new ReviewEvidence(args[1], patterns, original));
+    evidenceBuilder.Services.AddMcpServer().WithStdioServerTransport().WithTools<ReviewEvidenceTools>();
+    using var evidenceHost = evidenceBuilder.Build();
+    await evidenceHost.RunAsync();
+    return 0;
+}
+
 // publish 뒤 HB_Orchestration.bat이 부르는 설정 비교. 서버(Host)를 만들기 전에 출력하고 끝낸다.
 // 인자 없이 실행되면(Claude Code가 띄울 때) 이 분기를 지나쳐 기존 서버 그대로다.
 if (args.Length > 0 && args[0] == ConfigDriftReport.Flag)

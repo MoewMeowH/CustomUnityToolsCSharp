@@ -131,7 +131,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             }
             workFolder = folder;
             promptInput = promptInput with { Context = focus! };
-            meta = meta with { WorkFolder = folder };
+            meta = meta with { WorkFolder = folder, EvidenceSource = new ReviewEvidenceSource(Path.GetFullPath(root), Options.Context.AllDenyPatterns.ToArray()) };
         }
 
         // 세션별 실행 횟수 (대시보드 '세션' 화면 표시용, 한도 없음): 검증을 다 통과한 실행만 센다. 대체로 다시 부른 실행은 한 번으로 (90978dee2f C5).

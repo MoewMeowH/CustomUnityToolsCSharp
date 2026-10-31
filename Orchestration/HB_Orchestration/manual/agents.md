@@ -433,6 +433,38 @@ codex exec --json --ephemeral --ignore-user-config
   - git ls-files · `--version`도 같은 환경에서 돕니다.
 - 제공사 `codex`는 `Budget.FreeProviders`에 있어 비용 0이고 사용량 집계에서 빠집니다. 대신 구독 한도(5시간 · 주간)를 씁니다. `exec --json`에는 한도 %가 없어 기록하지 않습니다.
 
+### 실행 중 자료 도구 (`hb_evidence`)
+
+`evidence_environment(tool)`는 설치된 `git`·`claude`·`codex`의 고정 `--version`만 실행합니다. 임의 명령·인자·실행 경로를 받지 않으며 별도 모델/API 호출을 하지 않습니다. PATH의 저장소 내부 위치는 제외하고 최소 환경·임시 작업 위치·5초·출력4096자 상한을 적용합니다. 결과는 버전 토큰·상태·UTC 시각·OS·.NET·아키텍처이며 stdout/stderr 원문·계정·설치 경로·인증 값은 반환하지 않습니다. 같은 실행 내 재조회는 캐시하고 자료 예산은 공유합니다. 환경 도구는 설치 검색 기준이므로 제공사 설정의 ExecutablePath와 다를 수 있습니다. `scope=version_only`, `behaviorVerified=false`이며 도구 가용성·격리·인증 전환을 증명하지 않습니다. 유료 동작 실험은 지휘자가 합성 자료로 `run_mode`를 명시 호출해 별도 기록합니다. 자료 도구 안에서 리뷰를 재호출하지 않습니다.
+
+버전 실행은 원본 자료 루트를 아는 모드에서만 제공하며 사본 모드에서는 거절합니다. PATH의 빈 항목·상대 경로·원본 내부 항목을 제거하고 후보 파일과 상위 디렉터리에 symlink/junction이 있으면 거절합니다. `~` 별칭과 Windows 장치 경로도 허용하지 않습니다. 검증된 PATH만 자식에게 전달합니다. 이 경로 해석은 Git 이력 조회의 Git 선택에도 공유합니다. 링크를 쓰는 정상 설치도 unavailable일 수 있습니다. 관측 실패도 측정 시각과 함께 같은 실행 내 캐시합니다. `output_limit`는 설치 없음과 별개로 출력 상한 초과를 뜻합니다. 이 검사는 OS 실행 격리가 아니며 설치 파일과 시스템 디렉터리는 신뢰 입력입니다.
+
+`Orchestration.Providers.codex.CodexEvidenceTools=true`이면 Codex 실행에 전용 stdio MCP를 연결합니다. 기본값은 false이고 소스 appsettings.json은 true입니다. 기존 publish 설정을 보존하는 배포에서는 해당 키를 추가해야 합니다. 실행 폴더의 MCP apphost를 절대 경로로 실행합니다. apphost가 없으면 DLL과 현재 dotnet 또는 PATH에서 찾은 dotnet의 절대 경로를 사용합니다. 기존 배포물의 DLL·런타임 설정·의존성은 함께 필요합니다. 사용자 설치 런타임용 DOTNET_ROOT 변수도 자식에 유지합니다.
+
+- `evidence_list`: 파일 목록을 페이지로 조회합니다.
+- `evidence_search`: 문자열을 검색합니다. `pathPrefix`(상대 폴더)·`extension`(예: `.cs`)으로 범위를 좁힙니다. 다음 페이지는 같은 검색어/범위와 `nextFileIndex`·`nextOffset`을 사용합니다. 한 페이지는 최대12개 hit·20개 skipped·256개 대상 파일 또는 약8MB 검사량에서 끝납니다. 실패1개마다 페이지를 끝내지 않습니다. `skipped`와 `incomplete`는 미검색 파일을 알리며 커서를 끝까지 따라가도 해당 누락은 남습니다.
+- `evidence_read`: 파일을 최대 6,000자씩 읽고 다음 위치와 SHA-256을 반환합니다. maxChars(2~6,000)로 더 작게 요청할 수 있습니다. 한글과 긴 줄도 페이지로 읽습니다. Windows 경로의 대소문자 차이를 허용합니다.
+- `evidence_git_history`: 원본 자료 루트가 저장소 최상위일 때 현재 허용 목록의 파일에 대해 최근20개 커밋 해시를 반환합니다. 첫 Git 조회의 HEAD에 고정되며 더 오래된 이력이 있으면 truncated=true입니다. 커밋 메시지·작성자·이전 이름 추적·삭제 파일은 제공하지 않습니다.
+- `evidence_git_read`: 같은 실행의 history가 해당 경로에 반환한 커밋만 읽습니다. 일반 파일 blob만 최대2MB·엄격 UTF-8·NUL 없음 조건으로 읽고 문자 페이지·SHA-256·blob ID를 반환합니다. 임의 revision 표현식이나 다른 경로에 발급된 커밋은 받지 않습니다. 파일 도구와 같은 예산을 씁니다.
+
+Git 조회는 디스크 허용 목록과 함께 고정 HEAD에서도 일반 파일인 경로만 받습니다. `git rm --cached` 뒤 디스크에 남은 파일은 현재 파일 읽기는 가능해도 이력 조회는 거절합니다. `--no-follow`를 명시해 저장소의 `log.follow` 설정을 무시합니다. 커밋 읽기 허용 목록은 history 응답이 문자 예산 검사를 통과한 뒤 갱신합니다. 과거 UTF-8 BOM은 본문에서 제거하되 SHA-256은 BOM을 포함한 원본 blob 바이트 기준입니다. 작업 트리의 CRLF 변환 때문에 현재 파일과 과거 blob의 해시·offset은 직접 비교하면 안 됩니다. UTF-16 Git blob은 지원하지 않습니다. Git 오류는 stderr 원문 없이 `git_ownership`·`git_not_repository`·`git_unavailable`·`git_failed`로 구분하며, 소유권 오류 때문에 safe.directory를 자동 허용하지 않습니다.
+
+`Orchestration.Providers.codex.CodexEvidenceOriginalRoot=true`이면 자료 도구가 원본 프로젝트 루트를 읽습니다. 기본값은 false이고 소스 설정은 true입니다. 원본 루트는 ModeRunner가 정해 제공사로 전달하며 모델이 도구 인자로 바꿀 수 없습니다. 두 옵션을 모두 켜야 원본 도구가 연결됩니다. 자료 도구 연결 시 exec 내부에 `-c features.shell_tool=false`를 전달해 명령 실행 도구를 끕니다. `--ignore-user-config`는 유지하며 전역 config.toml에 의존하지 않습니다. CLI의 작업 위치는 기존 사본입니다. 원본 정책이 없으면 사본 자료 도구를 사용합니다.
+
+원본 모드에서는 내장 민감 파일 패턴·사본 전용 인증 설정 패턴·`Context.DenyPatterns`를 목록·검색·읽기 전체에 적용합니다. 예를 들어 `company-auth/**`나 `*.keystore`를 프로젝트별 금지 목록에 넣습니다. 목록을 만들 때 링크·지시 파일·계획/로그·Git 내부와 빌드/Unity 캐시를 제외하고, 실제 읽을 때 SafePath로 다시 검사합니다. 원본 목록은 최대 50,000개이며 상한에 도달하면 `inventoryTruncated=true`를 표시합니다. 목록은 시작 시 고정하므로 이후 새 파일은 다음 실행에서 보입니다. 파일 내용은 읽는 시점의 값이며 페이지 간 SHA-256이 바뀌면 같은 내용으로 간주하지 않습니다.
+
+원본 옵션이 꺼져 있으면 기존 필터를 거친 작업 사본을 읽으며 Git 조회와 버전 실행은 거절합니다. 고정 버전 관측 외의 외부 환경·임의 진단 명령은 두 모드 모두 제공하지 않습니다. Git 읽기는 설치된 Git의 고정 log/ls-tree/cat-file/rev-parse만 사용하고 명령마다10초·출력 상한을 적용합니다. 글로벌·시스템 설정과 상속 Git 환경 변수를 제거하고 replace·hooks·fsmonitor·프로토콜·lazy fetch를 비활성화합니다. 로컬 Git 저장소 자체는 사용자가 신뢰하는 입력이라는 전제입니다. 이 도구는 별도 모델이 아니라 같은 Codex 실행이 사용하는 자료 서버입니다. 일반 서버 설정·API 키를 로드하지 않습니다. 파일명 패턴은 현재나 과거 본문에 박힌 비밀을 탐지하지 않습니다. 자료 도구가 연결되지 않는 기존 셸 실행 모드는 그대로이며 OS 권한 격리를 구현한 것이 아닙니다.
+
+자료 도구는 실행당 48회·성공 응답 data의 JSON 합계 200,000자(UTF-16 단위)로 제한합니다. 오류·바깥 메타데이터는 문자 예산에서 제외하며 오류 호출도 횟수는 소모합니다. remainingChars는 이번 data까지 차감한 잔량입니다. 큰 응답 거절은 잔량을 없애지 않으므로 더 작게 읽을 수 있습니다. 이 제한은 기존 셸 호출에는 적용되지 않으며 전체 실행 시간 제한은 그대로입니다. 부족한 자료는 필요한 내용·판단이 막히는 이유·이미 확인한 경로를 `needsInfo`로 남깁니다. 자동 후속 리뷰는 시작하지 않습니다. 구독 사용량 감소나 자료 요청 제거를 보장하지 않습니다.
+
+검색의 형식/크기 실패는 실행 중 캐시합니다. 매번 경로 정책을 재검사하고 파일 크기·수정 시각이 같을 때만 실패 결과를 재사용하며 `cached=true`로 표시합니다. 파일이 바뀌면 다시 읽고, `retrySkipped=true`로 강제 재검사할 수 있습니다. 크기와 수정 시각까지 같은 내용 교체는 자동 감지하지 못합니다. 잠금·접근 오류 같은 일시 IO 실패는 캐시하지 않습니다. `cacheHits`·`filesExamined`·`scannedBytes`로 작업량을 확인합니다. 검색 기록에는 범위·작업량·실패 경로/캐시 여부도 남기며 검색어와 본문은 저장하지 않습니다.
+
+파일 목록은 폴더별 링크 검사와 미리 컴파일한 금지 패턴으로 구성합니다. 실제 읽을 때는 SafePath로 다시 검사합니다. 사본 모드의 파일 수는 사본 생성기의 추적 파일 상한과 context 정책을 따르며 자료 서버가 context 추가분을 별도 2만 개 상한으로 거절하지 않습니다.
+
+호출 기록에는 MCP 서버·도구·상태·호출 횟수와 선택된 읽기 메타데이터를 남깁니다. 상대 경로, 요청 offset/maxChars, 반환 offset·문자 수·끝 위치(끝 제외)·줄 범위·SHA-256·nextOffset·전체 문자 수로 이어 읽기를 대조할 수 있습니다. 검색은 커서와 hit의 경로/위치만, 목록은 커서와 반환 개수만 기록합니다. 본문·검색어·임의 인자·절대 경로는 저장하지 않습니다. `metadataAvailable=false`이면 CLI 결과 형식을 해석하지 못한 것이며, `outcome=error`이면 도구가 오류를 반환한 것입니다. MCP `status=completed`만으로 파일 읽기 성공으로 세지 않습니다. 기록은 최대 60건이고 넘으면 `mcp_calls_truncated=true`로 표시합니다. 도구 반환 기록은 모델의 실제 이해나 검토 완전성을 보증하지 않습니다. 작업 중 MCP 호출이 시작된 후 실패하면 전체 리뷰를 자동 재시도하지 않습니다.
+
+도구가 켜진 입력에는 evidence_list/search/read, Git 조회 조건과 다음 페이지 커서 안내를 제공합니다. 기존 셸 읽기 안내는 도구를 연결하지 않은 실행에만 넣습니다. 감사 기록은 과거 본문도 경로·커밋·blob·SHA-256·반환 범위만 저장하며 본문·커밋 메시지는 저장하지 않습니다. 외부 CLI 실측은 별도입니다.
+
 ### 작업 폴더 (`ReviewWorkFolder` Codex 모양)
 
 **루트가 git이면** `git ls-files`(intent-to-add 포함)의 파일을 작업 트리 상태로 복사합니다.

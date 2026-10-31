@@ -78,6 +78,171 @@ public sealed class CodexCliTests : IDisposable
         Assert.DoesNotContain("--output-schema", args);
     }
 
+    [Fact]
+    public void Evidence_server_is_explicit_required_and_bound_to_snapshot()
+    {
+        var workspace = Path.Combine(_dir, "snapshot");
+        var host = Path.Combine(_dir, "HB.Orchestration.Mcp.dll");
+        var args = CodexCliChatClient.Arguments(Settings, null, "", workspace, null, host);
+        Assert.Contains("mcp_servers.hb_evidence.required=true", args);
+        Assert.Contains("features.shell_tool=false", args);
+        Assert.DoesNotContain("features.shell_tool=false", CodexCliChatClient.Arguments(Settings, null, "", workspace, null));
+        Assert.Contains("mcp_servers.hb_evidence.args=[" + CodexCliChatClient.TomlString(host) + ",\"--review-evidence\"," + CodexCliChatClient.TomlString(workspace) + "]", args);
+        Assert.DoesNotContain(CodexCliChatClient.Arguments(Settings, null, "", workspace, null), a => a.StartsWith("mcp_servers."));
+    }
+
+    [Fact]
+    public void Evidence_apphost_does_not_require_dotnet_from_child_path()
+    {
+        var host = Path.Combine(_dir, "HB.Orchestration.Mcp.exe");
+        var args = CodexCliChatClient.Arguments(Settings, null, "", _dir, null, host);
+        Assert.Contains("mcp_servers.hb_evidence.command=" + CodexCliChatClient.TomlString(host), args);
+        Assert.Contains("mcp_servers.hb_evidence.args=[\"--review-evidence\"," + CodexCliChatClient.TomlString(_dir) + "]", args);
+    }
+
+    [Fact]
+    public void Original_evidence_root_and_patterns_do_not_change_shell_workspace()
+    {
+        var host = Path.Combine(_dir, "HB.Orchestration.Mcp.exe");
+        var source = new ReviewEvidenceSource(Path.Combine(_dir, "original"), ["company/**", "*.keystore"]);
+        var args = CodexCliChatClient.Arguments(Settings, null, "", _dir, null, host, source);
+        var policy = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(source.DenyPatterns)));
+        Assert.Contains("mcp_servers.hb_evidence.args=[\"--review-evidence-original\"," + CodexCliChatClient.TomlString(source.Root) + "," + CodexCliChatClient.TomlString(policy) + "]", args);
+        Assert.Equal(_dir, args[args.IndexOf("-C") + 1]);
+    }
+
+    [Fact]
+    public void Evidence_runtime_prefers_current_absolute_dotnet_and_fails_explicitly_if_missing()
+    {
+        var runtime = Path.Combine(_dir, "dotnet.exe");
+        File.WriteAllText(runtime, "placeholder");
+        Assert.Equal(runtime, CodexCliChatClient.ResolveEvidenceRuntime(runtime, ""));
+        Assert.False(Assert.Throws<ClaudeCliException>(() => CodexCliChatClient.ResolveEvidenceRuntime(null, "")).Retryable);
+    }
+
+    [Fact]
+    public void Failed_after_mcp_call_does_not_retry()
+    {
+        var events = Ev(new { type = "item.completed", item = new { type = "mcp_tool_call", server = "hb_evidence", tool = "evidence_read", status = "completed", arguments = new { path = "PRIVATE_PATH" }, result = "PRIVATE_BODY" } })
+            + "\n" + Ev(new { type = "turn.failed", error = new { message = "Selected model is at capacity" } });
+        var error = Assert.Throws<ClaudeCliException>(() => CodexCliChatClient.Parse(Ok(events), Settings.Model, "test"));
+        Assert.False(error.Retryable);
+    }
+
+    [Fact]
+    public void Mcp_call_metadata_does_not_include_arguments_or_source()
+    {
+        var mcp = Ev(new { type = "item.completed", item = new { type = "mcp_tool_call", server = "hb_evidence", tool = "evidence_read", status = "completed", arguments = "PRIVATE_PATH", result = "PRIVATE_BODY" } });
+        var response = CodexCliChatClient.Parse(Ok(Events(extra: mcp)), Settings.Model);
+        var raw = Assert.IsType<ClaudeCliRawResponse>(response.RawRepresentation).Json;
+        Assert.Contains("evidence_read", raw);
+        Assert.DoesNotContain("PRIVATE_PATH", raw);
+        Assert.DoesNotContain("PRIVATE_BODY", raw);
+    }
+
+    [Fact]
+    public void Read_audit_records_returned_pages_and_hash_without_source_text()
+    {
+        var sha = new string('a', 64);
+        string Page(int offset, string text, int? next) => Ev(new { type = "item.completed", item = new
+        {
+            type = "mcp_tool_call", server = "hb_evidence", tool = "evidence_read", status = "completed",
+            arguments = new { path = "Code.cs", offset, maxChars = 6000, secret = "DO_NOT_LOG_ARGUMENT" },
+            result = new { content = new[] { new { type = "text", text = System.Text.Json.JsonSerializer.Serialize(new
+                { data = new { path = "Code.cs", offset, text, sha256 = sha, startLine = 1, nextOffset = next, totalChars = 24 }, source = "original" }) } } }
+        } });
+        var events = Page(0, "DO_NOT_LOG_BODY", 15) + "\n" + Page(15, "remaining", null);
+        var response = CodexCliChatClient.Parse(Ok(Events(extra: events)), Settings.Model);
+        var raw = Assert.IsType<ClaudeCliRawResponse>(response.RawRepresentation).Json;
+        Assert.DoesNotContain("DO_NOT_LOG_BODY", raw);
+        Assert.DoesNotContain("DO_NOT_LOG_ARGUMENT", raw);
+        using var json = System.Text.Json.JsonDocument.Parse(raw);
+        var calls = json.RootElement.GetProperty("mcp_calls");
+        Assert.Equal("Code.cs", calls[0].GetProperty("path").GetString());
+        Assert.Equal(sha, calls[0].GetProperty("sha256").GetString());
+        Assert.Equal(15, calls[0].GetProperty("returnedChars").GetInt32());
+        Assert.Equal(15, calls[0].GetProperty("endOffsetExclusive").GetInt32());
+        Assert.Equal(15, calls[1].GetProperty("offset").GetInt32());
+        Assert.Equal(System.Text.Json.JsonValueKind.Null, calls[1].GetProperty("nextOffset").ValueKind);
+        Assert.True(calls[1].GetProperty("metadataAvailable").GetBoolean());
+    }
+
+    [Fact]
+    public void Read_audit_distinguishes_tool_error_and_does_not_persist_absolute_requests()
+    {
+        var events = Ev(new { type = "item.completed", item = new { type = "mcp_tool_call", server = "hb_evidence", tool = "evidence_read", status = "completed",
+            arguments = new { path = "C:/PRIVATE_ROOT/secret.key", offset = 0 }, result = new { content = new[] { new { type = "text", text = "{\"error\":\"hidden\"}" } } } } });
+        var response = CodexCliChatClient.Parse(Ok(Events(extra: events)), Settings.Model);
+        var raw = Assert.IsType<ClaudeCliRawResponse>(response.RawRepresentation).Json;
+        Assert.DoesNotContain("PRIVATE_ROOT", raw);
+        using var json = System.Text.Json.JsonDocument.Parse(raw);
+        Assert.Equal("error", json.RootElement.GetProperty("mcp_calls")[0].GetProperty("outcome").GetString());
+    }
+
+    [Fact]
+    public void Search_audit_keeps_scope_and_cached_skips_but_not_query_or_snippets()
+    {
+        var payload = System.Text.Json.JsonSerializer.Serialize(new { data = new
+        {
+            pathPrefix = "Source", extension = ".cs", filesExamined = 2, scannedBytes = 40, cacheHits = 1,
+            incomplete = true, nextFileIndex = (int?)null, nextOffset = 0,
+            hits = new[] { new { path = "Source/a.cs", offset = 3, line = 1, text = "PRIVATE_SNIPPET" } },
+            skipped = new[] { new { path = "Source/b.cs", fileIndex = 2, cached = true } }
+        } });
+        var events = Ev(new { type = "item.completed", item = new { type = "mcp_tool_call", server = "hb_evidence", tool = "evidence_search", status = "completed",
+            arguments = new { query = "PRIVATE_QUERY", pathPrefix = "Source", extension = ".cs" }, result = new { content = new[] { new { type = "text", text = payload } } } } });
+        var response = CodexCliChatClient.Parse(Ok(Events(extra: events)), Settings.Model);
+        var raw = Assert.IsType<ClaudeCliRawResponse>(response.RawRepresentation).Json;
+        Assert.DoesNotContain("PRIVATE_QUERY", raw);
+        Assert.DoesNotContain("PRIVATE_SNIPPET", raw);
+        using var json = System.Text.Json.JsonDocument.Parse(raw);
+        var call = json.RootElement.GetProperty("mcp_calls")[0];
+        Assert.Equal("Source", call.GetProperty("pathPrefix").GetString());
+        Assert.Equal(1, call.GetProperty("cacheHits").GetInt32());
+        Assert.True(call.GetProperty("skipped")[0].GetProperty("cached").GetBoolean());
+    }
+
+    [Fact]
+    public void Git_audit_records_commit_and_range_without_body_or_message()
+    {
+        var commit = new string('a', 40);
+        var payload = JsonSerializer.Serialize(new { data = new { path = "Code.cs", commit, blob = new string('b', 40),
+            sha256 = new string('c', 64), offset = 10, startLine = 2, text = "PRIVATE_BODY", nextOffset = (int?)null, totalChars = 22,
+            message = "PRIVATE_MESSAGE" } });
+        var events = Ev(new { type = "item.completed", item = new { type = "mcp_tool_call", server = "hb_evidence", tool = "evidence_git_read", status = "completed",
+            arguments = new { path = "Code.cs", commit }, result = new { content = new[] { new { type = "text", text = payload } } } } });
+        var raw = Assert.IsType<ClaudeCliRawResponse>(CodexCliChatClient.Parse(Ok(Events(extra: events)), Settings.Model).RawRepresentation).Json;
+        Assert.DoesNotContain("PRIVATE_BODY", raw); Assert.DoesNotContain("PRIVATE_MESSAGE", raw);
+        using var json = JsonDocument.Parse(raw);
+        var call = json.RootElement.GetProperty("mcp_calls")[0];
+        Assert.Equal(commit, call.GetProperty("commit").GetString());
+        Assert.Equal(22, call.GetProperty("endOffsetExclusive").GetInt32());
+    }
+
+    [Theory]
+    [InlineData("observed")]
+    [InlineData("output_limit")]
+    public void Environment_audit_keeps_only_fixed_kind_and_status(string status)
+    {
+        var payload = JsonSerializer.Serialize(new { data = new { observation = new { tool = "claude", status, version = "2.1.312", path = "PRIVATE_PATH" }, scope = "version_only", secret = "PRIVATE_BODY" } });
+        var events = Ev(new { type = "item.completed", item = new { type = "mcp_tool_call", server = "hb_evidence", tool = "evidence_environment", status = "completed",
+            arguments = new { tool = "claude", extra = "PRIVATE_ARG" }, result = new { content = new[] { new { type = "text", text = payload } } } } });
+        var raw = Assert.IsType<ClaudeCliRawResponse>(CodexCliChatClient.Parse(Ok(Events(extra: events)), Settings.Model).RawRepresentation).Json;
+        Assert.DoesNotContain("PRIVATE_", raw);
+        using var doc = JsonDocument.Parse(raw);
+        Assert.Equal("claude", doc.RootElement.GetProperty("mcp_calls")[0].GetProperty("observedTool").GetString());
+        Assert.Equal("version_only", doc.RootElement.GetProperty("mcp_calls")[0].GetProperty("scope").GetString());
+        Assert.Equal(status, doc.RootElement.GetProperty("mcp_calls")[0].GetProperty("observationStatus").GetString());
+    }
+
+    [Fact]
+    public void Failure_during_started_mcp_call_does_not_restart_review()
+    {
+        var events = Ev(new { type = "item.started", item = new { type = "mcp_tool_call" } }) + "\n"
+            + Ev(new { type = "turn.failed", error = new { message = "Selected model is at capacity" } });
+        Assert.False(Assert.Throws<ClaudeCliException>(() => CodexCliChatClient.Parse(Ok(events), Settings.Model)).Retryable);
+    }
+
     [Theory]
     [InlineData("a\\b", "\"a\\\\b\"")]
     [InlineData("tab\there", "\"tab\\there\"")]
@@ -247,7 +412,8 @@ public sealed class CodexCliTests : IDisposable
         Assert.Equal("""{"findings":[]}""", response.Text);
         Assert.Equal(folder, seen!.WorkingDirectory);
         Assert.Equal(folder, seen.Arguments[seen.Arguments.ToList().IndexOf("-C") + 1]);
-        Assert.Equal("리뷰 요청", seen.Stdin);
+        Assert.EndsWith("리뷰 요청", seen.Stdin);
+        Assert.Contains("rg -n", seen.Stdin);
         Assert.Contains("developer_instructions=\"역할 프롬프트\"", seen.Arguments);
         Assert.Contains("model_reasoning_effort=\"high\"", seen.Arguments);
         Assert.Equal("""{"type":"object"}""", schemaDuringRun);
@@ -561,14 +727,12 @@ public sealed class CodexCliTests : IDisposable
         }
     }
 
-    /// <summary>Codex 안내는 깨지지 않고 잘리지 않는 읽기만 권한다: 파이프 없는 rg + 바깥 · 안쪽 출력 상한.</summary>
+    /// <summary>공통 사본 안내는 접근 방식에 중립적이며 제공사가 연결한 도구 안내를 따른다.</summary>
     private static void AssertReadGuide(string? focus)
     {
-        Assert.Contains("rg -n '^' 경로", focus);
-        Assert.Contains("// @exec: {\"max_output_tokens\": 60000}", focus);
-        Assert.Contains("`tools.exec_command` 호출에도 `max_output_tokens: 60000`", focus);
-        Assert.DoesNotContain("rg · Get-Content", focus);
-        Assert.Contains("`Get-Content`와 파이프(`|`)는 쓰지 않는다", focus);
+        Assert.DoesNotContain("rg -n", focus);
+        Assert.DoesNotContain("@exec", focus);
+        Assert.Contains("허용된 자료 범위", focus);
     }
 
     // ── 모드 실행: 작업 폴더 · 스키마 · 한도 소진 대체 ─────────────────────────
@@ -612,6 +776,9 @@ public sealed class CodexCliTests : IDisposable
 
         Assert.Contains("리뷰 결과", result);
         Assert.NotNull(folderDuringCall);
+        var evidenceSource = Assert.IsType<ReviewEvidenceSource>(h.Client.Received[^1].Options?.AdditionalProperties?[CodexCliChatClient.EvidenceSourceKey]);
+        Assert.Equal(Path.GetFullPath(Environment.CurrentDirectory), evidenceSource.Root);
+        Assert.Contains("*.keystore", evidenceSource.DenyPatterns);
         Assert.False(Directory.Exists(folderDuringCall));
         var prompt = h.Client.Received[^1].Messages.Last().Text;
         Assert.Contains("MARK_IN_DIFF", prompt);                                       // diff 본문은 프롬프트에
