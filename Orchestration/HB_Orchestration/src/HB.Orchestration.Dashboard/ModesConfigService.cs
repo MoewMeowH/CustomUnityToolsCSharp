@@ -205,12 +205,6 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
         return config.GetSection("Orchestration").Get<OrchestrationOptions>();
     }
 
-    private static string StampOf(string path)
-    {
-        var info = new FileInfo(path);
-        return $"{info.LastWriteTimeUtc.Ticks}:{info.Length}";
-    }
-
     // ── 읽기 ────────────────────────────────────────────────────────────────
 
     public ModesSnapshot Load()
@@ -258,7 +252,7 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
                 throw new ModesConfigException($"MCP appsettings.json 파싱 실패 (줄 {(ex.LineNumber ?? 0) + 1}): {ex.Message}");
             }
 
-            settingsStamp = StampOf(settingsPath);
+            settingsStamp = HB.Orchestration.Shared.BlobStore.Sha256Hex(Encoding.UTF8.GetBytes(settingsText));
             settingsHasComments = ContainsComments(settingsText);
 
             if (ReadMcpOptions(settingsPath) is { } mcp)
@@ -283,7 +277,7 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
             ModesPathSource = modesSource,
             ModesSha256 = HB.Orchestration.Shared.BlobStore.Sha256Hex(bytes),
             LastWriteLocal = new FileInfo(modesPath).LastWriteTime,
-            Stamp = StampOf(modesPath),
+            Stamp = HB.Orchestration.Shared.BlobStore.Sha256Hex(bytes),
             Root = root,
             Typed = typed,
             HasComments = ContainsComments(text),
@@ -322,7 +316,10 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
 
     // ── 모드 저장 ────────────────────────────────────────────────────────────
 
-    public SaveResult Save(string expectedStamp, IReadOnlyList<ModeEdit> edits)
+    public SaveResult Save(string expectedStamp, IReadOnlyList<ModeEdit> edits) =>
+        WithSaveLock(() => SaveCore(expectedStamp, edits));
+
+    private SaveResult SaveCore(string expectedStamp, IReadOnlyList<ModeEdit> edits)
     {
         var snap = Load();
         if (snap.Stamp != expectedStamp) return SaveResult.Fail(ChangedElsewhere);
@@ -366,7 +363,10 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
     }
 
     /// <summary>modes.json에서 from 에이전트를 쓰는 모든 단계를 to로 바꾼다.</summary>
-    public SaveResult ReplaceAgent(string expectedStamp, string from, string to)
+    public SaveResult ReplaceAgent(string expectedStamp, string from, string to) =>
+        WithSaveLock(() => ReplaceAgentCore(expectedStamp, from, to));
+
+    private SaveResult ReplaceAgentCore(string expectedStamp, string from, string to)
     {
         var snap = Load();
         if (snap.Stamp != expectedStamp) return SaveResult.Fail(ChangedElsewhere);
@@ -391,7 +391,10 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
     /// appsettings.json의 Agents를 표 내용으로 바꾼다. 이름을 바꾼 에이전트는 modes.json의 단계도 같이 바꾼다.
     /// 모드가 쓰고 있는 에이전트는 삭제할 수 없다.
     /// </summary>
-    public SaveResult SaveAgents(string expectedSettingsStamp, string expectedModesStamp, IReadOnlyList<AgentEdit> rows)
+    public SaveResult SaveAgents(string expectedSettingsStamp, string expectedModesStamp, IReadOnlyList<AgentEdit> rows) =>
+        WithSaveLock(() => SaveAgentsCore(expectedSettingsStamp, expectedModesStamp, rows));
+
+    private SaveResult SaveAgentsCore(string expectedSettingsStamp, string expectedModesStamp, IReadOnlyList<AgentEdit> rows)
     {
         var snap = Load();
         if (snap.McpSettingsPath is null || snap.SettingsRoot is null)
@@ -517,7 +520,10 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
     /// 모델 단가 표와 환율을 appsettings.json의 Orchestration:Pricing에 저장한다.
     /// 표에 있는 모델만 바꾸고, 표에 없는 모델의 단가는 그대로 둔다. 에이전트와 상관없이 모델 단위로 관리한다.
     /// </summary>
-    public SaveResult SavePrices(string expectedSettingsStamp, IReadOnlyList<PriceEdit> rows, string krwPerUsd)
+    public SaveResult SavePrices(string expectedSettingsStamp, IReadOnlyList<PriceEdit> rows, string krwPerUsd) =>
+        WithSaveLock(() => SavePricesCore(expectedSettingsStamp, rows, krwPerUsd));
+
+    private SaveResult SavePricesCore(string expectedSettingsStamp, IReadOnlyList<PriceEdit> rows, string krwPerUsd)
     {
         var snap = Load();
         if (snap.McpSettingsPath is null || snap.SettingsRoot is null)
@@ -704,6 +710,23 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
 
     // ── 파일 쓰기 ────────────────────────────────────────────────────────────
 
+    // 저장은 동기 처리다. 여러 대시보드 프로세스도 같은 Mutex로 읽기부터 교체까지 직렬화한다.
+    private static SaveResult WithSaveLock(Func<SaveResult> save)
+    {
+        using var mutex = new Mutex(false, "HB.Orchestration.Dashboard.ConfigSave");
+        var acquired = false;
+        try
+        {
+            try { acquired = mutex.WaitOne(TimeSpan.FromSeconds(10)); }
+            catch (AbandonedMutexException) { acquired = true; } // 이전 소유자가 종료됐어도 다시 읽고 버전을 검사한다.
+            return acquired ? save() : SaveResult.Fail("다른 설정 저장이 진행 중입니다. 잠시 뒤 다시 저장하세요.");
+        }
+        finally
+        {
+            if (acquired) mutex.ReleaseMutex();
+        }
+    }
+
     private static string Serialize(JsonObject root) => root.ToJsonString(WriteOptions) + Environment.NewLine;
 
     /// <summary>백업을 남기고, 임시 파일에 쓴 뒤 한 번에 교체한다 (MCP 서버가 읽는 도중이어도 반쯤 쓴 파일을 보지 않게).</summary>
@@ -712,7 +735,7 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
         var dir = Path.GetDirectoryName(path)!;
         var backupDir = Path.Combine(dir, backupFolderName);
         Directory.CreateDirectory(backupDir);
-        File.Copy(path, Path.Combine(backupDir, $"{Path.GetFileNameWithoutExtension(path)}-{DateTime.Now:yyyyMMdd-HHmmss}.json"), overwrite: true);
+        File.Copy(path, Path.Combine(backupDir, $"{Path.GetFileNameWithoutExtension(path)}-{DateTime.Now:yyyyMMdd-HHmmss-fffffff}-{Guid.NewGuid():N}.json"), overwrite: false);
 
         foreach (var old in new DirectoryInfo(backupDir).GetFiles("*.json")
                      .OrderByDescending(f => f.LastWriteTimeUtc).Skip(BackupKeep))
@@ -720,22 +743,29 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
             try { old.Delete(); } catch (IOException) { /* 다음 저장 때 다시 시도 */ }
         }
 
-        var tmp = path + ".tmp";
-        File.WriteAllText(tmp, json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-
-        // MCP 서버가 마침 파일을 읽고 있으면 교체가 잠깐 실패할 수 있어 짧게 재시도한다.
-        for (var attempt = 0; ; attempt++)
+        var tmp = Path.Combine(dir, $".{Guid.NewGuid():N}.tmp");
+        try
         {
-            try
+            File.WriteAllText(tmp, json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            // MCP 서버가 마침 읽고 있으면 교체가 잠깐 실패할 수 있어 짧게 재시도한다.
+            for (var attempt = 0; ; attempt++)
             {
-                File.Replace(tmp, path, destinationBackupFileName: null);
-                Interlocked.Increment(ref _writes);
-                return;
+                try
+                {
+                    File.Replace(tmp, path, destinationBackupFileName: null);
+                    Interlocked.Increment(ref _writes);
+                    return;
+                }
+                catch (IOException) when (attempt < 5)
+                {
+                    Thread.Sleep(100 * (attempt + 1));
+                }
             }
-            catch (IOException) when (attempt < 5)
-            {
-                Thread.Sleep(100 * (attempt + 1));
-            }
+        }
+        finally
+        {
+            try { File.Delete(tmp); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* 정리 실패는 원래 오류를 가리지 않는다. */ }
         }
     }
 

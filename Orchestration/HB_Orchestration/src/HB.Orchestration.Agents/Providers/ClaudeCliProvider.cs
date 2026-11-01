@@ -429,8 +429,17 @@ public static class ClaudeCliProcess
             throw new ClaudeCliException($"[claude-cli] '{inv.Executable}'를 실행하지 못했습니다 ({ex.Message}). Claude Code 설치 · 제공사 ExecutablePath를 확인하세요.", null, false);
         }
 
+        // 부모가 먼저 끝나도 출력 파이프를 가진 자손을 종료할 수 있게 입력 전에 Job에 넣는다.
+        using var job = ProcessJob.Attach(process);
+        void KillAll()
+        {
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch (Exception) { /* 이미 끝남 */ }
+            job?.Terminate();
+        }
+
         using var timeoutCts = new CancellationTokenSource(timeout);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+        using var kill = linked.Token.Register(KillAll);
         var stdout = process.StandardOutput.ReadToEndAsync(linked.Token);
         var stderr = process.StandardError.ReadToEndAsync(linked.Token);
         try
@@ -444,17 +453,23 @@ public static class ClaudeCliProcess
             {
                 // CLI가 입력을 읽기 전에 끝났다 (인자 오류 · 판 변경 등). 네트워크 오류로 재시도하지 말고 CLI가 남긴 출력으로 원인을 보인다 (/self-review C7 · sub_self C5).
                 await WaitExitQuietly(process);
+                KillAll();
                 return new ClaudeCliProcessResult(process.HasExited ? process.ExitCode : -1, await Quiet(stdout), await Quiet(stderr));
             }
             await process.WaitForExitAsync(linked.Token);
+            job?.Terminate(); // 정상 종료여도 남은 자손이 파이프를 닫게 한다.
             return new ClaudeCliProcessResult(process.ExitCode, await stdout, await stderr);
         }
         catch (OperationCanceledException)
         {
-            try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch (Exception) { /* 이미 끝남 */ }
+            KillAll();
             await WaitExitQuietly(process);
             if (ct.IsCancellationRequested) throw;
             throw new TimeoutException($"[claude-cli] {timeout.TotalSeconds:0}초 안에 끝나지 않아 멈췄습니다.");
+        }
+        finally
+        {
+            KillAll(); // 입력·출력의 예외 경로에서도 실행 중인 프로세스를 남기지 않는다.
         }
     }
 
