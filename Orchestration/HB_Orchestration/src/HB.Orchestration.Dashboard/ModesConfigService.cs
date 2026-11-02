@@ -205,6 +205,14 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
         return config.GetSection("Orchestration").Get<OrchestrationOptions>();
     }
 
+    /// <summary>이미 읽은 바이트에서 — 해시 · 편집용 트리와 같은 시점의 내용으로 에이전트 목록을 만든다.</summary>
+    private static OrchestrationOptions? ReadMcpOptions(byte[] settingsBytes)
+    {
+        using var stream = new MemoryStream(settingsBytes, writable: false);
+        var config = new ConfigurationBuilder().AddJsonStream(stream).Build();
+        return config.GetSection("Orchestration").Get<OrchestrationOptions>();
+    }
+
     // ── 읽기 ────────────────────────────────────────────────────────────────
 
     public ModesSnapshot Load()
@@ -242,7 +250,11 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
 
         if (settingsPath is not null)
         {
-            var settingsText = File.ReadAllText(settingsPath);
+            // 한 번만 읽어 해시 · 편집용 트리 · 에이전트 목록이 같은 시점의 내용이 되게 한다 (modes.json과 같은 방식, /cross-review 9d03bc8d2b).
+            var settingsBytes = File.ReadAllBytes(settingsPath);
+            string settingsText;
+            using (var reader = new StreamReader(new MemoryStream(settingsBytes), Encoding.UTF8, detectEncodingFromByteOrderMarks: true))
+                settingsText = reader.ReadToEnd();
             try
             {
                 settingsRoot = JsonNode.Parse(settingsText, nodeOptions: null, documentOptions: DocOptions) as JsonObject;
@@ -252,10 +264,10 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
                 throw new ModesConfigException($"MCP appsettings.json 파싱 실패 (줄 {(ex.LineNumber ?? 0) + 1}): {ex.Message}");
             }
 
-            settingsStamp = HB.Orchestration.Shared.BlobStore.Sha256Hex(Encoding.UTF8.GetBytes(settingsText));
+            settingsStamp = HB.Orchestration.Shared.BlobStore.Sha256Hex(settingsBytes);
             settingsHasComments = ContainsComments(settingsText);
 
-            if (ReadMcpOptions(settingsPath) is { } mcp)
+            if (ReadMcpOptions(settingsBytes) is { } mcp)
             {
                 foreach (var a in mcp.Agents)
                     agents.Add(new AgentInfo(a.Name, a.Provider, a.Model, a.MaxOutputTokens, a.Enabled, a.TimeoutSeconds, a.Vision, a.ReasoningEffort));

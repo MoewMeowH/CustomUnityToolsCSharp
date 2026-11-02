@@ -10,19 +10,33 @@ using Microsoft.Extensions.Logging;
 if (args.Length > 0 && args[0] is "--review-evidence" or "--review-evidence-original")
 {
     var original = args[0] == "--review-evidence-original";
-    if (args.Length != (original ? 3 : 2) || !Path.IsPathFullyQualified(args[1])) return 2;
-    string[] patterns = [];
+    // 원본: <루트> <금지 패턴 base64 JSON> [<지휘자 context 경로 base64 JSON>]
+    if ((original ? args.Length is not (3 or 4) : args.Length != 2) || !Path.IsPathFullyQualified(args[1])) return 2;
+    string[] patterns = [], contextPaths = [];
     if (original)
     {
-        try { patterns = System.Text.Json.JsonSerializer.Deserialize<string[]>(Convert.FromBase64String(args[2])) ?? throw new FormatException(); }
+        static string[] Decode(string value) => System.Text.Json.JsonSerializer.Deserialize<string[]>(Convert.FromBase64String(value)) ?? throw new FormatException();
+        try
+        {
+            patterns = Decode(args[2]);
+            if (args.Length == 4) contextPaths = Decode(args[3]);
+        }
         catch (Exception ex) when (ex is FormatException or System.Text.Json.JsonException) { return 2; }
-        if (patterns.Any(p => string.IsNullOrWhiteSpace(p))) return 2;
+        if (patterns.Any(p => string.IsNullOrWhiteSpace(p)) || contextPaths.Any(p => string.IsNullOrWhiteSpace(p))) return 2;
     }
     Console.InputEncoding = new System.Text.UTF8Encoding(false);
     Console.OutputEncoding = new System.Text.UTF8Encoding(false);
+    ReviewEvidence evidence;
+    try { evidence = new ReviewEvidence(args[1], patterns, original, contextPaths); }
+    catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException)
+    {
+        // 원본 목록(git)을 못 만들면 시작하지 않는다 — Codex는 required 서버 실패로 리뷰를 멈춘다. 경로가 든 원문은 쓰지 않는다.
+        Console.Error.WriteLine("[review-evidence] 자료 목록을 만들지 못했습니다 (" + ex.GetType().Name + ").");
+        return 3;
+    }
     var evidenceBuilder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { Args = [], DisableDefaults = true });
     evidenceBuilder.Logging.ClearProviders();
-    evidenceBuilder.Services.AddSingleton(new ReviewEvidence(args[1], patterns, original));
+    evidenceBuilder.Services.AddSingleton(evidence);
     evidenceBuilder.Services.AddMcpServer().WithStdioServerTransport().WithTools<ReviewEvidenceTools>();
     using var evidenceHost = evidenceBuilder.Build();
     await evidenceHost.RunAsync();

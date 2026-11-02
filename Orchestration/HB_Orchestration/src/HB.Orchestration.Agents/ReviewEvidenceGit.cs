@@ -118,11 +118,20 @@ public sealed partial class ReviewEvidence
             "-c", "core.hooksPath=", "-c", "protocol.allow=never", "-c", "log.showSignature=false" }.Concat(args)) start.ArgumentList.Add(arg);
         using var process = Process.Start(start) ?? throw new IOException("Git을 실행할 수 없습니다.");
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        // 파이프 읽기는 취소 토큰으로 풀리지 않을 수 있다 — 시간 초과 · 출력 상한이면 트리째 끝내 읽기가 끝나게 한다.
+        // 그러지 않으면 lock(_gate) 안에서 멈춰 뒤의 자료 호출이 모두 막힌다 (/cross-review 9d03bc8d2b).
+        void Stop()
+        {
+            // 타이머 콜백에서도 돈다 — 트리 일부를 못 끝낸 AggregateException까지 삼켜야 서버가 죽지 않는다 (/self-review a9ebd62541 C4)
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or AggregateException or NotSupportedException) { }
+        }
+        using var registration = timeout.Token.Register(Stop);
         try
         {
             process.StandardInput.Close();
-            var output = Drain(process.StandardOutput.BaseStream, limit, timeout.Token);
-            var error = Drain(process.StandardError.BaseStream, 16_384, timeout.Token);
+            var output = Drain(process.StandardOutput.BaseStream, limit, Stop, timeout.Token);
+            var error = Drain(process.StandardError.BaseStream, 16_384, Stop, timeout.Token);
             Task.WhenAll(output, error, process.WaitForExitAsync(timeout.Token)).GetAwaiter().GetResult();
             if (process.ExitCode != 0)
             {
@@ -135,18 +144,23 @@ public sealed partial class ReviewEvidence
         }
         finally
         {
-            if (!process.HasExited) { process.Kill(entireProcessTree: true); process.WaitForExit(); }
+            Stop();
+            process.WaitForExit(5_000);
         }
     }
 
-    private static async Task<byte[]> Drain(Stream stream, int limit, CancellationToken token)
+    private static async Task<byte[]> Drain(Stream stream, int limit, Action stop, CancellationToken token)
     {
         using var result = new MemoryStream();
         var buffer = new byte[8192];
         int count;
         while ((count = await stream.ReadAsync(buffer, token)) > 0)
         {
-            if (result.Length + count > limit) throw new IOException("Git 응답 상한을 넘었습니다.");
+            if (result.Length + count > limit)
+            {
+                stop(); // 남은 출력을 아무도 읽지 않으면 git이 파이프에 막혀 시간 초과까지 간다
+                throw new IOException("Git 응답 상한을 넘었습니다.");
+            }
             result.Write(buffer, 0, count);
         }
         return result.ToArray();

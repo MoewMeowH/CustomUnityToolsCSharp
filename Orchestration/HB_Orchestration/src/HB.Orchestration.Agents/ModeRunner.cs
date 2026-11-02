@@ -121,7 +121,9 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             var style = string.Equals(cliType, CodexCliProvider.TypeName, StringComparison.OrdinalIgnoreCase) ? ReviewWorkFolder.Style.Codex
                 : mode.RepoCopy ? ReviewWorkFolder.Style.ClaudeRepo : ReviewWorkFolder.Style.ClaudeRead;
             // 저장소 사본(git · 복사)은 동기 작업이라 스레드 풀 밖으로 (/cross-review 90978dee2f C2).
-            var (folder, focus, folderError) = await Task.Run(() => ReviewWorkFolder.Create(ReviewWorkFolder.BaseFor(runner.LogPath), context, Options.Context, root, ct, style, folderNotes.Add), ct);
+            var repoCopied = true;
+            var (folder, focus, folderError) = await Task.Run(() => ReviewWorkFolder.Create(ReviewWorkFolder.BaseFor(runner.LogPath), context, Options.Context, root, ct, style,
+                note => { if (note.StartsWith(ReviewWorkFolder.NoRepoCopyNote, StringComparison.Ordinal)) repoCopied = false; folderNotes.Add(note); }), ct);
             if (folderError is not null) return $"[첨부 코드 오류] {folderError}";
             // Codex는 diff 본문이 프롬프트에 들어간다 — 그 길이로 입력 상한을 다시 잰다.
             if (style == ReviewWorkFolder.Style.Codex && maxChars > 0 && input.Length + focus!.Length > maxChars)
@@ -131,7 +133,17 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             }
             workFolder = folder;
             promptInput = promptInput with { Context = focus! };
-            meta = meta with { WorkFolder = folder, EvidenceSource = new ReviewEvidenceSource(Path.GetFullPath(root), Options.Context.AllDenyPatterns.ToArray()) };
+            // 원본 자료 모드는 저장소 사본이 만들어졌을 때만 (git 목록이 있어야 범위를 정한다) — 아니면 사본 모드로 고른 파일만 (/cross-review 9d03bc8d2b).
+            // 지휘자가 넘긴 메인 루트 경로는 무시 · 사본 제외 파일이어도 읽게 넘긴다 (추가 루트 '@이름/…'은 원본 도구가 읽지 않음).
+            meta = meta with
+            {
+                WorkFolder = folder,
+                EvidenceSource = repoCopied
+                    ? new ReviewEvidenceSource(Path.GetFullPath(root), Options.Context.AllDenyPatterns.ToArray(),
+                        [.. context!.Where(r => !(ContextLoader.TrySplitRootPrefix(r.Path, out var name, out _) && Options.Context.TryGetExtraRoot(name, out _, out _)))
+                            .Select(r => r.Path).Distinct(StringComparer.Ordinal)])
+                    : null,
+            };
         }
 
         // 세션별 실행 횟수 (대시보드 '세션' 화면 표시용, 한도 없음): 검증을 다 통과한 실행만 센다. 대체로 다시 부른 실행은 한 번으로 (90978dee2f C5).

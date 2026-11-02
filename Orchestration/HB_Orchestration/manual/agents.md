@@ -269,8 +269,8 @@ OpenAI Chat Completions 전용입니다. 다른 제공사에는 넣지 않습니
 검토형 서브에이전트(self-reviewer 등)를 Claude Code 구독 대신 **Anthropic API 키**로 돌립니다.
 
 - 서버가 `claude --safe-mode --restricted --strict-mcp-config -p`를 읽기 전용 에이전트로 띄웁니다.
-- `sub_self` · `sub_perf` · `sub_security`는 작업 폴더가 저장소 추적 파일 사본입니다 (모드의 `RepoCopy`). 에이전트가 Glob · Grep으로 찾아 Read로 읽습니다. `sub_direction`은 지휘자가 넘긴 파일만 받습니다.
-- 사본에서 빼는 것: 비추적 · 이진 · 큰 파일, 지시 · 규칙 · 계획 문서, `DenyPatterns`, 비밀 모양 이름(`.mcp*.json` · `appsettings.*.json` · `google-services.json` · 이름에 secret · token이 든 설정 파일). 코드 · 에셋 안에 박힌 비밀은 이름으로 거르지 못합니다. 더 빼려면 `Context.DenyPatterns`에 넣습니다.
+- `sub_self` · `sub_perf` · `sub_security`는 작업 폴더가 저장소 사본입니다 (모드의 `RepoCopy`). 사본 목록은 `git ls-files --cached --others --exclude-standard` — 추적 파일과 `.gitignore` 밖 새 파일입니다. 에이전트가 Glob · Grep으로 찾아 Read로 읽습니다. `sub_direction`은 지휘자가 넘긴 파일만 받습니다.
+- 사본에서 빼는 것: `.gitignore` 대상 · 이진 · 큰 파일, 지시 · 규칙 · 계획 문서, `DenyPatterns`, 비밀 모양 이름(`.mcp*.json` · `.mcp*.json.*`(백업) · SSH 키 `id_rsa*` 등 · `*.ppk` · `.npmrc` · `.netrc` · `.git-credentials` · `*.tfstate` · `*.har` · `*.log` · `appsettings.*.json` · `google-services.json` · 이름에 secret · token이 든 설정 파일). 코드 · 에셋 안에 박힌 비밀은 이름으로 거르지 못합니다. 더 빼려면 `Context.DenyPatterns`에 넣습니다.
 - diff에 든 파일이 사본에서 빠지면 결과 끝에 `(사본에서 뺀 변경 파일: …)`이 붙습니다. 전체를 보게 하려면 그 파일을 `context`로 넘깁니다.
 - **`--bare`는 쓰지 않습니다.** `--tools`에 Glob · Grep을 줘도 Read만 나옵니다 (Claude Code 2.1.312).
 
@@ -449,15 +449,15 @@ codex exec --json --ephemeral --ignore-user-config
 
 Git 조회는 디스크 허용 목록과 함께 고정 HEAD에서도 일반 파일인 경로만 받습니다. `git rm --cached` 뒤 디스크에 남은 파일은 현재 파일 읽기는 가능해도 이력 조회는 거절합니다. `--no-follow`를 명시해 저장소의 `log.follow` 설정을 무시합니다. 커밋 읽기 허용 목록은 history 응답이 문자 예산 검사를 통과한 뒤 갱신합니다. 과거 UTF-8 BOM은 본문에서 제거하되 SHA-256은 BOM을 포함한 원본 blob 바이트 기준입니다. 작업 트리의 CRLF 변환 때문에 현재 파일과 과거 blob의 해시·offset은 직접 비교하면 안 됩니다. UTF-16 Git blob은 지원하지 않습니다. Git 오류는 stderr 원문 없이 `git_ownership`·`git_not_repository`·`git_unavailable`·`git_failed`로 구분하며, 소유권 오류 때문에 safe.directory를 자동 허용하지 않습니다.
 
-`Orchestration.Providers.codex.CodexEvidenceOriginalRoot=true`이면 자료 도구가 원본 프로젝트 루트를 읽습니다. 기본값은 false이고 소스 설정은 true입니다. 원본 루트는 ModeRunner가 정해 제공사로 전달하며 모델이 도구 인자로 바꿀 수 없습니다. 두 옵션을 모두 켜야 원본 도구가 연결됩니다. 자료 도구 연결 시 exec 내부에 `-c features.shell_tool=false`를 전달해 명령 실행 도구를 끕니다. `--ignore-user-config`는 유지하며 전역 config.toml에 의존하지 않습니다. CLI의 작업 위치는 기존 사본입니다. 원본 정책이 없으면 사본 자료 도구를 사용합니다.
+`Orchestration.Providers.codex.CodexEvidenceOriginalRoot=true`이면 자료 도구가 원본 프로젝트 루트를 읽습니다. 기본값은 false이고 소스 설정은 true입니다. 원본 루트는 ModeRunner가 정해 제공사로 전달하며 모델이 도구 인자로 바꿀 수 없습니다. 두 옵션을 모두 켜야 원본 도구가 연결됩니다. 저장소 사본을 만들지 못한 실행(git이 아님 · 상한 초과)은 원본 정책을 넘기지 않아 사본 자료 도구를 씁니다. 자료 도구 연결 시 exec 내부에 `-c features.shell_tool=false`를 전달해 명령 실행 도구를 끕니다. 그래도 실행 기록에 셸 명령(시작만 된 것 포함)이나 `hb_evidence` 밖 MCP 도구가 나오면 결과를 버리고 실패로 기록합니다 — 사후 검사라 이미 모델로 나간 출력은 되돌리지 못합니다. 자료 서버 시작 시간 상한은 60초입니다(원본 모드는 시작 때 git 목록을 만듦). `--ignore-user-config`는 유지하며 전역 config.toml에 의존하지 않습니다. CLI의 작업 위치는 기존 사본입니다. 원본 정책이 없으면 사본 자료 도구를 사용합니다.
 
-원본 모드에서는 내장 민감 파일 패턴·사본 전용 인증 설정 패턴·`Context.DenyPatterns`를 목록·검색·읽기 전체에 적용합니다. 예를 들어 `company-auth/**`나 `*.keystore`를 프로젝트별 금지 목록에 넣습니다. 목록을 만들 때 링크·지시 파일·계획/로그·Git 내부와 빌드/Unity 캐시를 제외하고, 실제 읽을 때 SafePath로 다시 검사합니다. 원본 목록은 최대 50,000개이며 상한에 도달하면 `inventoryTruncated=true`를 표시합니다. 목록은 시작 시 고정하므로 이후 새 파일은 다음 실행에서 보입니다. 파일 내용은 읽는 시점의 값이며 페이지 간 SHA-256이 바뀌면 같은 내용으로 간주하지 않습니다.
+원본 모드에서는 내장 민감 파일 패턴·사본 전용 인증 설정 패턴·`Context.DenyPatterns`를 목록·검색·읽기 전체에 적용합니다. 예를 들어 `company-auth/**`나 `*.keystore`를 프로젝트별 금지 목록에 넣습니다. 원본 목록은 사본과 같은 git 목록(추적 파일 + `.gitignore` 밖 새 파일)에서 시작합니다 — 폴더를 직접 훑지 않으므로 `.gitignore` 대상(개인 설정 · 산출물 · 사내 자료 폴더)은 보이지 않습니다. git 목록을 못 만들면 자료 서버가 시작하지 않습니다(종료 코드 3). 거기서 링크·지시 파일·계획/로그·루트의 빌드/Unity 캐시 폴더를 제외하고, 실제 읽을 때 SafePath로 다시 검사합니다. 지휘자가 `context`로 넘긴 메인 루트 경로는 `.gitignore` · 사본 제외 대상이어도 목록에 넣습니다(사본 모드와 같은 규칙, Codex 지시 · 금지 패턴은 그대로 막음 — 서버 인자 4번째 base64 JSON). 속성 · 접근 오류로 건너뛴 항목 수는 응답의 `unreadableCount`입니다. 원본 목록은 최대 50,000개이며 상한에 도달하면 `inventoryTruncated=true`를 표시합니다. 목록은 시작 시 고정하므로 이후 새 파일은 다음 실행에서 보입니다. 파일 내용은 읽는 시점의 값이며 페이지 간 SHA-256이 바뀌면 같은 내용으로 간주하지 않습니다.
 
-원본 옵션이 꺼져 있으면 기존 필터를 거친 작업 사본을 읽으며 Git 조회와 버전 실행은 거절합니다. 고정 버전 관측 외의 외부 환경·임의 진단 명령은 두 모드 모두 제공하지 않습니다. Git 읽기는 설치된 Git의 고정 log/ls-tree/cat-file/rev-parse만 사용하고 명령마다10초·출력 상한을 적용합니다. 글로벌·시스템 설정과 상속 Git 환경 변수를 제거하고 replace·hooks·fsmonitor·프로토콜·lazy fetch를 비활성화합니다. 로컬 Git 저장소 자체는 사용자가 신뢰하는 입력이라는 전제입니다. 이 도구는 별도 모델이 아니라 같은 Codex 실행이 사용하는 자료 서버입니다. 일반 서버 설정·API 키를 로드하지 않습니다. 파일명 패턴은 현재나 과거 본문에 박힌 비밀을 탐지하지 않습니다. 자료 도구가 연결되지 않는 기존 셸 실행 모드는 그대로이며 OS 권한 격리를 구현한 것이 아닙니다.
+원본 옵션이 꺼져 있으면 기존 필터를 거친 작업 사본을 읽으며 Git 조회와 버전 실행은 거절합니다. 고정 버전 관측 외의 외부 환경·임의 진단 명령은 두 모드 모두 제공하지 않습니다. Git 읽기는 설치된 Git의 고정 log/ls-tree/cat-file/rev-parse만 사용하고 명령마다10초·출력 상한을 적용합니다 — 넘으면 git 프로세스 트리를 바로 끝냅니다. 글로벌·시스템 설정과 상속 Git 환경 변수를 제거하고 replace·hooks·fsmonitor·프로토콜·lazy fetch를 비활성화합니다. 로컬 Git 저장소 자체는 사용자가 신뢰하는 입력이라는 전제입니다. 이 도구는 별도 모델이 아니라 같은 Codex 실행이 사용하는 자료 서버입니다. 일반 서버 설정·API 키를 로드하지 않습니다. 파일명 패턴은 현재나 과거 본문에 박힌 비밀을 탐지하지 않습니다. 자료 도구가 연결되지 않는 기존 셸 실행 모드는 그대로이며 OS 권한 격리를 구현한 것이 아닙니다.
 
 자료 도구는 실행당 48회·성공 응답 data의 JSON 합계 200,000자(UTF-16 단위)로 제한합니다. 오류·바깥 메타데이터는 문자 예산에서 제외하며 오류 호출도 횟수는 소모합니다. remainingChars는 이번 data까지 차감한 잔량입니다. 큰 응답 거절은 잔량을 없애지 않으므로 더 작게 읽을 수 있습니다. 이 제한은 기존 셸 호출에는 적용되지 않으며 전체 실행 시간 제한은 그대로입니다. 부족한 자료는 필요한 내용·판단이 막히는 이유·이미 확인한 경로를 `needsInfo`로 남깁니다. 자동 후속 리뷰는 시작하지 않습니다. 구독 사용량 감소나 자료 요청 제거를 보장하지 않습니다.
 
-검색의 형식/크기 실패는 실행 중 캐시합니다. 매번 경로 정책을 재검사하고 파일 크기·수정 시각이 같을 때만 실패 결과를 재사용하며 `cached=true`로 표시합니다. 파일이 바뀌면 다시 읽고, `retrySkipped=true`로 강제 재검사할 수 있습니다. 크기와 수정 시각까지 같은 내용 교체는 자동 감지하지 못합니다. 잠금·접근 오류 같은 일시 IO 실패는 캐시하지 않습니다. `cacheHits`·`filesExamined`·`scannedBytes`로 작업량을 확인합니다. 검색 기록에는 범위·작업량·실패 경로/캐시 여부도 남기며 검색어와 본문은 저장하지 않습니다.
+검색은 크기 상한(2MB)을 넘거나 앞 8KB에 NUL이 있는 파일을 본문을 읽기 전에 건너뛰며 `scannedBytes`에 넣지 않습니다. 검색의 형식/크기 실패는 실행 중 캐시합니다. 매번 경로 정책을 재검사하고 파일 크기·수정 시각이 같을 때만 실패 결과를 재사용하며 `cached=true`로 표시합니다. 파일이 바뀌면 다시 읽고, `retrySkipped=true`로 강제 재검사할 수 있습니다. 크기와 수정 시각까지 같은 내용 교체는 자동 감지하지 못합니다. 잠금·접근 오류 같은 일시 IO 실패는 캐시하지 않습니다. `cacheHits`·`filesExamined`·`scannedBytes`로 작업량을 확인합니다. 검색 기록에는 범위·작업량·실패 경로/캐시 여부도 남기며 검색어와 본문은 저장하지 않습니다.
 
 파일 목록은 폴더별 링크 검사와 미리 컴파일한 금지 패턴으로 구성합니다. 실제 읽을 때는 SafePath로 다시 검사합니다. 사본 모드의 파일 수는 사본 생성기의 추적 파일 상한과 context 정책을 따르며 자료 서버가 context 추가분을 별도 2만 개 상한으로 거절하지 않습니다.
 
@@ -467,10 +467,10 @@ Git 조회는 디스크 허용 목록과 함께 고정 HEAD에서도 일반 파�
 
 ### 작업 폴더 (`ReviewWorkFolder` Codex 모양)
 
-**루트가 git이면** `git ls-files`(intent-to-add 포함)의 파일을 작업 트리 상태로 복사합니다.
+**루트가 git이면** `git ls-files --cached --others --exclude-standard`(추적 · intent-to-add · `.gitignore` 밖 새 파일)의 파일을 작업 트리 상태로 복사합니다.
 
 - 빼는 것:
-  - 비추적 파일 · 금지 패턴
+  - `.gitignore` 대상 파일 · 금지 패턴
   - Codex 지시 · 설정 자리: `AGENTS.md` · `AGENTS.override.md` · `.codex/` · `.agents/` (context로 넘겨도 뺍니다)
   - 링크 · 이진 · `MaxFileBytes` 초과
 - 구현 메모: 금지 패턴은 한 번만 컴파일하고, 링크는 폴더마다 한 번 봅니다. git은 `core.fsmonitor=false`. 사본 만들기는 `Task.Run`에서 합니다.

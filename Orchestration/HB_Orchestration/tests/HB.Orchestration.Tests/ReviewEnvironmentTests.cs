@@ -110,7 +110,16 @@ public sealed class ReviewEnvironmentTests
     {
         public string Base { get; } = Directory.CreateTempSubdirectory("hb-environment-test-").FullName;
         public string Root { get; }
-        public Fixture() { Root = Path.Combine(Base, "repository"); Directory.CreateDirectory(Root); }
+        public Fixture()
+        {
+            Root = Path.Combine(Base, "repository");
+            Directory.CreateDirectory(Root);
+            // 원본 모드는 git 목록에서 시작한다
+            var psi = new System.Diagnostics.ProcessStartInfo("git") { WorkingDirectory = Root, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+            foreach (var a in new[] { "init", "-q" }) psi.ArgumentList.Add(a);
+            using var p = System.Diagnostics.Process.Start(psi)!;
+            p.WaitForExit();
+        }
         public void Dispose() => Directory.Delete(Base, true);
     }
 }

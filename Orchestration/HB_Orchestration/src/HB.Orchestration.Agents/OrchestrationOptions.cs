@@ -309,9 +309,12 @@ public sealed class ContextOptions
     /// </summary>
     public static readonly IReadOnlyList<string> BuiltInRepoCopyDenyPatterns =
     [
-        ".mcp*.json", "google-services.json", "GoogleService-Info.plist", "appsettings.*.json",
+        ".mcp*.json", ".mcp*.json.*", "google-services.json", "GoogleService-Info.plist", "appsettings.*.json",
         "*secret*.json", "*secret*.yaml", "*secret*.yml", "*secret*.toml", "*secret*.ini", "*secret*.xml", "*secret*.txt",
         "*token*.json", "*token*.yaml", "*token*.yml", "*token*.toml", "*token*.ini", "*token*.xml", "*token*.txt",
+        // 사본 범위가 .gitignore 밖 새 파일까지 넓어져 흔한 자격 증명 · 덤프 이름도 뺀다 (/self-review f7b96afc33 C2).
+        "id_rsa*", "id_dsa*", "id_ecdsa*", "id_ed25519*", "*.ppk", ".npmrc", ".netrc", "_netrc", ".git-credentials",
+        "*.tfstate", "*.tfstate.*", "*.har", "*.log",
     ];
 
     /// <summary>

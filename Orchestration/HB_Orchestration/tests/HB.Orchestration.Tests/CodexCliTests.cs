@@ -121,6 +121,50 @@ public sealed class CodexCliTests : IDisposable
     }
 
     [Fact]
+    public void Shell_command_in_evidence_run_discards_the_answer()   // 셸을 끈 실행인데 명령이 나오면 판이 바뀐 것 — fail-closed (/cross-review 9d03bc8d2b)
+    {
+        Assert.NotNull(CodexCliChatClient.Parse(Ok(Events()), Settings.Model, "test"));
+        var error = Assert.Throws<ClaudeCliException>(() => CodexCliChatClient.Parse(Ok(Events()), Settings.Model, "test", shellDisabled: true));
+        Assert.Contains("셸 명령 1건", error.Message);
+        Assert.False(error.Retryable);
+    }
+
+    [Theory]   // 완료 항목 없이 시작만 된 명령 · hb_evidence 밖 MCP 도구도 같은 처리 (/self-review a9ebd62541 C6 · f7b96afc33 C5)
+    [InlineData("command_execution", null)]
+    [InlineData("mcp_tool_call", "other_server")]
+    public void Started_shell_or_foreign_tool_in_evidence_run_discards_the_answer(string type, string? server)
+    {
+        var started = Ev(new { type = "item.started", item = new { id = "item_9", type, server } });
+        var events = string.Join("\n", Events().Split('\n').Where(l => !l.Contains("command_execution")).Append(started)) + "\n";
+        Assert.NotNull(CodexCliChatClient.Parse(Ok(events), Settings.Model, "test"));   // 셸을 끄지 않은 실행에서는 그대로 받는다
+        Assert.Throws<ClaudeCliException>(() => CodexCliChatClient.Parse(Ok(events), Settings.Model, "test", shellDisabled: true));
+    }
+
+    [Fact]
+    public void Evidence_runtime_rejects_dotnet_inside_the_evidence_root()   // git · 버전 관측과 같은 실행 파일 정책
+    {
+        var root = Directory.CreateDirectory(Path.Combine(_dir, "root")).FullName;
+        var inside = Directory.CreateDirectory(Path.Combine(root, "tools")).FullName;
+        var outside = Directory.CreateDirectory(Path.Combine(_dir, "sdk")).FullName;
+        var name = OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet";
+        File.WriteAllText(Path.Combine(inside, name), "planted");
+        File.WriteAllText(Path.Combine(outside, name), "placeholder");
+
+        Assert.Equal(Path.Combine(outside, name), CodexCliChatClient.ResolveEvidenceRuntime(null, inside + Path.PathSeparator + outside, root));
+        Assert.Throws<ClaudeCliException>(() => CodexCliChatClient.ResolveEvidenceRuntime(Path.Combine(inside, name), inside, root));
+    }
+
+    [Fact]
+    public void Original_evidence_arguments_carry_context_paths()
+    {
+        var host = Path.Combine(_dir, "HB.Orchestration.Mcp.exe");
+        var source = new ReviewEvidenceSource(Path.Combine(_dir, "original"), ["*.keystore"], ["docs/plans/p.md"]);
+        var args = CodexCliChatClient.Arguments(Settings, null, "", _dir, null, host, source);
+        static string B64(string[] v) => CodexCliChatClient.TomlString(Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(v))));
+        Assert.Contains("mcp_servers.hb_evidence.args=[\"--review-evidence-original\"," + CodexCliChatClient.TomlString(source.Root) + "," + B64(source.DenyPatterns) + "," + B64(source.ContextPaths!) + "]", args);
+    }
+
+    [Fact]
     public void Failed_after_mcp_call_does_not_retry()
     {
         var events = Ev(new { type = "item.completed", item = new { type = "mcp_tool_call", server = "hb_evidence", tool = "evidence_read", status = "completed", arguments = new { path = "PRIVATE_PATH" }, result = "PRIVATE_BODY" } })
@@ -524,6 +568,28 @@ public sealed class CodexCliTests : IDisposable
     }
 
     [Fact]
+    public void Repo_copy_includes_new_untracked_files_but_not_ignored_ones()   // 기준은 '추적'이 아니라 '.gitignore 밖' (사용자 지적 · 결정)
+    {
+        var repo = Repo();
+        File.WriteAllText(Path.Combine(repo, "Added.cs"), "class Added { }\n");                     // git add 안 한 새 파일
+        File.WriteAllText(Path.Combine(repo, ".git", "info", "exclude"), "ignored/\n");
+        Directory.CreateDirectory(Path.Combine(repo, "ignored"));
+        File.WriteAllText(Path.Combine(repo, "ignored", "Private.cs"), "class Private { }\n");      // 무시 파일
+        File.WriteAllText(Path.Combine(repo, ".mcp.json.bak-20261020"), "{\"key\":\"secret\"}\n"); // 설정 백업 이름
+
+        var (folder, _, error) = ReviewWorkFolder.Create(Path.Combine(_dir, "review_in"), [new ContextRange("Calc.cs", 1, 1)],
+            new ContextOptions(), repo, default, ReviewWorkFolder.Style.Codex);
+        try
+        {
+            Assert.Null(error);
+            Assert.True(File.Exists(Path.Combine(folder!, "Added.cs")));
+            Assert.False(Directory.Exists(Path.Combine(folder!, "ignored")));
+            Assert.False(File.Exists(Path.Combine(folder!, ".mcp.json.bak-20261020")));
+        }
+        finally { ReviewWorkFolder.TryDelete(folder); }
+    }
+
+    [Fact]
     public void Codex_folder_is_tracked_copy_plus_context_with_diff_body()
     {
         var repo = Repo();
@@ -693,7 +759,7 @@ public sealed class CodexCliTests : IDisposable
         var psi = ReviewWorkFolder.GitStartInfo("git", _dir);
 
         Assert.True(psi.RedirectStandardInput);
-        Assert.Equal(["-c", "core.fsmonitor=false", "-c", "core.quotepath=off", "ls-files", "-z"], psi.ArgumentList);
+        Assert.Equal(["-c", "core.fsmonitor=false", "-c", "core.quotepath=off", "ls-files", "-z", "--cached", "--others", "--exclude-standard"], psi.ArgumentList);
     }
 
     [Theory]
@@ -776,14 +842,29 @@ public sealed class CodexCliTests : IDisposable
 
         Assert.Contains("리뷰 결과", result);
         Assert.NotNull(folderDuringCall);
-        var evidenceSource = Assert.IsType<ReviewEvidenceSource>(h.Client.Received[^1].Options?.AdditionalProperties?[CodexCliChatClient.EvidenceSourceKey]);
-        Assert.Equal(Path.GetFullPath(Environment.CurrentDirectory), evidenceSource.Root);
-        Assert.Contains("*.keystore", evidenceSource.DenyPatterns);
+        // 시험 폴더(bin)는 git 목록이 비어 저장소 사본이 없다 → 원본 자료 정책을 넘기지 않는다 (git 목록 없이는 원본 범위를 정할 수 없음)
+        Assert.False(h.Client.Received[^1].Options!.AdditionalProperties!.ContainsKey(CodexCliChatClient.EvidenceSourceKey));
         Assert.False(Directory.Exists(folderDuringCall));
         var prompt = h.Client.Received[^1].Messages.Last().Text;
         Assert.Contains("MARK_IN_DIFF", prompt);                                       // diff 본문은 프롬프트에
         Assert.Contains($"## 변경 diff ({diff.Name})", prompt);
         Assert.Equal(0, h.FallbackClient.Calls);
+    }
+
+    [Fact]
+    public async Task Mode_run_in_git_repo_passes_original_source_with_main_root_context_paths()
+    {
+        var repo = Repo();
+        using var h = new ModeRunnerHarness(Modes, providerType: CodexCliProvider.TypeName, withFallbackAgent: true);
+        h.Client.Script = [ScriptedChatClient.Reply("리뷰 결과")];
+
+        await h.Runner.RunAsync("cx", "의도", null, null, [new ContextRange("review_tmp/c.diff", 1, 5), new ContextRange("Calc.cs", 1, 1)],
+            null, ModeRunnerHarness.DefaultReason, null, CancellationToken.None, rootDir: repo);
+
+        var source = Assert.IsType<ReviewEvidenceSource>(h.Client.Received[^1].Options?.AdditionalProperties?[CodexCliChatClient.EvidenceSourceKey]);
+        Assert.Equal(Path.GetFullPath(repo), source.Root);
+        Assert.Contains("*.keystore", source.DenyPatterns);
+        Assert.Equal(["review_tmp/c.diff", "Calc.cs"], source.ContextPaths);
     }
 
     [Fact]

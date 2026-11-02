@@ -131,8 +131,8 @@ public sealed class ReviewEvidenceGitTests : IDisposable
         var service = new ReviewEvidence(_root, original: true); service.GitHistory("a.cs");
         Assert.Equal("한글", Data(service.GitRead("a.cs", commit)).GetProperty("text").GetString());
         using var empty = new EmptyRepositoryFixture();
-        var error = JsonSerializer.Deserialize<JsonElement>(new ReviewEvidence(empty.Root, original: true).GitHistory("a.cs"));
-        Assert.Equal("git_not_repository", error.GetProperty("code").GetString());
+        // 저장소가 아니면 원본 목록(git)을 못 만들어 자료 서버가 시작하지 않는다 (/cross-review 9d03bc8d2b — 예전에는 Git 조회에서 git_not_repository)
+        Assert.Throws<IOException>(() => new ReviewEvidence(empty.Root, original: true));
     }
 
     private sealed class EmptyRepositoryFixture : IDisposable

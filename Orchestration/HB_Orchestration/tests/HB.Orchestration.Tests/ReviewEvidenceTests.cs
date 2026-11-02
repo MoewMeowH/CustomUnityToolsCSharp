@@ -15,6 +15,16 @@ public sealed class ReviewEvidenceTests : IDisposable
     }
     private static JsonElement Result(string text) => JsonSerializer.Deserialize<JsonElement>(text);
 
+    /// <summary>원본 모드는 git 목록에서 시작한다 — 루트를 저장소로 만든다.</summary>
+    private void GitInit()
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo("git") { WorkingDirectory = _root, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (var a in new[] { "init", "-q" }) psi.ArgumentList.Add(a);
+        using var p = System.Diagnostics.Process.Start(psi)!;
+        p.WaitForExit();
+        Assert.Equal(0, p.ExitCode);
+    }
+
     [Fact]
     public void Read_pages_preserve_long_lines_korean_and_surrogate_pairs()
     {
@@ -131,7 +141,42 @@ public sealed class ReviewEvidenceTests : IDisposable
         Assert.Equal(0, repeat.GetProperty("scannedBytes").GetInt64());
         var forced = Result(service.Search("other", retrySkipped: true)).GetProperty("data");
         Assert.Equal(0, forced.GetProperty("cacheHits").GetInt32());
-        Assert.Equal(20, forced.GetProperty("scannedBytes").GetInt64());
+        Assert.Equal(20, forced.GetProperty("skipped").GetArrayLength());
+        Assert.Equal(0, forced.GetProperty("scannedBytes").GetInt64());   // 이진은 앞부분만 보고 거른다 — 본문 읽기 · 예산에 넣지 않음
+    }
+
+    [Fact]
+    public void Search_finds_utf16_text_with_bom()   // NUL 앞부분 검사가 UTF-16 텍스트를 이진으로 빼지 않게 (/self-review a9ebd62541 C3)
+    {
+        File.WriteAllText(Path.Combine(_root, "u16.txt"), "needle 한글", new System.Text.UnicodeEncoding(bigEndian: false, byteOrderMark: true));
+        var data = Result(new ReviewEvidence(_root).Search("needle")).GetProperty("data");
+        Assert.Single(data.GetProperty("hits").EnumerateArray());
+        Assert.Equal(0, data.GetProperty("skipped").GetArrayLength());
+    }
+
+    [Fact]
+    public void Original_root_drops_nested_generated_folders_and_credential_names()   // /self-review f7b96afc33 C2 · C6
+    {
+        GitInit();
+        Put("Client/Logs/editor.cs", "x");
+        Put("Client/Assets/A.cs", "x");
+        Put("id_rsa", "x");
+        Put("deploy/.npmrc", "x");
+        Put("build.log", "x");
+        var files = Result(new ReviewEvidence(_root, original: true).List()).GetProperty("data").GetProperty("files")
+            .EnumerateArray().Select(x => x.GetString()).ToArray();
+        Assert.Equal(new[] { "Client/Assets/A.cs" }, files);
+    }
+
+    [Fact]
+    public void Search_skips_oversized_files_without_spending_the_page_budget()
+    {
+        for (var i = 0; i < 6; i++) Put($"big{i}.txt", new string('x', 2_000_001));   // 6 × 2MB면 예전에는 8MB 페이지 상한이 찼다
+        Put("z.cs", "needle");
+        var data = Result(new ReviewEvidence(_root).Search("needle")).GetProperty("data");
+        Assert.Single(data.GetProperty("hits").EnumerateArray());
+        Assert.Equal(6, data.GetProperty("skipped").GetArrayLength());
+        Assert.Equal("needle".Length, data.GetProperty("scannedBytes").GetInt64());
     }
 
     [Fact]
@@ -242,19 +287,22 @@ public sealed class ReviewEvidenceTests : IDisposable
     [Fact]
     public void Original_root_reads_untracked_source_but_filters_all_tools()
     {
-        Put("Source/Untracked.cs", "needle source");
+        GitInit();
+        File.WriteAllText(Path.Combine(_root, ".git", "info", "exclude"), "ignored/\n");
+        Put("Source/Untracked.cs", "needle source");                 // git add 안 한 새 파일 — 보인다
+        Put("ignored/Company.cs", "needle ignored");                 // .gitignore 대상 — 안 보인다 (/cross-review 9d03bc8d2b)
         Put("config/company.json", "needle private");
         Put("signing/release.keystore", "needle private");
         Put("Library/Cache.cs", "needle generated");
-        Put(".git/config", "needle git");
         Put(".mcp.json", "needle private");
+        Put(".mcp.json.bak-20261020", "needle private");
         Put("AGENTS.md", "needle instruction");
         var service = new ReviewEvidence(_root, ["config/**"], original: true);
         var listing = Result(service.List());
         Assert.Equal("original", listing.GetProperty("source").GetString());
         var files = listing.GetProperty("data").GetProperty("files").EnumerateArray().Select(x => x.GetString()).ToArray();
         Assert.Equal(new[] { "Source/Untracked.cs" }, files);
-        foreach (var path in new[] { "config/company.json", "signing/release.keystore", ".git/config", ".mcp.json", "AGENTS.md", "Library/Cache.cs", "../outside.cs" })
+        foreach (var path in new[] { "config/company.json", "signing/release.keystore", ".git/config", ".mcp.json", ".mcp.json.bak-20261020", "AGENTS.md", "Library/Cache.cs", "ignored/Company.cs", "../outside.cs" })
             Assert.True(Result(service.Read(path)).TryGetProperty("error", out _));
         var hits = Result(service.Search("needle")).GetProperty("data").GetProperty("hits").EnumerateArray().ToArray();
         Assert.Single(hits);
@@ -264,8 +312,31 @@ public sealed class ReviewEvidenceTests : IDisposable
     }
 
     [Fact]
+    public void Original_root_allows_conductor_context_paths_even_if_ignored_or_excluded()   // 사본 모드가 context 파일을 복사하는 것과 같은 규칙
+    {
+        GitInit();
+        File.WriteAllText(Path.Combine(_root, ".git", "info", "exclude"), "docs/\n");
+        Put("docs/plans/p.md", "plan body");
+        Put("docs/other.md", "not passed");
+        Put("AGENTS.md", "instruction");
+        Put(".env", "KEY=1");
+        var service = new ReviewEvidence(_root, original: true, contextPaths: ["docs/plans/p.md", "AGENTS.md", ".env"]);
+        Assert.Equal("plan body", Result(service.Read("docs/plans/p.md")).GetProperty("data").GetProperty("text").GetString());
+        foreach (var path in new[] { "docs/other.md", "AGENTS.md", ".env" })          // 넘기지 않은 무시 파일 · Codex 지시 · 금지 패턴은 그대로 막음
+            Assert.True(Result(service.Read(path)).TryGetProperty("error", out _));
+    }
+
+    [Fact]
+    public void Original_root_does_not_start_without_a_git_list()   // 범위를 정할 수 없으면 fail-closed
+    {
+        Put("a.cs", "code");
+        Assert.Throws<IOException>(() => new ReviewEvidence(_root, original: true));
+    }
+
+    [Fact]
     public void Original_read_reports_hash_changes_after_file_is_updated()
     {
+        GitInit();
         Put("file.cs", "original");
         var service = new ReviewEvidence(_root, original: true);
         var first = Result(service.Read("file.cs")).GetProperty("data").GetProperty("sha256").GetString();

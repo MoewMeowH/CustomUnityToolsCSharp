@@ -36,6 +36,9 @@ public static class ReviewWorkFolder
     /// </summary>
     public enum Style { ClaudeRead, ClaudeRepo, Codex }
 
+    /// <summary>저장소 사본을 만들지 못했을 때 안내 앞부분 — ModeRunner가 이걸 보고 원본 자료 모드를 넘기지 않는다 (git 목록이 없으면 원본 범위도 정할 수 없음).</summary>
+    public const string NoRepoCopyNote = "(저장소 사본 없음:";
+
     /// <summary>
     /// 폴더를 만들고 파일을 복사한다. Focus = 프롬프트의 첨부 절 대신 넣을 "파일 목록 + 주목할 범위" (Codex는 + diff 본문).
     /// 실패하면(예상 밖 예외 포함) 만든 폴더를 지우고 오류 문구를 돌려준다. 취소는 폴더를 지운 뒤 그대로 던진다.
@@ -76,7 +79,7 @@ public static class ReviewWorkFolder
         var repoCopy = style != Style.ClaudeRead;
         var tracked = repoCopy ? CopyTracked(root, folder, options, ct) : default;
         if (repoCopy && tracked.Files == 0)
-            onNote?.Invoke($"(저장소 사본 없음: {tracked.Note ?? "복사할 수 있는 추적 파일 없음"} — 이 실행은 지휘자가 고른 파일만 봄)");
+            onNote?.Invoke($"{NoRepoCopyNote} {tracked.Note ?? "복사할 수 있는 추적 파일 없음"} — 이 실행은 지휘자가 고른 파일만 봄)");
         var diffs = new List<(string Inside, string Dest)>();
         var instructionSkipped = new List<string>();
         var copied = new Dictionary<string, (string Inside, string Sha, int? Lines)>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
@@ -166,7 +169,7 @@ public static class ReviewWorkFolder
             var why = tracked.Note is { } note ? $" ({note})" : "";
             text.AppendLine().AppendLine("## 작업 폴더 (서버가 복사함)")
                 .AppendLine(tracked.Files > 0
-                    ? $"지금 작업 폴더는 저장소 사본이다 — git 추적 파일 {tracked.Files:N0}개를 지금 작업 트리 상태 그대로 같은 상대 경로로 복사했다 (비추적 · 금지 패턴 · 이진 · 큰 파일 · Codex 지시 · 설정 파일은 사본에 넣지 않았다{skipped}). 아래 '중심' 목록에서 시작하고 판단에 필요한 정의 · 호출부 · 시험을 확인한다. 실제 읽기 도구와 허용 루트는 실행 앞부분의 안내를 따른다."
+                    ? $"지금 작업 폴더는 저장소 사본이다 — git 목록 파일(추적 파일 + .gitignore 밖 새 파일) {tracked.Files:N0}개를 지금 작업 트리 상태 그대로 같은 상대 경로로 복사했다 (무시 파일 · 금지 패턴 · 이진 · 큰 파일 · Codex 지시 · 설정 파일은 사본에 넣지 않았다{skipped}). 아래 '중심' 목록에서 시작하고 판단에 필요한 정의 · 호출부 · 시험을 확인한다. 실제 읽기 도구와 허용 루트는 실행 앞부분의 안내를 따른다."
                     : $"지금 작업 폴더에는 지휘자가 고른 파일만 아래 경로 그대로 복사돼 있다{why}. 판단에 필요하면 목록의 다른 파일 · 다른 부분도 읽는다.")
                 .AppendLine("허용된 자료 범위만 확인한다. 파일을 만들거나 고치지 않는다.")
                 .AppendLine("확인할 수 없는 것은 추측하지 말고 자료 요청(needsInfo)으로 남긴다.")
@@ -178,7 +181,7 @@ public static class ReviewWorkFolder
             var why = tracked.Note is { } note ? $" ({note})" : "";
             text.AppendLine().AppendLine("## 작업 폴더 (서버가 복사함)")
                 .AppendLine(tracked.Files > 0
-                    ? $"지금 작업 폴더는 저장소 사본이다 — git 추적 파일 {tracked.Files:N0}개를 지금 작업 트리 상태 그대로 같은 상대 경로로 복사했다 (비추적 · 금지 패턴 · 이진 · 큰 파일 · 지시 · 규칙 · 계획 문서는 사본에 넣지 않았다{skipped}). 아래 '중심' 목록에서 시작하고, 판단에 필요한 정의 · 호출부 · 시험은 Glob · Grep으로 찾아 Read로 읽는다."
+                    ? $"지금 작업 폴더는 저장소 사본이다 — git 목록 파일(추적 파일 + .gitignore 밖 새 파일) {tracked.Files:N0}개를 지금 작업 트리 상태 그대로 같은 상대 경로로 복사했다 (무시 파일 · 금지 패턴 · 이진 · 큰 파일 · 지시 · 규칙 · 계획 문서는 사본에 넣지 않았다{skipped}). 아래 '중심' 목록에서 시작하고, 판단에 필요한 정의 · 호출부 · 시험은 Glob · Grep으로 찾아 Read로 읽는다."
                     : $"지금 작업 폴더에는 지휘자가 고른 파일만 아래 경로 그대로 복사돼 있다{why}. 판단에 필요하면 목록의 다른 파일 · 다른 부분도 읽는다.")
                 .AppendLine("폴더 밖은 읽지 않는다.")
                 .AppendLine("'정의' 줄은 서버가 정규식으로 뽑은 대략의 위치(이름 줄번호)다. 큰 파일은 필요한 범위만 Read(offset · limit)로 열고, 판단 전에 그 줄을 직접 확인한다.")
@@ -253,17 +256,17 @@ public static class ReviewWorkFolder
     }
 
     /// <summary>
-    /// 루트의 git 추적 파일(<c>git ls-files</c> — intent-to-add 포함, 비추적 제외)을 지금 작업 트리 상태로 복사한다.
+    /// 루트의 git 목록 파일(<see cref="GitListedFiles"/> — 추적 · intent-to-add · .gitignore 밖 새 파일)을 지금 작업 트리 상태로 복사한다.
     /// 금지 패턴(비밀 파일 · .git) · 지시 · 규칙 · 계획 문서(<see cref="IsExcludedFromCopy"/>) · 링크 · 파일 크기 상한 · 이진(앞 8KB에 NUL) · 지워진 파일은 건너뛴다.
     /// git이 없거나 저장소가 아니거나 상한(<see cref="MaxTrackedFiles"/> · <see cref="MaxTrackedBytes"/>)을 넘으면 복사하지 않고 Note에 이유를 남긴다
     /// (그때는 context 파일만으로 돈다). 반쯤 복사한 파일은 지운다.
     /// </summary>
     internal static (int Files, int Skipped, string? Note) CopyTracked(string root, string folder, ContextOptions options, CancellationToken ct)
     {
-        var (paths, gitError) = GitTrackedFiles(root, ct);
+        var (paths, gitError) = GitListedFiles(root, ct);
         if (gitError is not null) return (0, 0, gitError);
-        if (paths!.Count == 0) return (0, 0, "git 추적 파일 없음");
-        if (paths.Count > MaxTrackedFiles) return (0, 0, $"추적 파일 {paths.Count:N0}개 / 사본 상한 {MaxTrackedFiles:N0}개라 저장소 사본을 만들지 않음");
+        if (paths!.Count == 0) return (0, 0, "git 목록 파일 없음");
+        if (paths.Count > MaxTrackedFiles) return (0, 0, $"git 목록 파일 {paths.Count:N0}개 / 사본 상한 {MaxTrackedFiles:N0}개라 저장소 사본을 만들지 않음");
 
         // git이 돌려준 경로는 실제 이름이라 SafePath.Resolve(구성 요소마다 디렉터리 열거 · 파일마다 패턴 컴파일)보다 가벼운 검사로 본다:
         // 대체 데이터 스트림 · 장치 이름 · 루트 밖 · 금지 패턴(한 번 컴파일) · 링크(폴더마다 한 번) (/cross-review 90978dee2f C2).
@@ -293,7 +296,7 @@ public static class ReviewWorkFolder
                 if (total > MaxTrackedBytes)
                 {
                     DeleteChildren(folder);
-                    return (0, 0, $"추적 파일 합계가 사본 상한 {MaxTrackedBytes / 1_000_000:N0}MB를 넘어 저장소 사본을 만들지 않음");
+                    return (0, 0, $"git 목록 파일 합계가 사본 상한 {MaxTrackedBytes / 1_000_000:N0}MB를 넘어 저장소 사본을 만들지 않음");
                 }
                 var dest = Path.GetFullPath(Path.Combine(folder, Path.GetRelativePath(root, full)));
                 if (!dest.StartsWith(Path.TrimEndingDirectorySeparator(folder) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) { skipped++; continue; }
@@ -355,7 +358,7 @@ public static class ReviewWorkFolder
     }
 
     /// <summary>루트(제외)부터 dir까지 링크 · junction이 없는지. 폴더마다 한 번만 본다.</summary>
-    private static bool NoLinkBetween(string root, string dir, Dictionary<string, bool> cache)
+    internal static bool NoLinkBetween(string root, string dir, Dictionary<string, bool> cache)
     {
         if (string.Equals(Path.TrimEndingDirectorySeparator(dir), root, StringComparison.OrdinalIgnoreCase)) return true;
         if (cache.TryGetValue(dir, out var known)) return known;
@@ -389,21 +392,22 @@ public static class ReviewWorkFolder
             CreateNoWindow = true,
         };
         // fsmonitor 끔: 리뷰 대상 .git/config의 core.fsmonitor 명령이 실행되지 않게. 환경도 Codex 자식과 같이 정리 (/cross-review e37c6e41c9 C4).
-        foreach (var a in new[] { "-c", "core.fsmonitor=false", "-c", "core.quotepath=off", "ls-files", "-z" }) psi.ArgumentList.Add(a);
+        // 목록 = 추적 파일 + .gitignore 밖 새 파일 — 새로 만든 파일은 보이고 무시 파일(개인 설정 · 산출물 · 사내 자료)은 빠진다 (/cross-review 9d03bc8d2b, 사용자 결정).
+        foreach (var a in new[] { "-c", "core.fsmonitor=false", "-c", "core.quotepath=off", "ls-files", "-z", "--cached", "--others", "--exclude-standard" }) psi.ArgumentList.Add(a);
+        // XDG_CONFIG_HOME은 남긴다: 목록 범위가 무시 규칙으로 정해지는데, 지우면 전역 무시 파일($XDG_CONFIG_HOME/git/ignore)이 빠진다 (/self-review f7b96afc33 C3).
         foreach (var (k, v) in Providers.CodexCliChatClient.ChildEnvironment(npmMarker: false))
-            if (v is null) psi.Environment.Remove(k);
+            if (v is null && !k.Equals("XDG_CONFIG_HOME", StringComparison.OrdinalIgnoreCase)) psi.Environment.Remove(k);
         return psi;
     }
 
     /// <summary>
-    /// <c>git ls-files -z</c> (루트 기준 상대 경로). git은 PATH의 절대 경로 폴더에서만 찾는다 — 서버의 현재 폴더(프로젝트 루트)의 git.exe가 실행되지 않게.
+    /// <see cref="GitStartInfo"/> 목록 (루트 기준 상대 경로, 같은 경로는 한 번). git은 PATH의 절대 경로 폴더에서만 찾는다 — 서버의 현재 폴더(프로젝트 루트)의 git.exe가 실행되지 않게.
+    /// 사본(<see cref="CopyTracked"/>)과 원본 자료 도구(<see cref="ReviewEvidence"/>)가 같은 목록을 쓴다.
     /// </summary>
-    private static (List<string>? Paths, string? Error) GitTrackedFiles(string root, CancellationToken ct)
+    internal static (List<string>? Paths, string? Error) GitListedFiles(string root, CancellationToken ct)
     {
-        var name = OperatingSystem.IsWindows() ? "git.exe" : "git";
-        var git = (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
-            .Select(d => d.Trim().Trim('"')).Where(Path.IsPathFullyQualified)
-            .Select(d => Path.Combine(d, name)).FirstOrDefault(File.Exists);
+        // 자료 도구의 다른 git 호출과 같은 실행 파일 정책: 루트 안 · 링크를 거친 git.exe는 고르지 않는다 (/self-review a9ebd62541 C1 · f7b96afc33 C1).
+        var git = ReviewExecutablePolicy.Git(root, ReviewExecutablePolicy.SearchPath(root, Environment.GetEnvironmentVariable("PATH")));
         if (git is null) return (null, "git을 찾지 못함");
 
         try
@@ -428,7 +432,7 @@ public static class ReviewWorkFolder
                 return (null, "git ls-files가 30초 안에 끝나지 않음");
             }
             return p.ExitCode == 0
-                ? ([.. output.Split('\0', StringSplitOptions.RemoveEmptyEntries)], null)
+                ? ([.. output.Split('\0', StringSplitOptions.RemoveEmptyEntries).Distinct(StringComparer.Ordinal)], null)
                 : (null, GitFailure(p.ExitCode, stderr));
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or InvalidOperationException)

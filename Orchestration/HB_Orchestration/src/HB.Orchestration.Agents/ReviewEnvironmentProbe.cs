@@ -62,7 +62,7 @@ internal static class ReviewEnvironmentProbe
             void Stop()
             {
                 try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
-                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or AggregateException or NotSupportedException) { }
             }
             using var registration = timeout.Token.Register(Stop);
             try

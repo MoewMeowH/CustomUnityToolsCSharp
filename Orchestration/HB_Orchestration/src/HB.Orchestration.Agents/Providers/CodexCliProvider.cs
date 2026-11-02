@@ -192,7 +192,7 @@ public sealed class CodexCliChatClient(CodexCliSettings settings, ClaudeCliRunne
                 Arguments(settings, options?.Reasoning?.Effort, system, workspace, schemaFile, evidenceHost, evidenceSource), workspace, ChildEnvironment(), user);
             var result = await run(invocation, settings.Timeout, cancellationToken);
             var codexVersion = version is null ? null : await version(settings.Executable);
-            return Parse(result, settings.Model, codexVersion);
+            return Parse(result, settings.Model, codexVersion, shellDisabled: evidenceHost is not null);
         }
         finally
         {
@@ -240,15 +240,18 @@ public sealed class CodexCliChatClient(CodexCliSettings settings, ClaudeCliRunne
             if (!Path.IsPathFullyQualified(evidenceHost) || !Path.IsPathFullyQualified(workspace))
                 throw new ArgumentException("자료 도구 실행 파일과 사본은 절대 경로여야 합니다.");
             var isDll = Path.GetExtension(evidenceHost).Equals(".dll", StringComparison.OrdinalIgnoreCase);
-            var command = isDll ? ResolveEvidenceRuntime(Environment.ProcessPath, Environment.GetEnvironmentVariable("PATH")) : evidenceHost;
             if (evidenceSource is not null && !Path.IsPathFullyQualified(evidenceSource.Root))
                 throw new ArgumentException("원본 자료 루트는 절대 경로여야 합니다.");
+            var command = isDll ? ResolveEvidenceRuntime(Environment.ProcessPath, Environment.GetEnvironmentVariable("PATH"), evidenceSource?.Root ?? workspace) : evidenceHost;
+            static string Json64(string[] values) => TomlString(Convert.ToBase64String(Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(values))));
             var serverArgs = evidenceSource is null ? "\"--review-evidence\"," + TomlString(workspace)
-                : "\"--review-evidence-original\"," + TomlString(evidenceSource.Root) + "," + TomlString(Convert.ToBase64String(Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(evidenceSource.DenyPatterns))));
+                : "\"--review-evidence-original\"," + TomlString(evidenceSource.Root) + "," + Json64(evidenceSource.DenyPatterns)
+                  + (evidenceSource.ContextPaths is { Length: > 0 } paths ? "," + Json64(paths) : "");
             args.AddRange(["-c", "mcp_servers.hb_evidence.command=" + TomlString(command),
                 "-c", "mcp_servers.hb_evidence.args=[" + (isDll ? TomlString(evidenceHost) + "," : "") + serverArgs + "]",
                 "-c", "mcp_servers.hb_evidence.required=true",
-                "-c", "mcp_servers.hb_evidence.startup_timeout_sec=20"]);
+                // 원본 모드는 시작 때 git 목록(최대 30초) · 파일 검사를 한다 — 그보다 넉넉히 (/self-review a9ebd62541 C2)
+                "-c", "mcp_servers.hb_evidence.startup_timeout_sec=60"]);
         }
         if (ClaudeCliChatClient.EffortName(effort) is { } e) args.AddRange(["-c", "model_reasoning_effort=" + TomlString(e)]);
         if (!string.IsNullOrWhiteSpace(system)) args.AddRange(["-c", "developer_instructions=" + TomlString(system)]);
@@ -357,17 +360,19 @@ public sealed class CodexCliChatClient(CodexCliSettings settings, ClaudeCliRunne
         return entry;
     }
 
-    public static string ResolveEvidenceRuntime(string? processPath, string? searchPath)
+    /// <param name="evidenceRoot">자료 루트 — 주면 git · 버전 관측과 같은 실행 파일 정책(루트 안 · 링크 거절, <see cref="ReviewExecutablePolicy"/>)을 건다 (/cross-review 9d03bc8d2b).</param>
+    public static string ResolveEvidenceRuntime(string? processPath, string? searchPath, string? evidenceRoot = null)
     {
+        bool Usable(string candidate) => evidenceRoot is null ? File.Exists(candidate) : ReviewExecutablePolicy.Allowed(candidate, evidenceRoot);
         if (processPath is not null && Path.IsPathFullyQualified(processPath)
-            && Path.GetFileNameWithoutExtension(processPath).Equals("dotnet", StringComparison.OrdinalIgnoreCase) && File.Exists(processPath))
+            && Path.GetFileNameWithoutExtension(processPath).Equals("dotnet", StringComparison.OrdinalIgnoreCase) && Usable(processPath))
             return processPath;
         foreach (var entry in (searchPath ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
         {
             var directory = entry.Trim('"');
             if (!Path.IsPathFullyQualified(directory)) continue;
             var candidate = Path.Combine(directory, OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
-            if (File.Exists(candidate)) return candidate;
+            if (Usable(candidate)) return candidate;
         }
         throw new ClaudeCliException("[codex-cli] 자료 서버용 dotnet을 찾지 못했습니다. MCP apphost를 함께 배포하거나 dotnet 절대 경로가 PATH에 있어야 합니다.", ErrorKind.Client, retryable: false);
     }
@@ -409,7 +414,8 @@ public sealed class CodexCliChatClient(CodexCliSettings settings, ClaudeCliRunne
     /// JSONL 이벤트 → 응답. 마지막 agent_message가 본문, turn.completed의 usage가 토큰 (입력 = 캐시 포함, OpenAI 기록과 같은 뜻).
     /// turn.failed · 답 없음 · usage 없음은 실패 — 0 토큰 성공으로 조용히 기록하지 않는다. 실패여도 usage가 있으면 예외에 싣는다.
     /// </summary>
-    public static ChatResponse Parse(ClaudeCliProcessResult result, string model, string? codexVersion = null)
+    /// <param name="shellDisabled">자료 도구를 붙여 셸을 끈 실행 — 셸 명령이 하나라도 있으면 실패로 본다.</param>
+    public static ChatResponse Parse(ClaudeCliProcessResult result, string model, string? codexVersion = null, bool shellDisabled = false)
     {
         // lastError = 최상위 error 이벤트, itemWarning = item 안의 경고성 오류 (예: 모델 정보 없음).
         // 경고 글은 분류 근거로 앞세우지 않는다 — "usage limit" 같은 안내가 다른 실패를 Quota로 바꾸지 않게 (지휘자 K4).
@@ -420,6 +426,8 @@ public sealed class CodexCliChatClient(CodexCliSettings settings, ClaudeCliRunne
         var evidenceCalls = new JsonArray();
         var mcpCount = 0;
         var workStarted = false;
+        var startedCommands = 0;   // 완료 항목 없이 시작만 된 명령도 셸이 열렸다는 뜻 (/self-review a9ebd62541 C6)
+        int foreignTools = 0, foreignStarted = 0;   // hb_evidence 밖 MCP 도구 — 자료 도구 실행에는 다른 서버를 붙이지 않는다
         foreach (var raw in result.Stdout.Split('\n'))
         {
             var line = raw.Trim();
@@ -435,6 +443,8 @@ public sealed class CodexCliChatClient(CodexCliSettings settings, ClaudeCliRunne
                     break;
                 case "item.started":
                     if (Str(ev["item"]?["type"]) is "command_execution" or "mcp_tool_call") workStarted = true;
+                    if (Str(ev["item"]?["type"]) == "command_execution") startedCommands++;
+                    if (Str(ev["item"]?["type"]) == "mcp_tool_call" && Str(ev["item"]?["server"]) != "hb_evidence") foreignStarted++;
                     break;
                 case "item.completed":
                     var item = ev["item"];
@@ -450,6 +460,7 @@ public sealed class CodexCliChatClient(CodexCliSettings settings, ClaudeCliRunne
                             break;
                         case "mcp_tool_call":
                             mcpCount++;
+                            if (Str(item?["server"]) != "hb_evidence") foreignTools++;
                             if (evidenceCalls.Count < MaxRecordedCommands)
                                 evidenceCalls.Add(EvidenceCallMetadata(item));
                             break;
@@ -483,6 +494,15 @@ public sealed class CodexCliChatClient(CodexCliSettings settings, ClaudeCliRunne
             ["codex_version"] = codexVersion,
         }.ToJsonString();
         var spent = SpentOf(usage, rawJson);
+
+        // 자료 도구 실행은 셸을 끈다(-c features.shell_tool=false). 판이 바뀌어 셸이 되살아나면 목록 · 금지 패턴 밖을 읽었을 수 있으니 결과를 쓰지 않는다 (fail-closed, /cross-review 9d03bc8d2b).
+        // 사후 검사라 이미 모델로 나간 출력은 되돌리지 못한다 — 판이 바뀐 것을 알리고 그 결과를 쓰지 않는 것까지.
+        var shellRuns = Math.Max(commandCount, startedCommands);
+        var foreignRuns = Math.Max(foreignTools, foreignStarted);
+        if (shellDisabled && (shellRuns > 0 || foreignRuns > 0))
+            throw new ClaudeCliException($"[codex-cli] 자료 도구 실행인데 셸 명령 {shellRuns}건 · 다른 MCP 도구 {foreignRuns}건이 실행됐습니다 — " +
+                "이 Codex 판에서 features.shell_tool=false가 듣지 않거나 다른 도구가 붙은 것으로 보여 결과를 버립니다.",
+                ErrorKind.Client, false, null, spent);
 
         if (failed is not null || answer is null)
         {

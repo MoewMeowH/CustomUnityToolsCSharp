@@ -4,7 +4,8 @@ using System.Text.Json;
 
 namespace HB.Orchestration.Agents;
 
-public sealed record ReviewEvidenceSource(string Root, string[] DenyPatterns);
+/// <param name="ContextPaths">지휘자가 context로 넘긴 루트 안 경로 — 사본처럼 무시 · 사본 제외 파일이어도 읽게 한다 (Codex 지시 · 금지 패턴은 그대로 막음).</param>
+public sealed record ReviewEvidenceSource(string Root, string[] DenyPatterns, string[]? ContextPaths = null);
 
 /// <summary>서버가 지정한 루트에서 제외 규칙을 적용해 읽는다. 셸 실행은 제공하지 않는다.</summary>
 public sealed partial class ReviewEvidence
@@ -20,6 +21,7 @@ public sealed partial class ReviewEvidence
     private readonly string[] _denyPatterns;
     private readonly bool _original;
     private readonly bool _inventoryTruncated;
+    private readonly int _unreadable;
     private const int OriginalFileLimit = 50_000;
     private static readonly HashSet<string> GeneratedFolders = new(StringComparer.OrdinalIgnoreCase)
         { ".git", ".vs", ".claude", ".codex", ".agents", "review_tmp", "subagent_in", "bin", "obj", "node_modules", "Library", "Temp", "Logs", "UserSettings" };
@@ -34,7 +36,7 @@ public sealed partial class ReviewEvidence
         Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
-    public ReviewEvidence(string root, IEnumerable<string>? denyPatterns = null, bool original = false)
+    public ReviewEvidence(string root, IEnumerable<string>? denyPatterns = null, bool original = false, IEnumerable<string>? contextPaths = null)
     {
         _original = original;
         _denyPatterns = ContextOptions.BuiltInDenyPatterns.Concat(denyPatterns ?? [])
@@ -42,35 +44,78 @@ public sealed partial class ReviewEvidence
         _root = Path.GetFullPath(root);
         if (!Directory.Exists(_root) || (File.GetAttributes(_root) & FileAttributes.ReparsePoint) != 0)
             throw new ArgumentException("리뷰 사본 폴더가 없거나 링크입니다.");
-        var files = new List<string>();
+        var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var files = new HashSet<string>(comparer);
+        var unreadable = 0;
         var denied = SafePath.DenyMatcher(_denyPatterns);
-        var pending = new Stack<(string Path, int Depth)>();
-        pending.Push((_root, 0));
-        while (pending.TryPop(out var dir))
+        if (original)
         {
-            if (dir.Depth > 64) throw new IOException("사본 폴더 깊이 상한을 넘었습니다.");
-            foreach (var path in Directory.EnumerateFileSystemEntries(dir.Path))
+            // 원본은 사본과 같은 git 목록(추적 + .gitignore 밖 새 파일)만 — 무시 파일 · 다른 비추적 자료를 외부 모델에 열지 않는다 (/cross-review 9d03bc8d2b).
+            // 목록을 못 얻으면 범위를 정할 수 없으니 시작하지 않는다 (fail-closed).
+            var (listed, gitError) = ReviewWorkFolder.GitListedFiles(_root, CancellationToken.None);
+            if (listed is null) throw new IOException($"원본 자료 목록을 만들 수 없습니다 ({gitError}).");
+            var linkFree = new Dictionary<string, bool>(comparer);
+            foreach (var relative in listed)
             {
-                var relative = Path.GetRelativePath(_root, path).Replace('\\', '/');
-                if (_original && (GeneratedFolders.Contains(Path.GetFileName(path)) || ReviewWorkFolder.IsExcludedFromCopy(relative))) continue;
-                var attr = File.GetAttributes(path);
-                if ((attr & FileAttributes.ReparsePoint) != 0) continue;
-                if ((attr & FileAttributes.Directory) != 0)
-                {
-                    if (denied(relative + "/__entry__") is null) pending.Push((path, dir.Depth + 1));
-                }
-                else
-                {
-                    if (denied(relative) is null && SafePath.WindowsNameProblem(relative) is null
-                        && !ReviewWorkFolder.IsCodexInstructionPath(relative)) files.Add(relative);
-                }
-                if (_original && files.Count >= OriginalFileLimit) { _inventoryTruncated = true; break; }
-                // 사본 생성기가 추적 파일 상한과 context 추가분을 관리한다. 별도 상한으로 정상 사본을 거절하지 않는다.
+                if (files.Count >= OriginalFileLimit) { _inventoryTruncated = true; break; }
+                // 생성물 폴더 이름은 어느 깊이든 뺀다 — 하위 Unity 프로젝트의 Logs · UserSettings처럼 루트 .gitignore가 못 거른 것 (/self-review f7b96afc33 C6)
+                if (relative.Split('/')[..^1].Any(GeneratedFolders.Contains) || ReviewWorkFolder.IsExcludedFromCopy(relative)) continue;
+                AddListed(relative, linkFree);
             }
-            if (_inventoryTruncated) break;
+            // 지휘자가 넘긴 파일은 무시 · 사본 제외여도 읽는다 — 사본 모드가 context 파일을 복사하는 것과 같은 규칙.
+            foreach (var path in contextPaths ?? [])
+            {
+                var (full, error) = SafePath.Resolve(path, _root, _denyPatterns, SafePath.Access.Read);
+                if (error is null) AddListed(Path.GetRelativePath(_root, full!).Replace('\\', '/'), linkFree);
+            }
+        }
+        else
+        {
+            var pending = new Stack<(string Path, int Depth)>();
+            pending.Push((_root, 0));
+            while (pending.TryPop(out var dir))
+            {
+                if (dir.Depth > 64) throw new IOException("사본 폴더 깊이 상한을 넘었습니다.");
+                IEnumerable<string> entries;
+                try { entries = Directory.EnumerateFileSystemEntries(dir.Path).ToArray(); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { unreadable++; continue; }
+                foreach (var path in entries)
+                {
+                    var relative = Path.GetRelativePath(_root, path).Replace('\\', '/');
+                    FileAttributes attr;
+                    // 열거 뒤 사라졌거나 권한이 없는 항목 하나로 서버 전체가 시작하지 않으면 안 된다 (1-F2) — 세고 건너뛴다.
+                    try { attr = File.GetAttributes(path); }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { unreadable++; continue; }
+                    if ((attr & FileAttributes.ReparsePoint) != 0) continue;
+                    if ((attr & FileAttributes.Directory) != 0)
+                    {
+                        if (denied(relative + "/__entry__") is null) pending.Push((path, dir.Depth + 1));
+                    }
+                    else if (denied(relative) is null && SafePath.WindowsNameProblem(relative) is null
+                        && !ReviewWorkFolder.IsCodexInstructionPath(relative)) files.Add(relative);
+                    // 사본 생성기가 파일 상한과 context 추가분을 관리한다. 별도 상한으로 정상 사본을 거절하지 않는다.
+                }
+            }
         }
         _files = files.Order(StringComparer.Ordinal).ToArray();
-        _paths = _files.ToDictionary(p => p, p => p, OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        _paths = _files.ToDictionary(p => p, p => p, comparer);
+        _unreadable = unreadable;
+
+        // git 경로는 실제 이름이라 사본 생성기(CopyTracked)와 같은 가벼운 검사: 대체 스트림 · 장치 이름 · 금지 패턴 · 지시 파일 · 루트 밖 · 링크.
+        void AddListed(string relative, Dictionary<string, bool> linkFree)
+        {
+            if (relative.Contains(':') || denied(relative) is not null || SafePath.WindowsNameProblem(relative) is not null
+                || ReviewWorkFolder.IsCodexInstructionPath(relative)) return;
+            try
+            {
+                var full = Path.GetFullPath(Path.Combine(_root, relative));
+                if (!full.StartsWith(_root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) return;
+                var info = new FileInfo(full);
+                if (!info.Exists || info.Attributes.HasFlag(FileAttributes.ReparsePoint) || !ReviewWorkFolder.NoLinkBetween(_root, info.DirectoryName!, linkFree)) return;
+                files.Add(relative);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { unreadable++; }
+        }
     }
 
     public string List(string contains = "", int offset = 0) => Execute(() =>
@@ -144,7 +189,10 @@ public sealed partial class ReviewEvidence
                     throw new UnreadableTextException("이전 검색에서 읽지 못한 텍스트 파일입니다.");
                 }
                 _failedSearchFiles.Remove(path);
-                scanned += Math.Min(info.Length, MaxFileBytes);
+                // 크기 초과 · 이진은 전부 읽기 전에 거른다 — 읽지 않은 바이트로 페이지 상한이 차지 않게 (/cross-review 9d03bc8d2b).
+                if (info.Length > MaxFileBytes) throw new UnreadableTextException("파일 크기 상한을 넘었습니다.");
+                if (BinaryHead(full)) throw new UnreadableTextException("이진 파일은 읽지 않습니다.");
+                scanned += info.Length;
                 (body, _) = LoadFile(full);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
@@ -181,6 +229,17 @@ public sealed partial class ReviewEvidence
 
     private (string Text, string Hash) Load(string path) => LoadFile(ResolveFile(path));
 
+    /// <summary>앞 8KB에 NUL이 있으면 이진 (사본 생성기와 같은 기준). UTF-16 · UTF-32 BOM이면 LoadFile의 디코딩 판정에 맡긴다 (/self-review a9ebd62541 C3).</summary>
+    private static bool BinaryHead(string full)
+    {
+        using var source = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.Read);
+        Span<byte> head = stackalloc byte[8192];
+        head = head[..source.Read(head)];
+        if (head.StartsWith(stackalloc byte[] { 0xFF, 0xFE }) || head.StartsWith(stackalloc byte[] { 0xFE, 0xFF })
+            || head.StartsWith(stackalloc byte[] { 0x00, 0x00, 0xFE, 0xFF })) return false;
+        return head.Contains((byte)0);
+    }
+
     private static (string Text, string Hash) LoadFile(string full)
     {
         using var source = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.Read);
@@ -210,7 +269,7 @@ public sealed partial class ReviewEvidence
                         exhausted = false, remainingCalls = MaxCalls - _calls, remainingChars = MaxReturnedChars - _returned }, Json);
                 }
                 var response = JsonSerializer.Serialize(new { data, source = _original ? "original" : "snapshot", inventoryTruncated = _inventoryTruncated,
-                    remainingCalls = MaxCalls - _calls, remainingChars = MaxReturnedChars - _returned - size }, Json);
+                    unreadableCount = _unreadable, remainingCalls = MaxCalls - _calls, remainingChars = MaxReturnedChars - _returned - size }, Json);
                 onSuccess?.Invoke();
                 _returned += size;
                 return response;
