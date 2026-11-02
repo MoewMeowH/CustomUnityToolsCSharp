@@ -72,7 +72,7 @@ public sealed partial class StickerPacks(StickerCatalog stickers, ProfileStore p
         {
             var o = stickers.Options;
             // 팩 → 스티커 폴더 → 기본 팩 차례 (기본 팩은 스티커 폴더 = FallbackDir 아래)
-            return new StickerOptions { Dir = dir, FallbackDir = o.Dir, DefaultPack = o.DefaultPack, SizePx = o.SizePx, Files = o.Files, Aliases = o.Aliases, Auto = o.Auto, UrlBase = url };
+            return new StickerOptions { Dir = dir, FallbackDir = o.Dir, DefaultPack = o.DefaultPack, SizePx = o.SizePx, Files = o.Files, Aliases = o.Aliases, Hints = o.Hints, Auto = o.Auto, UrlBase = url };
         });
     }
 

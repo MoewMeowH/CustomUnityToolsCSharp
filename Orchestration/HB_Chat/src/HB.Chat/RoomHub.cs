@@ -324,6 +324,9 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     /// <summary>이 앱의 loopback 주소 — 앱 MCP를 claude에 알려 줄 때 (<see cref="TerminalMcp.LoopbackUrl"/>). 없으면 터미널 도구를 붙이지 않는다.</summary>
     public Func<string?>? SelfUrl { get; init; }
 
+    /// <summary>스티커 설정 — Claude 방 규칙에 스티커 안내(<see cref="StickerRules"/>)를 붙일 때. 없으면 안내 없음.</summary>
+    public HB.Orchestration.ChatUi.StickerCatalog? Stickers { get; init; }
+
     /// <summary>
     /// 방을 열어 둔 화면이 있을 때만 그 방 알림으로 — 없으면 알림을 만들지도 않는다(터미널 출력 base64, /self-review 57b59ef134 C4).
     /// 터미널 출력은 snapshot에 남기지 않는다 — 화면이 버퍼로 다시 받는다.
@@ -1622,6 +1625,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             extras: [.. extraServers.Where(s => s != McpConfigFile.UnityServer)],
             // 모델 선택창 안내는 기본 서버가 붙고 요청 창 · 스위치가 있는 방에만 (785ebb5e97 C7)
             modeCard: mcpConfig is not null && !room.McpOff.Contains(o.McpServer) && room.GroupId is null)
+            + StickerRules.For(Stickers?.Options) // 설정 태그 · Hints가 바뀌면 지문이 바뀌어 다음 말에 다시 붙는다
             + GroupRules.For(store, room, o.WorkspacePath); // 단톡방 구성원 방이면 역할 · 다른 구성원 — 바뀌면 지문이 바뀌어 다음 말에 다시 붙는다
         // 이어 쓰는 세션은 CLI가 압축 전까지 처음 시스템 프롬프트를 쓴다 (단계 실측: resume에 넣은 새 규칙은 안 보임).
         // 지휘자가 마지막으로 받은 규칙과 다르면 이번 말 앞에 새 규칙을 붙인다 — 갈래 첫 실행 · 이 칸 전에 만든 방도 한 번 받는다.

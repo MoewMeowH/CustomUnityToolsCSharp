@@ -36,6 +36,9 @@ public sealed class StickerOptions
     /// <summary>의미 태그 → Files의 태그 (예: 완료 → 해냈다). 지휘자는 의미 태그나 Files 태그 아무거나 쓴다.</summary>
     public Dictionary<string, string> Aliases { get; set; } = new(StringComparer.Ordinal);
 
+    /// <summary>의미 태그 → 쓸 때 (선택). HB_Chat이 방 규칙의 태그 목록에 붙인다.</summary>
+    public Dictionary<string, string> Hints { get; set; } = new(StringComparer.Ordinal);
+
     /// <summary>
     /// 상황 → 태그 (외부 에이전트 · 서브에이전트 · 판정 말풍선에 화면이 붙인다). 값을 비우면 그 상황은 붙이지 않는다.
     /// 키는 <see cref="AutoSticker"/>의 상수.

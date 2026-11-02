@@ -61,6 +61,7 @@ builder.Services.AddSingleton(sp =>
         Cli = sp.GetRequiredService<CliVersions>(),
         Terminals = sp.GetRequiredService<Terminals>(),
         Browser = sp.GetRequiredService<AgentBrowser>(),
+        Stickers = sp.GetRequiredService<StickerCatalog>(),
         SelfUrl = () => TerminalMcp.LoopbackUrl(sp.GetRequiredService<Microsoft.AspNetCore.Hosting.Server.IServer>()),
     };
 });
