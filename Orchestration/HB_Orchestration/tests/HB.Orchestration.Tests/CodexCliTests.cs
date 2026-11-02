@@ -120,6 +120,22 @@ public sealed class CodexCliTests : IDisposable
         Assert.False(Assert.Throws<ClaudeCliException>(() => CodexCliChatClient.ResolveEvidenceRuntime(null, "")).Retryable);
     }
 
+    [Theory]   // 드라이브 루트는 이미 구분자로 끝난다 — 접두사에 하나 더 붙이면 모든 경로가 밖으로 보인다 (3e02602ff0 F2)
+    [InlineData("repo", "repo/")]
+    [InlineData("repo/", "repo/")]
+    public void Root_prefix_adds_a_separator_only_when_missing(string root, string expected)
+    {
+        var sep = Path.DirectorySeparatorChar;
+        Assert.Equal(expected.Replace('/', sep), ReviewWorkFolder.RootPrefix(root.Replace('/', sep)));
+    }
+
+    [Fact]
+    public void Codex_child_keeps_xdg_config_home_for_the_evidence_server_git()   // 자료 서버 git 목록도 사본과 같은 전역 무시 규칙 (3e02602ff0 F1)
+    {
+        Assert.Contains("XDG_CONFIG_HOME", CodexCliChatClient.KeptEnvironment);
+        Assert.False(CodexCliChatClient.ChildEnvironment(["XDG_CONFIG_HOME"], npmMarker: false).ContainsKey("XDG_CONFIG_HOME"));
+    }
+
     [Fact]
     public void Shell_command_in_evidence_run_discards_the_answer()   // 셸을 끈 실행인데 명령이 나오면 판이 바뀐 것 — fail-closed (/cross-review 9d03bc8d2b)
     {

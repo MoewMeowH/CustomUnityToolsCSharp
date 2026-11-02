@@ -271,7 +271,7 @@ public static class ReviewWorkFolder
         // git이 돌려준 경로는 실제 이름이라 SafePath.Resolve(구성 요소마다 디렉터리 열거 · 파일마다 패턴 컴파일)보다 가벼운 검사로 본다:
         // 대체 데이터 스트림 · 장치 이름 · 루트 밖 · 금지 패턴(한 번 컴파일) · 링크(폴더마다 한 번) (/cross-review 90978dee2f C2).
         var denied = SafePath.DenyMatcher(options.AllDenyPatterns.Concat(ContextOptions.BuiltInRepoCopyDenyPatterns));
-        var rootPrefix = root + Path.DirectorySeparatorChar;
+        var rootPrefix = RootPrefix(root);
         var linkFree = new Dictionary<string, bool>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
         int files = 0, skipped = 0;
         long total = 0;
@@ -360,9 +360,12 @@ public static class ReviewWorkFolder
     }
 
     /// <summary>루트(제외)부터 dir까지 링크 · junction이 없는지. 폴더마다 한 번만 본다.</summary>
+    /// <summary>루트 안 경로인지 볼 접두사 — 드라이브 루트(F:\)처럼 이미 구분자로 끝나면 하나 더 붙이지 않는다 (3e02602ff0 F2).</summary>
+    internal static string RootPrefix(string root) => Path.EndsInDirectorySeparator(root) ? root : root + Path.DirectorySeparatorChar;
+
     internal static bool NoLinkBetween(string root, string dir, Dictionary<string, bool> cache)
     {
-        if (string.Equals(Path.TrimEndingDirectorySeparator(dir), root, StringComparison.OrdinalIgnoreCase)) return true;
+        if (string.Equals(Path.TrimEndingDirectorySeparator(dir), Path.TrimEndingDirectorySeparator(root), StringComparison.OrdinalIgnoreCase)) return true;
         if (cache.TryGetValue(dir, out var known)) return known;
         var parent = Path.GetDirectoryName(dir);
         var ok = new DirectoryInfo(dir).LinkTarget is null && parent is not null && NoLinkBetween(root, parent, cache);
@@ -396,9 +399,9 @@ public static class ReviewWorkFolder
         // fsmonitor 끔: 리뷰 대상 .git/config의 core.fsmonitor 명령이 실행되지 않게. 환경도 Codex 자식과 같이 정리 (/cross-review e37c6e41c9 C4).
         // 목록 = 추적 파일 + .gitignore 밖 새 파일 — 새로 만든 파일은 보이고 무시 파일(개인 설정 · 산출물 · 사내 자료)은 빠진다 (/cross-review 9d03bc8d2b, 사용자 결정).
         foreach (var a in new[] { "-c", "core.fsmonitor=false", "-c", "core.quotepath=off", "ls-files", "-z", "--cached", "--others", "--exclude-standard" }) psi.ArgumentList.Add(a);
-        // XDG_CONFIG_HOME은 남긴다: 목록 범위가 무시 규칙으로 정해지는데, 지우면 전역 무시 파일($XDG_CONFIG_HOME/git/ignore)이 빠진다 (/self-review f7b96afc33 C3).
+        // KeptEnvironment에 XDG_CONFIG_HOME이 있어 전역 무시 파일($XDG_CONFIG_HOME/git/ignore)이 사본 · 자료 서버 양쪽에 같이 적용된다.
         foreach (var (k, v) in Providers.CodexCliChatClient.ChildEnvironment(npmMarker: false))
-            if (v is null && !k.Equals("XDG_CONFIG_HOME", StringComparison.OrdinalIgnoreCase)) psi.Environment.Remove(k);
+            if (v is null) psi.Environment.Remove(k);
         return psi;
     }
 
@@ -409,8 +412,16 @@ public static class ReviewWorkFolder
     internal static (List<string>? Paths, string? Error) GitListedFiles(string root, CancellationToken ct)
     {
         // 자료 도구의 다른 git 호출과 같은 실행 파일 정책: 루트 안 · 링크를 거친 git.exe는 고르지 않는다 (/self-review a9ebd62541 C1 · f7b96afc33 C1).
-        var git = ReviewExecutablePolicy.Git(root, ReviewExecutablePolicy.SearchPath(root, Environment.GetEnvironmentVariable("PATH")));
-        if (git is null) return (null, "git을 찾지 못함");
+        var pathValue = Environment.GetEnvironmentVariable("PATH");
+        var git = ReviewExecutablePolicy.Git(root, ReviewExecutablePolicy.SearchPath(root, pathValue));
+        if (git is null)
+        {
+            // PATH에 git은 있는데 정책(루트 안 · 링크 · junction · 짧은 이름)에 걸린 경우를 가른다 — 원인을 알 수 있게 (0dce1437ca C5)
+            var name = OperatingSystem.IsWindows() ? "git.exe" : "git";
+            var anyGit = (pathValue ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+                .Select(d => d.Trim().Trim('"')).Where(Path.IsPathFullyQualified).Any(d => File.Exists(Path.Combine(d, name)));
+            return (null, anyGit ? "PATH의 git이 실행 파일 정책(루트 안 · 링크 · junction · 짧은 이름 경로)에 걸려 쓰지 않음" : "git을 찾지 못함");
+        }
 
         try
         {

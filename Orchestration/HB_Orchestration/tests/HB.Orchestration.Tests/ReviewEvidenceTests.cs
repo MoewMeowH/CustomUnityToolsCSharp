@@ -6,7 +6,12 @@ namespace HB.Orchestration.Tests;
 public sealed class ReviewEvidenceTests : IDisposable
 {
     private readonly string _root = Directory.CreateTempSubdirectory("hb-evidence-test-").FullName;
-    public void Dispose() => Directory.Delete(_root, true);
+    public void Dispose()
+    {
+        foreach (var path in Directory.EnumerateFiles(_root, "*", SearchOption.AllDirectories))
+            File.SetAttributes(path, FileAttributes.Normal);   // git 객체 파일은 읽기 전용
+        Directory.Delete(_root, true);
+    }
     private void Put(string path, string text)
     {
         var full = Path.Combine(_root, path);
@@ -16,13 +21,39 @@ public sealed class ReviewEvidenceTests : IDisposable
     private static JsonElement Result(string text) => JsonSerializer.Deserialize<JsonElement>(text);
 
     /// <summary>원본 모드는 git 목록에서 시작한다 — 루트를 저장소로 만든다.</summary>
-    private void GitInit()
+    private void GitInit() => Git("init", "-q");
+
+    private void Git(params string[] args)
     {
         var psi = new System.Diagnostics.ProcessStartInfo("git") { WorkingDirectory = _root, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
-        foreach (var a in new[] { "init", "-q" }) psi.ArgumentList.Add(a);
+        foreach (var a in new[] { "-c", "commit.gpgSign=false", "-c", "user.email=t@t", "-c", "user.name=t" }.Concat(args)) psi.ArgumentList.Add(a);
         using var p = System.Diagnostics.Process.Start(psi)!;
         p.WaitForExit();
         Assert.Equal(0, p.ExitCode);
+    }
+
+    [Fact]
+    public void Original_root_ending_with_separator_still_lists_files()   // 드라이브 루트(F:\)처럼 끝 구분자가 있어도 목록이 비지 않게 (3e02602ff0 F2)
+    {
+        GitInit();
+        Put("src/A.cs", "code");
+        var files = Result(new ReviewEvidence(_root + Path.DirectorySeparatorChar, original: true).List()).GetProperty("data").GetProperty("files")
+            .EnumerateArray().Select(x => x.GetString()).ToArray();
+        Assert.Equal(new[] { "src/A.cs" }, files);
+    }
+
+    [Fact]
+    public void Deleted_tracked_file_is_skipped_without_counting_as_unreadable()   // '없음'과 '못 읽음'을 가른다 (3e02602ff0 F3)
+    {
+        GitInit();
+        Put("gone.cs", "x");
+        Put("kept.cs", "y");
+        Git("add", "-A");
+        Git("commit", "-q", "-m", "init");
+        File.Delete(Path.Combine(_root, "gone.cs"));
+        var listing = Result(new ReviewEvidence(_root, original: true).List());
+        Assert.Equal(new[] { "kept.cs" }, listing.GetProperty("data").GetProperty("files").EnumerateArray().Select(x => x.GetString()).ToArray());
+        Assert.Equal(0, listing.GetProperty("unreadableCount").GetInt32());
     }
 
     [Fact]

@@ -41,7 +41,7 @@ public sealed partial class ReviewEvidence
         _original = original;
         _denyPatterns = ContextOptions.BuiltInDenyPatterns.Concat(denyPatterns ?? [])
             .Concat(original ? ContextOptions.BuiltInRepoCopyDenyPatterns : []).Distinct().ToArray();
-        _root = Path.GetFullPath(root);
+        _root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));   // 드라이브 루트(F:\)는 그대로 남는다 — 접두사는 RootPrefix
         if (!Directory.Exists(_root) || (File.GetAttributes(_root) & FileAttributes.ReparsePoint) != 0)
             throw new ArgumentException("리뷰 사본 폴더가 없거나 링크입니다.");
         var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
@@ -109,9 +109,13 @@ public sealed partial class ReviewEvidence
             try
             {
                 var full = Path.GetFullPath(Path.Combine(_root, relative));
-                if (!full.StartsWith(_root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) return;
-                var info = new FileInfo(full);
-                if (!info.Exists || info.Attributes.HasFlag(FileAttributes.ReparsePoint) || !ReviewWorkFolder.NoLinkBetween(_root, info.DirectoryName!, linkFree)) return;
+                if (!full.StartsWith(ReviewWorkFolder.RootPrefix(_root), StringComparison.OrdinalIgnoreCase)) return;
+                // FileInfo.Exists는 권한 오류도 false로 숨긴다 — 속성을 직접 읽어 '없음'(지워진 추적 파일)과 '못 읽음'을 가른다 (3e02602ff0 F3)
+                FileAttributes attr;
+                try { attr = File.GetAttributes(full); }
+                catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException) { return; }
+                if ((attr & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0
+                    || !ReviewWorkFolder.NoLinkBetween(_root, Path.GetDirectoryName(full)!, linkFree)) return;
                 files.Add(relative);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { unreadable++; }

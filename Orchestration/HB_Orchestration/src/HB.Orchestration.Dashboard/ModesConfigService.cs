@@ -149,27 +149,34 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
     /// <summary>편집 대상 modes.json을 정한 근거 (화면 머리에 보인다).</summary>
     public const string SourceDashboardOption = "Dashboard:ModesPath";
 
-    private (string ModesPath, string ModesSource, string? SettingsPath) ResolvePaths()
+    /// <summary>MCP appsettings.json 경로 (없으면 null).</summary>
+    private string? SettingsPath()
     {
         var dir = McpConfigDir;
-        string? settings = dir is null ? null : Path.Combine(dir, "appsettings.json");
-        if (settings is not null && !File.Exists(settings)) settings = null;
+        var settings = dir is null ? null : Path.Combine(dir, "appsettings.json");
+        return settings is not null && File.Exists(settings) ? settings : null;
+    }
+
+    /// <param name="settingsBytes">Load가 이미 읽은 appsettings 바이트 — 경로 결정도 같은 시점의 내용으로 (따로 다시 읽지 않는다).</param>
+    private (string ModesPath, string ModesSource) ResolvePaths(byte[]? settingsBytes)
+    {
+        var dir = McpConfigDir;
 
         // 직접 지정이 있으면 그 파일만 (없으면 오류 — 다른 파일로 조용히 넘어가지 않는다).
         if (!string.IsNullOrWhiteSpace(options.Value.ModesPath))
         {
             var direct = Path.GetFullPath(options.Value.ModesPath);
             if (!File.Exists(direct)) throw new ModesConfigException($"modes.json이 없습니다: {direct}");
-            return (direct, SourceDashboardOption, settings);
+            return (direct, SourceDashboardOption);
         }
 
         // 그 밖에는 MCP 서버와 같은 찾는 순서 (ModesPathResolver). 대시보드에는 세션 폴더가 없어 hb-modes.json은 보지 않는다.
         // 설정 ModesPath의 상대 경로는 공용 함수가 서버 폴더(= McpConfigDir) 기준으로 푼다 (서버와 같음).
-        var configured = settings is null ? null : ReadMcpOptions(settings)?.ModesPath;
+        var configured = settingsBytes is null ? null : ReadMcpOptions(settingsBytes)?.ModesPath;
 
         // 지정 경로(appsettings ModesPath · HB_MODES_PATH)에 파일이 없으면 서버처럼 오류다 (다음 후보로 넘어가지 않음).
         var found = ModesPathResolver.Resolve(configured, environment(ModesPathResolver.EnvVar), cwd: null, serverDir: dir);
-        if (found.Path is { } path) return (path, ModesPathResolver.Label(found.Source), settings);
+        if (found.Path is { } path) return (path, ModesPathResolver.Label(found.Source));
 
         throw new ModesConfigException(found.Source == ModesPathResolver.Source.ServerFolder
             ? dir is null
@@ -217,7 +224,10 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
 
     public ModesSnapshot Load()
     {
-        var (modesPath, modesSource, settingsPath) = ResolvePaths();
+        // appsettings는 한 번만 읽어 modes 경로 결정 · 해시 · 편집 트리 · 에이전트 목록이 모두 같은 시점의 내용이 되게 한다
+        var settingsPath = SettingsPath();
+        var settingsBytes = settingsPath is null ? null : File.ReadAllBytes(settingsPath);
+        var (modesPath, modesSource) = ResolvePaths(settingsBytes);
         var bytes = File.ReadAllBytes(modesPath);
         // File.ReadAllText와 같은 디코딩 (UTF-8 기본, BOM 따름). 해시와 내용이 같은 시점의 파일이 되도록 한 번만 읽는다.
         string text;
@@ -248,10 +258,8 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
         var settingsStamp = "";
         var settingsHasComments = false;
 
-        if (settingsPath is not null)
+        if (settingsBytes is not null)
         {
-            // 한 번만 읽어 해시 · 편집용 트리 · 에이전트 목록이 같은 시점의 내용이 되게 한다 (modes.json과 같은 방식, /cross-review 9d03bc8d2b).
-            var settingsBytes = File.ReadAllBytes(settingsPath);
             string settingsText;
             using (var reader = new StreamReader(new MemoryStream(settingsBytes), Encoding.UTF8, detectEncodingFromByteOrderMarks: true))
                 settingsText = reader.ReadToEnd();

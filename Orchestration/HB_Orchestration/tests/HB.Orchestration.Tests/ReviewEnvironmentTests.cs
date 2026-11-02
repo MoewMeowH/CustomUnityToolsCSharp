@@ -119,6 +119,7 @@ public sealed class ReviewEnvironmentTests
             foreach (var a in new[] { "init", "-q" }) psi.ArgumentList.Add(a);
             using var p = System.Diagnostics.Process.Start(psi)!;
             p.WaitForExit();
+            if (p.ExitCode != 0) throw new InvalidOperationException($"git init 실패 (종료 코드 {p.ExitCode})");
         }
         public void Dispose() => Directory.Delete(Base, true);
     }

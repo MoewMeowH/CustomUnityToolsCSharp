@@ -104,6 +104,8 @@ public sealed class CodexCliChatClient(CodexCliSettings settings, ClaudeCliRunne
         "USERNAME", "USERDOMAIN", "COMPUTERNAME", "OS", "NUMBER_OF_PROCESSORS",
         "PROCESSOR_ARCHITECTURE", "PROCESSOR_IDENTIFIER", "PROCESSOR_LEVEL", "PROCESSOR_REVISION", "PSModulePath", "DriverData",
         "LANG", "LC_ALL", "TERM", "NO_COLOR", "CODEX_HOME",
+        // 자료 서버의 git 목록이 사본과 같은 전역 무시 규칙($XDG_CONFIG_HOME/git/ignore)을 쓰게 (3e02602ff0 F1)
+        "XDG_CONFIG_HOME",
         "DOTNET_ROOT", "DOTNET_ROOT_X64", "DOTNET_ROOT_X86", "DOTNET_ROOT_ARM64",
         "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "SSL_CERT_FILE", "SSL_CERT_DIR",
     };
