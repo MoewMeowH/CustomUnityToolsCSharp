@@ -4,9 +4,10 @@
         [--path <대상 폴더>]... [--mode auto|code|text] [--diff review_tmp/<날짜>_<주제>.diff]
   → 사본을 만들고 요약을 낸다. 실패(git 없음 · 상한 넘음 · 출력 폴더 문제 · 복사 오류)면 이유를 내고 exit 1 — 그때는 고른 파일로 리뷰한다.
 
-- 복사: `git ls-files`(추적 + intent-to-add)의 지금 작업 트리 내용. --path가 있으면 그 폴더 아래만 (프로젝트가 여럿인 저장소).
+- 복사: `git ls-files --cached --others --exclude-standard`(추적 + intent-to-add + .gitignore 밖 새 파일)의 지금 작업 트리 내용
+  — 서버 사본(ReviewWorkFolder)과 같은 범위. --path가 있으면 그 폴더 아래만 (프로젝트가 여럿인 저장소).
   사본 경로는 git 최상위 기준이다 (diff와 같은 기준 — --root가 하위 폴더여도).
-- 빼는 것 (독립성 · 지시): 지휘자 지시 · 실수 · 프로젝트 규칙 파일, .claude · .codex · .agents, 리뷰 임시 폴더, 계획서 · 작업 로그, .mcp*.json.
+- 빼는 것 (독립성 · 지시): 지휘자 지시 · 실수 · 프로젝트 규칙 파일, .claude · .codex · .agents, 리뷰 임시 폴더, 계획서 · 작업 로그 · 작업 지시서, .mcp*.json.
   git 기록(.git)은 애초에 복사하지 않는다 (커밋 메시지에 결론이 들어간다).
 - 빼는 것 (안전 · 크기): 비밀 모양 이름(서버 BuiltInDenyPatterns와 같은 목록 + α), 링크 · junction(경로 중간 포함), 2MB 넘는 파일,
   이진(앞 8KB에 NUL), 지워진 파일.
@@ -31,14 +32,16 @@ MAX_FILE = 2_000_000
 SKIP_NAMES = {'claude.md', 'claude.local.md', 'mistakes.md', 'project.md', 'agents.md', 'agents.override.md'}
 # 독립성 · 지시: 경로 조각 (폴더 이름)
 SKIP_DIRS = {'.claude', '.codex', '.agents', '.git', 'review_tmp', 'subagent_in'}
-# 계획서 · 작업 로그 (docs/plans/… · docs/worklog/… · docs/worklog.md — 다른 저장소는 추적할 수 있다)
-SKIP_DOCS = re.compile(r'(^|/)docs/(plans|worklog)(/|$)|(^|/)docs/worklog\.md$', re.IGNORECASE)
-# 비밀 모양 이름 — 서버 OrchestrationOptions.BuiltInDenyPatterns와 같은 목록 + MCP 설정 · 로컬 설정 · 서명 키
+# 계획서 · 작업 로그 · /work-order 지시서 기본 폴더 (docs/plans/… · docs/worklog/… · docs/worklog.md · docs/work-orders/… — 다른 저장소는 추적할 수 있다)
+SKIP_DOCS = re.compile(r'(^|/)docs/(plans|worklog|work-orders)(/|$)|(^|/)docs/worklog\.md$', re.IGNORECASE)
+# 비밀 모양 이름 — 서버 BuiltInDenyPatterns · BuiltInRepoCopyDenyPatterns와 같은 목록 + 로컬 설정 · 서명 키
 SECRET = re.compile(
     r'(^|/)('
-    r'\.env|\.env\.[^/]*|[^/]*\.(pem|key|p8|p12|pfx|keystore|jks|mobileprovision|provisionprofile|snk)'
+    r'\.env|\.env\.[^/]*|[^/]*\.(pem|key|p8|p12|pfx|keystore|jks|mobileprovision|provisionprofile|snk|ppk|har|log)'
     r'|credentials([._-][^/]*)?|secrets([._-][^/]*)?'  # 대소문자 무시라 secrets*로 두면 SecretStore.cs도 걸린다
-    r'|\.mcp[^/]*\.json|appsettings\.local\.json|id_(rsa|ed25519|ecdsa)[^/]*'
+    r'|\.mcp[^/]*\.json(\.[^/]*)?|appsettings\.local\.json|id_(rsa|dsa|ed25519|ecdsa)[^/]*'
+    # .gitignore 밖 새 파일까지 복사하므로 흔한 자격 증명 · 상태 파일 이름도 뺀다
+    r'|\.npmrc|\.netrc|_netrc|\.git-credentials|[^/]*\.tfstate(\.[^/]*)?'
     r')$',
     re.IGNORECASE)
 # code 모드 확장자 (유니티 · 일반 소스 · 빌드 설정)
@@ -72,9 +75,9 @@ def run_git(git, root, *args):
 
 
 def tracked(git, root, paths):
-    """대상 폴더 아래 추적 파일 (git 최상위 기준 경로, '/' 구분)."""
-    out = run_git(git, root, 'ls-files', '-z', '--cached', '--full-name', '--', *(paths or ['.']))
-    return [p for p in out.decode('utf-8').split('\0') if p]
+    """대상 폴더 아래 추적 파일 + .gitignore 밖 새 파일 (git 최상위 기준 경로, '/' 구분, 같은 경로는 한 번)."""
+    out = run_git(git, root, 'ls-files', '-z', '--cached', '--others', '--exclude-standard', '--full-name', '--', *(paths or ['.']))
+    return list(dict.fromkeys(p for p in out.decode('utf-8').split('\0') if p))
 
 
 def unquote_c(s):

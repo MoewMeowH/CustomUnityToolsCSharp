@@ -58,6 +58,8 @@ try:
         'subagent_in/old/a.cs': 'o', 'docs/plans/p.md': 'plan', 'docs/worklog/w.md': 'log', 'docs/worklog.md': 'idx',
         'docs/README.md': 'keep', '.mcp.json': '{}', 'appsettings.local.json': '{}', 'cert.pfx': 'k', '.env': 'K=1',
         'credentials.json': '{}', 'secrets.yaml': 'k', 'Android.keystore': 'k',
+        'docs/work-orders/w.md': 'order', '.mcp.json.bak-1': '{}', 'id_dsa': 'k', 'k.ppk': 'k', '.npmrc': 'k', '.netrc': 'k',
+        '.git-credentials': 'k', 'tf.tfstate': '{}', 'a.har': '{}', 'run.log': 'l',
         'big.txt': 'y' * (sct.MAX_FILE + 1), 'img.png': b'\x89PNG\x00\x01', 'gone.cs': 'x',
         'lnk/L.cs': 'class L {}',
         # 유니티 (저장소 하위 폴더)
@@ -76,7 +78,10 @@ try:
     os.remove(os.path.join(repo, 'gone.cs'))                  # 지워진 추적 파일
     write(repo, 'src/New.cs', 'class N {}')
     git(repo, 'add', '-N', 'src/New.cs')                       # intent-to-add
-    write(repo, 'untracked.cs', 'x')                           # 추적 밖
+    write(repo, 'untracked.cs', 'x')                           # 추적 밖 · .gitignore 밖 새 파일 → 넣는다
+    with open(os.path.join(repo, '.git', 'info', 'exclude'), 'w', encoding='utf-8') as f:
+        f.write('ignored/\n')
+    write(repo, 'ignored/I.cs', 'x')                           # .gitignore 대상 → 뺀다
 
     # 폴더 junction (Windows만): 추적 폴더 lnk/를 밖 폴더로 바꿔 둔다
     junction = False
@@ -91,12 +96,14 @@ try:
     summary = sct.copy(repo, out, [], 'text', None)
     have = lambda rel: os.path.isfile(os.path.join(out, *rel.split('/')))  # noqa: E731
     check('text: 코드 · 글 복사', have('src/A.cs') and have('src/B.txt') and have('docs/README.md'))
-    check('intent-to-add 포함, 추적 밖 · 지워진 파일 없음', have('src/New.cs') and not have('untracked.cs') and not have('gone.cs'))
+    check('intent-to-add · 새 파일 포함, 무시 파일 · 지워진 파일 없음',
+          have('src/New.cs') and have('untracked.cs') and not have('ignored/I.cs') and not have('gone.cs'))
     check('독립성 파일 뺌', not any(have(r) for r in ['CLAUDE.md', 'sub/CLAUDE.md', 'MISTAKES.md', 'PROJECT.md', 'AGENTS.md',
                                                   '.claude/x.md', '.codex/config.toml', 'review_tmp/a.diff', 'subagent_in/old/a.cs',
-                                                  'docs/plans/p.md', 'docs/worklog/w.md', 'docs/worklog.md']))
+                                                  'docs/plans/p.md', 'docs/worklog/w.md', 'docs/worklog.md', 'docs/work-orders/w.md']))
     check('비밀 모양 뺌', not any(have(r) for r in ['.mcp.json', 'appsettings.local.json', 'cert.pfx', '.env', 'credentials.json',
-                                                 'secrets.yaml', 'Android.keystore']))
+                                                 'secrets.yaml', 'Android.keystore', '.mcp.json.bak-1', 'id_dsa', 'k.ppk', '.npmrc',
+                                                 '.netrc', '.git-credentials', 'tf.tfstate', 'a.har', 'run.log']))
     check('이름에 secret이 든 코드는 넣음', have('src/SecretStore.cs'))
     check('큰 파일 · 이진 뺌', not have('big.txt') and not have('img.png'))
     check('.git 없음', not os.path.exists(os.path.join(out, '.git')))
