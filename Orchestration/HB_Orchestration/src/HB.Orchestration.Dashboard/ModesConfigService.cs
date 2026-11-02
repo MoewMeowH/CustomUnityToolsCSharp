@@ -157,8 +157,8 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
         return settings is not null && File.Exists(settings) ? settings : null;
     }
 
-    /// <param name="settingsBytes">Load가 이미 읽은 appsettings 바이트 — 경로 결정도 같은 시점의 내용으로 (따로 다시 읽지 않는다).</param>
-    private (string ModesPath, string ModesSource) ResolvePaths(byte[]? settingsBytes)
+    /// <param name="mcpOptions">Load가 한 번 읽어 푼 appsettings — 경로 결정도 같은 시점의 내용으로 (따로 다시 읽지 않는다).</param>
+    private (string ModesPath, string ModesSource) ResolvePaths(OrchestrationOptions? mcpOptions)
     {
         var dir = McpConfigDir;
 
@@ -172,7 +172,7 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
 
         // 그 밖에는 MCP 서버와 같은 찾는 순서 (ModesPathResolver). 대시보드에는 세션 폴더가 없어 hb-modes.json은 보지 않는다.
         // 설정 ModesPath의 상대 경로는 공용 함수가 서버 폴더(= McpConfigDir) 기준으로 푼다 (서버와 같음).
-        var configured = settingsBytes is null ? null : ReadMcpOptions(settingsBytes)?.ModesPath;
+        var configured = mcpOptions?.ModesPath;
 
         // 지정 경로(appsettings ModesPath · HB_MODES_PATH)에 파일이 없으면 서버처럼 오류다 (다음 후보로 넘어가지 않음).
         var found = ModesPathResolver.Resolve(configured, environment(ModesPathResolver.EnvVar), cwd: null, serverDir: dir);
@@ -212,12 +212,22 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
         return config.GetSection("Orchestration").Get<OrchestrationOptions>();
     }
 
-    /// <summary>이미 읽은 바이트에서 — 해시 · 편집용 트리와 같은 시점의 내용으로 에이전트 목록을 만든다.</summary>
+    /// <summary>
+    /// 이미 읽은 바이트에서 — 해시 · 편집용 트리와 같은 시점의 내용으로 에이전트 목록을 만든다.
+    /// 깨진 JSON은 화면이 받는 ModesConfigException으로 (그대로 두면 처리 안 된 예외 = 500, 556a41088d C6).
+    /// </summary>
     private static OrchestrationOptions? ReadMcpOptions(byte[] settingsBytes)
     {
-        using var stream = new MemoryStream(settingsBytes, writable: false);
-        var config = new ConfigurationBuilder().AddJsonStream(stream).Build();
-        return config.GetSection("Orchestration").Get<OrchestrationOptions>();
+        try
+        {
+            using var stream = new MemoryStream(settingsBytes, writable: false);
+            var config = new ConfigurationBuilder().AddJsonStream(stream).Build();
+            return config.GetSection("Orchestration").Get<OrchestrationOptions>();
+        }
+        catch (Exception ex) when (ex is FormatException or InvalidDataException or InvalidOperationException)
+        {
+            throw new ModesConfigException($"MCP appsettings.json을 읽지 못했습니다: {ex.Message}");
+        }
     }
 
     // ── 읽기 ────────────────────────────────────────────────────────────────
@@ -227,7 +237,8 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
         // appsettings는 한 번만 읽어 modes 경로 결정 · 해시 · 편집 트리 · 에이전트 목록이 모두 같은 시점의 내용이 되게 한다
         var settingsPath = SettingsPath();
         var settingsBytes = settingsPath is null ? null : File.ReadAllBytes(settingsPath);
-        var (modesPath, modesSource) = ResolvePaths(settingsBytes);
+        var mcpOptions = settingsBytes is null ? null : ReadMcpOptions(settingsBytes);
+        var (modesPath, modesSource) = ResolvePaths(mcpOptions);
         var bytes = File.ReadAllBytes(modesPath);
         // File.ReadAllText와 같은 디코딩 (UTF-8 기본, BOM 따름). 해시와 내용이 같은 시점의 파일이 되도록 한 번만 읽는다.
         string text;
@@ -275,7 +286,7 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
             settingsStamp = HB.Orchestration.Shared.BlobStore.Sha256Hex(settingsBytes);
             settingsHasComments = ContainsComments(settingsText);
 
-            if (ReadMcpOptions(settingsBytes) is { } mcp)
+            if (mcpOptions is { } mcp)
             {
                 foreach (var a in mcp.Agents)
                     agents.Add(new AgentInfo(a.Name, a.Provider, a.Model, a.MaxOutputTokens, a.Enabled, a.TimeoutSeconds, a.Vision, a.ReasoningEffort));

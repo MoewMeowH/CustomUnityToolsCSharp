@@ -130,10 +130,28 @@ public sealed class CodexCliTests : IDisposable
     }
 
     [Fact]
-    public void Codex_child_keeps_xdg_config_home_for_the_evidence_server_git()   // 자료 서버 git 목록도 사본과 같은 전역 무시 규칙 (3e02602ff0 F1)
+    public void Original_evidence_server_gets_xdg_config_home_without_widening_codex_env()   // 자료 서버 git 목록도 사본과 같은 전역 무시 규칙 (3e02602ff0 F1 · 556a41088d C2 · C3)
     {
-        Assert.Contains("XDG_CONFIG_HOME", CodexCliChatClient.KeptEnvironment);
-        Assert.False(CodexCliChatClient.ChildEnvironment(["XDG_CONFIG_HOME"], npmMarker: false).ContainsKey("XDG_CONFIG_HOME"));
+        Assert.DoesNotContain("XDG_CONFIG_HOME", CodexCliChatClient.KeptEnvironment);   // Codex 본 실행 · 셸 환경은 그대로
+        var old = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
+        var xdg = Path.Combine(_dir, "xdg \"cfg\"");
+        Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", xdg);
+        try
+        {
+            var host = Path.Combine(_dir, "HB.Orchestration.Mcp.exe");
+            var original = CodexCliChatClient.Arguments(Settings, null, "", _dir, null, host, new ReviewEvidenceSource(Path.Combine(_dir, "original"), []));
+            Assert.Contains("mcp_servers.hb_evidence.env={ XDG_CONFIG_HOME = " + CodexCliChatClient.TomlString(xdg) + " }", original);
+            var snapshot = CodexCliChatClient.Arguments(Settings, null, "", _dir, null, host);
+            Assert.DoesNotContain(snapshot, a => a.StartsWith("mcp_servers.hb_evidence.env=", StringComparison.Ordinal));
+        }
+        finally { Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", old); }
+    }
+
+    [Fact]
+    public void Executable_policy_treats_paths_under_a_drive_root_as_inside()   // 드라이브 루트 저장소에서 루트 안 git.exe를 고르지 않게 (556a41088d C1)
+    {
+        var drive = Path.GetPathRoot(_dir)!;
+        Assert.False(ReviewExecutablePolicy.Allowed(_dir, drive, directory: true));
     }
 
     [Fact]

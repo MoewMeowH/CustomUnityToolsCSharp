@@ -104,8 +104,6 @@ public sealed class CodexCliChatClient(CodexCliSettings settings, ClaudeCliRunne
         "USERNAME", "USERDOMAIN", "COMPUTERNAME", "OS", "NUMBER_OF_PROCESSORS",
         "PROCESSOR_ARCHITECTURE", "PROCESSOR_IDENTIFIER", "PROCESSOR_LEVEL", "PROCESSOR_REVISION", "PSModulePath", "DriverData",
         "LANG", "LC_ALL", "TERM", "NO_COLOR", "CODEX_HOME",
-        // 자료 서버의 git 목록이 사본과 같은 전역 무시 규칙($XDG_CONFIG_HOME/git/ignore)을 쓰게 (3e02602ff0 F1)
-        "XDG_CONFIG_HOME",
         "DOTNET_ROOT", "DOTNET_ROOT_X64", "DOTNET_ROOT_X86", "DOTNET_ROOT_ARM64",
         "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "SSL_CERT_FILE", "SSL_CERT_DIR",
     };
@@ -254,6 +252,10 @@ public sealed class CodexCliChatClient(CodexCliSettings settings, ClaudeCliRunne
                 "-c", "mcp_servers.hb_evidence.required=true",
                 // 원본 모드는 시작 때 git 목록(최대 30초) · 파일 검사를 한다 — 그보다 넉넉히 (/self-review a9ebd62541 C2)
                 "-c", "mcp_servers.hb_evidence.startup_timeout_sec=60"]);
+            // Codex는 MCP 서버를 기본 허용 목록 환경으로 띄운다 — 원본 모드 git 목록이 사본과 같은 전역 무시 규칙을 쓰도록
+            // XDG_CONFIG_HOME만 그 서버에 직접 넘긴다 (Codex 본 실행 · 셸 환경은 넓히지 않음, 556a41088d C2 · C3).
+            if (evidenceSource is not null && Environment.GetEnvironmentVariable(ReviewWorkFolder.XdgConfigHome) is { Length: > 0 } xdg)
+                args.AddRange(["-c", $"mcp_servers.hb_evidence.env={{ {ReviewWorkFolder.XdgConfigHome} = {TomlString(xdg)} }}"]);
         }
         if (ClaudeCliChatClient.EffortName(effort) is { } e) args.AddRange(["-c", "model_reasoning_effort=" + TomlString(e)]);
         if (!string.IsNullOrWhiteSpace(system)) args.AddRange(["-c", "developer_instructions=" + TomlString(system)]);

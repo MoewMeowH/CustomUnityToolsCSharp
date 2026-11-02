@@ -16,7 +16,8 @@ internal static class ReviewExecutablePolicy
             var full = Path.GetFullPath(path);
             var dir = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
             var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-            if (full.Equals(dir, comparison) || full.StartsWith(dir + Path.DirectorySeparatorChar, comparison)) return false;
+            // 드라이브 루트(F:\)는 trim해도 구분자로 끝난다 — 하나 더 붙이면 모든 경로가 "루트 밖"이 된다 (556a41088d C1)
+            if (full.Equals(dir, comparison) || full.StartsWith(ReviewWorkFolder.RootPrefix(dir), comparison)) return false;
             if (directory ? !Directory.Exists(full) : !File.Exists(full)) return false;
             // 최종 파일뿐 아니라 PATH 디렉터리의 상위 junction/symlink도 거절한다.
             for (FileSystemInfo? item = directory ? new DirectoryInfo(full) : new FileInfo(full); item is not null;

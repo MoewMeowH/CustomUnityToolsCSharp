@@ -359,10 +359,13 @@ public static class ReviewWorkFolder
         }
     }
 
-    /// <summary>루트(제외)부터 dir까지 링크 · junction이 없는지. 폴더마다 한 번만 본다.</summary>
+    /// <summary>git 전역 무시 파일 위치를 정하는 변수 — 사본 · 자료 서버의 git 목록이 같은 규칙을 쓰게 남긴다.</summary>
+    internal const string XdgConfigHome = "XDG_CONFIG_HOME";
+
     /// <summary>루트 안 경로인지 볼 접두사 — 드라이브 루트(F:\)처럼 이미 구분자로 끝나면 하나 더 붙이지 않는다 (3e02602ff0 F2).</summary>
     internal static string RootPrefix(string root) => Path.EndsInDirectorySeparator(root) ? root : root + Path.DirectorySeparatorChar;
 
+    /// <summary>루트(제외)부터 dir까지 링크 · junction이 없는지. 폴더마다 한 번만 본다.</summary>
     internal static bool NoLinkBetween(string root, string dir, Dictionary<string, bool> cache)
     {
         if (string.Equals(Path.TrimEndingDirectorySeparator(dir), Path.TrimEndingDirectorySeparator(root), StringComparison.OrdinalIgnoreCase)) return true;
@@ -399,9 +402,10 @@ public static class ReviewWorkFolder
         // fsmonitor 끔: 리뷰 대상 .git/config의 core.fsmonitor 명령이 실행되지 않게. 환경도 Codex 자식과 같이 정리 (/cross-review e37c6e41c9 C4).
         // 목록 = 추적 파일 + .gitignore 밖 새 파일 — 새로 만든 파일은 보이고 무시 파일(개인 설정 · 산출물 · 사내 자료)은 빠진다 (/cross-review 9d03bc8d2b, 사용자 결정).
         foreach (var a in new[] { "-c", "core.fsmonitor=false", "-c", "core.quotepath=off", "ls-files", "-z", "--cached", "--others", "--exclude-standard" }) psi.ArgumentList.Add(a);
-        // KeptEnvironment에 XDG_CONFIG_HOME이 있어 전역 무시 파일($XDG_CONFIG_HOME/git/ignore)이 사본 · 자료 서버 양쪽에 같이 적용된다.
+        // XDG_CONFIG_HOME은 남긴다 — 목록 범위가 무시 규칙으로 정해지므로 전역 무시 파일($XDG_CONFIG_HOME/git/ignore)이 빠지면 안 된다.
+        // 자료 서버에는 Codex가 MCP 서버 env로 이 값을 넘긴다 (CodexCliChatClient.Arguments).
         foreach (var (k, v) in Providers.CodexCliChatClient.ChildEnvironment(npmMarker: false))
-            if (v is null) psi.Environment.Remove(k);
+            if (v is null && !k.Equals(XdgConfigHome, StringComparison.OrdinalIgnoreCase)) psi.Environment.Remove(k);
         return psi;
     }
 

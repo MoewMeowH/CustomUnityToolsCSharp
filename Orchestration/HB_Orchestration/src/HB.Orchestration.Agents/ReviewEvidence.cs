@@ -110,7 +110,8 @@ public sealed partial class ReviewEvidence
             {
                 var full = Path.GetFullPath(Path.Combine(_root, relative));
                 if (!full.StartsWith(ReviewWorkFolder.RootPrefix(_root), StringComparison.OrdinalIgnoreCase)) return;
-                // FileInfo.Exists는 권한 오류도 false로 숨긴다 — 속성을 직접 읽어 '없음'(지워진 추적 파일)과 '못 읽음'을 가른다 (3e02602ff0 F3)
+                // FileInfo.Exists는 오류도 false로 숨긴다 — 속성을 직접 읽어 '없음'(지워진 추적 파일)과 '속성을 못 읽음'(부모 폴더 접근 거부 등)을 가른다 (3e02602ff0 F3).
+                // 파일 자체의 읽기 거부는 속성 조회가 통과하므로 여기서 안 걸리고 읽는 때 오류 응답이 된다 (556a41088d C5).
                 FileAttributes attr;
                 try { attr = File.GetAttributes(full); }
                 catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException) { return; }
