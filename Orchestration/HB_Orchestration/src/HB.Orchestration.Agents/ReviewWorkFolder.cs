@@ -337,7 +337,9 @@ public static class ReviewWorkFolder
         for (var i = 0; i + 1 < parts.Length; i++)
             if (parts[i].Equals("docs", StringComparison.OrdinalIgnoreCase)
                 && (parts[i + 1].Equals("plans", StringComparison.OrdinalIgnoreCase) || parts[i + 1].Equals("worklog", StringComparison.OrdinalIgnoreCase)
-                    || parts[i + 1].Equals("worklog.md", StringComparison.OrdinalIgnoreCase)))
+                    || parts[i + 1].Equals("worklog.md", StringComparison.OrdinalIgnoreCase)
+                    // /work-order 지시서 기본 폴더 — 계획 원문이라 리뷰어가 "계획대로인가"로 쏠린다 (설정 폴더 WorkOrders.Folder는 아직 안 뺌)
+                    || parts[i + 1].Equals("work-orders", StringComparison.OrdinalIgnoreCase)))
                 return true;
         return false;
     }

@@ -746,6 +746,8 @@ public sealed class CodexCliTests : IDisposable
     [InlineData("a/.Claude/x.json", true)]
     [InlineData("Orchestration/x/docs/plans/p.md", true)]
     [InlineData("docs/WORKLOG.md", true)]
+    [InlineData("docs/work-orders/2026-11-03_x.md", true)]
+    [InlineData("Proj/docs/Work-Orders/a.md", true)]
     [InlineData("review_tmp/a.diff", true)]
     [InlineData("docs/guide.md", false)]
     [InlineData("plans/p.md", false)]
