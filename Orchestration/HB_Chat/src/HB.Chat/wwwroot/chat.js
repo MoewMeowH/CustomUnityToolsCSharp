@@ -1136,6 +1136,8 @@
         // 진행 중 턴: 보낸 말(흐리게) + 지휘자 말풍선(입력 중 점 → 흘림 글, 위에 도구 칩) + 승인 카드 · 거절 줄.
         // 흘림 글은 글자 그대로이고, 끝나면 세션 기록의 말풍선으로 바뀐다. 기다리는 말은 입력칸 위 목록(#queue, 2-2 d).
         let stream = null, chips = null;
+        let liveRunTurn = 0; // 턴 끝 · 다시 붙기마다 올린다 — 그 전에 시작한 외부 말풍선 받기는 진행 칸에 붙이지 않는다 (loadLiveRuns)
+        let runsReloadPending = false; // 기록 쪽에 없는 외부 말풍선이 있어 쪽을 다시 받아야 함 — 턴 도중 · 검색 보이기 중이면 다음 턴 끝까지 미룬다
         // 나 · 지휘자 프로필 (3차 e): 서버가 data-profiles로 준 이름 · 글자 · 색 · 그림 (없으면 기본)
         const profiles = (() => { try { return JSON.parse(root.dataset.profiles || "{}"); } catch { return {}; } })();
         function avatar(p, fallback) {
@@ -1389,35 +1391,47 @@
         }
         // 턴 도중 새 말 받기(방 이름 바꾸기 등)가 외부 말풍선을 대화 쪽에 다시 그렸으면 진행 칸의 같은 말풍선은 지운다 — 두 번 보이지 않게 (6b6443f26e C1)
         function dropShownLiveRuns() {
-            const chat = chatEl();
-            if (!chat) return;
-            live.querySelectorAll(":scope > .live-run").forEach(n => {
-                const key = n.dataset.runKey;
-                if (key && chat.querySelector('[data-run-key="' + CSS.escape(key) + '"]')) n.remove();
-            });
+            live.querySelectorAll(":scope > .live-run").forEach(n => { if (runInChat(n.dataset.runKey)) n.remove(); });
         }
+        const runInChat = key => !!key && !!chatEl()?.querySelector('[data-run-key="' + CSS.escape(key) + '"]');
         // 턴 도중 외부 에이전트 말풍선 (runs 알림): 화면이 그린 마지막 줄 뒤의 실행 말풍선을 받아 아직 없는 것만 진행 칸에 붙인다.
         // 호출 기록 · 세션 기록이 알림보다 늦게 써질 수 있어 새 것이 없으면 조금 뒤 다시 받는다. 턴 끝에는 기록 제자리 말풍선으로 바뀌어 지운다.
         // 알림 차례(chain)를 막지 않게 기다리지 않고 부른다 — 겹쳐 받아도 붙이기 직전에 같은 키를 다시 본다.
+        // 턴이 끝난 뒤(liveRunTurn이 바뀜) 늦게 온 말풍선은 진행 칸에 붙이지 않는다 — 턴 끝 지우기가 지나 다음 턴까지 남는다.
+        // 턴 끝 새 말 받기가 제자리에 넣지 못한 것(호출 기록이 늦게 써짐 · 이미 그린 말 앞 자리)이면 쪽을 다시 받아 제자리에 보인다.
         async function loadLiveRuns(tries) {
-            for (let i = 0; i < tries && !disposed; i++) {
+            const turn = liveRunTurn;
+            // 받기를 시작할 때 그린 마지막 줄 — 턴 끝 새 말 받기가 줄을 넘긴 뒤에도 이 턴 말풍선을 묻는다 (같은 키 검사로 두 번 붙지 않음)
+            const after = chatEl()?.dataset.lastLine ?? "-1";
+            for (let i = 0; i < tries && !disposed; i++) { // 턴이 끝나도 남은 횟수는 받는다 — 늦게 써진 호출 기록을 제자리에 보이려고
                 if (i > 0) await new Promise(r => setTimeout(r, 1500));
                 try {
-                    const chat = chatEl();
-                    const res = await fetch(self + "?handler=Runs&after=" + encodeURIComponent(chat?.dataset.lastLine ?? "-1"), { cache: "no-store" });
+                    const res = await fetch(self + "?handler=Runs&after=" + encodeURIComponent(after), { cache: "no-store" });
                     if (!res.ok || disposed) return;
                     const tmp = document.createElement("div");
                     tmp.innerHTML = await res.text();
                     const box = tmp.querySelector(".live-runs");
                     if (!box) return;
+                    const unseen = key => key && !document.querySelector('[data-run-key="' + CSS.escape(key) + '"]');
+                    if (turn !== liveRunTurn) {
+                        const keys = [...box.children].map(n => n.dataset.runKey).filter(unseen);
+                        // 알림 차례 뒤에서 다시 본다 — 턴 끝 새 말 받기가 그사이 제자리에 넣었으면 다시 받지 않는다.
+                        // 다음 턴이 도는 중이면 쪽을 바꾸지 않는다 — 그 턴의 보낸 말 · 외부 말풍선이 기록 쪽에 먼저 그려진다 (8f79e1752f C2). 다음 턴 끝에 받는다
+                        if (!keys.length) continue;
+                        chain = chain.then(async () => {
+                            if (disposed || !keys.some(unseen)) return;
+                            if (stream || revealing) { runsReloadPending = true; return; }
+                            if (!await reloadMessages(atBottom())) runsReloadPending = true; // 실패해도 다음 턴 끝에 다시 (C4)
+                        }).catch(() => { });
+                        return;
+                    }
                     decorate(box);
                     const follow = atBottom();
                     let added = 0;
                     // 글 없이 '입력 중'만 있는 지휘자 말풍선이 맨 아래면 그 앞에 — 기다림 표시가 외부 말풍선 위에 남지 않게 (6b6443f26e C4, addNarration과 같음)
                     const typingMsg = stream?.dataset.empty && chips?.hidden ? stream.closest(".msg") : null; // 칩(부른 도구)이 있으면 그 아래에 그대로
                     for (const node of [...box.children]) {
-                        const key = node.dataset.runKey;
-                        if (!key || document.querySelector('[data-run-key="' + CSS.escape(key) + '"]')) continue;
+                        if (!unseen(node.dataset.runKey)) continue;
                         node.classList.add("live-run");
                         if (typingMsg?.parentElement === live) live.insertBefore(node, typingMsg); else live.append(node);
                         added++;
@@ -1955,6 +1969,7 @@
                     // 처음 붙거나 다시 붙을 때: 그사이 끝난 턴이 있을 수 있으니 새 말부터 받는다 (0a3b1d5155 C3).
                     // 끊긴 사이 다른 방이 바뀌었을 수도 있어 목록도 다시 받는다.
                     scheduleList();
+                    liveRunTurn++;
                     await refreshMessages();
                     cards.forEach(c => c.remove()); cards.clear(); // 기다리는 카드는 snapshot 뒤 approval로 다시 온다
                     if (ev.busy) { startTurn(ev.prompt, ev.text, ev.pendingItems); loadLiveRuns(1); } // 다시 붙었을 때 이번 턴에 이미 온 외부 말풍선
@@ -2065,16 +2080,26 @@
                     notice.textContent = ev.text; notice.hidden = false;
                     break;
                 case "end": {
+                    liveRunTurn++; // 이 턴의 외부 말풍선 받기가 늦게 와도 진행 칸에 붙이지 않는다
                     loadCommands(); // 이번 실행의 init이 명령 목록을 새로 알려 줬을 수 있다 (Claude 앱 기능 A)
                     // 이 턴의 말은 세션 기록으로 다시 그린다. 다시 받지 못하면 진행 중 말풍선을 남겨 둔다 (지휘자 검토 R7).
                     // 실패 · 중지면 이유를 한 줄 남긴다.
-                    const refreshed = await refreshMessages();
+                    let refreshed = await refreshMessages();
+                    // 진행 칸 외부 말풍선이 기록 쪽에 다시 그려지지 않았으면(턴 도중 새 말 받기가 그 자리를 지나침 · 늦은 받기가 미뤄 둠) 쪽을 다시 받는다 —
+                    // 그대로 지우면 새로고침 전까지 사라진다 (8f79e1752f C1). 검색 보이기 중이면 다음 턴 끝으로 미루고 그 말풍선은 남긴다 (C3)
+                    if (refreshed && (runsReloadPending || [...live.querySelectorAll(":scope > .live-run")].some(n => !runInChat(n.dataset.runKey)))) {
+                        if (revealing) runsReloadPending = true;
+                        else { runsReloadPending = false; refreshed = await reloadMessages(atBottom()); if (!refreshed) runsReloadPending = true; }
+                    }
                     // 보내지 못한 말은 남김 (C2). 질문 답 말풍선은 세션 기록의 것으로 바뀌므로 지운다 (4차 D1).
                     // 답하지 않은 질문 줄(q-done)은 성공으로 끝난 턴에서만 — 중지 · 실패면 기록에 결과 줄이 없을 수 있어 남긴다 (e8091295fe C4)
                     // 승인 결과 줄 · 백그라운드 명령 진행 줄도 지운다 — 기록 속 제자리에 방 기록 줄 · 백그라운드 알림 줄로 다시 그려졌다.
                     // 서브에이전트 진행 줄은 기록에 같은 줄이 없어 다음 턴까지 둔다 (/self-review e464ec29ba 자료 부족)
-                    // 턴 도중 붙인 외부 에이전트 말풍선(.live-run)도 — 기록 제자리에 다시 그려졌다
-                    if (refreshed) live.querySelectorAll(":scope > .msg:not(.failed), :scope > .live-run, :scope > .approval-line, :scope > .agent-line[data-kind=\"local_bash\"]" + (ev.ok ? ", :scope > .q-done" : "")).forEach(m => m.remove());
+                    // 턴 도중 붙인 외부 에이전트 말풍선(.live-run)도 — 기록 제자리에 다시 그려졌다 (다시 받기를 미뤘으면 기록 쪽에 없는 것은 남긴다)
+                    if (refreshed) {
+                        live.querySelectorAll(":scope > .msg:not(.failed), :scope > .approval-line, :scope > .agent-line[data-kind=\"local_bash\"]" + (ev.ok ? ", :scope > .q-done" : "")).forEach(m => m.remove());
+                        live.querySelectorAll(":scope > .live-run").forEach(n => { if (!runsReloadPending || runInChat(n.dataset.runKey)) n.remove(); });
+                    }
                     else live.prepend(el("div", "live-line denied", "말풍선을 다시 받지 못했습니다 — 새로고침하면 보입니다."));
                     stream = null; chips = null;
                     clearBackground();

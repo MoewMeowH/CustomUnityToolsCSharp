@@ -126,6 +126,24 @@ switch ($mode) {
         $d = Ask 'req_hold' '{"subtype":"can_use_tool","tool_name":"Bash","display_name":"Bash","input":{"command":"echo hold"},"tool_use_id":"toolu_hold"}'
         Finish $d 'Bash' 'reviewed'
     }
+    'runlate' {
+        # external bubble whose call record is written after the turn ends (screen test): run_mode result + a conductor line, then the turn ends at once.
+        # The test writes the call record afterwards; the late retry must show it in place, not in the live pane.
+        $utf8 = New-Object Text.UTF8Encoding $false
+        $now = [DateTime]::UtcNow
+        $stamp = { param($i) $now.AddMilliseconds($i).ToString('o') }
+        $sidPart = '"sessionId":"' + $Sid + '",'
+        $use = '{"type":"assistant",' + $sidPart + '"timestamp":"' + (& $stamp 1) + '","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_late1","name":"mcp__hb-orchestration__run_mode","input":{"mode":"review_main"}}]}}'
+        $res = '{"type":"user",' + $sidPart + '"timestamp":"' + (& $stamp 2) + '","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_late1","content":"runId: 0f0e0d0c0b\n### 1. Reviewer"}]}}'
+        $text = '{"type":"assistant",' + $sidPart + '"timestamp":"' + (& $stamp 3) + '","message":{"role":"assistant","content":[{"type":"text","text":"after review"}]}}'
+        $said = '{"type":"user",' + $sidPart + '"timestamp":"' + (& $stamp 0) + '","message":{"role":"user","content":' + (ConvertTo-Json $body.Trim() -Compress) + '}}'
+        $lines = @($said, $use, $res, $text)
+        New-Item -ItemType Directory -Force (Split-Path $Transcript) | Out-Null
+        [IO.File]::AppendAllText($Transcript, (($lines -join "`n") + "`n"), $utf8)
+        Emit $use
+        Emit $res
+        Emit '{"type":"result","subtype":"success","is_error":false,"result":"after review","total_cost_usd":0.001,"permission_denials":[]}'
+    }
     'stream' {
         # group live text (screen test): a tool and two text pieces, then wait for the test's go file (<tasks>/go-<session id>, up to 30s), then the rest
         Emit '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"ts","name":"Read","input":{"file_path":"C:\\ws\\notes.md"}}]}}'

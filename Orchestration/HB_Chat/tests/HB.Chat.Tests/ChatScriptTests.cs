@@ -255,6 +255,31 @@ public sealed class ChatScriptTests(ChatApp app, ChatBrowser browser) : IClassFi
         page.AssertNoErrors();
     }
 
+    /// <summary>
+    /// 호출 기록이 턴 끝 뒤에 써진 외부 말풍선: 턴 끝 새 말 받기에는 없고 늦은 다시 받기에서 나온다 — 진행 칸에 남기지 않고 기록 제자리에 보인다
+    /// (말풍선 시각이 이미 그린 말보다 앞이라 '새 줄 뒤' 받기로는 못 넣는 자리).
+    /// </summary>
+    [Fact]
+    public async Task ExternalRunBubble_RecordAfterTurnEnd_ShownInPlace()
+    {
+        if (!browser.Available) return;
+        var room = app.Services.GetRequiredService<RoomStore>().Create("ws", PermissionLevel.Command, "opus", null);
+        await using var page = await browser.OpenAsync(app.RoomUrl(room));
+        await page.SendAsync("runlate");
+        await page.WaitForAsync("[...document.querySelectorAll('#chat .body')].some(b => b.textContent.includes('after review')) && !document.querySelector('#live .msg.conductor')", "턴 끝", ChatPage.TurnWait);
+        await HB.Orchestration.Shared.CallLog.AppendAsync(new HB.Orchestration.Shared.CallRecord
+        {
+            Id = "c-late", Timestamp = DateTimeOffset.UtcNow.AddSeconds(-30), Tool = "run_mode", Mode = "review_main", Model = "gpt-6.1-sol", Agent = "codex_cli_sol",
+            Prompt = "p", RunId = "0f0e0d0c0b", Step = 1, Success = true, Response = "late external reply", Reason = "r", ElapsedMs = 100,
+        }, Path.Combine(app.Dir, "calls.jsonl"));
+        await page.WaitForAsync("[...document.querySelectorAll('#chat .body')].some(b => b.textContent.includes('late external reply'))", "기록 제자리 말풍선", ChatPage.TurnWait);
+        Assert.False(await page.EvalAsync<bool>("!!document.querySelector('#live .live-run')"));
+        Assert.Equal(1, await page.EvalAsync<int>("[...document.querySelectorAll('.body')].filter(b => b.textContent.includes('late external reply')).length"));
+        // 제자리: 말풍선 시각이 그린 말보다 앞이라 지휘자 말 'after review' 앞에 놓인다 (8f79e1752f C5)
+        Assert.True(await page.EvalAsync<bool>("(() => { const b = [...document.querySelectorAll('#chat .body')]; const ext = b.find(x => x.textContent.includes('late external reply')), said = b.find(x => x.textContent.includes('after review')); return !!(ext.compareDocumentPosition(said) & Node.DOCUMENT_POSITION_FOLLOWING); })()"));
+        page.AssertNoErrors();
+    }
+
     /// <summary>서버 요약 중간 글: 진행 중 칸에 흐린 말풍선 + "요약" 표시, '입력 중' 말풍선은 그 아래에 남는다.</summary>
     [Fact]
     public async Task Narration_ShownInLiveBubble()
