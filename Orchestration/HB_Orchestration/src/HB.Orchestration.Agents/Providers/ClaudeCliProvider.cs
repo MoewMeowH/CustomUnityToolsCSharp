@@ -151,6 +151,8 @@ public sealed class ClaudeCliChatClient(ClaudeCliSettings settings, ClaudeCliRun
     [
         "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY",
         "ANTHROPIC_BASE_URL", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT",
+        // --bare가 켜는 값 — 부모에 있으면 --tools에 Glob · Grep을 줘도 Read만 남는다 (2.1.312 실측)
+        "CLAUDE_CODE_SIMPLE",
     ];
 
     /// <summary>이 이름 끝을 가진 변수도 지운다 — 다른 제공사 키 · 토큰을 자식에게 넘기지 않는다 (지휘자 K2).</summary>

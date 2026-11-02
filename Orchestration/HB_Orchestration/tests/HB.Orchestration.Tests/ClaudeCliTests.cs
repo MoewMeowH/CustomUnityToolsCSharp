@@ -72,7 +72,7 @@ public sealed class ClaudeCliTests : IDisposable
 
         Assert.Equal("sk-test", env["ANTHROPIC_API_KEY"]);
         foreach (var name in new[] { "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "ANTHROPIC_BASE_URL",
-                     "HB_REVIEWER_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "OPENAI_ADMIN_KEY", "GITHUB_TOKEN" })
+                     "CLAUDE_CODE_SIMPLE", "HB_REVIEWER_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "OPENAI_ADMIN_KEY", "GITHUB_TOKEN" })
             Assert.Null(env[name]);
         Assert.False(env.ContainsKey("PATH"));                                   // 나머지 환경은 그대로 물려받는다
     }
