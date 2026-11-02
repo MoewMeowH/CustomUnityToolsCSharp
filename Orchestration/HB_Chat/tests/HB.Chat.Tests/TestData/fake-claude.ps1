@@ -106,6 +106,26 @@ switch ($mode) {
         Emit '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_u1","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}},{"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":"/9j/4AAQ"}}]},{"type":"tool_result","tool_use_id":"toolu_u2","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}}]}]}}'
         Emit '{"type":"result","subtype":"success","is_error":false,"result":"shot","total_cost_usd":0.001,"permission_denials":[]}'
     }
+    'runbubble' {
+        # external bubble mid-turn (screen test): run_mode tool_use + its result (runId header) reach the transcript and the stream,
+        # then a held card keeps the turn going while the test looks for the bubble in the live pane. The test writes the call record.
+        $utf8 = New-Object Text.UTF8Encoding $false
+        $now = [DateTime]::UtcNow
+        $stamp = { param($i) $now.AddMilliseconds($i).ToString('o') }
+        # sessionId on every line like the real CLI (the run reader needs it to read the run_mode calls)
+        $sidPart = '"sessionId":"' + $Sid + '",'
+        $use = '{"type":"assistant",' + $sidPart + '"timestamp":"' + (& $stamp 1) + '","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_run1","name":"mcp__hb-orchestration__run_mode","input":{"mode":"review_main"}}]}}'
+        $res = '{"type":"user",' + $sidPart + '"timestamp":"' + (& $stamp 2) + '","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_run1","content":"runId: 0a1b2c3d4e\n### 1. Reviewer"}]}}'
+        # build the user line first: ',' binds tighter than '+', so it cannot sit inside the @(...) list with the concatenation
+        $said = '{"type":"user",' + $sidPart + '"timestamp":"' + (& $stamp 0) + '","message":{"role":"user","content":' + (ConvertTo-Json $body.Trim() -Compress) + '}}'
+        $lines = @($said, $use, $res)
+        New-Item -ItemType Directory -Force (Split-Path $Transcript) | Out-Null
+        [IO.File]::AppendAllText($Transcript, (($lines -join "`n") + "`n"), $utf8)
+        Emit $use
+        Emit $res
+        $d = Ask 'req_hold' '{"subtype":"can_use_tool","tool_name":"Bash","display_name":"Bash","input":{"command":"echo hold"},"tool_use_id":"toolu_hold"}'
+        Finish $d 'Bash' 'reviewed'
+    }
     'stream' {
         # group live text (screen test): a tool and two text pieces, then wait for the test's go file (<tasks>/go-<session id>, up to 30s), then the rest
         Emit '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"ts","name":"Read","input":{"file_path":"C:\\ws\\notes.md"}}]}}'

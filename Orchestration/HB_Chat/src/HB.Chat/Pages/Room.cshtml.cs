@@ -249,6 +249,12 @@ public sealed partial class RoomModel(
     /// </summary>
     public bool AfterFragment { get; private set; }
 
+    /// <summary>
+    /// 턴 도중 실행 말풍선 조각(?handler=Runs)이면 그 말풍선들 — 화면에 그린 마지막 줄 뒤에 놓일 것만. null이면 보통 쪽.
+    /// _Messages가 이것만 그리고 끝낸다 (말풍선 모양을 한 곳에서 — 턴 끝에는 기록 제자리 말풍선으로 바뀐다).
+    /// </summary>
+    public IReadOnlyList<RunBubble>? LiveRuns { get; private set; }
+
     /// <summary>이 방에서 부른 run_mode 실행 말풍선의 자리. 그릴 때 처음 한 번 계산한다 (Fork 등은 안 읽음 — a9e6066519 C3).</summary>
     public RunPlacement Runs => _runs ??= runs.For(Transcript);
     private RunPlacement? _runs;
@@ -448,6 +454,23 @@ public sealed partial class RoomModel(
         AfterFragment = Fragment && after is not null;
         return Partial("_Messages", this);
     }
+
+    /// <summary>
+    /// 턴 도중 run_mode 결과가 온 뒤(runs 알림) 화면이 부른다: 화면이 그린 마지막 줄(after) 뒤에 놓일 실행 말풍선만 돌려준다.
+    /// 이 방 세션 기록에서 찾으므로 다른 방 실행은 나오지 않는다. 단톡방은 아직 없음.
+    /// </summary>
+    public IActionResult OnGetRuns(string id, int after)
+    {
+        Response.Headers.CacheControl = "no-store";
+        if (!Load(id) || Room.IsGroup) return NotFound();
+        if (Transcript?.FormatError is not null) return StatusCode(StatusCodes.Status503ServiceUnavailable);
+        LiveRuns = LiveRunsAfter(Transcript?.Entries ?? [], Runs, after);
+        return Partial("_Messages", this);
+    }
+
+    /// <summary>줄 번호가 after보다 큰 말 앞의 말풍선 + 맨 뒤 말풍선 (시각 차례). after가 마지막 말이면 맨 뒤 것만.</summary>
+    internal static IReadOnlyList<RunBubble> LiveRunsAfter(IReadOnlyList<ChatEntry> entries, RunPlacement runs, int after) =>
+        [.. entries.Where(e => e.Line > after).SelectMany(runs.For).Concat(runs.Trailing).OrderBy(b => b.At)];
 
     /// <summary>방 이름 바꾸기 (비우면 첫 말로 돌아감). 목록 알림을 낸다.</summary>
     public IActionResult OnPostRename(string id, string? title)

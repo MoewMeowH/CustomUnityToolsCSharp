@@ -111,11 +111,16 @@ public sealed class RoomConnectionTests : IDisposable
         var image = Assert.Single(images.Images); // gif는 뺀다
         Assert.Equal(("toolu_1", "image/png", "AAAA"), (image.ToolUseId, image.MediaType, image.Base64));
 
-        // 서브에이전트 · 그림 없는 user 줄 · 글 결과는 그림 이벤트가 아니다
+        Assert.Equal(["toolu_1"], images.ToolUseIds);
+
+        // 서브에이전트 줄 · 결과 없는 user 줄은 이벤트가 아니다
         Assert.IsType<OtherEvent>(StreamParser.Parse(
             """{"type":"user","parent_tool_use_id":"toolu_0","message":{"content":[{"type":"tool_result","tool_use_id":"x","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAAA"}}]}]}}"""));
-        Assert.IsType<OtherEvent>(StreamParser.Parse("""{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"x","content":"text only"}]}}"""));
         Assert.IsType<OtherEvent>(StreamParser.Parse("""{"type":"user","message":{"content":"plain"}}"""));
+        // 글 결과는 그림 없이 id만 — run_mode 결과가 온 순간을 안다 (외부 말풍선 실시간)
+        var text = Assert.IsType<ToolImagesEvent>(StreamParser.Parse("""{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"x","content":"text only"}]}}"""));
+        Assert.Empty(text.Images);
+        Assert.Equal(["x"], text.ToolUseIds);
     }
 
     [Fact]

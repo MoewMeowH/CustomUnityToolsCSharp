@@ -1350,6 +1350,7 @@
                 if (fresh.dataset.reset) {
                     decorate(fresh);
                     chat.replaceWith(fresh);
+                    dropShownLiveRuns();
                     setTitle(fresh.dataset.title);
                     if (follow) toBottom();
                     markRead();
@@ -1362,6 +1363,7 @@
                     decorate(fresh);
                     if (chat.dataset.firstLine === "-1") chat.dataset.firstLine = fresh.dataset.firstLine;
                     while (fresh.firstChild) chat.append(fresh.firstChild);
+                    dropShownLiveRuns();
                 }
                 chat.dataset.lastLine = fresh.dataset.lastLine;
                 setTitle(fresh.dataset.title);
@@ -1378,11 +1380,53 @@
                 if (!fresh || disposed) return false;
                 decorate(fresh);
                 chatEl().replaceWith(fresh);
+                dropShownLiveRuns();
                 setTitle(fresh.dataset.title);
                 if (follow) toBottom();
                 markRead();
                 return true;
             } catch { return false; }
+        }
+        // 턴 도중 새 말 받기(방 이름 바꾸기 등)가 외부 말풍선을 대화 쪽에 다시 그렸으면 진행 칸의 같은 말풍선은 지운다 — 두 번 보이지 않게 (6b6443f26e C1)
+        function dropShownLiveRuns() {
+            const chat = chatEl();
+            if (!chat) return;
+            live.querySelectorAll(":scope > .live-run").forEach(n => {
+                const key = n.dataset.runKey;
+                if (key && chat.querySelector('[data-run-key="' + CSS.escape(key) + '"]')) n.remove();
+            });
+        }
+        // 턴 도중 외부 에이전트 말풍선 (runs 알림): 화면이 그린 마지막 줄 뒤의 실행 말풍선을 받아 아직 없는 것만 진행 칸에 붙인다.
+        // 호출 기록 · 세션 기록이 알림보다 늦게 써질 수 있어 새 것이 없으면 조금 뒤 다시 받는다. 턴 끝에는 기록 제자리 말풍선으로 바뀌어 지운다.
+        // 알림 차례(chain)를 막지 않게 기다리지 않고 부른다 — 겹쳐 받아도 붙이기 직전에 같은 키를 다시 본다.
+        async function loadLiveRuns(tries) {
+            for (let i = 0; i < tries && !disposed; i++) {
+                if (i > 0) await new Promise(r => setTimeout(r, 1500));
+                try {
+                    const chat = chatEl();
+                    const res = await fetch(self + "?handler=Runs&after=" + encodeURIComponent(chat?.dataset.lastLine ?? "-1"), { cache: "no-store" });
+                    if (!res.ok || disposed) return;
+                    const tmp = document.createElement("div");
+                    tmp.innerHTML = await res.text();
+                    const box = tmp.querySelector(".live-runs");
+                    if (!box) return;
+                    decorate(box);
+                    const follow = atBottom();
+                    let added = 0;
+                    // 글 없이 '입력 중'만 있는 지휘자 말풍선이 맨 아래면 그 앞에 — 기다림 표시가 외부 말풍선 위에 남지 않게 (6b6443f26e C4, addNarration과 같음)
+                    const typingMsg = stream?.dataset.empty && chips?.hidden ? stream.closest(".msg") : null; // 칩(부른 도구)이 있으면 그 아래에 그대로
+                    for (const node of [...box.children]) {
+                        const key = node.dataset.runKey;
+                        if (!key || document.querySelector('[data-run-key="' + CSS.escape(key) + '"]')) continue;
+                        node.classList.add("live-run");
+                        if (typingMsg?.parentElement === live) live.insertBefore(node, typingMsg); else live.append(node);
+                        added++;
+                    }
+                    if (added === 0) continue;
+                    if (follow) toBottom();
+                    return;
+                } catch { return; }
+            }
         }
         function setTitle(title) {
             if (!title) return;
@@ -1913,7 +1957,7 @@
                     scheduleList();
                     await refreshMessages();
                     cards.forEach(c => c.remove()); cards.clear(); // 기다리는 카드는 snapshot 뒤 approval로 다시 온다
-                    if (ev.busy) startTurn(ev.prompt, ev.text, ev.pendingItems);
+                    if (ev.busy) { startTurn(ev.prompt, ev.text, ev.pendingItems); loadLiveRuns(1); } // 다시 붙었을 때 이번 턴에 이미 온 외부 말풍선
                     else { clearLive(); stream = null; chips = null; setBusy(false); showQueue([]); }
                     if (ev.face) setFace(ev.face);
                     renderSteps(ev.steps);
@@ -1986,6 +2030,10 @@
                     if (follow) toBottom();
                     break;
                 }
+                case "runs":
+                    // run_mode 결과가 왔다 — 외부 에이전트 말풍선을 턴이 끝나기 전에 보인다 (기다리지 않음)
+                    loadLiveRuns(4);
+                    break;
                 case "tool":
                     // 칩만 — 표정은 서버 face 알림 · snapshot만 따른다. snapshot 뒤 다시 보내는 tool이 승인 기다림 · 답 쓰는 중을
                     // "도구 실행 중"으로 덮던 문제 (/self-review 83b453653b C1). 대상(파일 이름 · 명령 첫 줄)이 있으면 같이 (3차 b).
@@ -2025,7 +2073,8 @@
                     // 답하지 않은 질문 줄(q-done)은 성공으로 끝난 턴에서만 — 중지 · 실패면 기록에 결과 줄이 없을 수 있어 남긴다 (e8091295fe C4)
                     // 승인 결과 줄 · 백그라운드 명령 진행 줄도 지운다 — 기록 속 제자리에 방 기록 줄 · 백그라운드 알림 줄로 다시 그려졌다.
                     // 서브에이전트 진행 줄은 기록에 같은 줄이 없어 다음 턴까지 둔다 (/self-review e464ec29ba 자료 부족)
-                    if (refreshed) live.querySelectorAll(":scope > .msg:not(.failed), :scope > .approval-line, :scope > .agent-line[data-kind=\"local_bash\"]" + (ev.ok ? ", :scope > .q-done" : "")).forEach(m => m.remove());
+                    // 턴 도중 붙인 외부 에이전트 말풍선(.live-run)도 — 기록 제자리에 다시 그려졌다
+                    if (refreshed) live.querySelectorAll(":scope > .msg:not(.failed), :scope > .live-run, :scope > .approval-line, :scope > .agent-line[data-kind=\"local_bash\"]" + (ev.ok ? ", :scope > .q-done" : "")).forEach(m => m.remove());
                     else live.prepend(el("div", "live-line denied", "말풍선을 다시 받지 못했습니다 — 새로고침하면 보입니다."));
                     stream = null; chips = null;
                     clearBackground();

@@ -229,6 +229,32 @@ public sealed class ChatScriptTests(ChatApp app, ChatBrowser browser) : IClassFi
         page.AssertNoErrors();
     }
 
+    /// <summary>
+    /// 외부 에이전트 말풍선을 턴 도중에 보인다 (사용자 보고 "다른방 다녀왔다가 오면 대답이 노출돼"): run_mode 결과가 오면 진행 칸에 붙고,
+    /// 턴이 끝나면 기록 제자리 말풍선 하나만 남는다 (진행 칸 것은 지움 — 두 번 보이지 않게).
+    /// </summary>
+    [Fact]
+    public async Task ExternalRunBubble_ShownMidTurn_ThenOnceInPlace()
+    {
+        if (!browser.Available) return;
+        await HB.Orchestration.Shared.CallLog.AppendAsync(new HB.Orchestration.Shared.CallRecord
+        {
+            // 말풍선 시각(호출 끝)이 이 턴 사용자 말보다 뒤 — 실제처럼 맨 뒤(Trailing) 자리 (6b6443f26e C3)
+            Id = "c-live", Timestamp = DateTimeOffset.UtcNow.AddSeconds(5), Tool = "run_mode", Mode = "review_main", Model = "gpt-6.1-sol", Agent = "codex_cli_sol",
+            Prompt = "p", RunId = "0a1b2c3d4e", Step = 1, Success = true, Response = "live external reply", Reason = "r", ElapsedMs = 100,
+        }, Path.Combine(app.Dir, "calls.jsonl"));
+        var room = app.Services.GetRequiredService<RoomStore>().Create("ws", PermissionLevel.Command, "opus", null);
+        await using var page = await browser.OpenAsync(app.RoomUrl(room));
+        await page.SendAsync("runbubble");
+        await page.WaitForAsync("!!document.querySelector('#live .approval')", "명령 카드 (턴 도중)", ChatPage.TurnWait);
+        await page.WaitForAsync("[...document.querySelectorAll('#live .live-run .body')].some(b => b.textContent.includes('live external reply'))", "진행 칸 외부 말풍선", ChatPage.TurnWait);
+        await page.EvalAsync("[...document.querySelectorAll('#live .approval button')].find(b => b.textContent === '허용').click()");
+        await page.WaitForAsync("!document.querySelector('#live .approval') && !document.querySelector('#live .live-run')", "턴 끝 — 진행 칸 말풍선 지움", ChatPage.TurnWait);
+        await page.WaitForAsync("[...document.querySelectorAll('#chat .body')].some(b => b.textContent.includes('live external reply'))", "기록 제자리 말풍선", ChatPage.TurnWait);
+        Assert.Equal(1, await page.EvalAsync<int>("[...document.querySelectorAll('.body')].filter(b => b.textContent.includes('live external reply')).length"));
+        page.AssertNoErrors();
+    }
+
     /// <summary>서버 요약 중간 글: 진행 중 칸에 흐린 말풍선 + "요약" 표시, '입력 중' 말풍선은 그 아래에 남는다.</summary>
     [Fact]
     public async Task Narration_ShownInLiveBubble()

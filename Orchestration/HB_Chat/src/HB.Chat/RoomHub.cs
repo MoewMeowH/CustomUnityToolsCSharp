@@ -1552,6 +1552,34 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         }
     }
 
+    /// <summary>hb-orchestration run_mode 도구 (MCP 서버 이름은 설정마다 다를 수 있어 끝 이름으로 본다).</summary>
+    internal static bool IsRunModeTool(string name) => name.StartsWith("mcp__", StringComparison.Ordinal) && name.EndsWith("__run_mode", StringComparison.Ordinal);
+
+    /// <summary>
+    /// 외부 말풍선을 새로 받을 때인가: 기다리던 run_mode 호출의 결과가 왔을 때(받은 id는 지운다).
+    /// 결과 대신 "백그라운드로 넘어감" 안내가 왔으면 그 작업 id만 기억했다가, 그 작업이 끝날 때 알린다 —
+    /// 다른 백그라운드 작업(Bash · 서브에이전트) 끝에는 알리지 않는다 (/self-review 6b6443f26e C2).
+    /// </summary>
+    internal static bool RunResultArrived(StreamEvent ev, HashSet<string> runUses, HashSet<string> runTasks)
+    {
+        switch (ev)
+        {
+            case ToolImagesEvent results:
+                var arrived = false;
+                foreach (var id in results.ToolUseIds)
+                {
+                    if (!runUses.Remove(id)) continue;
+                    if (results.BackgroundTasks.TryGetValue(id, out var task)) runTasks.Add(task);
+                    else arrived = true;
+                }
+                return arrived;
+            case TaskEvent { Phase: "done" } done:
+                return runTasks.Remove(done.TaskId);
+            default:
+                return false;
+        }
+    }
+
     /// <summary>Unity 캡처 도구 이름 앞부분 — capture_game_view · capture_scene_view · capture_editor_element · capture_runtime_element (0단계 명령 목록).</summary>
     public const string UnityCapturePrefix = "mcp__" + McpConfigFile.UnityServer + "__capture_";
 
@@ -1678,6 +1706,8 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         var captures = new Dictionary<string, string>(StringComparer.Ordinal);
         // 도구 호출 id → 대상 (CLI가 거절한 호출의 기록 줄에 파일 · 명령을 보인다)
         var toolTargets = new Dictionary<string, string?>(StringComparer.Ordinal);
+        var runUses = new HashSet<string>(StringComparer.Ordinal); // 결과를 기다리는 run_mode 호출 id
+        var runTasks = new HashSet<string>(StringComparer.Ordinal); // 백그라운드로 넘어간 run_mode의 작업 id
         using var stopOnMismatch = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var result = await ClaudeRunner.RunAsync(process, prompt, ev =>
         {
@@ -1699,7 +1729,11 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             if (ev is RateLimitEvent limits) Limits?.SaveClaude(limits); // 사이드바 한도 줄은 목록을 다시 그릴 때 읽는다
             if (ev is UsageEvent calls)
                 foreach (var call in calls.Tools)
+                {
                     if (call.Id is { } callId) toolTargets[callId] = call.Detail;
+                    if (call.Id is { } runCall && IsRunModeTool(call.Name)) runUses.Add(runCall);
+                }
+            var runArrived = RunResultArrived(ev, runUses, runTasks);
             if (ev is DeniedEvent denied) CliDenied(room, live, generation, denied, toolTargets);
             // 할 일 도구를 쓴 뒤의 출력이면 그 사이 도구가 돌아 파일이 바뀌었을 수 있다 — 잠금 밖에서 읽는다 (3차 b).
             // 잦은 stream_event(글 · 도구 입력 · 생각 조각)에서는 읽지 않고, 300ms 안에 다시 읽지 않는다 — 마지막 상태는 턴 끝 읽기가 맞춘다 (/self-review ea28ba9185 C1).
@@ -1709,6 +1743,8 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             {
                 if (live.Generation != generation) return;
                 if (steps is not null) Broadcast(live, new LiveEvent("steps") { Steps = steps });
+                // 외부 에이전트 말풍선은 세션 기록 · 호출 기록에서 그린다 — 결과가 온 순간 화면이 새 말풍선만 받아 가게 알린다
+                if (runArrived) Broadcast(live, new LiveEvent("runs"));
                 if (ev is DeltaEvent) SetFace(live, Face.Writing);
                 else if (ev is ToolEvent te) SetFace(live, Face.Tool, te.Name); // 화면은 표정을 face 알림으로만 바꾼다 (83b453653b C1)
                 // 칩은 tool_use 입력이 다 온 assistant 줄에서 — 대상(파일 이름 · 명령 첫 줄)까지 보인다 (3차 b, 0번 실측 C)

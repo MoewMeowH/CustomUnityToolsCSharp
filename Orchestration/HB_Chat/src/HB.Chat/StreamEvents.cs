@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using HB.Orchestration.Shared;
 
 namespace HB.Chat;
@@ -96,7 +97,17 @@ public sealed record ToolUse(string Name, string? Detail)
 /// user 메시지의 tool_result 속 그림 (MCP 도구가 돌려준 base64 그림 — capture_game_view 등). 메인 대화만 (서브에이전트 줄은 뺀다).
 /// 그림 하나가 <see cref="RoomShots.MaxBytes"/>를 넘거나 png · jpeg가 아니면 넣지 않는다.
 /// </summary>
-public sealed record ToolImagesEvent(IReadOnlyList<ToolImage> Images) : StreamEvent;
+public sealed record ToolImagesEvent(IReadOnlyList<ToolImage> Images) : StreamEvent
+{
+    /// <summary>이 줄에 결과가 온 도구 호출 id 전부 (그림이 없어도) — run_mode 결과가 온 순간을 알아 외부 말풍선을 바로 보인다.</summary>
+    public IReadOnlyList<string> ToolUseIds { get; init; } = [];
+
+    /// <summary>
+    /// 결과 대신 "백그라운드로 넘어감" 안내가 온 호출 → 그 작업 id. 진짜 결과는 그 작업이 끝날 때(task_notification) 온다.
+    /// 안내는 결과 맨 앞의 'MCP tool "…" … moved to the background as task X' 한 줄일 때만 (세션 기록 읽기와 같은 규칙).
+    /// </summary>
+    public IReadOnlyDictionary<string, string> BackgroundTasks { get; init; } = new Dictionary<string, string>();
+}
 
 /// <summary>그림 하나. 풀기(base64)는 남길 그림에서만 — Read로 연 첨부 그림 · 브라우저 스크린샷도 여기로 온다.</summary>
 public sealed record ToolImage(string ToolUseId, string MediaType, string Base64);
@@ -311,10 +322,14 @@ public static class StreamParser
         if (!e.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object
             || !message.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array) return new OtherEvent("user");
         var images = new List<ToolImage>();
+        var ids = new List<string>();
+        var background = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var block in content.EnumerateArray())
         {
-            if (block.ValueKind != JsonValueKind.Object || Str(block, "type") != "tool_result" || Str(block, "tool_use_id") is not { Length: > 0 } id
-                || !block.TryGetProperty("content", out var inner) || inner.ValueKind != JsonValueKind.Array) continue;
+            if (block.ValueKind != JsonValueKind.Object || Str(block, "type") != "tool_result" || Str(block, "tool_use_id") is not { Length: > 0 } id) continue;
+            ids.Add(id);
+            if (BackgroundMove.Match(FirstResultText(block) ?? "") is { Success: true } moved) background[id] = moved.Groups[1].Value;
+            if (!block.TryGetProperty("content", out var inner) || inner.ValueKind != JsonValueKind.Array) continue;
             foreach (var part in inner.EnumerateArray())
             {
                 if (part.ValueKind != JsonValueKind.Object || Str(part, "type") != "image"
@@ -324,7 +339,24 @@ public static class StreamParser
                 images.Add(new ToolImage(id, Str(source, "media_type")!, data));
             }
         }
-        return images.Count > 0 ? new ToolImagesEvent(images) : new OtherEvent("user");
+        return images.Count > 0 || ids.Count > 0 ? new ToolImagesEvent(images) { ToolUseIds = ids, BackgroundTasks = background } : new OtherEvent("user");
+    }
+
+    /// <summary>
+    /// Claude Code가 도구를 백그라운드로 넘길 때 결과 자리에 쓰는 안내 (맨 앞 'MCP tool "…"' 한 줄 안에서만 — 결과 본문에 인용된 문구는 아님).
+    /// 판마다 문구가 달라 '… moved to the background as task X'만 본다 (HB.Orchestration.Shared 세션 기록 읽기와 같은 규칙).
+    /// </summary>
+    private static readonly Regex BackgroundMove = new(@"\A\s*MCP tool ""[^""\r\n]*""[^\r\n]*?moved to the background as task (\w+)", RegexOptions.CultureInvariant);
+
+    /// <summary>tool_result 본문의 첫 글 (문자열이거나 text 조각 배열). 없으면 null.</summary>
+    private static string? FirstResultText(JsonElement block)
+    {
+        if (!block.TryGetProperty("content", out var c)) return null;
+        if (c.ValueKind == JsonValueKind.String) return c.GetString();
+        if (c.ValueKind != JsonValueKind.Array) return null;
+        foreach (var part in c.EnumerateArray())
+            if (part.ValueKind == JsonValueKind.Object && Str(part, "type") == "text") return Str(part, "text");
+        return null;
     }
 
     /// <summary>칩에 보일 짧은 대상 — 끝난 턴 칩(세션 기록)과 같은 규칙이라 공용 <see cref="ToolTargets"/>로 옮김 (4차 C3).</summary>

@@ -19,7 +19,7 @@
             var link = Model.CallLink(b);
             if (b.Kind == RunBubbleKind.Start)
             {
-                <div class="system run-start@(trailing ? " run-trailing" : "")">
+                <div class="system run-start@(trailing ? " run-trailing" : "")" data-run-key="@b.Key">
                     <span class="body">@Model.RenderRun(b)</span>
                     <span class="when">@b.At.ToLocalTime().ToString("HH:mm") · @b.Detail</span>
                     @if (link is not null)
@@ -29,7 +29,7 @@
                 </div>
                 continue;
             }
-            <div class="msg @RoomModel.RunClass(b)@(b.IsError ? " error" : "")@(trailing ? " run-trailing" : "")">
+            <div class="msg @RoomModel.RunClass(b)@(b.IsError ? " error" : "")@(trailing ? " run-trailing" : "")" data-run-key="@b.Key">
                 @* 외부 에이전트 프로필 (3차 e): 이름별 보이는 이름 · 그림 · 색. 원래 이름은 title로 *@
                 @{ var agentName = Profiles.AgentName(b.Name); }
                 @Profiles.Avatar(ProfileStore.AgentKey(b.Name), agentName, b.Name)
@@ -130,6 +130,12 @@
             </div>
         }
     }
+}
+@* 턴 도중 실행 말풍선 조각 (?handler=Runs): 말풍선만 — 화면이 data-run-key로 아직 없는 것만 진행 칸에 붙인다 *@
+@if (Model.LiveRuns is { } liveRuns)
+{
+    <div class="live-runs">@{ RunBubbleList(liveRuns); }</div>
+    return;
 }
 @* data-error: 세션 기록을 읽지 못한 채 그린 쪽 — 화면은 다음 새 말 받기 대신 쪽 전체를 다시 받는다 (/self-review 83b453653b C6) *@
 <div class="chat" id="chat" data-title="@Model.Title" data-last-line="@Model.LastLine"
