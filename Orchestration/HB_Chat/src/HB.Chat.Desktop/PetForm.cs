@@ -351,7 +351,7 @@ public sealed class PetForm : Form
         base.OnMouseUp(e);
         if (e.Button != MouseButtons.Left || !_pressed) return;
         _pressed = false;
-        if (_dragging) Moved?.Invoke();
+        if (_dragging) EndDrag();
         else Clicked?.Invoke();
         _dragging = false;
     }
@@ -362,8 +362,16 @@ public sealed class PetForm : Form
         base.OnMouseCaptureChanged(e);
         if (!_pressed || Capture) return;
         _pressed = false;
-        if (_dragging) Moved?.Invoke();
+        if (_dragging) EndDrag();
         _dragging = false;
+    }
+
+    /// <summary>끌기 끝: 화면 밖으로 넘긴 펫을 화면 안으로 민 뒤 그 자리를 저장하라고 Moved.</summary>
+    private void EndDrag()
+    {
+        var inside = PetPlace.Inside(Bounds, [.. Screen.AllScreens.Select(s => s.WorkingArea)]);
+        if (inside != Location) Location = inside;
+        Moved?.Invoke();
     }
 
     protected override void Dispose(bool disposing)

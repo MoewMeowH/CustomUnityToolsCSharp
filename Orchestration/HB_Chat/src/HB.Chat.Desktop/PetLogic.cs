@@ -241,6 +241,25 @@ public static class PetPlace
         return new(new Point(x, y), above, tail);
     }
 
+    /// <summary>
+    /// 끌기를 놓은 자리를 화면 안으로 (사용자 "2번 고치자" — 끌어서 화면 밖으로 넘기면 다시 잡을 수 없었다): 펫이 가장 많이 걸친 작업 영역,
+    /// 하나도 안 걸쳤으면 가운데가 가장 가까운 작업 영역 안으로 민다. 화면 사이로 옮기기는 그대로 된다. 영역보다 크면 왼쪽 · 위에 맞춘다.
+    /// </summary>
+    public static Point Inside(Rectangle pet, IReadOnlyList<Rectangle> works)
+    {
+        if (works.Count == 0) return pet.Location;
+        var center = new Point(pet.Left + pet.Width / 2, pet.Top + pet.Height / 2);
+        var work = works.MaxBy(w => { var i = Rectangle.Intersect(w, pet); return i.IsEmpty ? 0L : (long)i.Width * i.Height; });
+        if (Rectangle.Intersect(work, pet).IsEmpty)
+            work = works.MinBy(w =>
+            {
+                long dx = Math.Max(0, Math.Max(w.Left - center.X, center.X - w.Right)), dy = Math.Max(0, Math.Max(w.Top - center.Y, center.Y - w.Bottom));
+                return dx * dx + dy * dy;
+            });
+        return new(Math.Clamp(pet.Left, work.Left, Math.Max(work.Left, work.Right - pet.Width)),
+            Math.Clamp(pet.Top, work.Top, Math.Max(work.Top, work.Bottom - pet.Height)));
+    }
+
     /// <summary>누른 뒤 이만큼 안에서 떼면 클릭, 넘게 움직이면 끌기.</summary>
     public static bool IsClick(Point down, Point up, Size dragSize) =>
         Math.Abs(up.X - down.X) <= dragSize.Width && Math.Abs(up.Y - down.Y) <= dragSize.Height;

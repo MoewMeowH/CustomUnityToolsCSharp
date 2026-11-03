@@ -228,6 +228,23 @@ public sealed class PetMotionTests
         }
     }
 
+    /// <summary>끌기를 놓은 자리를 화면 안으로 (사용자 "2번 고치자"): 넘긴 쪽을 밀어 넣고, 화면 사이 옮기기는 그대로.</summary>
+    [Fact]
+    public void DragEnd_PushedInsideScreen()
+    {
+        Rectangle left = new(0, 0, 1920, 1040), right = new(1920, 0, 2560, 1400); // 두 화면 (작업 표시줄 빼고)
+        var size = new Size(96, 104);
+        Point At(int x, int y) => PetPlace.Inside(new Rectangle(new Point(x, y), size), [left, right]);
+        Assert.Equal(new Point(500, 500), At(500, 500));               // 안이면 그대로
+        Assert.Equal(new Point(0, 500), At(-60, 500));                 // 왼쪽 밖
+        Assert.Equal(new Point(500, 1040 - 104), At(500, 1000));       // 작업 표시줄 위로
+        Assert.Equal(new Point(0, 0), At(-500, -500));                 // 완전히 밖 — 가까운 화면 안
+        Assert.Equal(new Point(4480 - 96, 300), At(5000, 300));        // 오른쪽 화면 밖 → 그 화면 안
+        Assert.Equal(new Point(1920, 1200), At(1900, 1200));           // 두 화면에 걸침 — 더 많이 걸친(오른쪽, 왼쪽은 그 높이 없음) 쪽
+        Assert.Equal(new Point(2000, 100), At(2000, 100));             // 다른 화면으로 옮기기는 그대로
+        Assert.Equal(new Point(10, 10), PetPlace.Inside(new Rectangle(10, 10, 96, 104), []));
+    }
+
     [Fact]
     public void RunRows_AreRowsOneAndTwo()
     {
