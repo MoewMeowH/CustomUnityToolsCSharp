@@ -194,6 +194,30 @@ public sealed class ClaudeSession
     public async Task<bool> StopTaskAsync(string taskId) =>
         await ControlAsync(new { subtype = "stop_task", task_id = taskId }) is { Ok: true };
 
+    /// <summary>
+    /// 지금 답만 멈춘다 (interrupt, 2.1.316 실측 2026-11-04: 곧바로 성공 답 · 도는 전경 도구는 거절 · 그 턴은 result error_during_execution,
+    /// 백그라운드 작업은 산다 · 프로세스도 산다). 답이 성공이면 true.
+    /// </summary>
+    public async Task<bool> InterruptAsync() =>
+        await ControlAsync(new { subtype = "interrupt" }) is { Ok: true };
+
+    /// <summary>
+    /// 보낸 사용자 말을 CLI가 받아(되돌림을 봄) 그 턴을 답하는 중이면 interrupt를 보내기 시작해 그 답을, 아니면 null —
+    /// 자동 턴 · 받기 전의 말 · 쉬는 중에는 보내지 않는다 (/self-review 42c732f7d3 C1 · C2: 다른 턴을 멈추거나, 받기 전이라 무시됐다).
+    /// 쓰기는 이 호출 안에서 시작된다(입력 줄 잠금을 먼저 잡음) — 그 뒤에 보내는 말은 interrupt 줄 다음에 들어간다.
+    /// </summary>
+    public Task<bool>? InterruptUserTurn()
+    {
+        lock (_gate)
+            if (!AnsweringUserLocked) return null;
+        return InterruptAsync();
+    }
+
+    /// <summary>보낸 사용자 말을 CLI가 받아 그 턴을 답하는 중인가 (끼어들기를 interrupt로 할 수 있는 때).</summary>
+    public bool AnsweringUser { get { lock (_gate) return AnsweringUserLocked; } }
+
+    private bool AnsweringUserLocked => _state == SessionState.Responding && _inTurn && _turnUser && _pending is null;
+
     /// <summary>제어 요청 하나 — 답(또는 제한 시간 · 프로세스 끝이면 null).</summary>
     internal async Task<ControlResponseEvent?> ControlAsync(object request, TimeSpan? timeout = null)
     {

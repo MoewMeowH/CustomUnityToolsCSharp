@@ -551,12 +551,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
             var message = live.Pending[i];
             live.Pending.RemoveAt(i);
             live.Pending.Insert(0, message);
-            if (live.Busy && live.Cts is { } running)
-            {
-                EndApprovals(live, "끼어들기");
-                live.Interrupted = true;
-                running.Cancel();
-            }
+            if (live.Busy) InterruptTurn(live);
             Broadcast(live, QueueEvent("queued", live));
         }
         return null;
@@ -593,12 +588,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
                 if (interrupt)
                 {
                     live.Pending.Insert(0, message);
-                    EndApprovals(live, "끼어들기"); // 끝나는 실행의 토큰도 비운다
-                    if (live.Cts is { } running)
-                    {
-                        live.Interrupted = true;
-                        running.Cancel(); // 지금 실행만 — 루프는 같은 세대로 큐 맨 앞(이 말)을 이어 돈다
-                    }
+                    InterruptTurn(live);
                 }
                 else live.Pending.Add(message);
                 Broadcast(live, QueueEvent("queued", live));
@@ -1313,10 +1303,32 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
     }
 
     /// <summary>실행이 끝나거나 중지될 때: 기다리던 승인 · 질문을 모두 거절(답 없음)로 끝낸다 (잠금 안에서 부른다).</summary>
-    private static void EndApprovals(Live live, string label)
+    /// <summary>
+    /// 끼어들기 · 지금 보내기 (잠금 안에서): 지금 실행만 멈춘다 — 루프는 같은 세대로 큐 맨 앞(새 말)을 이어 돈다. 쉬는 실행이 이 턴을 답하는 중이면
+    /// interrupt로 답만 멈춰 백그라운드 작업을 살리고(결정 "끼어들기만 살림"), 그때는 서브에이전트가 낸 카드는 남긴다 — 그 서브에이전트도 산다
+    /// (42c732f7d3 C4). 아니면 예전처럼 카드를 모두 끝내고 실행을 취소한다 (끝나는 실행의 토큰도 비운다).
+    /// </summary>
+    private void InterruptTurn(Live live)
+    {
+        if (live.Cts is not { } running)
+        {
+            EndApprovals(live, "끼어들기");
+            return;
+        }
+        live.Interrupted = true;
+        if (TryInterruptRest(live))
+        {
+            EndApprovals(live, "끼어들기", keepAgents: true);
+            return;
+        }
+        EndApprovals(live, "끼어들기");
+        running.Cancel();
+    }
+
+    private static void EndApprovals(Live live, string label, bool keepAgents = false)
     {
         foreach (var p in live.Approvals.Values)
-            if (p.Answer.TrySetResult(new ApprovalAnswer(false, $"{label} — 승인 요청을 거절했습니다."))) p.Label = label;
+            if (!(keepAgents && p.Request.FromAgent) && p.Answer.TrySetResult(new ApprovalAnswer(false, $"{label} — 승인 요청을 거절했습니다."))) p.Label = label;
         foreach (var q in live.Questions.Values)
             if (q.Answer.TrySetResult(null)) q.Label = label;
     }

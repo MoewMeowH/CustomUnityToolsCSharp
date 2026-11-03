@@ -300,4 +300,68 @@ public sealed class RoomRestTests : IDisposable
         var next = await UntilAll(ch, Idle);
         Assert.DoesNotContain(next, e => e.Kind == "notice" && e.Text!.Contains("앱 밖에서"));
     }
+
+    /// <summary>
+    /// 쉬는 실행에서 답하는 도중 끼어들기: 프로세스를 끊지 않고 interrupt만 보낸다 — 그 턴은 "끼어들기로 멈춤", 백그라운드 작업은 살고,
+    /// 새 말은 같은 프로세스로 답한다 (결정 "끼어들기만 살림", 2.1.316 실측 2026-11-04).
+    /// </summary>
+    [Fact]
+    public async Task Interrupt_KeepsBackgroundTasks_SameProcess()
+    {
+        var room = CommandRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "server s1");
+        await UntilAll(ch, Idle, Tasks(1));
+        _hub.Send(room.Id, "fg 8000");
+        await UntilAll(ch, e => e.Kind == "start" && e.Prompt == "fg 8000");
+        await UntilAnsweringUser(room.Id); // 프로세스가 그 말을 받아 답하는 중이 되게
+        Assert.Null(_hub.Interrupt(room.Id, "say after"));
+        var seen = await UntilAll(ch, e => e.Kind == "end" && e.Text == "끼어들기로 멈춤", e => e.Kind == "end" && e.Ok == true, Idle);
+        Assert.Equal(1, _hub.InterruptsSent);
+        Assert.Equal(1, _launched);
+        Assert.True(_hub.IsResting(room.Id));
+        Assert.Equal(1, _hub.RestingTasks(room.Id));
+        Assert.Null(_store.Get(room.Id)!.LastError); // 끼어들기는 실패가 아니다
+        Assert.DoesNotContain(seen, e => e.Kind == "background" && e.BackgroundCount == 0);
+    }
+
+    /// <summary>interrupt가 실패하면(오류 답) 예전처럼 실행을 끝내고 새 프로세스로 새 말을 보낸다 — 닫는 쪽으로.</summary>
+    [Fact]
+    public async Task Interrupt_Refused_FallsBackToEndingProcess()
+    {
+        var room = CommandRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "nointerrupt");
+        await UntilAll(ch, Idle);
+        _hub.Send(room.Id, "server s1");
+        await UntilAll(ch, Idle, Tasks(1));
+        _hub.Send(room.Id, "fg 8000");
+        await UntilAll(ch, e => e.Kind == "start" && e.Prompt == "fg 8000");
+        await UntilAnsweringUser(room.Id);
+        Assert.Null(_hub.Interrupt(room.Id, "say after"));
+        await UntilAll(ch, e => e.Kind == "end" && e.Text == "끼어들기로 멈춤", e => e.Kind == "end" && e.Ok == true, Idle);
+        Assert.Equal(1, _hub.InterruptsSent); // interrupt를 보냈고, 거절돼 예전 길로
+        Assert.Equal(2, _launched);
+    }
+
+    /// <summary>받기 전(되돌림 전)에 끼어들면 interrupt를 보내지 않고 예전 길 — 받기 전 interrupt는 CLI가 무시한다.</summary>
+    [Fact]
+    public async Task Interrupt_BeforeAccepted_UsesOldPath()
+    {
+        var room = CommandRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "server s1");
+        await UntilAll(ch, Idle, Tasks(1));
+        Assert.False(_hub.AnsweringUser(room.Id));
+        _hub.Send(room.Id, "fg 8000");
+        Assert.Null(_hub.Interrupt(room.Id, "say after")); // 같은 순간 — 아직 받지 않음
+        await UntilAll(ch, e => e.Kind == "end" && e.Ok == true, Idle);
+        Assert.Equal(0, _hub.InterruptsSent);
+    }
+
+    private async Task UntilAnsweringUser(string roomId)
+    {
+        for (var i = 0; i < 200 && !_hub.AnsweringUser(roomId); i++) await Task.Delay(25);
+        Assert.True(_hub.AnsweringUser(roomId));
+    }
 }

@@ -16,6 +16,8 @@
 #   ask                   a permission request inside the turn; answer 'allow' -> result 'allowed', else 'denied'
 #   bgask <ms> <id>       background task that asks for permission after <ms> (while idle), then ends
 #   die                   exit 3 in the middle of the turn
+#   nointerrupt           from now on the interrupt control answers error (the app must fall back)
+# Controls: interrupt (ends the running turn with error_during_execution, tasks live on), stop_task, set_model, apply_flag_settings.
 # ASCII only - Windows PowerShell reads this file as ANSI.
 param([string]$Sid)
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
@@ -34,6 +36,7 @@ $turn = $null                # running turn: @{ End = tick; Text = answer; Folde
 $asks = @{}                  # request id -> $true while waiting for a control_response
 $answers = @{}               # request id -> response object
 $eof = $false
+$refuseInterrupt = $false    # 'nointerrupt' turns this on (interrupt answers error)
 $autoPending = New-Object System.Collections.ArrayList   # ended task ids waiting for an automatic turn
 
 function TaskList {
@@ -99,6 +102,7 @@ function StartUserTurn {
             $script:turn.End = [long]::MaxValue
             $script:turn.Wait = 'req_t'
         }
+        'nointerrupt' { $script:refuseInterrupt = $true; $script:turn.Text = 'refusing interrupts' }
         'die' { [Console]::Error.WriteLine('fake died'); exit 3 }
         default { $script:turn.Text = 'echo ' + $body }
     }
@@ -136,6 +140,20 @@ function HandleLine([string]$line) {
                 Emit ('{"type":"control_response","response":{"subtype":"success","request_id":' + (J $id) + ',"response":{}}}')
             } else {
                 Emit ('{"type":"control_response","response":{"subtype":"error","request_id":' + (J $id) + ',"error":"invalid_task_id"}}')
+            }
+        }
+        'interrupt' {
+            # 2.1.316 probe (2026-11-04): success at once, the running turn ends with error_during_execution (no text), background tasks live on.
+            # A user message whose first word is 'nointerrupt' makes the fake refuse (the app falls back to ending the process).
+            if ($script:refuseInterrupt) {
+                Emit ('{"type":"control_response","response":{"subtype":"error","request_id":' + (J $id) + ',"error":"refused"}}')
+            } else {
+                Emit ('{"type":"control_response","response":{"subtype":"success","request_id":' + (J $id) + ',"response":{"still_queued":[]}}}')
+                if ($null -ne $script:turn) {
+                    $script:turn = $null
+                    $script:cost += 0.01
+                    Emit ('{"type":"result","subtype":"error_during_execution","is_error":true,"total_cost_usd":' + $script:cost.ToString([Globalization.CultureInfo]::InvariantCulture) + ',"permission_denials":[]}')
+                }
             }
         }
         default { Emit ('{"type":"control_response","response":{"subtype":"error","request_id":' + (J $id) + ',"error":"unsupported"}}') }

@@ -50,6 +50,12 @@ public sealed partial class RoomHub
         public int Other;
         public string? SessionId;
 
+        /// <summary>
+        /// 이 화면 턴에 끼어들기로 interrupt를 보냈다 — 성공 아닌 result로 끝나면 중지된 턴("끼어들기로 멈춤")으로 남긴다. 턴마다 따로라
+        /// 다른 턴(다음 말 · 자동 턴)의 결과에 번지지 않는다 (/self-review 42c732f7d3 C3).
+        /// </summary>
+        public volatile bool Interrupting;
+
         public void Track(StreamEvent ev)
         {
             switch (ev)
@@ -129,6 +135,42 @@ public sealed partial class RoomHub
         return await run.Proc.StopTaskAsync(taskId) ? null : "작업을 끝내지 못했습니다 — 다시 누르거나 '지금 끝내기'를 쓰세요.";
     }
 
+    /// <summary>
+    /// 끼어들기 · 지금 보내기 (잠금 안에서): 쉬는 실행이 지금 화면 턴을 답하는 중이면 프로세스를 끊지 않고 interrupt만 보낸다 — 지금 답만 멈추고
+    /// 백그라운드 작업은 산다 (결정 "끼어들기만 살림", 2.1.316 실측 2026-11-04). 그 턴은 result로 끝나고, 다음 차례(맨 앞의 새 말)가 같은 프로세스로 간다.
+    /// interrupt가 실패하면(답 없음 · 오류) 예전처럼 실행을 취소해 프로세스를 끝낸다. 이 길을 탔으면 true — 아니면 부른 쪽이 예전처럼 취소한다.
+    /// </summary>
+    private bool TryInterruptRest(Live live)
+    {
+        // 이 화면 턴(사용자 말)의 CLI 턴이 받아져 도는 중일 때만 — 자동 턴 · 받기 전 · 다른 턴 끝을 기다리는 중이면 예전 길 (42c732f7d3 C1 · C2)
+        if (live.Session is not { } run || run.Wait is not { Auto: false } wait || live.Cts is not { } running) return false;
+        if (run.Proc.InterruptUserTurn() is not { } sent) return false;
+        wait.Interrupting = true;
+        Interlocked.Increment(ref _interruptsSent);
+        _ = FollowInterruptAsync(live, wait, running, sent);
+        return true;
+    }
+
+    /// <summary>interrupt 답을 기다려, 실패(오류 · 답 없음)면 그 턴이 아직 돌 때 예전처럼 취소한다 (프로세스 끝).</summary>
+    private static async Task FollowInterruptAsync(Live live, TurnWait wait, CancellationTokenSource running, Task<bool> sent)
+    {
+        bool ok;
+        try { ok = await sent.ConfigureAwait(false); }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException) { ok = false; }
+        if (ok) return;
+        lock (live.Gate)
+        {
+            wait.Interrupting = false;
+            // live.Cts는 Dispose 전에 비운다 — 같은 것일 때만
+            if (live.Cts == running)
+                try { running.Cancel(); } catch (ObjectDisposedException) { }
+        }
+    }
+
+    /// <summary>interrupt 길을 탄 수 (시험 — 예전 길과 가린다).</summary>
+    private int _interruptsSent;
+    internal int InterruptsSent => Volatile.Read(ref _interruptsSent);
+
     /// <summary>CLI의 백그라운드 서브에이전트 작업 종류 (2.1.316 실측 task_type).</summary>
     private const string AgentKind = "local_agent";
 
@@ -151,6 +193,13 @@ public sealed partial class RoomHub
     {
         if (!_rooms.TryGetValue(roomId, out var live)) return false;
         lock (live.Gate) return Resting(live);
+    }
+
+    /// <summary>쉬는 실행이 화면 턴의 사용자 말을 받아 답하는 중인가 (시험 — 끼어들기가 interrupt 길을 탈 때).</summary>
+    internal bool AnsweringUser(string roomId)
+    {
+        if (!_rooms.TryGetValue(roomId, out var live)) return false;
+        lock (live.Gate) return live.Session is { Wait: { Auto: false } } run && run.Proc.AnsweringUser;
     }
 
     /// <summary>
@@ -331,10 +380,15 @@ public sealed partial class RoomHub
     private static async Task<RunResult> TurnResultAsync(RoomRun run, TurnWait wait, TurnEndedEvent? ended, bool cancelled)
     {
         if (ended is { Result: var r })
-            return new RunResult(r.Ok, false, r.Ok ? null : $"실행 오류 ({r.Subtype}): {r.Text}", r.Text, r.CostUsd, wait.SessionId, r.Denials, wait.Other, null)
+        {
+            // 끼어들기(interrupt)로 멈춘 턴: CLI는 error_during_execution으로 끝낸다 — 실패가 아니라 중지된 턴으로 (화면 "끼어들기로 멈춤")
+            var interrupted = wait.Interrupting && !r.Ok;
+            return new RunResult(r.Ok, interrupted, r.Ok ? null : interrupted ? "끼어들기로 멈춤" : $"실행 오류 ({r.Subtype}): {r.Text}", r.Text, r.CostUsd,
+                wait.SessionId, r.Denials, wait.Other, null)
             {
                 ContextTokens = wait.Context, ContextWindow = r.WindowFor(wait.ContextModel), Status = wait.Status,
             };
+        }
         var exit = await run.Proc.Completion;
         if (run.StopReason is { } why)
             return new RunResult(false, false, why, null, null, wait.SessionId, 0, wait.Other, exit.Stderr) { ContextTokens = wait.Context, Status = wait.Status };
