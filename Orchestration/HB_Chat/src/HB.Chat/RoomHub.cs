@@ -1694,6 +1694,13 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         {
             process = ProcessFactory?.Invoke(room, spec, workspace)
                       ?? new ProcessSpec(o.ResolveClaude(), ClaudeArgs.Build(spec, [.. o.ModelList]), workspace);
+            // 서브에이전트 강도 (claude 2.1.316) — 시험용 ProcessFactory에도 붙여 같은 길을 본다
+            if (ClaudeArgs.RunEnvironment(spec.Level, o.SubagentEffort) is { Count: > 0 } env)
+            {
+                var merged = new Dictionary<string, string>(process.Environment);
+                foreach (var (k, v) in env) merged[k] = v;
+                process = process with { Environment = merged };
+            }
         }
         catch (ArgumentException ex)
         {

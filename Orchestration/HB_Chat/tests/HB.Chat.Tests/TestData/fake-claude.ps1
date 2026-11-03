@@ -54,6 +54,11 @@ switch ($mode) {
         if ($Transcript) { New-Item -ItemType Directory -Force (Split-Path $Transcript) | Out-Null; Add-Content -Path $Transcript -Value '{"type":"user"}' }
         Emit ('{"type":"result","subtype":"error_during_execution","is_error":true,"result":' + (ConvertTo-Json $prompt -Compress) + ',"total_cost_usd":0.001,"permission_denials":[]}')
     }
+    'env' {
+        # environment the app added for this run (subagent effort) - returned as an error result like echo
+        $v = if ($null -ne $env:CLAUDE_CODE_SUBAGENT_EFFORT) { 'effort=' + $env:CLAUDE_CODE_SUBAGENT_EFFORT } else { 'effort=none' }
+        Emit ('{"type":"result","subtype":"error_during_execution","is_error":true,"result":' + (ConvertTo-Json $v -Compress) + ',"total_cost_usd":0.001,"permission_denials":[]}')
+    }
     'call' {
         # group chain tests (GroupTests, stage 4): success answer = the message with '#Name' turned into '@Name' (the user message itself calls nobody else)
         # SLOW anywhere in the prepended blocks (an earlier line of the group chat) -> wait 3s first, so members called together can differ in speed

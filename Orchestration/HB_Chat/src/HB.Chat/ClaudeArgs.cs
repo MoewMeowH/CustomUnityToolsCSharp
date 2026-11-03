@@ -236,6 +236,23 @@ public static partial class ClaudeArgs
     /// <summary>서브에이전트를 쓸 수 있는 단계 (읽기 · 앱 — <see cref="AgentTool"/>).</summary>
     public static bool AllowsAgents(PermissionLevel level) => level is PermissionLevel.Read or PermissionLevel.App;
 
+    /// <summary>서브에이전트 추론 강도 환경 변수 (claude 2.1.316) — 정의에 effort가 없는 서브에이전트가 세션 강도 대신 이 값으로 돈다.</summary>
+    public const string SubagentEffortVariable = "CLAUDE_CODE_SUBAGENT_EFFORT";
+
+    /// <summary>
+    /// 실행 환경 변수: 서브에이전트를 쓰는 단계(<see cref="AllowsAgents"/>)에 <see cref="ChatOptions.SubagentEffort"/>를 넣는다. 비면 넣지 않는다(방 강도를 이어받음).
+    /// 목록 밖 값이면 예외 — 모델 이름처럼 그 실행을 오류로 끝낸다 (조용히 빼면 설정이 먹은 줄 안다).
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> RunEnvironment(PermissionLevel level, string? subagentEffort)
+    {
+        var env = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (!AllowsAgents(level) || string.IsNullOrWhiteSpace(subagentEffort)) return env;
+        var (value, error) = RoomEffort.Clean(subagentEffort);
+        if (error is not null || value is null) throw new ArgumentException($"설정 Chat:SubagentEffort가 알 수 없는 추론 강도입니다: {subagentEffort}");
+        env[SubagentEffortVariable] = value;
+        return env;
+    }
+
     public static string? PlanMode(PermissionLevel level) => level switch
     {
         PermissionLevel.Command => "default",

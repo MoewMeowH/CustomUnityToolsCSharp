@@ -93,6 +93,12 @@ public sealed class ChatOptions
 
     public string DefaultModel { get; set; } = "opus";
 
+    /// <summary>
+    /// 방 서브에이전트의 추론 강도 (claude 2.1.316 CLAUDE_CODE_SUBAGENT_EFFORT, <see cref="RoomEffort.Levels"/>). 정의에 effort가 없는 서브에이전트에만 걸린다.
+    /// 비우면 넣지 않는다 — 방 강도를 그대로 이어받는다. 목록 밖 값이면 그 방 실행이 오류로 끝난다 (<see cref="ClaudeArgs.RunEnvironment"/>).
+    /// </summary>
+    public string? SubagentEffort { get; set; } = "medium";
+
     /// <summary>읽기 · 명령 단계에 붙이는 MCP 서버 이름 (작업 폴더 .mcp.json의 항목).</summary>
     public string McpServer { get; set; } = "hb-orchestration";
 

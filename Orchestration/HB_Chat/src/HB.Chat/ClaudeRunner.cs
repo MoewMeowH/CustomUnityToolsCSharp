@@ -8,7 +8,11 @@ using System.Text.Json.Nodes;
 namespace HB.Chat;
 
 /// <summary>띄울 프로세스. Args는 <see cref="ClaudeArgs"/>가 만든 값 (테스트는 가짜 claude 스크립트 앞 인자를 붙인다).</summary>
-public sealed record ProcessSpec(string FileName, IReadOnlyList<string> Args, string WorkingDirectory);
+public sealed record ProcessSpec(string FileName, IReadOnlyList<string> Args, string WorkingDirectory)
+{
+    /// <summary>자식 프로세스에 더할 환경 변수 (이름 → 값). 이 앱 환경을 물려받은 위에 덮는다 (<see cref="ClaudeArgs.RunEnvironment"/>).</summary>
+    public IReadOnlyDictionary<string, string> Environment { get; init; } = new Dictionary<string, string>();
+}
 
 /// <summary>
 /// 실행 하나의 결과. Ok는 result 이벤트가 성공으로 왔을 때만. SessionId는 init에서 받은 실제 ID.
@@ -110,6 +114,9 @@ public static class ClaudeRunner
         foreach (var a in spec.Args) psi.ArgumentList.Add(a);
         // 이 앱을 Claude Code 세션 안에서 띄웠을 때 물려받는 표시. 띄운 claude가 자기를 하위 세션으로 보지 않게 뺀다.
         psi.Environment.Remove("CLAUDECODE");
+        // 서브에이전트 강도는 앱 설정만 — 이 앱을 띄운 환경의 값이 설정을 비운 방 · 명령 방에 새지 않게 (sub_self 47b774c535 C6)
+        psi.Environment.Remove(ClaudeArgs.SubagentEffortVariable);
+        foreach (var (name, value) in spec.Environment) psi.Environment[name] = value;
 
         using var proc = new Process { StartInfo = psi };
         try

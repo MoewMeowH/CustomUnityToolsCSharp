@@ -744,6 +744,29 @@ public sealed class RoomHubTests : IDisposable
     }
 
     [Fact]
+    public async Task SubagentEffort_ReachesChildProcess_OnlyAgentLevels()
+    {
+        // claude 2.1.316 CLAUDE_CODE_SUBAGENT_EFFORT: 읽기 방은 설정값(기본 medium)이 자식 환경에, 명령 방은 넣지 않는다 (서브에이전트 없음)
+        // 이 앱을 띄운 환경에 같은 변수가 있어도 앱 설정만 넘긴다 (sub_self 47b774c535 C6)
+        var before = Environment.GetEnvironmentVariable(ClaudeArgs.SubagentEffortVariable);
+        Environment.SetEnvironmentVariable(ClaudeArgs.SubagentEffortVariable, "high");
+        try
+        {
+            var room = NewRoom();
+            var ch = _hub.Subscribe(room.Id);
+            _hub.Send(room.Id, "env");
+            Assert.EndsWith("effort=medium", await Echoed(ch));
+            _store.Update(room.Id, r => r with { Level = PermissionLevel.Command });
+            _hub.Send(room.Id, "env");
+            Assert.EndsWith("effort=none", await Echoed(ch));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(ClaudeArgs.SubagentEffortVariable, before);
+        }
+    }
+
+    [Fact]
     public async Task ChangedRules_ArePrependedOnce_WhenResuming()
     {
         // 이어 쓰는 세션은 CLI가 처음 시스템 프롬프트를 쓴다 (0단계 실측) — 규칙이 바뀌면 말 앞에 system-reminder로 새 규칙

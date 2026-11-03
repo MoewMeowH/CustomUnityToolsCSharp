@@ -25,6 +25,19 @@ public sealed class ClaudeArgsTests
     }
 
     [Fact]
+    public void RunEnvironment_SubagentEffort_OnlyAgentLevels_KnownValues()
+    {
+        // claude 2.1.316 CLAUDE_CODE_SUBAGENT_EFFORT: 서브에이전트를 쓰는 단계(읽기 · 앱)만, 빈 값은 넣지 않음, 모르는 값은 실행 전에 막음
+        Assert.Equal("medium", ClaudeArgs.RunEnvironment(PermissionLevel.Read, "medium")[ClaudeArgs.SubagentEffortVariable]);
+        Assert.Equal("low", ClaudeArgs.RunEnvironment(PermissionLevel.App, " low ")[ClaudeArgs.SubagentEffortVariable]);
+        Assert.Empty(ClaudeArgs.RunEnvironment(PermissionLevel.Command, "medium"));
+        Assert.Empty(ClaudeArgs.RunEnvironment(PermissionLevel.App, ""));
+        Assert.Empty(ClaudeArgs.RunEnvironment(PermissionLevel.App, null));
+        Assert.Throws<ArgumentException>(() => ClaudeArgs.RunEnvironment(PermissionLevel.App, "ultra"));
+        Assert.Empty(ClaudeArgs.RunEnvironment(PermissionLevel.Command, "ultra")); // 서브에이전트가 없는 단계는 값을 보지 않는다
+    }
+
+    [Fact]
     public void Plan_PermissionModePlan_AndExitPlanModeTool_CommandOnly()
     {
         // Claude 앱 기능 C (2.1.312 실측): 계획 모드 + 승인 도구 ExitPlanMode
