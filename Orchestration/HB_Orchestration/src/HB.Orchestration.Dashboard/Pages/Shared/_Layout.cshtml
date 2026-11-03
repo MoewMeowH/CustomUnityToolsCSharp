@@ -1,3 +1,26 @@
+@{
+    // 지금 탭: 페이지 이름 → 탭 (상세 화면은 그 목록 탭에)
+    var current = (ViewContext.RouteData.Values["page"] as string) switch
+    {
+        "/Index" or "/Call" or "/Attachment" => "/Index",
+        "/ClaudeSession" => "/ClaudeSessions",
+        "/Room" or "/RoomRun" => "/Rooms",
+        var page => page,
+    };
+}
+@functions {
+    private static readonly (string Href, string Label, string Tab)[] Tabs =
+    [
+        ("/", "호출 기록", "/Index"),
+        ("/Modes", "모드", "/Modes"),
+        ("/Verdicts", "판정", "/Verdicts"),
+        ("/Sessions", "세션", "/Sessions"),
+        ("/ClaudeSessions", "Claude 세션", "/ClaudeSessions"),
+        ("/Subagents", "서브에이전트 결과", "/Subagents"),
+        ("/Rooms", "채팅방", "/Rooms"),
+        ("/Billing", "청구 대조", "/Billing"),
+    ];
+}
 <!doctype html>
 <html lang="ko">
 <head>
@@ -44,9 +67,12 @@
         tr:last-child td { border-bottom: 0; }
         tbody tr:hover { background: var(--code); }
         .table-scroll { overflow-x: auto; }
-        .nav { display: flex; gap: 14px; }
-        .nav a { color: var(--muted); text-decoration: none; }
+        .nav { display: flex; gap: 14px; align-self: stretch; }
+        @* 지금 탭: 글자 진하게 + 머리줄 아래 강조색 막대 (링크를 머리줄 높이로 늘려 막대가 머리줄 테두리에 붙게) *@
+        .nav a { color: var(--muted); text-decoration: none; display: flex; align-items: center;
+                 border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 0 2px; }
         .nav a:hover { color: var(--text); }
+        .nav a.active { color: var(--text); font-weight: 600; border-bottom-color: var(--accent); }
     </style>
 </head>
 <body>
@@ -54,14 +80,11 @@
     <div class="wrap">
         <a class="brand" href="/">HB Orchestration</a>
         <nav class="nav">
-            <a href="/">호출 기록</a>
-            <a href="/Modes">모드</a>
-            <a href="/Verdicts">판정</a>
-            <a href="/Sessions">세션</a>
-            <a href="/ClaudeSessions">Claude 세션</a>
-            <a href="/Subagents">서브에이전트 결과</a>
-            <a href="/Rooms">채팅방</a>
-            <a href="/Billing">청구 대조</a>
+            @foreach (var (href, label, tab) in Tabs)
+            {
+                var on = tab == current;
+                <a href="@href" class="@(on ? "active" : null)" aria-current="@(on ? "page" : null)">@label</a>
+            }
         </nav>
     </div>
 </header>

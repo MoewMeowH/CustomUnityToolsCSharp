@@ -22,6 +22,7 @@ builder.Services.AddSingleton<VerdictLogCache>();
 builder.Services.AddSingleton<RiderProjects>();
 builder.Services.AddSingleton<PricingService>();
 builder.Services.AddSingleton<ClaudeSessionsService>();
+builder.Services.AddHostedService<ClaudeSessionsWarmup>(); // 첫 Claude 세션 화면이 기록 전체를 읽느라 멈추지 않게
 builder.Services.AddSingleton<SubagentResultsService>();
 builder.Services.AddSingleton<BillingStore>();
 builder.Services.AddSingleton(sp => new StickerCatalog(() => sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<DashboardOptions>>().CurrentValue.Stickers));
