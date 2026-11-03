@@ -63,8 +63,8 @@ public static class PetLook
 {
     public const int Directions = 16, FirstRow = 9;
 
-    /// <summary>마우스가 이 거리(펫 가운데에서, px) 안이면 본다.</summary>
-    public const int Range = 300;
+    /// <summary>마우스가 이 거리(펫 가운데에서, px) 안이면 본다 (처음 300 → 실제 확인 뒤 사용자 결정 500).</summary>
+    public const int Range = 500;
 
     /// <summary>화면 좌표 벡터(아래가 +y)의 방향 번호. (0,0)이면 null (CodePet directionIndexFromVector).</summary>
     public static int? Direction(double dx, double dy)
