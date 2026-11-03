@@ -28,11 +28,14 @@ public sealed class PetController : IDisposable
     private string? _faceUrl;
     private bool _dark;
 
-    // ---- 그림을 잃은 레이어드 창 되살리기 (2026-11-03 사용자 보고: 사진 앱을 열고 닫으면 펫 · 말풍선 그림만 사라짐, 보이기를 껐다 켜면 돌아옴) ----
-    private readonly System.Windows.Forms.Timer _revive = new() { Interval = 500 };
-    private DateTime _lastRevive = DateTime.MinValue, _lastFailLog = DateTime.MinValue;
+    // ---- 늘 위 지키기 (2026-11-03 사용자 확인: 사진 앱을 열면 펫이 모든 창 뒤 바탕화면 쪽으로 밀림, 보이기를 껐다 켜야 돌아옴) ----
+    /// <summary>포그라운드 창이 바뀐 뒤 0.3초 · 1.5초에 다시 세운다 (사진 앱은 펫보다 늦게 그려진다 — 사용자 관찰).</summary>
+    private readonly System.Windows.Forms.Timer _raiseSoon = new() { Interval = 300 }, _raiseLater = new() { Interval = 1500 };
+    /// <summary>다른 길로 밀려도 오래 뒤에 남지 않게 3초마다.</summary>
+    private readonly System.Windows.Forms.Timer _raiseEvery = new() { Interval = 3000 };
+    private readonly ForegroundWatcher _foreground;
+    private DateTime _lastFailLog = DateTime.MinValue;
     private int _lastFailCode;
-    private static readonly TimeSpan ReviveGap = TimeSpan.FromSeconds(10);
 
     /// <summary>펫을 눌렀다 — 따라가는 방(없으면 null)과 펫 자리.</summary>
     public event Action<string?, Rectangle>? Clicked;
@@ -69,39 +72,35 @@ public sealed class PetController : IDisposable
         _menu.Opening += (_, _) => { _form.StopWalking(); FillMenus(); }; // 메뉴가 떠 있는 동안은 걷지 않는다 (PetForm.Resting)
         _form.ContextMenuStrip = _menu;
 
-        _form.DisplayChanged += name => ReviveSoon("펫 창 " + name);
-        _bubble.DisplayChanged += name => ReviveSoon("말풍선 창 " + name);
         Layered.Failed += OnLayeredFailed;
-        _revive.Tick += (_, _) =>
+        _raiseSoon.Tick += (_, _) => { _raiseSoon.Stop(); RaiseTopmost(); };
+        _raiseLater.Tick += (_, _) => { _raiseLater.Stop(); RaiseTopmost(); };
+        _raiseEvery.Tick += (_, _) => RaiseTopmost();
+        _raiseEvery.Start();
+        _foreground = new ForegroundWatcher(() =>
         {
-            _revive.Stop();
-            _lastRevive = DateTime.UtcNow;
-            _form.Revive();
-            _bubble.Revive();
-        };
+            if (_disposed) return;
+            _raiseSoon.Stop(); _raiseSoon.Start();
+            _raiseLater.Stop(); _raiseLater.Start();
+        });
     }
 
-    /// <summary>화면 설정이 바뀌었다 — 0.5초 뒤(바뀌는 중일 수 있어) 한 번 다시 띄운다. 이유는 로그에.</summary>
-    private void ReviveSoon(string why)
+    /// <summary>펫 · 말풍선을 늘 위 맨 앞으로 (말풍선이 펫 위). 오른쪽 메뉴가 떠 있으면 하지 않는다 — 메뉴를 덮지 않게.</summary>
+    private void RaiseTopmost()
     {
-        if (_disposed) return;
-        _log($"펫 다시 띄우기 예약: {why}");
-        if (!_revive.Enabled) _revive.Start();
+        if (_disposed || !_settings.Visible || _menu.Visible) return;
+        Layered.RaiseTopmost(_form);
+        Layered.RaiseTopmost(_bubble);
     }
 
-    /// <summary>
-    /// 그림 올리기 실패: 오류 번호를 남기고(같은 번호는 1분에 한 번) 다시 띄운다(10초에 한 번까지 — 다시 띄우다 또 실패해도 돌지 않게).
-    /// </summary>
+    /// <summary>그림 올리기 실패: 오류 번호를 로그에 (같은 번호는 1분에 한 번).</summary>
     private void OnLayeredFailed(Form form, int code)
     {
         if (_disposed || form != _form && form != _bubble) return;
         var now = DateTime.UtcNow;
-        if (code != _lastFailCode || now - _lastFailLog > TimeSpan.FromMinutes(1))
-        {
-            _log($"{(form == _form ? "펫" : "말풍선")} 그림 올리기 실패 (UpdateLayeredWindow, Win32 오류 {code})");
-            (_lastFailCode, _lastFailLog) = (code, now);
-        }
-        if (now - _lastRevive > ReviveGap && !_revive.Enabled) _revive.Start();
+        if (code == _lastFailCode && now - _lastFailLog < TimeSpan.FromMinutes(1)) return;
+        _log($"{(form == _form ? "펫" : "말풍선")} 그림 올리기 실패 (UpdateLayeredWindow, Win32 오류 {code})");
+        (_lastFailCode, _lastFailLog) = (code, now);
     }
 
     public bool Visible => _settings.Visible;
@@ -326,7 +325,10 @@ public sealed class PetController : IDisposable
     {
         _disposed = true;
         Layered.Failed -= OnLayeredFailed; // 정적 이벤트 — 안 빼면 정리된 컨트롤러가 남는다
-        _revive.Dispose();
+        _foreground.Dispose();
+        _raiseSoon.Dispose();
+        _raiseLater.Dispose();
+        _raiseEvery.Dispose();
         _bubble.Dispose();
         _form.Dispose();
         _menu.Dispose();

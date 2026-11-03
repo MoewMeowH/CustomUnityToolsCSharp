@@ -245,16 +245,6 @@ public sealed class PetMotionTests
         Assert.Equal(new Point(10, 10), PetPlace.Inside(new Rectangle(10, 10, 96, 104), []));
     }
 
-    /// <summary>화면 설정이 바뀐 메시지면 펫 · 말풍선이 그림을 다시 올린다 (사진 앱을 열고 닫은 뒤 그림만 사라진 일, 2026-11-03).</summary>
-    [Fact]
-    public void DisplayMessages_TriggerRevive()
-    {
-        Assert.Equal("WM_DISPLAYCHANGE", Layered.DisplayMessage(0x007E));
-        Assert.Equal("WM_DPICHANGED", Layered.DisplayMessage(0x02E0));
-        Assert.Equal("WM_DWMCOMPOSITIONCHANGED", Layered.DisplayMessage(0x031E));
-        Assert.Null(Layered.DisplayMessage(0x0200)); // 마우스 이동 등은 아님
-    }
-
     [Fact]
     public void RunRows_AreRowsOneAndTwo()
     {
