@@ -1,5 +1,5 @@
 ---
-description: Claude 지휘자와 검토형 리뷰어(기본 API 리뷰 sub_* — 코드 · perf · security · direction, 서브에이전트는 sub로 고르거나 크레딧 소진 때)가 독립적으로 리뷰한 뒤 결과를 종합한다 (다른 회사 외부 에이전트 없음)
+description: Claude 지휘자와 검토형 리뷰어(기본 API 리뷰 sub_* — Codex 구독, 코드 · perf · security · direction, 서브에이전트는 sub로 고르거나 한도 소진 때)가 독립적으로 리뷰한 뒤 결과를 종합한다
 argument-hint: [sub] [perf|security|direction|trace] [파일/커밋 범위 또는 계획서 · 지시서, 비우면 현재 미커밋 변경]
 disable-model-invocation: true
 ---
@@ -11,15 +11,15 @@ disable-model-invocation: true
   - `security` → `sub_security` / **security-reviewer** (입력 검증·경로·비밀 값·외부 전송·검사 우회·fail-closed만)
   - `direction` → `sub_direction` / **direction-reviewer** (요청 원문과 계획서의 방향만 — 대상은 계획서, 아래 "direction일 때")
   - `trace <지시서 경로>` → 서브에이전트 **evidence-collector**만 (API 모드 없음 — 요구마다 코드를 검색해야 함). 지시서 대조, 아래 "trace일 때"
-- **기본은 API 리뷰**(`sub_*` — claude -p 읽기 전용 에이전트, HB_REVIEWER_API_KEY로 과금, 구독 사용량을 쓰지 않음): 아래 **"API 리뷰"** 절차. 첫 단어가 `sub`이면 서브에이전트(아래 1~5 본 절차).
+- **기본은 API 리뷰**(`sub_*` — Codex CLI 읽기 전용, ChatGPT 구독 한도를 씀. 한도 소진이면 서버가 claude -p(HB_REVIEWER_API_KEY, 구독에 딸린 월 크레딧)로 대신한다): 아래 **"API 리뷰"** 절차. 첫 단어가 `sub`이면 서브에이전트(아래 1~5 본 절차).
 - 나머지가 대상. 비어 있으면 `git diff HEAD`의 미커밋 변경.
 - 아래 "self-reviewer"는 고른 리뷰어(API 리뷰면 `sub_*` 결과)로 읽는다.
-- 다른 회사 외부 에이전트는 부르지 않는다. 외부 시선까지 필요하면 `/cross-review`. `sub_*`는 Claude(같은 회사)라 외부 시선이 아니다 — 서브에이전트 자리만 대신한다.
+- 외부 리뷰 모드(`review_*`)는 부르지 않는다. 외부 시선까지 필요하면 `/cross-review`. `sub_*`는 Codex(다른 회사)지만 `/cross-review`의 외부 review_main과 같은 모델이라, 그 명령에서는 서브에이전트가 기본이다 — 여기서는 서브에이전트 자리만 대신한다.
 
 **API 리뷰** (기본): 2-2 ~ 2-4와 4만 바뀐다.
 - 2-1은 같다 (지휘자 검토를 먼저 작업 로그에 저장).
 - 2-2 대신: `subagent_in/`에 복사하지 않는다 (direction 제외 — 아래). `run_mode("sub_*", input, context, reason)` — input = 위임 메시지의 대상 설명 · 변경 의도 · 제약(사용자 결정 원문) — 검증 결과 · 결론 · 요청/계획서 원문은 넣지 않는다(CLAUDE.md "독립성"). context = diff 파일(변경이면 첫 항목, CLAUDE.md "diff는 파일로") + 대상 파일 (범위 = 검토의 중심). `sub_self` · `sub_perf` · `sub_security`는 서버가 저장소 추적 파일 사본을 작업 폴더에 깔고 에이전트가 Glob · Grep으로 정의 · 호출부 · 설정 · 시험을 직접 찾는다 — 지휘자 지시 · 규칙 · 계획서는 사본에서 빠지므로 그런 파일을 고친 변경이면 그 파일도 context로 넘긴다 (빠지면 결과 끝에 `(사본에서 뺀 변경 파일: …)`이 붙는다). 결과 끝에 `(저장소 사본 없음: …)`이 붙으면 고른 파일만 본 것이니 종합에서 알리고, 그때는 판단에 필요한 파일을 context에 넉넉히 넣어 다시 부를지 정한다. `sub_direction`은 context 파일만 받는다. 읽은 내용은 Anthropic으로 나가므로 비밀이 든 파일은 context에 넣지 않는다. 너의 의견 · 의심 지점은 넣지 않는다. 지침 파일은 서버가 시스템 프롬프트에 붙인다.
-- 2-3: 서브에이전트를 부르지 않는다. 결과가 **`[실패] Quota`**(크레딧 소진 — 서버가 최근 1시간 안에 Quota였으면 호출 없이 바로 돌려줌)면 **묻지 않고** 같은 대상 · 같은 위임 내용으로 서브에이전트 본 절차로 다시 한다: 2-1 지휘자 검토는 이미 저장했으니 고치지 않고, 2-2 입력 복사(`subagent_in/` · SHA-256 확인 · `_SUBAGENT_MISTAKES.md`)부터 2-4까지 한 뒤 4는 `selfReview`로 기록한다. 결과 보고 · 작업 로그에 "크레딧 소진으로 서브에이전트 사용"을 적는다. 그 밖의 `[실패]`는 한 줄로 알리고 서브에이전트로 다시 할지 사용자에게 묻는다.
+- 2-3: 서브에이전트를 부르지 않는다. 결과가 **`[실패] Quota`**(Codex 한도와 대체 Claude 크레딧이 모두 소진 — 서버가 최근 1시간 안에 Quota였으면 호출 없이 바로 돌려줌)면 **묻지 않고** 같은 대상 · 같은 위임 내용으로 서브에이전트 본 절차로 다시 한다: 2-1 지휘자 검토는 이미 저장했으니 고치지 않고, 2-2 입력 복사(`subagent_in/` · SHA-256 확인 · `_SUBAGENT_MISTAKES.md`)부터 2-4까지 한 뒤 4는 `selfReview`로 기록한다. 결과 보고 · 작업 로그에 "한도 소진으로 서브에이전트 사용"을 적는다. 결과 끝에 대체 실행 줄이 붙었으면(Claude로 대신함) 종합에서 알린다. 그 밖의 `[실패]`는 한 줄로 알리고 서브에이전트로 다시 할지 사용자에게 묻는다.
 - 2-4: 결과 형식 검사는 같다. `## 읽은 파일`은 작업 폴더 기준 상대 경로다 (절대 경로 · `..`가 있으면 멈춤 — 작업 폴더는 실행 뒤 지워져 대조할 수 없다). `[경고] claude-cli 도구 사용 N건이 거절됨`이 붙으면 종합에서 알린다.
 - 4: `record_verdicts`에 `selfReview` 대신 run_mode 결과의 **runId** (지적은 `steps: [1]`). 나머지 규칙 같음.
 - 대시보드 첫 화면에 API 리뷰 이번 달 횟수 · 비용과 크레딧 소진 상태가 보인다.
@@ -77,7 +77,7 @@ disable-model-invocation: true
 
 * 정의: `.claude/agents/`
   * 검토형(Opus, `subagent_in/` 격리 · 같은 출력 형식): `self-reviewer`(코드 리뷰 — `/self-review` · `/cross-review` 2단계), `perf-reviewer`(성능 — `/mode` perf_* ownReview · `/self-review perf`), `security-reviewer`(보안 — `/self-review security` · 보안 영역 `/cross-review`는 사용자에게 묻고 self-reviewer와 함께), `direction-reviewer`(요청 원문 대 계획서 방향 — 계획서를 쓴 뒤 승인 전에 `/self-review direction`을 **제안만**).
-  * 검토형은 기본이 API 리뷰(모드 `sub_self` · `sub_perf` · `sub_security` · `sub_direction`, 위 "API 리뷰"). 서브에이전트는 `/self-review sub …`로 고르거나 `[실패] Quota`(크레딧 소진) 때 대신 쓴다.
+  * 검토형은 기본이 API 리뷰(모드 `sub_self` · `sub_perf` · `sub_security` · `sub_direction` — Codex 구독, 한도 소진이면 Claude API, 위 "API 리뷰"). 서브에이전트는 `/self-review sub …`로 고르거나 `[실패] Quota` 때, `/cross-review` main에서 쓴다.
   * 수집형: `web-searcher`(Sonnet, WebSearch · WebFetch만 — research 2단계 · crash 사전 조사 검색), `evidence-collector`(Opus, `/preflight` P4 근거 수집 · `/self-review trace` 지시서 대조).
   * 모델: 맥락 편향 없이 봐야 하는 자리는 `opus`, 지휘자 컨텍스트 보호·반복 작업(조사·수집·추출)은 `sonnet`.
   * 정의 파일에는 `tools` 허용 목록이 반드시 있어야 한다 (생략하면 MCP 도구까지 상속 → `run_mode`를 부를 수 있음). `python -I .claude/scripts/check_agents.py`로 검사한다. `permissionMode` bypass 계열 금지.

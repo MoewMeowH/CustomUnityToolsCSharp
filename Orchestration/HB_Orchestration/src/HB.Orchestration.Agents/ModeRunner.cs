@@ -434,8 +434,9 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
 
         var runId = Guid.NewGuid().ToString("N")[..10];
         var meta = new CallMeta(null, []) { Reason = reason, Provenance = RunProvenance(plan!) };
-        var step = plan!.Steps[0];
-        // 골든은 같은 입력을 몇 분 간격으로 되풀이하므로 저장 지점을 둔다 (제공사 PromptCache가 Context일 때만 효과, 짧으면 AgentRunner가 Off).
+        // 골든은 같은 입력을 몇 분 간격으로 되풀이하므로 저장 지점을 둔다 — 모드 · 제공사 설정이 Off여도 Context로 (run_mode는 다시 읽히는 일이 드물어
+        // 제공사 기본을 Off로 둔다: 2026-11-04 집계 run_mode 읽기/쓰기 2% · 골든 82%). 정책이 없는 제공사(ProviderDefault)거나 첨부가 짧으면 AgentRunner가 그대로 · Off.
+        var step = plan!.Steps[0] with { PromptCache = PromptCacheMode.Context };
         var call = NewCall(runId, modeName, 1, step, step.Instructions, new BuiltPrompt(prompt, RepeatCachePrefix(prompt)), meta) with { Tool = tool };
         return (runId, await runner.RunStepAsync(call, ct), null);
     }

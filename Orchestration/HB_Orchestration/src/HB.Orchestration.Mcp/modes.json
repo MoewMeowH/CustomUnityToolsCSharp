@@ -126,44 +126,48 @@
     },
     "sub_self": {
       "RepoCopy": true,
-      "Description": "/self-review 기본 · /cross-review 2단계 ownReview 기본: Claude(API 키)가 저장소 추적 파일 사본에서 Glob · Grep으로 찾아 self-reviewer 형식으로 리뷰. context 필수 (검토의 중심)",
+      "Description": "/self-review 기본: Codex CLI sol(구독)이 저장소 추적 파일 사본에서 직접 찾아 self-reviewer 형식으로 리뷰. 한도 소진이면 Claude(API 키)로 대체. context 필수 (검토의 중심)",
       "Flow": "Sequential",
       "Steps": [
         {
           "Role": "SubSelf",
-          "Agent": "claude_cli_opus"
+          "Agent": "codex_cli_sol",
+          "FallbackAgent": "claude_cli_opus"
         }
       ]
     },
     "sub_perf": {
       "RepoCopy": true,
-      "Description": "/self-review perf · perf_* ownReview 기본: Claude(API 키) 성능 검토 (self-reviewer 형식). context 필수",
+      "Description": "/self-review perf · perf_* ownReview 기본: Codex CLI sol(구독) 성능 검토 (self-reviewer 형식), 한도 소진이면 Claude(API 키). context 필수",
       "Flow": "Sequential",
       "Steps": [
         {
           "Role": "SubPerf",
-          "Agent": "claude_cli_opus"
+          "Agent": "codex_cli_sol",
+          "FallbackAgent": "claude_cli_opus"
         }
       ]
     },
     "sub_security": {
       "RepoCopy": true,
-      "Description": "/self-review security · 보안 영역 /cross-review 기본: Claude(API 키) 보안 검토 (self-reviewer 형식). context 필수",
+      "Description": "/self-review security 기본: Codex CLI sol(구독) 보안 검토 (self-reviewer 형식), 한도 소진이면 Claude(API 키). context 필수",
       "Flow": "Sequential",
       "Steps": [
         {
           "Role": "SubSecurity",
-          "Agent": "claude_cli_opus"
+          "Agent": "codex_cli_sol",
+          "FallbackAgent": "claude_cli_opus"
         }
       ]
     },
     "sub_direction": {
-      "Description": "/self-review direction 기본: Claude(API 키)가 요청 원문 대 계획서 방향 검토. context에 request.md · 계획서",
+      "Description": "/self-review direction 기본: Codex CLI sol(구독)이 요청 원문 대 계획서 방향 검토, 한도 소진이면 Claude(API 키). context에 request.md · 계획서",
       "Flow": "Sequential",
       "Steps": [
         {
           "Role": "SubDirection",
-          "Agent": "claude_cli_opus"
+          "Agent": "codex_cli_sol",
+          "FallbackAgent": "claude_cli_opus"
         }
       ]
     },

@@ -11,7 +11,7 @@
 ### 언제 부르나 — 기본은 부르지 않는다
 
 * 리뷰 (`/self-review` · `/cross-review`): 50줄 이상 변경, 스레딩/비동기/메모리 관련 변경, 사용자가 교차 리뷰를 요청했을 때 — **자동으로 부르지 않고 사용자에게 묻는다**.
-  * 선택지: `/self-review`(지휘자 + API 리뷰어, 저장소 사본에서 직접 찾음 — API 키 과금) · `/self-review sub`(서브에이전트가 저장소 추적 사본에서 직접 찾음 — 구독 사용량) · `/cross-review`(+ 외부 `review_main`, 중요한 변경은 `/cross-review high` = `review_high`) · 리뷰 없음. 변경 성격(단순 이동·이름 변경·문서·테스트만 / 비용 계산·보안·직렬화·스레딩 같은 위험 영역)을 한 줄로 보이고 추천을 붙인다.
+  * 선택지: `/self-review`(지휘자 + API 리뷰어(Codex 구독), 저장소 사본에서 직접 찾음) · `/self-review sub`(서브에이전트가 저장소 추적 사본에서 직접 찾음 — 구독 사용량) · `/cross-review`(+ 외부 `review_main`, 중요한 변경은 `/cross-review high` = `review_high`) · 리뷰 없음. 변경 성격(단순 이동·이름 변경·문서·테스트만 / 비용 계산·보안·직렬화·스레딩 같은 위험 영역)을 한 줄로 보이고 추천을 붙인다.
   * 중요도에 따른 추천: 작은 · 한곳 변경은 `/self-review`, 여러 파일 · 프로젝트에 걸치거나 호출부 · 설정까지 따라가야 하는 변경(구조 · 상태 · 경로 · 설정 해석)은 `/self-review sub`, 위험 영역 · 되돌리기 어려운 변경은 `/cross-review`.
   * 사용자가 직접 짠 코드(`/work-order human` 방향서 = `구현: 사용자` 계획서): 결함 리뷰는 위와 같이 고르고(지시서는 넣지 않음), 요구 사항 대조는 `/self-review trace <지시서>`로 따로 제안한다. 며칠 지난 작업의 `/cross-review`는 reason에 `[plan:<계획서 파일>]`.
   * 사용자가 명령을 직접 입력했으면 묻지 않는다. `review_*` 모드는 `/cross-review`로만 부른다.
@@ -38,7 +38,7 @@
 ## 서브에이전트 (Claude Code)
 
 외부 에이전트를 대신하지 않는다 (교차 리뷰의 가치는 다른 회사 모델의 시선). 사용자가 `/self-review`를 고른 경우만 외부 리뷰 없이 끝낸다.
-* 검토형(self · perf · security · direction)은 기본이 API 리뷰(`sub_*`, 키 `HB_REVIEWER_API_KEY` — 구독 사용량을 쓰지 않음). 서브에이전트는 `/self-review sub …`로 고르거나 `[실패] Quota` 때 대신 쓴다.
+* 검토형(self · perf · security · direction)은 기본이 API 리뷰(`sub_*` — Codex CLI 구독, 한도 소진이면 서버가 Claude `HB_REVIEWER_API_KEY`(구독에 딸린 월 크레딧)로 대신). 서브에이전트는 `/self-review sub …`로 고르거나 `[실패] Quota` 때 대신 쓴다. `/cross-review`에서는 외부 `review_main`도 Codex라 지휘자 쪽 리뷰어는 서브에이전트로 한다.
 * **서브에이전트를 부르기 전에 `/self-review` 명령 파일의 "서브에이전트 공통 규칙"을 읽는다** — 정의 · `subagent_in/` 입력 복사 · 실수 목록 · 결과 형식 검사.
 * 서브에이전트 결과를 판정·승인으로 쓰지 않는다.
 

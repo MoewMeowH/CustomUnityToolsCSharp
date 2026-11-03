@@ -627,7 +627,9 @@ public sealed class ClaudeCliTests : IDisposable
         foreach (var (mode, role) in new[] { ("sub_self", "SubSelf"), ("sub_perf", "SubPerf"), ("sub_security", "SubSecurity"), ("sub_direction", "SubDirection") })
         {
             var step = doc.RootElement.GetProperty("Modes").GetProperty(mode).GetProperty("Steps")[0];
-            Assert.Equal((role, "claude_cli_opus"), (step.GetProperty("Role").GetString(), step.GetProperty("Agent").GetString()));
+            // 기본은 Codex 구독, 한도 소진이면 Claude(API 키) — 구독에 딸린 월 크레딧
+            Assert.Equal((role, "codex_cli_sol", "claude_cli_opus"),
+                (step.GetProperty("Role").GetString(), step.GetProperty("Agent").GetString(), step.GetProperty("FallbackAgent").GetString()));
             var prompt = doc.RootElement.GetProperty("Roles").GetProperty(role).GetProperty("Prompt").GetString()!;
             Assert.Contains("작업 폴더", prompt);
             Assert.DoesNotContain("subagent_in", prompt);                                 // 서브에이전트용 폴더 지시가 남지 않게

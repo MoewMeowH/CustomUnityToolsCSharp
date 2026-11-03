@@ -575,6 +575,25 @@ public sealed class GoldenTests
         Assert.Equal(attachment + "\n## 요청\n봐 줘", texts[0].Text + texts[1].Text); // 이어 붙이면 원문 그대로
     }
 
+    /// <summary>제공사 기본이 Off여도 골든 반복은 저장 지점을 둔다 (run_mode만 끔).</summary>
+    [Fact]
+    public async Task Golden_run_keeps_cache_point_when_provider_cache_is_off()
+    {
+        using var h = new ModeRunnerHarness(Modes);
+        h.Options.Providers["fake"].PromptCache = PromptCacheMode.Off;
+        using var d = new GoldenDir();
+        var attachment = "\n## 첨부 코드 (서버가 디스크에서 읽음, 줄 번호 포함)\n\n### a.cs:1-1\n" + new string('x', StepCall.MinContextCacheChars) + "\n";
+        d.Add("a", input: attachment + "\n## 요청\n봐 줘");
+        h.Client.Script = [ScriptedChatClient.Reply(Answer)];
+
+        var (code, _, err) = await Cli(h, "run", "--dir", d.Root, "--yes");
+
+        Assert.True(code == 0, err);
+        var texts = h.Client.Received.Single().Messages.Single(m => m.Role == Microsoft.Extensions.AI.ChatRole.User)
+            .Contents.OfType<Microsoft.Extensions.AI.TextContent>().ToList();
+        Assert.Equal(2, texts.Count);
+    }
+
     [Fact]
     public async Task Score_rejects_no_guidelines_flag()
     {
