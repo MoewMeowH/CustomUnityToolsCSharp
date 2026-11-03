@@ -98,6 +98,21 @@ public static class ClaudeRunner
     public static async Task<RunResult> RunAsync(ProcessSpec spec, string prompt, Action<StreamEvent> onEvent,
         Func<ToolPermission, CancellationToken, Task<string>>? onPermission, CancellationToken ct, CancellationToken wrapUp = default)
     {
+        using var proc = new Process { StartInfo = StartInfo(spec) };
+        try
+        {
+            if (!proc.Start()) return Fail("프로세스를 시작하지 못했습니다.");
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException)
+        {
+            return Fail($"실행 실패: {ex.Message}");
+        }
+        return await RunStartedAsync(proc, prompt, onEvent, onPermission, ct, wrapUp);
+    }
+
+    /// <summary>띄울 프로세스 설정 (숨김 · UTF-8 입출력 · 인자 하나씩 · 환경 정리) — <see cref="ClaudeSession"/>도 같은 값으로 띄운다.</summary>
+    internal static ProcessStartInfo StartInfo(ProcessSpec spec)
+    {
         var utf8 = new UTF8Encoding(false);
         var psi = new ProcessStartInfo(spec.FileName)
         {
@@ -117,17 +132,12 @@ public static class ClaudeRunner
         // 서브에이전트 강도는 앱 설정만 — 이 앱을 띄운 환경의 값이 설정을 비운 방 · 명령 방에 새지 않게 (sub_self 47b774c535 C6)
         psi.Environment.Remove(ClaudeArgs.SubagentEffortVariable);
         foreach (var (name, value) in spec.Environment) psi.Environment[name] = value;
+        return psi;
+    }
 
-        using var proc = new Process { StartInfo = psi };
-        try
-        {
-            if (!proc.Start()) return Fail("프로세스를 시작하지 못했습니다.");
-        }
-        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException)
-        {
-            return Fail($"실행 실패: {ex.Message}");
-        }
-
+    private static async Task<RunResult> RunStartedAsync(Process proc, string prompt, Action<StreamEvent> onEvent,
+        Func<ToolPermission, CancellationToken, Task<string>>? onPermission, CancellationToken ct, CancellationToken wrapUp)
+    {
         var stderrTask = ReadTail(proc.StandardError, MaxStderrChars);
         string? error = null;
         // stdin 쓰기는 하나씩 (승인 답은 다른 스레드에서 온다). 닫은 뒤의 쓰기 · 끝난 프로세스에 쓰기는 조용히 버린다.
@@ -331,6 +341,24 @@ public static class ClaudeRunner
         session_id = "",
     }, LineJson);
 
+    /// <summary>uuid를 단 사용자 말 한 줄 — <c>--replay-user-messages</c>가 그 uuid로 되돌려 준다 (<see cref="ClaudeSession"/>, 2.1.316 실측).</summary>
+    internal static string UserLine(string prompt, string uuid) => JsonSerializer.Serialize(new
+    {
+        type = "user",
+        message = new { role = "user", content = prompt },
+        parent_tool_use_id = (string?)null,
+        session_id = "",
+        uuid,
+    }, LineJson);
+
+    /// <summary>앱이 CLI에 보내는 제어 요청 한 줄 (set_model · apply_flag_settings · stop_task — 2.1.316 실측 모양).</summary>
+    internal static string ControlLine(string requestId, object request) => JsonSerializer.Serialize(new
+    {
+        type = "control_request",
+        request_id = requestId,
+        request,
+    }, LineJson);
+
     private static readonly JsonSerializerOptions LineJson = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
     /// <summary>
@@ -338,7 +366,7 @@ public static class ClaudeRunner
     /// onPermission이 던지거나 답 JSON이 깨졌으면 거절로 답한다 — 답이 없으면 CLI가 멈춰 있게 된다 (지휘자 검토 C2).
     /// CLI가 그 요청을 거뒀으면(control_cancel_request — 요청 토큰만 끊기고 실행 토큰은 그대로) 답을 쓰지 않는다.
     /// </summary>
-    private static async Task AnswerAsync(StdinWriter input, ControlRequestEvent control,
+    internal static async Task AnswerAsync(StdinWriter input, ControlRequestEvent control,
         Func<ToolPermission, CancellationToken, Task<string>>? onPermission,
         ConcurrentDictionary<string, CancellationTokenSource> asks, CancellationTokenSource ask, CancellationToken run)
     {
@@ -402,17 +430,18 @@ public static class ClaudeRunner
     }
 
     /// <summary>stdin 줄 쓰기 (한 번에 하나). 닫은 뒤 · 프로세스가 끝난 뒤의 쓰기는 버린다.</summary>
-    private sealed class StdinWriter(StreamWriter writer)
+    internal sealed class StdinWriter(StreamWriter writer)
     {
         private readonly SemaphoreSlim _gate = new(1, 1);
         private bool _closed;
 
-        public async Task WriteAsync(string line)
+        /// <summary>썼으면 true. 닫힌 뒤 · 쓰기 실패면 false.</summary>
+        public async Task<bool> WriteAsync(string line)
         {
             await _gate.WaitAsync();
             try
             {
-                if (_closed) return;
+                if (_closed) return false;
                 // 한 줄은 한 번에 쓴다: StreamWriter로 쓰면 버퍼(4KB) 단위로 나뉘어 파이프에 들어가는데, 약 8KB를 넘는 줄이 여러 번에 나뉘어
                 // 들어오면 stdin을 열어 둔 CLI가 그 줄을 처리하지 않고 멈췄다 (2.1.312 실측 — 9KB 줄: 나눠 쓰면 멈춤 · 한 번에 쓰면 20KB도 됨,
                 //). 긴 말 · 한글(\uXXXX로 6배)이 걸린다. \r\n 대신 \n — 줄 끝 모양을 실측과 같게.
@@ -420,8 +449,13 @@ public static class ClaudeRunner
                 var bytes = writer.Encoding.GetBytes(line + "\n");
                 await writer.BaseStream.WriteAsync(bytes);
                 await writer.BaseStream.FlushAsync();
+                return true;
             }
-            catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException) { _closed = true; }
+            catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException)
+            {
+                _closed = true;
+                return false;
+            }
             finally
             {
                 _gate.Release();
@@ -445,16 +479,18 @@ public static class ClaudeRunner
         }
     }
 
-    private static void Kill(Process proc)
+    internal static void Kill(Process proc)
     {
         try
         {
             if (!proc.HasExited) proc.Kill(entireProcessTree: true);
         }
-        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or NotSupportedException) { }
+        // 그 사이 스스로 끝나는 트리면 Kill이 AggregateException("Not all processes in process tree could be terminated")을 던진다 —
+        // 쉬는 실행은 끝나는 중인 프로세스에 중지 · 앱 종료가 겹칠 수 있다 (시험에서 확인). 이미 정리된 Process면 ObjectDisposedException
+        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or NotSupportedException or AggregateException or ObjectDisposedException) { }
     }
 
-    private static async Task<string> ReadTail(StreamReader reader, int limit)
+    internal static async Task<string> ReadTail(StreamReader reader, int limit)
     {
         var sb = new StringBuilder();
         var buf = new char[4096];

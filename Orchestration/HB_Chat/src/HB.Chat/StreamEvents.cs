@@ -157,7 +157,28 @@ public sealed record ControlCancelEvent(string RequestId) : StreamEvent;
 /// </summary>
 public sealed record RateLimitEvent(IReadOnlyList<LimitWindow> Windows, string? Status, bool? UsingOverage) : StreamEvent;
 
-/// <summary>화면에 쓰지 않는 줄 (status · message_start · control_response · 모르는 종류 · 깨진 JSON).</summary>
+/// <summary>
+/// control_response: 앱이 보낸 제어 요청(set_model · apply_flag_settings · stop_task …)의 답. Ok는 subtype success.
+/// Error는 실패 문구, ResponseJson은 response 안 response 객체 원문(없으면 null). 2.1.316 실측 모양.
+/// </summary>
+public sealed record ControlResponseEvent(string RequestId, bool Ok, string? Error, string? ResponseJson) : StreamEvent;
+
+/// <summary>
+/// 사용자 말 되돌림 (<c>--replay-user-messages</c>, 2.1.316 실측): CLI가 넣은 말을 처리할 때 <c>{"type":"user","isReplay":true,"uuid":…}</c>로 돌려준다.
+/// 그 턴의 init 뒤 · result 전에 온다. 이 uuid가 든 턴이 그 말의 턴이다 (자동 턴과 가른다).
+/// </summary>
+public sealed record ReplayEvent(string? Uuid) : StreamEvent;
+
+/// <summary>
+/// system/background_tasks_changed: 지금 도는 백그라운드 작업 전체 목록 (2.1.316 실측 — 바뀔 때마다 옴, 끝나면 빠짐).
+/// 전경 Bash는 들지 않는다. 서브에이전트가 띄운 명령은 ParentTaskId가 있다.
+/// </summary>
+public sealed record BackgroundTasksEvent(IReadOnlyList<BackgroundTask> Tasks) : StreamEvent;
+
+/// <summary>백그라운드 작업 하나: task_type(local_bash · local_agent …) · 설명 · subagent_type · 띄운 서브에이전트 작업 id.</summary>
+public sealed record BackgroundTask(string TaskId, string? Kind, string? Description, string? Agent, string? ParentTaskId);
+
+/// <summary>화면에 쓰지 않는 줄 (status · message_start · 모르는 종류 · 깨진 JSON).</summary>
 public sealed record OtherEvent(string Type) : StreamEvent;
 
 public static class StreamParser
@@ -179,6 +200,12 @@ public static class StreamParser
                 "control_request" when Str(e, "request_id") is { Length: > 0 } id && e.TryGetProperty("request", out var req) && req.ValueKind == JsonValueKind.Object
                     => new ControlRequestEvent(id, Str(req, "subtype") ?? "", req.GetRawText()),
                 "control_cancel_request" when Str(e, "request_id") is { Length: > 0 } cancelId => new ControlCancelEvent(cancelId),
+                "control_response" when e.TryGetProperty("response", out var cr) && cr.ValueKind == JsonValueKind.Object
+                                        && Str(cr, "request_id") is { Length: > 0 } crId =>
+                    new ControlResponseEvent(crId, Str(cr, "subtype") == "success", Cap(Str(cr, "error"), StatusChars),
+                        cr.TryGetProperty("response", out var crBody) && crBody.ValueKind == JsonValueKind.Object ? crBody.GetRawText() : null),
+                "user" when e.TryGetProperty("isReplay", out var replay) && replay.ValueKind == JsonValueKind.True => new ReplayEvent(Cap(Str(e, "uuid"), 80)),
+                "system" when subtype == "background_tasks_changed" => ParseBackgroundTasks(e),
                 "system" when subtype == "init" => new InitEvent(Str(e, "session_id"), Str(e, "claude_code_version"), McpServers(e))
                 {
                     SlashCommands = Strs(e, "slash_commands"),
@@ -219,6 +246,23 @@ public static class StreamParser
         {
             return new OtherEvent("invalid");
         }
+    }
+
+    /// <summary>작업 목록 상한 — 넘는 항목은 버린다 (줄 하나가 화면 · 상태를 키우지 않게).</summary>
+    public const int MaxBackgroundTasks = 64;
+
+    private static StreamEvent ParseBackgroundTasks(JsonElement e)
+    {
+        if (!e.TryGetProperty("tasks", out var tasks) || tasks.ValueKind != JsonValueKind.Array) return new OtherEvent("system/background_tasks_changed");
+        var list = new List<BackgroundTask>();
+        foreach (var t in tasks.EnumerateArray())
+        {
+            if (list.Count >= MaxBackgroundTasks) break;
+            if (t.ValueKind != JsonValueKind.Object || Cap(Str(t, "task_id"), 80) is not { Length: > 0 } id) continue;
+            list.Add(new BackgroundTask(id, Cap(Str(t, "task_type"), 40), Cap(Str(t, "description"), StatusChars), Cap(Str(t, "subagent_type"), 80),
+                Cap(Str(t, "parent_task_id"), 80)));
+        }
+        return new BackgroundTasksEvent(list);
     }
 
     private static StreamEvent ParseRateLimit(JsonElement e)

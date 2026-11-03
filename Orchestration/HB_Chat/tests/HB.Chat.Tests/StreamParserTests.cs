@@ -37,10 +37,42 @@ public sealed class StreamParserTests
         // request_id나 request가 없으면 다른 줄로 (답할 곳을 모름)
         Assert.IsType<OtherEvent>(StreamParser.Parse("""{"type":"control_request","request":{"subtype":"can_use_tool"}}"""));
         Assert.IsType<OtherEvent>(StreamParser.Parse("""{"type":"control_request","request_id":"x"}"""));
-        Assert.IsType<OtherEvent>(StreamParser.Parse("""{"type":"control_response","response":{"subtype":"success","request_id":"hbchat_init"}}"""));
+        // 앱이 보낸 제어 요청의 답 (2.1.316 실측 모양) — request_id가 없으면 다른 줄로
+        var ok = Assert.IsType<ControlResponseEvent>(StreamParser.Parse("""{"type":"control_response","response":{"subtype":"success","request_id":"sm1","response":{"model":"claude-haiku-5-5"}}}"""));
+        Assert.Equal(("sm1", true, null), (ok.RequestId, ok.Ok, ok.Error));
+        Assert.Contains("claude-haiku-5-5", ok.ResponseJson);
+        var bare = Assert.IsType<ControlResponseEvent>(StreamParser.Parse("""{"type":"control_response","response":{"subtype":"success","request_id":"hbchat_init"}}"""));
+        Assert.Null(bare.ResponseJson);
+        var bad = Assert.IsType<ControlResponseEvent>(StreamParser.Parse("""{"type":"control_response","response":{"subtype":"error","request_id":"x1","error":"invalid_task_id"}}"""));
+        Assert.Equal((false, "invalid_task_id"), (bad.Ok, bad.Error));
+        Assert.IsType<OtherEvent>(StreamParser.Parse("""{"type":"control_response","response":{"subtype":"success"}}"""));
         // 요청 거두기 (SDK 규약 모양 — 추정, 7d839f4aa5 C1)
         Assert.Equal("9f1", Assert.IsType<ControlCancelEvent>(StreamParser.Parse("""{"type":"control_cancel_request","request_id":"9f1"}""")).RequestId);
         Assert.IsType<OtherEvent>(StreamParser.Parse("""{"type":"control_cancel_request"}"""));
+    }
+
+    /// <summary>--replay-user-messages의 되돌림 줄 (2.1.316 실측) — isReplay가 아닌 user 줄은 지금처럼 도구 결과로.</summary>
+    [Fact]
+    public void Replay_KeepsUuid()
+    {
+        var ev = Assert.IsType<ReplayEvent>(StreamParser.Parse(
+            """{"type":"user","message":{"role":"user","content":"Say just the word PING."},"session_id":"s","parent_tool_use_id":null,"uuid":"937777f1-1d5c-4f0e-a6c3-7220462a611c","isReplay":true}"""));
+        Assert.Equal("937777f1-1d5c-4f0e-a6c3-7220462a611c", ev.Uuid);
+        Assert.IsNotType<ReplayEvent>(StreamParser.Parse("""{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t","content":"x"}]},"uuid":"u","isReplay":false}"""));
+    }
+
+    /// <summary>백그라운드 작업 목록 (2.1.316 실측 모양): 명령 · 서브에이전트 · 서브에이전트가 띄운 명령. 빈 목록도 이벤트.</summary>
+    [Fact]
+    public void BackgroundTasks_ReadsList()
+    {
+        var ev = Assert.IsType<BackgroundTasksEvent>(StreamParser.Parse(
+            """{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"aa0a7a4cd098fc960","run_id":"r1","task_type":"local_agent","subagent_type":"general-purpose","description":"Run sleep and echo"},{"task_id":"bq3kxmvjr","run_id":"r2","task_type":"local_bash","description":"sleep 25","parent_task_id":"aa0a7a4cd098fc960"},{"run_id":"no id"}],"uuid":"u","session_id":"s"}"""));
+        Assert.Equal(
+            [new BackgroundTask("aa0a7a4cd098fc960", "local_agent", "Run sleep and echo", "general-purpose", null),
+             new BackgroundTask("bq3kxmvjr", "local_bash", "sleep 25", null, "aa0a7a4cd098fc960")],
+            ev.Tasks);
+        Assert.Empty(Assert.IsType<BackgroundTasksEvent>(StreamParser.Parse("""{"type":"system","subtype":"background_tasks_changed","tasks":[]}""")).Tasks);
+        Assert.IsType<OtherEvent>(StreamParser.Parse("""{"type":"system","subtype":"background_tasks_changed"}"""));
     }
 
     [Fact]

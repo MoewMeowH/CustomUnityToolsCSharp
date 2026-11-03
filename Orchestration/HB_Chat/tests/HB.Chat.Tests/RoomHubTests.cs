@@ -315,12 +315,12 @@ public sealed class RoomHubTests : IDisposable
         File.WriteAllText(Path.Combine(_dir, "ws", ".mcp.json"), """{"mcpServers":{"hb-orchestration":{"command":"dotnet","args":["x.dll"]}}}""");
         var room = _store.Create("ws", PermissionLevel.Read, "opus", null);
         var ch = _hub.Subscribe(room.Id);
-        Assert.Null(_hub.Send(room.Id, "hello no attach"));
-        await Until(ch, e => e.Kind == "idle");
-        Assert.Null(_specs[0].AttachDir);
-
+        // 쉬는 실행 방은 첨부 폴더를 첫 실행 전에 만든다 — 쉬는 동안 첫 첨부로 인자가 바뀌지 않게 (/self-review af6ffa3da5 C3)
         var folder = Attachments.Folder(Path.Combine(_dir, "data"), room.Id);
-        Directory.CreateDirectory(folder);
+        Assert.Null(_hub.Send(room.Id, "hello no attach yet"));
+        await Until(ch, e => e.Kind == "idle");
+        Assert.Equal(Path.GetFullPath(folder), _specs[0].AttachDir);
+
         Assert.Null(_hub.Send(room.Id, "hello attach"));
         await Until(ch, e => e.Kind == "idle");
         Assert.Equal(Path.GetFullPath(folder), _specs[1].AttachDir);
@@ -661,7 +661,9 @@ public sealed class RoomHubTests : IDisposable
 
         var spec = Assert.Single(_specs);
         Assert.Equal(McpConfigFile.RoomPath(Path.Combine(_dir, "data"), room.Id), spec.McpConfigPath);
-        Assert.False(File.Exists(spec.McpConfigPath)); // 실행이 끝나면 지운다
+        // 프로세스가 끝나면 지운다 — 쉬는 실행이라 턴 끝(idle) 뒤 프로세스가 닫히면서 (작업 없는 턴은 곧바로)
+        for (var i = 0; i < 100 && File.Exists(spec.McpConfigPath); i++) await Task.Delay(50);
+        Assert.False(File.Exists(spec.McpConfigPath));
         Assert.Equal(["notion"], spec.ExtraMcpServers);
         var config = Assert.Single(_configTexts);
         Assert.Contains("hb-orchestration", config);
@@ -780,9 +782,9 @@ public sealed class RoomHubTests : IDisposable
         _hub.Send(room.Id, "echo first");
         var first = await Echoed(ch);
         Assert.StartsWith("<system-reminder>", first);
-        Assert.Contains(RoomRules.For(PermissionLevel.Read, modeCard: true), first);
+        Assert.Contains(RoomRules.For(PermissionLevel.Read, modeCard: true, rest: true), first);
         Assert.EndsWith("echo first", first);
-        Assert.Equal(RoomRules.Hash(RoomRules.For(PermissionLevel.Read, modeCard: true)), _store.Get(room.Id)!.RulesHash);
+        Assert.Equal(RoomRules.Hash(RoomRules.For(PermissionLevel.Read, modeCard: true, rest: true)), _store.Get(room.Id)!.RulesHash);
 
         // 그대로면 붙이지 않는다
         _hub.Send(room.Id, "echo second");

@@ -13,12 +13,14 @@
     {
         RoomActivity.Approval => s.Face == Face.Question ? "답 기다림" : "승인 기다림",
         RoomActivity.Busy => "실행 중" + (s.Steps is { } p ? " " + p : ""),
+        _ when s.Background > 0 => $"백그라운드 {s.Background}", // 답은 끝났고 작업이 돈다 (쉬는 실행)
         _ => s.Failed ? "실패" : "",
     };
     static string StateClass(RoomSummary s) => s.Activity switch
     {
         RoomActivity.Approval => "approval",
         RoomActivity.Busy => "busy",
+        _ when s.Background > 0 => "resting",
         _ => s.Failed ? "failed" : "",
     };
 }

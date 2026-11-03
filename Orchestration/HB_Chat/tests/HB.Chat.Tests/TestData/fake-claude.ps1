@@ -1,5 +1,6 @@
-# 가짜 claude: stdin stream-json(SDK식 — initialize 제어 요청 → 사용자 말 한 줄)에서 사용자 말의 첫 낱말로 동작을 고르고 stream-json 줄을 낸다
-# (RoomHubTests · ApprovalFlowTests). 인자: 세션 ID. 줄 모양은 0번 실측(Claude Code 2.1.311 · 2.1.312)에서 본 것만 흉내 낸다.
+# 가짜 claude: stdin stream-json(SDK식 — initialize 제어 요청 → 사용자 말)에서 사용자 말의 첫 낱말로 동작을 고르고 stream-json 줄을 낸다
+# (RoomHubTests · ApprovalFlowTests). 인자: 세션 ID. 줄 모양은 0번 실측(Claude Code 2.1.311 · 2.1.312 · 2.1.316)에서 본 것만 흉내 낸다.
+# 한 프로세스가 말 여러 개를 받는다 (쉬는 실행) — stdin이 닫힐 때까지. 말에 uuid가 있으면 init 뒤 그 말을 되돌린다 (--replay-user-messages).
 # approve · ask · write 모드: 3차 0번 실측의 control_request can_use_tool을 내고 stdin의 control_response를 기다려, 허용이면 성공 · 거절이면 오류 결과를 낸다.
 # 두 번째 인자: 할 일 폴더(tasks 모드가 <폴더>/<세션>/<번호>.json을 쓴다 — 3차 b, 0번 실측 B 모양).
 # third arg (optional): session transcript path - echo modes append one line there like the real CLI recording the user message.
@@ -9,30 +10,35 @@ param([string]$Sid, [string]$TasksRoot, [string]$Transcript)
 
 function Emit([string]$line) { [Console]::Out.WriteLine($line); [Console]::Out.Flush() }
 
-# 사용자 말이 올 때까지 읽는다 (initialize는 성공으로 답한다 — 진짜 CLI처럼).
-$prompt = ''
-while ($null -ne ($line = [Console]::In.ReadLine())) {
-    $msg = $line | ConvertFrom-Json
-    if ($msg.type -eq 'control_request' -and $msg.request.subtype -eq 'initialize') {
-        Emit ('{"type":"control_response","response":{"subtype":"success","request_id":"' + $msg.request_id + '","response":{}}}')
-    } elseif ($msg.type -eq 'user') {
-        $prompt = [string]$msg.message.content
-        break
+# Many turns in one process (resting runs, 2.1.316 probe): every user message -> init, the user line back (isReplay + uuid, --replay-user-messages),
+# then the mode's lines. stdin closed -> the process ends. User lines that arrive while a turn waits for an answer are kept for later.
+$inbox = New-Object System.Collections.Queue
+function NextUser {
+    if ($script:inbox.Count -gt 0) { return $script:inbox.Dequeue() }
+    while ($null -ne ($line = [Console]::In.ReadLine())) {
+        if (-not $line.Trim()) { continue }
+        $msg = $line | ConvertFrom-Json
+        if ($msg.type -eq 'control_request' -and $msg.request.subtype -eq 'initialize') {
+            Emit ('{"type":"control_response","response":{"subtype":"success","request_id":"' + $msg.request_id + '","response":{}}}')
+        } elseif ($msg.type -eq 'user') { return $msg }
     }
+    return $null
 }
-# app may prepend system-reminder blocks (rules-changed note, group chat delta - one or more): strip them to read the mode, keep the full prompt for 'echo'
-$body = [regex]::Replace($prompt, '(?s)^(?:<system-reminder>.*?</system-reminder>\s*)+', '')
-$mode = ($body.Trim() -split '\s+')[0]
 
 # 승인 요청을 내고 같은 request_id의 답을 기다린다. 답(response 객체) 또는 입력이 끝나면 $null.
 function Ask([string]$id, [string]$request) {
     Emit ('{"type":"control_request","request_id":"' + $id + '","request":' + $request + '}')
     while ($null -ne ($line = [Console]::In.ReadLine())) {
+        if (-not $line.Trim()) { continue }
         $msg = $line | ConvertFrom-Json
         if ($msg.type -eq 'control_response' -and $msg.response.request_id -eq $id) { return $msg.response.response }
+        if ($msg.type -eq 'user') { $script:inbox.Enqueue($msg) }
     }
     return $null
 }
+
+function TaskList([string]$items) { Emit ('{"type":"system","subtype":"background_tasks_changed","tasks":[' + $items + ']}') }
+function Init([string]$id) { Emit ('{"type":"system","subtype":"init","session_id":"' + $id + '","claude_code_version":"0.0.0-fake","mcp_servers":[]}') }
 
 function Finish($d, [string]$tool, [string]$okText) {
     if ($d -and $d.behavior -eq 'allow') {
@@ -45,8 +51,24 @@ function Finish($d, [string]$tool, [string]$okText) {
     }
 }
 
+while ($null -ne ($user = NextUser)) {
+$prompt = [string]$user.message.content
+# app may prepend system-reminder blocks (rules-changed note, group chat delta - one or more): strip them to read the mode, keep the full prompt for 'echo'
+$body = [regex]::Replace($prompt, '(?s)^(?:<system-reminder>.*?</system-reminder>\s*)+', '')
+$mode = ($body.Trim() -split '\s+')[0]
+
+# resumed session whose background task died with the previous CLI (real check 2026-10-29, same in 2.1.316): before the user turn the CLI emits
+# task_notification stopped, init and an EMPTY result (no user line back). 'ghostfail': that early result is an error without text.
+if ($mode -in 'ghost', 'ghostfail') {
+    Emit '{"type":"system","subtype":"task_notification","task_id":"b_old","status":"stopped","output_file":"","summary":"Background shell command did not finish before the previous session ended"}'
+    Init $Sid
+    if ($mode -eq 'ghost') { Emit '{"type":"result","subtype":"success","is_error":false,"result":"","total_cost_usd":0,"permission_denials":[]}' }
+    else { Emit '{"type":"result","subtype":"error_during_execution","is_error":true,"total_cost_usd":0,"permission_denials":[]}' }
+}
+
 $useSid = if ($mode -eq 'other') { '00000000-0000-0000-0000-000000000000' } else { $Sid }
-Emit ('{"type":"system","subtype":"init","session_id":"' + $useSid + '","claude_code_version":"0.0.0-fake","mcp_servers":[]}')
+Init $useSid
+if ($user.uuid) { Emit ('{"type":"user","message":{"role":"user","content":' + (ConvertTo-Json $prompt -Compress) + '},"session_id":"' + $Sid + '","parent_tool_use_id":null,"uuid":"' + $user.uuid + '","isReplay":true}') }
 
 switch ($mode) {
     { $_ -in 'echo', '/echo' } {
@@ -315,18 +337,22 @@ switch ($mode) {
         Finish $d 'Bash' 'sub done'
     }
     'bgagent' {
-        # background subagent (feature D, real check 2026-10-28): the CLI emits the main result first, then the subagent asks for approval,
-        # then task_notification and a second result. The app must keep stdin open until the subagent is done.
-        Emit '{"type":"system","subtype":"task_started","task_id":"t_bg1","tool_use_id":"toolu_b","description":"Make dir","subagent_type":"general-purpose","is_backgrounded":true}'
+        # background subagent (feature D, real check 2026-10-28 / 2.1.316 shape): the turn ends first, then the subagent asks for approval while the
+        # process rests, then task_notification, the task list empties and an automatic turn (init + result) follows.
+        TaskList '{"task_id":"t_bg1","task_type":"local_agent","subagent_type":"general-purpose","description":"Make dir"}'
+        Emit '{"type":"system","subtype":"task_started","task_id":"t_bg1","tool_use_id":"toolu_b","description":"Make dir","subagent_type":"general-purpose","is_backgrounded":true,"task_type":"local_agent"}'
         Emit '{"type":"result","subtype":"success","is_error":false,"result":"launched","total_cost_usd":0.001,"permission_denials":[]}'
         $d = Ask 'req_bg' '{"subtype":"can_use_tool","tool_name":"Bash","display_name":"Bash","input":{"command":"mkdir bgdir","description":"Create bgdir"},"agent_id":"bg1","tool_use_id":"toolu_fake7"}'
         $status = if ($d -and $d.behavior -eq 'allow') { 'completed' } else { 'failed' }
         Emit ('{"type":"system","subtype":"task_notification","task_id":"t_bg1","tool_use_id":"toolu_b","status":"' + $status + '","subagent_type":"general-purpose"}')
+        TaskList ''
+        Init $Sid
         Finish $d 'Bash' 'bg done'
     }
     'bghang' {
-        # background subagent that never reports done (security review 42f9d47dc4 C2): the app must still close stdin after its wait cap
-        Emit '{"type":"system","subtype":"task_started","task_id":"t_hang","tool_use_id":"toolu_c","description":"Never ends","subagent_type":"general-purpose","is_backgrounded":true}'
+        # background subagent that never reports done (security review 42f9d47dc4 C2): the turn ends, the process rests until the cap / wrap-up / stop
+        TaskList '{"task_id":"t_hang","task_type":"local_agent","subagent_type":"general-purpose","description":"Never ends"}'
+        Emit '{"type":"system","subtype":"task_started","task_id":"t_hang","tool_use_id":"toolu_c","description":"Never ends","subagent_type":"general-purpose","is_backgrounded":true,"task_type":"local_agent"}'
         Emit '{"type":"result","subtype":"success","is_error":false,"result":"launched","total_cost_usd":0.001,"permission_denials":[]}'
     }
     'bgmisc' {
@@ -342,24 +368,24 @@ switch ($mode) {
         # main result first, then task_notification (no task_type) and a second result. The app must keep stdin open for the second answer.
         $d = Ask 'req_bgb' '{"subtype":"can_use_tool","tool_name":"Bash","display_name":"Bash","input":{"command":"python job.py","description":"Run job","run_in_background":true},"tool_use_id":"toolu_fake8"}'
         if (-not $d -or $d.behavior -ne 'allow') { Finish $d 'Bash' 'no'; break }
+        TaskList '{"task_id":"b_job","task_type":"local_bash","description":"Run job"}'
         Emit '{"type":"system","subtype":"task_started","task_id":"b_job","tool_use_id":"toolu_fake8","description":"Run job","is_backgrounded":true,"task_type":"local_bash"}'
         Emit '{"type":"result","subtype":"success","is_error":false,"result":"started","total_cost_usd":0.001,"permission_denials":[]}'
         Start-Sleep -Milliseconds 1500
         Emit '{"type":"system","subtype":"task_notification","task_id":"b_job","status":"completed","output_file":"C:\\tmp\\b_job.output"}'
+        TaskList ''
+        # the automatic turn after the job ended (2.1.316: a turn of its own, init first, no user line back)
+        Init $Sid
         Emit '{"type":"result","subtype":"success","is_error":false,"result":"job finished","total_cost_usd":0.002,"permission_denials":[]}'
     }
     'ghost' {
-        # resumed session whose background task died with the previous CLI (real check 2026-10-29): before the user turn the CLI emits
-        # task_notification status stopped, init and an EMPTY result. The app must not take that result as the turn end (stdin stays open).
-        Emit '{"type":"system","subtype":"task_notification","task_id":"b_old","status":"stopped","output_file":"","summary":"Background shell command did not finish before the previous session ended"}'
-        Emit '{"type":"result","subtype":"success","is_error":false,"result":"","total_cost_usd":0,"permission_denials":[]}'
+        # the ghost lines came before init (above); the user turn itself asks for a command so the approval must reach the app
         Emit '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tg","name":"Bash","input":{"command":"git status"}}]}}'
         $d = Ask 'req_ghost' '{"subtype":"can_use_tool","tool_name":"Bash","display_name":"Bash","input":{"command":"git status","description":"Show status"},"tool_use_id":"tg"}'
         Finish $d 'Bash' 'after ghost'
     }
     'ghostfail' {
-        # unknown task notification, then an error result WITHOUT a result field (self-review 6f64f4b039 C1): must end the turn, not be swallowed
-        Emit '{"type":"system","subtype":"task_notification","task_id":"b_old2","status":"stopped","output_file":""}'
+        # the early ghost result was an error without text (above, self-review 6f64f4b039 C1); the user turn then fails the same way and must end the turn
         Emit '{"type":"result","subtype":"error_during_execution","is_error":true,"total_cost_usd":0,"permission_denials":[]}'
     }
     'bgfromagent' {
@@ -369,6 +395,7 @@ switch ($mode) {
     }
     'bgserver' {
         # background server that never ends: after stdin closes the real CLI keeps running (real check), so the app must kill it after a grace
+        TaskList '{"task_id":"b_srv","task_type":"local_bash","description":"Serve"}'
         Emit '{"type":"system","subtype":"task_started","task_id":"b_srv","tool_use_id":"toolu_fake9","description":"Serve","is_backgrounded":true,"task_type":"local_bash"}'
         Emit '{"type":"result","subtype":"success","is_error":false,"result":"server up","total_cost_usd":0.001,"permission_denials":[]}'
         Start-Sleep -Seconds 120
@@ -474,5 +501,5 @@ switch ($mode) {
         Emit '{"type":"result","subtype":"success","is_error":false,"result":"Hello","total_cost_usd":0.0125,"permission_denials":[{"tool_name":"Write"}],"modelUsage":{"m":{"contextWindow":200000}}}'
     }
 }
-# result 뒤에는 앱이 stdin을 닫는다 — 진짜 CLI처럼 입력 끝을 기다렸다가 끝낸다
-while ($null -ne [Console]::In.ReadLine()) { }
+}
+# stdin closed (the app decided the process is done) - end like the real CLI

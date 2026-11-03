@@ -17,6 +17,9 @@ public sealed record RoomSummary(
     /// <summary>실행 중인 방의 진행 단계 ("2/5", 3차 b). 없으면 null.</summary>
     public string? Steps { get; init; }
 
+    /// <summary>답 뒤 쉬는 실행에서 도는 백그라운드 작업 수 (방 목록 "백그라운드 N"). 실행 중 · 없으면 0.</summary>
+    public int Background { get; init; }
+
     /// <summary>마지막 턴의 지휘자 상태 한 줄 (3차 b).</summary>
     public RoomStatus? Status { get; init; }
 
@@ -74,6 +77,7 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
         {
             Face = hub.FaceOf(room, transient: false),
             Steps = hub.StepProgress(room.Id),
+            Background = hub.RestingTasks(room.Id),
             Status = room.Status,
             Workspace = room.Workspace,
             StickerPack = room.StickerPack,

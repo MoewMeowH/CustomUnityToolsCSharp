@@ -536,6 +536,8 @@ public sealed partial class RoomModel(
         // 명령 아래로 내리면 지휘자가 띄운 프로세스도 끝낸다 — "명령 실행 없음" 단계에서 돌던 서버가 남지 않게 (/self-review 57b59ef134 C1 · a3a9dd85c1 C1). 내 셸은 그대로
         // 앱 단계는 CLI가 묻지 않고 판단해 앱이 막을 자리가 없다 — 내리면 지금 턴을 멈춘다
         if (expectedLevel == PermissionLevel.App && lv != PermissionLevel.App) hub.StopTurn(id);
+        // 쉬는 실행(답 뒤 백그라운드 작업)은 띄울 때의 단계 인자로 산다 — 단계를 내리면 작업째 끝낸다 (/cross-review 52ac1810e1 security C1)
+        else if (lv < expectedLevel) hub.EndRest(id, "settings", afterTurn: true); // 쓰던 답은 자르지 않고 그 턴 끝에 (af6ffa3da5 C1)
         if (lv == PermissionLevel.Read && expectedLevel != PermissionLevel.Read)
         {
             hub.EndTurnTrust(id);
@@ -611,6 +613,7 @@ public sealed partial class RoomModel(
             return groups.SetDeleted(id, DateTimeOffset.Now) is { } groupError ? BadRequest(groupError) : ChangedGroup(id);
         if (store.Get(id) is { GroupId: not null }) return BadRequest("단톡방 구성원 방은 단톡방과 함께 휴지통에 넣습니다.");
         if (hub.IsBusy(id)) return BadRequest("실행 중인 방입니다 — 중지한 뒤 휴지통에 넣으세요.");
+        hub.EndRest(id); // 답 뒤 쉬던 백그라운드 작업도 끝낸다 — 휴지통 방에서 프로세스 · 자동 답이 남지 않게 (/cross-review 52ac1810e1 1-F4)
         hub.ForgetCommands(id);
         terminals.StopRoom(id, "방 삭제"); // 그 방 터미널도 끝낸다
         browser.Close(id, "방 삭제");
@@ -641,6 +644,8 @@ public sealed partial class RoomModel(
         if (!Load(id)) return NotFound();
         if (Room.DeletedAt is not null) return BadRequest("휴지통에 있는 방입니다.");
         if (hub.IsBusy(id)) return BadRequest("실행 중인 방은 복제하지 않습니다 — 턴이 끝난 뒤 다시 하세요.");
+        // 쉬는 실행은 작업이 끝나면 스스로 이어 답해 기록을 쓴다 — 갈래가 쓰는 중인 기록을 읽지 않게 (self C2)
+        if (hub.HasRestingTasks(id)) return BadRequest("백그라운드 작업이 도는 방은 복제하지 않습니다 — 작업이 끝나거나 '지금 끝내기' 뒤 다시 하세요.");
         if (transcripts.Size(Room.SessionId) is null) return BadRequest("아직 대화가 없어 복제할 것이 없습니다.");
         var (title, _) = RoomList.CleanTitle(RoomList.Cut(Title, 190) + " (갈래)");
         try
@@ -831,6 +836,22 @@ public sealed partial class RoomModel(
         if (!RoomStore.IsRoomId(id)) return NotFound();
         hub.WrapUp(id);
         return new JsonResult(new { ok = true });
+    }
+
+    /// <summary>설정 바꾸기 전 확인에서 허용함: 쉬는 실행을 작업째 끝낸다 (결정 "확인 뒤 작업 끝내고 적용" — 기록 줄은 "방 설정이 바뀌어").</summary>
+    public IActionResult OnPostEndRest(string id)
+    {
+        if (!RoomStore.IsRoomId(id)) return NotFound();
+        hub.EndRest(id, "settings", afterTurn: true); // 응답 중이면 쓰던 답은 끝까지 (af6ffa3da5 C1)
+        return new JsonResult(new { ok = true });
+    }
+
+    /// <summary>백그라운드 작업 하나 끝내기 (작업 줄의 단추) — 다른 작업 · 프로세스는 그대로.</summary>
+    public async Task<IActionResult> OnPostStopTask(string id, string? task)
+    {
+        if (!RoomStore.IsRoomId(id)) return NotFound();
+        if (string.IsNullOrWhiteSpace(task) || task.Length > 80) return BadRequest("작업 ID가 없습니다.");
+        return await hub.StopTaskAsync(id, task) is { } error ? BadRequest(error) : new JsonResult(new { ok = true });
     }
 
     // ---- 터미널 곁칸 ----

@@ -925,8 +925,11 @@
         const planToggle = $("#plan-next");
         planToggle?.addEventListener("change", async () => {
             const data = new FormData(); data.append("on", planToggle.checked ? "true" : "false");
+            const endRest = planToggle.checked ? confirmRestChange() : async () => { }; // 끄는 것은 이어 쓴다
+            if (!endRest) { planToggle.checked = false; return; }
             planToggle.disabled = true;
             if (!await post("PlanNext", data)) planToggle.checked = !planToggle.checked;
+            else await endRest();
             planToggle.disabled = false;
         });
         const live = $("#live");
@@ -1726,22 +1729,31 @@
                 settings?.addEventListener("submit", async (e) => {
                     e.preventDefault();
                     const button = settings.querySelector("button[type=submit]");
+                    const level = settings.querySelector("select[name=level]");
+                    const was = level?.querySelector("option[selected]")?.value ?? level?.value;
+                    const endRest = level && level.value !== was ? confirmRestChange() : async () => { };
+                    if (!endRest) { level.value = was; return; } // 취소면 원래 단계로 되돌려 적용된 것처럼 보이지 않게
                     button.disabled = true;
-                    if (await post("Settings", new FormData(settings))) { reopenRoom(roomId); return; }
+                    if (await post("Settings", new FormData(settings))) { await endRest(); reopenRoom(roomId); return; }
                     button.disabled = false;
                 });
                 // 연결 탭: 켜기 · 끄기 · Unity 고르기 · 확인. 다음 실행부터 — 성공하면 곁칸만 다시 받는다
                 $("#side-sec-mcp")?.addEventListener("change", async (e) => {
                     const t = e.target;
                     if (t.matches("input[data-mcp]")) {
+                        const endRest = confirmRestChange();
+                        if (!endRest) { t.checked = !t.checked; return; }
                         const data = new FormData(); data.append("name", t.dataset.mcp); data.append("on", String(t.checked));
                         t.disabled = true;
                         if (!await post("McpToggle", data)) t.checked = !t.checked;
+                        else await endRest();
                         loadSide();
                     } else if (t.id === "side-unity") {
+                        const endRest = confirmRestChange();
+                        if (!endRest) { loadSide(); return; } // 고르기 전 값으로 다시 그린다
                         const data = new FormData(); data.append("project", t.value);
                         t.disabled = true;
-                        await post("Unity", data);
+                        if (await post("Unity", data)) await endRest();
                         loadSide();
                     }
                 });
@@ -1914,7 +1926,17 @@
         // 기다림은 정리 시각(until)이 있는 동안 — 작업 수가 0이어도 지휘자가 이어 답하는 중이라 줄과 단추를 둔다 (/self-review 6f64f4b039 C3). 끝 · 중지에서 지운다.
         let bgLine = null;
         function clearBackground() { bgLine?.remove(); bgLine = null; }
-        function showBackground(count, until) {
+        // 쉬는 실행의 인자가 바뀌는 설정(권한 · 연결 · Unity · 외부 요청 전에 묻기 · 계획 먼저 켜기): 남은 백그라운드 작업을 끝내야 적용된다 —
+        // 묻고(결정 "확인 뒤 작업 끝내고 적용"), 취소면 null (설정을 보내지 않는다). 허용이면 "저장된 뒤 작업 끝내기" 함수를 돌려준다 —
+        // 저장이 실패하면 작업을 끝내지 않는다 (af6ffa3da5 C5). 응답 중이면 쓰던 답은 끝까지 (서버가 그 턴 끝에). 모델 · 강도는 살린 채 바뀌어 묻지 않는다.
+        function confirmRestChange() {
+            const n = bgLine?.isConnected ? (bgLine.list?.childElementCount || 0) : 0;
+            if (n === 0) return async () => { };
+            if (!confirm(`백그라운드 작업 ${n}개가 돌고 있습니다. 이 설정을 바꾸면 그 작업을 끝내고(지금 답하는 중이면 그 답이 끝난 뒤) 다음 말부터 새로 시작합니다. 바꿀까요?`)) return null;
+            return async () => { await post("EndRest", new FormData(), true); };
+        }
+        // tasks: 쉬는 실행의 작업 목록 (있으면 하나씩 끝내기 단추 — 답이 끝나도 산다). 없으면 예전 기다림(단톡방 구성원).
+        function showBackground(count, until, tasks) {
             if (!until) { clearBackground(); return; }
             if (!bgLine || !bgLine.isConnected) {
                 bgLine = el("div", "live-line bg-wait");
@@ -1928,10 +1950,35 @@
                 live.append(bgLine);
             }
             bgLine.button.disabled = false; // 새 기다림 알림이 오면 다시 켠다
-            const at = new Date(until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+            const hhmm = (t) => new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+            const at = hhmm(until);
             bgLine.firstChild.textContent = (count
-                ? `답은 끝났고 백그라운드 작업 ${count}개를 기다립니다`
+                ? (tasks ? `백그라운드 작업 ${count}개가 돌고 있습니다 — 그동안 말을 보낼 수 있고, 끝나면 지휘자가 이어 답합니다` : `답은 끝났고 백그라운드 작업 ${count}개를 기다립니다`)
                 : "백그라운드 작업이 끝나 지휘자가 이어 답하는 중입니다") + ` — ${at}까지 안 끝나면 정리합니다 `;
+            // 작업 목록 · 하나씩 끝내기 (쉬는 실행). 설명은 글자로만 넣는다 (textContent)
+            bgLine.list?.remove();
+            bgLine.list = null;
+            if (tasks?.length) {
+                const list = el("div", "bg-tasks");
+                for (const t of tasks) {
+                    const row = el("div", "bg-task");
+                    const kind = t.kind === "agent" ? "서브에이전트" + (t.agent ? " " + t.agent : "")
+                        : t.kind === "command" ? (t.fromAgent ? "서브에이전트의 명령" : "명령") : "작업 (" + t.kind + ")";
+                    row.append(el("span", null, `${kind}: ${t.description || t.id} · ${hhmm(t.since)}부터`));
+                    const stop = el("button", "btn", "끝내기");
+                    stop.type = "button";
+                    stop.addEventListener("click", async () => {
+                        stop.disabled = true;
+                        const data = new FormData();
+                        data.append("task", t.id);
+                        if (!await post("StopTask", data)) stop.disabled = false; // 실패 문구는 post가 보인다 — 다시 누를 수 있게
+                    });
+                    row.append(stop);
+                    list.append(row);
+                }
+                bgLine.append(list);
+                bgLine.list = list;
+            }
             if (atBottom()) toBottom();
         }
 
@@ -1980,7 +2027,8 @@
                     if (ev.face) setFace(ev.face);
                     renderSteps(ev.steps);
                     if (ev.status) showStatus(ev.status);
-                    if (ev.busy && ev.backgroundUntil) showBackground(ev.backgroundCount || 0, ev.backgroundUntil); else clearBackground();
+                    // 서버는 실행 중이거나 쉬는 실행(답 뒤에도 작업이 남음)일 때만 정리 시각을 보낸다
+                    if (ev.backgroundUntil) showBackground(ev.backgroundCount || 0, ev.backgroundUntil, ev.tasks); else clearBackground();
                     showTrust(ev.trust === true);
                     renderTerms(ev.terminals);
                     for (const v of termViews.values()) loadBuffer(v); // 끊긴 사이 출력은 알림으로 오지 않았다
@@ -1990,7 +2038,7 @@
                     refreshDocsOnTurnEnd();
                     break;
                 case "background":
-                    showBackground(ev.backgroundCount, ev.backgroundUntil);
+                    showBackground(ev.backgroundCount, ev.backgroundUntil, ev.tasks);
                     break;
                 case "trust":
                     showTrust(ev.trust === true);
@@ -2229,8 +2277,11 @@
         const askRunMode = $("#ask-run-mode");
         askRunMode?.addEventListener("change", async () => {
             const data = new FormData(); data.append("on", askRunMode.checked ? "true" : "false");
+            const endRest = confirmRestChange();
+            if (!endRest) { askRunMode.checked = !askRunMode.checked; return; }
             askRunMode.disabled = true;
             if (!await post("AskRunMode", data)) askRunMode.checked = !askRunMode.checked;
+            else await endRest();
             askRunMode.disabled = false;
         });
         const modePick = $("#mode-pick"), modeChip = $("#mode-chip"), modeChipText = $("#mode-chip-text");
