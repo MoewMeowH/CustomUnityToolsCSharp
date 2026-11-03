@@ -274,4 +274,30 @@ public sealed class RoomRestTests : IDisposable
         Assert.True((await UntilAll(ch, Idle)).Single(e => e.Kind == "end").Ok);
         Assert.Equal(2, _launched);
     }
+
+    /// <summary>
+    /// 쉬는 실행은 마지막 턴이 끝난 뒤에야 프로세스가 끝나고 CLI가 그때 세션 기록에 줄을 더 쓴다 — 프로세스가 끝나면 그 크기를 이 앱이 본 크기로 적어,
+    /// 다음 말에 "이 앱 밖에서 바뀌었습니다" 경고가 잘못 뜨지 않게 (사용자 화면 2026-11-04). 가짜 CLI는 기록을 쓰지 않아 시험이 턴 끝 뒤에 덧붙인다.
+    /// </summary>
+    [Fact]
+    public async Task TranscriptGrownAfterTurn_ByRestingProcess_IsNotOutsideChange()
+    {
+        var room = CommandRoom();
+        var transcript = Path.Combine(_dir, "projects", "F--ws", room.SessionId + ".jsonl");
+        Directory.CreateDirectory(Path.GetDirectoryName(transcript)!);
+        File.WriteAllText(transcript, "{\"type\":\"user\"}\n");
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "say hi");
+        await UntilAll(ch, Idle);
+        Assert.True(_hub.IsResting(room.Id));
+        File.AppendAllText(transcript, "{\"type\":\"last-prompt\"}\n"); // 프로세스가 끝나며 쓰는 줄
+        for (var i = 0; i < 100 && _hub.IsResting(room.Id); i++) await Task.Delay(50);
+        Assert.False(_hub.IsResting(room.Id));
+        for (var i = 0; i < 40 && _store.Get(room.Id)!.KnownSize != new FileInfo(transcript).Length; i++) await Task.Delay(50);
+        Assert.Equal(new FileInfo(transcript).Length, _store.Get(room.Id)!.KnownSize);
+
+        _hub.Send(room.Id, "say again");
+        var next = await UntilAll(ch, Idle);
+        Assert.DoesNotContain(next, e => e.Kind == "notice" && e.Text!.Contains("앱 밖에서"));
+    }
 }

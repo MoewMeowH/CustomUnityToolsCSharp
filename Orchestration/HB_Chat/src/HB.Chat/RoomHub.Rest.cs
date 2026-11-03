@@ -537,6 +537,20 @@ public sealed partial class RoomHub
                 }
             }
         }
+        // 쉬는 실행은 마지막 화면 턴이 끝난 뒤(IdleGrace · 작업 끝)에야 프로세스가 끝나고, CLI는 끝날 때 세션 기록에 줄을 더 쓴다 —
+        // 턴 끝에 적은 크기와 달라져 다음 말에 "이 앱 밖에서 바뀌었습니다" 경고가 잘못 떴다 (사용자 화면 2026-11-04: 223,272 → 224,183).
+        // 화면 턴이 돌지 않을 때 끝났으면 지금 크기를 이 앱이 본 크기로 (돌고 있으면 그 턴 끝 Record가 적는다). 앱을 끄느라 끝난 것은 그대로 둔다
+        bool idle;
+        lock (live.Gate) idle = !live.Busy;
+        if (idle && !_disposed)
+        {
+            try
+            {
+                if (store.Get(roomId) is { RunStartedAt: null } room && transcripts.Size(room.SessionId) is { } size && size != room.KnownSize)
+                    store.Update(roomId, r => r.RunStartedAt is null ? r with { KnownSize = size } : r);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException) { }
+        }
         wait?.Ended.TrySetResult(null);
         run.Done.TrySetResult();
     }
