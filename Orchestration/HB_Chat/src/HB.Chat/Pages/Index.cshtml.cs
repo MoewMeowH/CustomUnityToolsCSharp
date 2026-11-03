@@ -8,7 +8,7 @@ namespace HB.Chat.Pages;
 /// 방을 고르지 않은 첫 화면: 왼쪽 방 목록 + 오른쪽 새 방 만들기.
 /// ?handler=RoomList: 앱 전체 알림을 받은 화면이 목록 부분만 다시 받는다.
 /// </summary>
-public sealed class IndexModel(RoomStore store, RoomHub hub, RoomList list, ChatTranscripts transcripts, IOptions<ChatOptions> options, GroupChat groups) : PageModel
+public sealed class IndexModel(RoomStore store, RoomHub hub, RoomList list, ChatTranscripts transcripts, IOptions<ChatOptions> options, GroupChat groups, UsageLimits limits) : PageModel
 {
     /// <summary>
     /// 새 단톡방 (1단계): 구성원 이름 · 역할 줄들. 구성원마다 숨은 자식 방이 생긴다.
@@ -72,10 +72,15 @@ public sealed class IndexModel(RoomStore store, RoomHub hub, RoomList list, Chat
         if (ShowTrash) TrashRooms = [.. store.All().Where(r => r.DeletedAt is not null && r.GroupId is null).OrderByDescending(r => r.DeletedAt)];
     }
 
-    /// <summary>사이드바 구독 한도 줄 — 목록을 다시 받을 때 화면이 같이 받는다.</summary>
-    public IActionResult OnGetLimits()
+    /// <summary>계정 조회를 기다리는 상한 — 넘으면 있는 값으로 그리고, 조회는 뒤에서 마저 끝나 다음 갱신 때 보인다.</summary>
+    private static readonly TimeSpan LimitsWait = TimeSpan.FromSeconds(3);
+
+    /// <summary>사이드바 구독 한도 줄 — 목록을 다시 받을 때 화면이 같이 받는다. Codex 계정 조회가 5분 지났으면 한 번 돌리고 잠깐 기다린다.</summary>
+    public async Task<IActionResult> OnGetLimits()
     {
         Response.Headers.CacheControl = "no-store";
+        try { await limits.RefreshCodexAsync().WaitAsync(LimitsWait, HttpContext.RequestAborted); }
+        catch (Exception ex) when (ex is TimeoutException or OperationCanceledException) { }
         return Partial("_Limits");
     }
 

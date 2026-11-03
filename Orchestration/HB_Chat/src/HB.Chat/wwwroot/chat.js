@@ -41,7 +41,7 @@
 
     // ---- 방 목록 ----
     let room = null; // 지금 붙은 방: { id, dispose }
-    let listTimer = null, listSeq = 0, limitsSeq = 0;
+    let listTimer = null, listSeq = 0, limitsBusy = false, limitsAgain = false;
     async function refreshList() {
         const seq = ++listSeq;
         refreshLimits(); // 목록 요청이 실패해도 한도 줄은 따로 (/self-review b40d9efb00 C6)
@@ -64,20 +64,27 @@
             }
         } catch { /* 다음 알림 때 다시 */ }
     }
-    // 사이드바 구독 한도: 목록을 다시 받을 때 같이 — 펼친 창은 펼친 채로, 늦게 온 옛 응답은 버림
+    // 사이드바 구독 한도: 목록을 다시 받을 때 같이 — 펼친 창은 펼친 채로.
+    // 요청은 하나만: 서버가 Codex 계정 조회를 최대 3초 기다려 겹치면 HTTP/1.1 연결(호스트당 6개)을 잡는다 (/self-review sub C3).
+    // 도는 동안 온 신호는 끝난 뒤 한 번만 다시 받는다 (그때는 조회가 끝나 바로 온다).
     async function refreshLimits() {
-        const seq = ++limitsSeq;
+        if (limitsBusy) { limitsAgain = true; return; }
+        limitsBusy = true;
         try {
             const res = await fetch("/?handler=Limits", { cache: "no-store" });
-            if (!res.ok || seq !== limitsSeq) return;
+            if (!res.ok) return;
             const tmp = document.createElement("div");
             tmp.innerHTML = await res.text(); // 서버가 Razor 인코딩으로 만든 같은 출처 HTML
             const fresh = tmp.querySelector("#usage-limits"), old = document.getElementById("usage-limits");
-            if (fresh && old && seq === limitsSeq) {
+            if (fresh && old) {
                 fresh.open = old.open;
                 old.replaceWith(fresh);
             }
         } catch { /* 다음 알림 때 다시 */ }
+        finally {
+            limitsBusy = false;
+            if (limitsAgain) { limitsAgain = false; refreshLimits(); }
+        }
     }
     function scheduleList() { clearTimeout(listTimer); listTimer = setTimeout(refreshList, 250); }
     // 작업 폴더별 묶음 (3차 d): 접은 폴더 이름을 브라우저에 저장한다 (편의만 — 못 읽으면 모두 펼침). 목록을 다시 받을 때마다 다시 적용.

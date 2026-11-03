@@ -1,10 +1,12 @@
 @inject UsageLimits Limits
 @*
     사이드바 아래 구독 한도 (결정: 사이드바 아래 + 누르면 창, 색만).
-    Claude는 HB_Chat 실행 때 받은 마지막 값, Codex는 ~/.codex 세션 기록의 마지막 값. 목록을 다시 받을 때 화면이 ?handler=Limits로 다시 받는다.
+    Claude는 HB_Chat 실행 때 받은 마지막 값, Codex는 계정 조회(5분마다) · ~/.codex 세션 기록 중 새 값. 목록을 다시 받을 때 화면이 ?handler=Limits로 다시 받는다.
+    처음 그릴 때는 조회를 기다리지 않고 뒤에서 시작만 한다 (화면이 붙자마자 목록을 다시 받으며 보인다).
 *@
 @{
     var now = DateTimeOffset.Now;
+    _ = Limits.RefreshCodexAsync(now);
     var sources = new (string Name, LimitSnapshot? Value)[] { ("Claude", Limits.Claude()), ("Codex", Limits.Codex(now)) };
 }
 <details class="side-limits" id="usage-limits">
@@ -35,7 +37,7 @@
                 <div class="limit-head"><b>@name</b>@if (s?.Plan is { } plan) { <span class="muted"> · @plan</span> }@if (s?.UsingOverage == true) { <span class="lim-warn"> · 초과 사용 중</span> }</div>
                 @if (s is null || s.Windows.Count == 0)
                 {
-                    <div class="muted">@(name == "Claude" ? "아직 받은 값이 없습니다 — HB_Chat에서 Claude를 한 번 돌리면 보입니다." : "Codex 세션 기록에 한도 값이 없습니다.")</div>
+                    <div class="muted">@(name == "Claude" ? "아직 받은 값이 없습니다 — HB_Chat에서 Claude를 한 번 돌리면 보입니다." : "Codex 계정 조회 · 세션 기록에서 한도 값을 받지 못했습니다.")</div>
                 }
                 else
                 {
@@ -49,11 +51,15 @@
                             <span class="muted reset">@Reset(w.ResetsAt, now)</span>
                         </div>
                     }
-                    <div class="muted when">받은 시각 @s.At.ToLocalTime().ToString("MM-dd HH:mm")@(s.IsStale(now) ? " (지난 값)" : "")</div>
+                    @if (s.ResetCredits is { } credits)
+                    {
+                        <div class="muted when">한도 초기화 크레딧 @(credits)개</div>
+                    }
+                    <div class="muted when">받은 시각 @s.At.ToLocalTime().ToString("MM-dd HH:mm")@(s.IsStale(now) ? " (지난 값)" : "")@(s.From switch { LimitSnapshot.FromAccount => " · 계정 조회", LimitSnapshot.FromRollout => " · 세션 기록", _ => "" })</div>
                 }
             </div>
         }
-        <div class="muted note">Claude는 HB_Chat에서 Claude를 돌릴 때마다, Codex는 Codex를 쓸 때마다 갱신됩니다 (추가 호출 없음).</div>
+        <div class="muted note">Claude는 HB_Chat에서 Claude를 돌릴 때마다 갱신됩니다 (추가 호출 없음). Codex는 목록을 다시 받을 때 5분마다 계정에서 조회하고, 실패하면 세션 기록의 마지막 값입니다.</div>
     </div>
 </details>
 

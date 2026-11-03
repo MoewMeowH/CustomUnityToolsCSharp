@@ -102,4 +102,123 @@ public sealed class UsageLimitsTests : IDisposable
         var snap = UsageLimits.ReadCodex(sessions)!;
         Assert.Equal(30, snap.Windows[0].Percent);                                // 깨진 줄 · 다른 묶음은 건너뛰고 그 앞 줄
     }
+
+    [Fact]
+    public void Codex_NullRolloutsInFront_StillFindsValue()   // Codex Desktop이 rate_limits null 기록 21개를 한꺼번에 만든 경우
+    {
+        var sessions = Path.Combine(_dir, "codex3", "sessions");
+        var day = Directory.CreateDirectory(Path.Combine(sessions, "2026", "11", "04")).FullName;
+        var old = Path.Combine(day, "rollout-old.jsonl");
+        File.WriteAllText(old, CodexLine("2026-11-03T06:54:00Z", 27, 56) + "\n");
+        File.SetLastWriteTimeUtc(old, new DateTime(2026, 11, 3, 6, 54, 0, DateTimeKind.Utc));
+        for (var i = 0; i < 21; i++)
+        {
+            var f = Path.Combine(day, $"rollout-null{i:00}.jsonl");
+            File.WriteAllText(f, """{"timestamp":"2026-11-03T17:25:57Z","type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":null}}""" + "\n");
+            File.SetLastWriteTimeUtc(f, new DateTime(2026, 11, 3, 17, 25, 57, DateTimeKind.Utc).AddSeconds(i));
+        }
+
+        var snap = UsageLimits.ReadCodex(sessions)!;
+        Assert.Equal((27.0, LimitSnapshot.FromRollout), (snap.Windows[0].Percent!.Value, snap.From));
+    }
+
+    [Fact]
+    public void Codex_FileCache_RereadsOnlyChangedFiles()   // C2
+    {
+        var home = Path.Combine(_dir, "codex5");
+        var day = Directory.CreateDirectory(Path.Combine(home, "sessions", "2026", "11", "04")).FullName;
+        var file = Path.Combine(day, "rollout-a.jsonl");
+        File.WriteAllText(file, CodexLine("2026-11-04T01:00:00Z", 10, 1) + "\n");
+        var limits = new UsageLimits(() => _dir, () => home);
+        var t0 = DateTimeOffset.Now;
+        Assert.Equal(10, limits.Codex(t0)!.Windows[0].Percent);
+
+        File.AppendAllText(file, CodexLine("2026-11-04T02:00:00Z", 20, 2) + "\n");      // 크기 · 시각이 바뀜 → 다시 읽음
+        Assert.Equal(20, limits.Codex(t0 + UsageLimits.CodexCache + TimeSpan.FromSeconds(1))!.Windows[0].Percent);
+        var stamp = File.GetLastWriteTimeUtc(file);                                        // 크기 · 시각이 같으면 내용이 바뀌어도 캐시
+        File.WriteAllText(file, File.ReadAllText(file).Replace("\"used_percent\":20", "\"used_percent\":30"));
+        File.SetLastWriteTimeUtc(file, stamp);
+        Assert.Equal(20, limits.Codex(t0 + 2 * (UsageLimits.CodexCache + TimeSpan.FromSeconds(1)))!.Windows[0].Percent);
+
+        File.Delete(file);
+        Assert.Null(limits.Codex(t0 + 3 * (UsageLimits.CodexCache + TimeSpan.FromSeconds(1)))); // 사라진 파일은 캐시에서도
+    }
+
+    /// <summary>codex 0.165.0 account/rateLimits/read 실측 응답 (accountId 등 뺌).</summary>
+    private const string AccountResponse = """{"id":2,"result":{"ordinaryUsageAllowed":true,"rateLimits":{"limitId":"codex","primary":{"usedPercent":0,"windowDurationMins":300,"resetsAt":1793747355},"secondary":{"usedPercent":57,"windowDurationMins":10080,"resetsAt":1793862262},"planType":"plus"},"rateLimitsByLimitId":{"codex":{"limitId":"codex","primary":{"usedPercent":3,"windowDurationMins":300,"resetsAt":1793747355},"secondary":{"usedPercent":58,"windowDurationMins":10080,"resetsAt":1793862262},"planType":"plus"}},"rateLimitResetCredits":{"availableCount":2,"credits":null}}}""";
+
+    private static LimitSnapshot? ParseAccount(string json) => CodexLimits.Parse(System.Text.Json.Nodes.JsonNode.Parse(json), DateTimeOffset.UnixEpoch);
+
+    [Fact]
+    public void Account_ParsesResponse()
+    {
+        var snap = ParseAccount(AccountResponse)!;
+        Assert.Equal(("codex", "plus", 2, LimitSnapshot.FromAccount), (snap.Source, snap.Plan, snap.ResetCredits, snap.From));
+        Assert.Equal([("5시간", 3.0), ("7일", 58.0)], snap.Windows.Select(w => (w.Label, w.Percent!.Value))); // rateLimitsByLimitId.codex 먼저
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1793862262), snap.Windows[1].ResetsAt);
+
+        var single = ParseAccount("""{"id":2,"result":{"rateLimits":{"primary":{"usedPercent":10,"windowDurationMins":300},"secondary":null}}}""")!;
+        Assert.Equal(("5시간", 10.0, (DateTimeOffset?)null, (int?)null), (single.Windows.Single().Label, single.Windows[0].Percent!.Value, single.Windows[0].ResetsAt, single.ResetCredits));
+
+        Assert.Null(ParseAccount("""{"id":2,"result":{"rateLimits":{"limitId":"other","primary":{"usedPercent":10}}}}""")); // 다른 묶음
+        Assert.Null(ParseAccount("""{"id":2,"error":{"code":-32600,"message":"chatgpt auth required"}}"""));         // 오류 응답
+        Assert.Null(ParseAccount("""{"id":2,"result":{"rateLimits":{"primary":null,"secondary":null}}}"""));         // 창 없음
+        Assert.Null(ParseAccount("""{"id":2,"result":{"rateLimits":{"primary":{"usedPercent":"x"}}}}"""));          // 모양이 다름
+        Assert.Null(CodexLimits.Parse(null, DateTimeOffset.UnixEpoch));
+    }
+
+    [Fact]
+    public async Task Account_RefreshEveryInterval_FailureKeepsOld_SingleFlight()
+    {
+        var calls = 0;
+        LimitSnapshot? next = null;
+        var gate = new TaskCompletionSource();
+        var limits = new UsageLimits(() => _dir, () => Path.Combine(_dir, "없는-codex"), async _ =>
+        {
+            Interlocked.Increment(ref calls);
+            await gate.Task;
+            return next;
+        });
+        var t0 = DateTimeOffset.Now;
+        Assert.Null(limits.Codex(t0));
+
+        next = ParseAccount(AccountResponse)! with { At = t0 };
+        var first = limits.RefreshCodexAsync(t0);
+        Assert.Same(first, limits.RefreshCodexAsync(t0.AddMinutes(10))); // 돌고 있으면 같은 작업
+        gate.SetResult();
+        await first;
+        Assert.Equal((1, 3.0), (calls, limits.Codex(t0)!.Windows[0].Percent!.Value));
+
+        await limits.RefreshCodexAsync(t0.AddMinutes(4));                // 5분 안 — 부르지 않음
+        Assert.Equal(1, calls);
+
+        next = null;                                                      // 실패해도 전 값은 남는다
+        await limits.RefreshCodexAsync(t0.AddMinutes(6));
+        Assert.Equal((2, 3.0), (calls, limits.Codex(t0)!.Windows[0].Percent!.Value));
+        await limits.RefreshCodexAsync(t0.AddMinutes(8));                // 실패 뒤에도 5분 쉼
+        Assert.Equal(2, calls);
+
+        var throwing = new UsageLimits(() => _dir, () => Path.Combine(_dir, "없는-codex"), _ => throw new InvalidOperationException("x"));
+        await throwing.RefreshCodexAsync(t0);                             // 예외로 끝나지 않음
+        Assert.Null(throwing.Codex(t0));
+        Assert.Null(new UsageLimits(() => _dir).RefreshCodexAsync(t0).Exception); // 조회기 없으면 아무것도 안 함
+    }
+
+    [Fact]
+    public async Task Account_AndRollout_NewerWins()
+    {
+        var home = Path.Combine(_dir, "codex4");
+        var day = Directory.CreateDirectory(Path.Combine(home, "sessions", "2026", "10", "29")).FullName;
+        File.WriteAllText(Path.Combine(day, "rollout-a.jsonl"), CodexLine("2026-10-29T10:00:00Z", 14, 2) + "\n");
+        var account = ParseAccount(AccountResponse)!;
+
+        var older = new UsageLimits(() => _dir, () => home, _ => Task.FromResult<LimitSnapshot?>(account with { At = DateTimeOffset.Parse("2026-10-29T09:00:00Z") }));
+        await older.RefreshCodexAsync();
+        var won = older.Codex()!;
+        Assert.Equal((LimitSnapshot.FromRollout, 14.0, 2), (won.From, won.Windows[0].Percent!.Value, won.ResetCredits)); // 기록이 더 새로움 — 크레딧은 계정 값에서 (C1)
+
+        var newer = new UsageLimits(() => _dir, () => home, _ => Task.FromResult<LimitSnapshot?>(account with { At = DateTimeOffset.Parse("2026-10-29T11:00:00Z") }));
+        await newer.RefreshCodexAsync();
+        Assert.Equal((LimitSnapshot.FromAccount, 2), (newer.Codex()!.From, newer.Codex()!.ResetCredits));
+    }
 }

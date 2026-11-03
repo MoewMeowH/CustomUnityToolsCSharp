@@ -47,8 +47,13 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton(sp => new AgentBrowser(() => sp.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder,
     blockedPorts: () => TerminalMcp.BlockedPorts(sp.GetRequiredService<Microsoft.AspNetCore.Hosting.Server.IServer>(), sp.GetRequiredService<IOptions<ChatOptions>>().Value)));
 builder.Services.AddMcpServer().WithHttpTransport(o => o.Stateless = true).WithTools<TerminalTools>().WithTools<BrowserTools>().WithTools<RoomTools>();
-// 구독 한도: Claude는 실행 때 받은 값을 데이터 폴더에, Codex는 ~/.codex 세션 기록에서
-builder.Services.AddSingleton(sp => new UsageLimits(() => sp.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder));
+// 구독 한도: Claude는 실행 때 받은 값을 데이터 폴더에, Codex는 계정 조회(codex app-server, 5분마다) · 세션 기록 중 새 것
+builder.Services.AddSingleton(sp =>
+{
+    ChatOptions Opts() => sp.GetRequiredService<IOptions<ChatOptions>>().Value;
+    return new UsageLimits(() => Opts().DataFolder, () => Opts().CodexHomeDir(),
+        ct => CodexLimits.ReadAsync(Opts().ResolveCodex(), Opts().CodexHomeDir(), ct));
+});
 // claude CLI 판 기록 (카드 자가 시험 · 확인하지 않은 판 띠)
 builder.Services.AddSingleton(sp => new CliVersions(() => sp.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder));
 builder.Services.AddSingleton(sp =>
