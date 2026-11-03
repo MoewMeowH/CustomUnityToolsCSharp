@@ -252,6 +252,69 @@ public sealed partial class WorkspaceStore
     /// <param name="workspace">방 작업 폴더 경로 — 그 안 쓰기가 호스트에 왔으면(계획 모드 · CLI 보호 파일) 이 카드로 묻지 않는다 (sub_self dfe83d0bb5 C4).</param>
     public static string? WhyNoWrite(string? filePath, IEnumerable<string> guarded, string? workspace = null)
     {
+        if (Locate(filePath, checkNames: true, out var target) is { } why) return why;
+        if (WriteBlockedName(target) is { } real) return $"지시 · 설정 · 실행으로 이어지는 파일이라 쓰지 않습니다 ({real}).";
+        if (workspace is not null && (Resolve(workspace) ?? Full(workspace)) is { } ws && (Same(target, ws) || Inside(target, ws)))
+            return "작업 폴더 안 파일인데 묻는 쓰기라(계획 모드 · 보호 파일) 이 카드로 묻지 않습니다.";
+        foreach (var system in SystemFolders())
+            if (Same(target, system) || Inside(target, system)) return $"시스템 폴더 안입니다: {system}";
+        foreach (var start in new[] { Environment.SpecialFolder.Startup, Environment.SpecialFolder.CommonStartup }
+                     .Select(f => Environment.GetFolderPath(f)).Where(p => p.Length > 3).Select(p => Resolve(p) ?? Full(p)).OfType<string>())
+            if (Same(target, start) || Inside(target, start)) return $"시작프로그램 폴더 안입니다: {start}";
+        foreach (var guard in guarded.Select(g => Resolve(g) ?? Full(g)).OfType<string>())
+            if (Same(target, guard) || Inside(target, guard)) return $"이 앱 · 그 저장소 · 데이터 · Claude 설정 폴더 안입니다: {guard}";
+        return null;
+    }
+
+    /// <summary>앱 단계 쓰기 요청을 어떻게 다룰지 (<see cref="AppWrite(string?, IEnumerable{string}, string, string?, IEnumerable{string})"/>). AllowFolder = 늘 허용 폴더, AllowMemory = 자동 메모리 — 둘 다 허용하고 기록에 남긴다.</summary>
+    public enum AppWriteRoute { Allow, AllowMemory, AllowFolder, Card, Deny }
+
+    /// <summary>이 목록의 보호 폴더로 <see cref="AppWrite(string?, IEnumerable{string}, string, string?, IEnumerable{string})"/>.</summary>
+    public (AppWriteRoute Route, string? Why) AppWrite(string? filePath, string workspace, string? memoryFolder, IEnumerable<string> allowedFolders) =>
+        AppWrite(filePath, _protectedFolders, workspace, memoryFolder, allowedFolders);
+
+    /// <summary>
+    /// 앱 단계 방에서 앱으로 온 Write · Edit (설정 "폴더 밖 쓰기 묻기" — ask 규칙 <c>Edit(//**)</c>로 모든 쓰기가 온다). 경로 모양 · 링크는
+    /// <see cref="WhyNoWrite(string?, IEnumerable{string}, string?)"/>와 같은 검사로 최종 경로를 푼 뒤:
+    /// 작업 폴더 안 → 허용 (그 전 auto가 묻지 않고 하던 범위 — 이름 검사는 하지 않는다), 그 작업 폴더의 자동 메모리 폴더 바로 아래 .md → 허용
+    /// (보호 폴더 ~/.claude 안이라 먼저 본다), 그 밖은 <see cref="WhyNoWrite(string?, IEnumerable{string}, string?)"/>를 통과해야 하고 —
+    /// 늘 허용한 폴더 안이면 허용, 아니면 카드. 거절 · 카드는 Why에 까닭(거절) 또는 null.
+    /// </summary>
+    /// <param name="memoryFolder">그 작업 폴더의 자동 메모리 폴더 (<c>&lt;세션 기록 폴더&gt;/&lt;작업 폴더 인코딩&gt;/memory</c>). null이면 보지 않는다.</param>
+    public static (AppWriteRoute Route, string? Why) AppWrite(string? filePath, IEnumerable<string> guarded, string workspace, string? memoryFolder,
+        IEnumerable<string> allowedFolders)
+    {
+        // 모양 · 링크가 이상하면 아래 WhyNoWrite가 같은 까닭으로 거절한다
+        if (Locate(filePath, checkNames: false, out var target) is null)
+        {
+            if ((Resolve(workspace) ?? Full(workspace)) is { } ws && (Same(target, ws) || Inside(target, ws)))
+                return InsideBlockedName(target) is { } name
+                    // 그 전에도 CLI가 auto에서 스스로 묻고 앱이 거절하던 쪽 (.git · .vscode · 셸 · git 설정 …) — 앱 설정 · 스크립트 · 지시 파일은 그대로 허용
+                    ? (AppWriteRoute.Deny, $"작업 폴더 안이지만 git · 편집기 · 셸 설정이나 실행 파일이라 쓰지 않습니다 ({name}).")
+                    : (AppWriteRoute.Allow, null);
+            // 메모리 폴더가 아직 없어도(그 작업 폴더의 첫 메모리) 같은 풀이로 — 있는 상위 폴더까지 링크를 본 최종 경로
+            if (memoryFolder is not null && Locate(System.IO.Path.Combine(memoryFolder, "x.md"), checkNames: false, out var probe) is null
+                && System.IO.Path.GetDirectoryName(probe) is { } memory && System.IO.Path.GetDirectoryName(target) is { } parent && Same(parent, memory)
+                && target.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+                return (AppWriteRoute.AllowMemory, null);
+        }
+        if (WhyNoWrite(filePath, guarded, workspace) is { } why) return (AppWriteRoute.Deny, why);
+        // WhyNoWrite를 통과했으면 최종 경로가 있다
+        Locate(filePath, checkNames: true, out target);
+        // 저장해 둔 최종 경로 그대로 비교한다 — 다시 풀면 그 폴더를 정션으로 바꿨을 때 정션 대상이 허용된다 (/cross-review 53a0e1871c 1-F2).
+        // 그 폴더 안을 거치는 쓰기는 위 Locate가 링크로 거절한다
+        foreach (var folder in allowedFolders.Select(f => Full(f)).OfType<string>())
+            if (Same(target, folder) || Inside(target, folder)) return (AppWriteRoute.AllowFolder, null);
+        return (AppWriteRoute.Card, null);
+    }
+
+    /// <summary>
+    /// 쓰기 경로를 최종 경로로 푼다 (모양 · 드라이브 · 링크 검사). 막히면 까닭, 아니면 null과 <paramref name="target"/>.
+    /// checkNames면 입력 경로의 쓰지 않는 이름(<see cref="WriteBlockedName"/>)도 본다 — 최종 경로의 이름은 부르는 쪽이 본다.
+    /// </summary>
+    private static string? Locate(string? filePath, bool checkNames, out string target)
+    {
+        target = "";
         if (string.IsNullOrWhiteSpace(filePath) || !DriveLetterPath().IsMatch(filePath.Trim()))
             return "드라이브 문자부터 쓴 절대 경로가 아닙니다 (\\\\?\\ · UNC · 상대 경로는 받지 않음).";
         var raw = filePath.Trim();
@@ -267,13 +330,12 @@ public sealed partial class WorkspaceStore
             if (new DriveInfo(full[..1]).DriveType is DriveType.Network or DriveType.NoRootDirectory) return "네트워크 · 없는 드라이브입니다.";
         }
         catch (ArgumentException) { return "드라이브를 알 수 없습니다."; }
-        if (WriteBlockedName(full) is { } blocked) return $"지시 · 설정 · 실행으로 이어지는 파일이라 쓰지 않습니다 ({blocked}).";
+        if (checkNames && WriteBlockedName(full) is { } blocked) return $"지시 · 설정 · 실행으로 이어지는 파일이라 쓰지 않습니다 ({blocked}).";
         // 새 폴더를 만들며 쓰는 경우 — 있는 가장 가까운 폴더로 링크 · 최종 경로를 본다
         var existing = folder;
         while (!Directory.Exists(existing))
             if (System.IO.Path.GetDirectoryName(existing) is { Length: > 0 } parent) existing = parent;
             else return "있는 상위 폴더를 찾지 못했습니다.";
-        string target;
         try
         {
             if (File.Exists(full) && File.GetAttributes(full).HasFlag(FileAttributes.ReparsePoint)) return "링크 파일에는 쓰지 않습니다.";
@@ -284,16 +346,6 @@ public sealed partial class WorkspaceStore
             if (target.Length == 0) return "파일의 실제 경로를 확인하지 못했습니다.";
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return "파일 · 폴더 속성을 읽지 못했습니다."; }
-        if (WriteBlockedName(target) is { } real) return $"지시 · 설정 · 실행으로 이어지는 파일이라 쓰지 않습니다 ({real}).";
-        if (workspace is not null && (Resolve(workspace) ?? Full(workspace)) is { } ws && (Same(target, ws) || Inside(target, ws)))
-            return "작업 폴더 안 파일인데 묻는 쓰기라(계획 모드 · 보호 파일) 이 카드로 묻지 않습니다.";
-        foreach (var system in SystemFolders())
-            if (Same(target, system) || Inside(target, system)) return $"시스템 폴더 안입니다: {system}";
-        foreach (var start in new[] { Environment.SpecialFolder.Startup, Environment.SpecialFolder.CommonStartup }
-                     .Select(f => Environment.GetFolderPath(f)).Where(p => p.Length > 3).Select(p => Resolve(p) ?? Full(p)).OfType<string>())
-            if (Same(target, start) || Inside(target, start)) return $"시작프로그램 폴더 안입니다: {start}";
-        foreach (var guard in guarded.Select(g => Resolve(g) ?? Full(g)).OfType<string>())
-            if (Same(target, guard) || Inside(target, guard)) return $"이 앱 · 그 저장소 · 데이터 · Claude 설정 폴더 안입니다: {guard}";
         return null;
     }
 
@@ -320,15 +372,29 @@ public sealed partial class WorkspaceStore
     /// 쓰지 않는 이름이면 그 이름 — 편집 금지 규칙(<see cref="ClaudeArgs.EditDenied"/>) 중 이름 규칙(<c>**/이름</c> · <c>**/폴더/**</c>)과 같은 것
     /// (지시 파일 · .claude · .mcp*.json · appsettings · 스크립트) + <see cref="WriteBlockedFolders"/> · <see cref="WriteBlockedFiles"/>. 대소문자는 가리지 않는다.
     /// </summary>
-    public static string? WriteBlockedName(string fullPath)
+    public static string? WriteBlockedName(string fullPath) => InsideBlockedName(fullPath) ?? EditDeniedName(fullPath);
+
+    /// <summary>
+    /// 앱 단계 작업 폴더 안 쓰기에서도 막는 이름 — <see cref="WriteBlockedFolders"/> · <see cref="WriteBlockedFiles"/>만 (편집 금지 규칙 이름은 빼고: 앱 단계는
+    /// 작업 폴더의 앱 설정 · 스크립트 · 지시 파일을 고칠 수 있다). 대소문자는 가리지 않는다.
+    /// </summary>
+    public static string? InsideBlockedName(string fullPath)
+    {
+        var parts = fullPath.Split(['\\', '/'], StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0) return null;
+        foreach (var dir in parts[..^1])
+            if (WriteBlockedFolders.FirstOrDefault(f => dir.Equals(f, StringComparison.OrdinalIgnoreCase)) is { } folder) return folder + " 폴더";
+        return WriteBlockedFiles.FirstOrDefault(f => Like(parts[^1], f)) is not null ? parts[^1] : null;
+    }
+
+    private static bool Like(string value, string glob) => Regex.IsMatch(value, "^" + Regex.Escape(glob).Replace(@"\*", ".*") + "$", RegexOptions.IgnoreCase);
+
+    /// <summary>편집 금지 규칙(<see cref="ClaudeArgs.EditDenied"/>) 중 이름 규칙(<c>**/이름</c> · <c>**/폴더/**</c>)에 걸리는 이름.</summary>
+    private static string? EditDeniedName(string fullPath)
     {
         var parts = fullPath.Split(['\\', '/'], StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length == 0) return null;
         var name = parts[^1];
-        static bool Like(string value, string glob) => Regex.IsMatch(value, "^" + Regex.Escape(glob).Replace(@"\*", ".*") + "$", RegexOptions.IgnoreCase);
-        foreach (var dir in parts[..^1])
-            if (WriteBlockedFolders.FirstOrDefault(f => dir.Equals(f, StringComparison.OrdinalIgnoreCase)) is { } folder) return folder + " 폴더";
-        if (WriteBlockedFiles.FirstOrDefault(f => Like(name, f)) is not null) return name;
         foreach (var rule in ClaudeArgs.EditDenied.Where(r => r.StartsWith("**/", StringComparison.Ordinal)))
         {
             var rest = rule[3..];
@@ -429,6 +495,9 @@ public sealed partial class WorkspaceStore
         try { return System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetFullPath(path.Trim())); }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException or System.Security.SecurityException) { return null; }
     }
+
+    /// <summary>있는 폴더의 최종 경로 (링크 · subst · 짧은 이름이 풀린 것). 없거나 못 풀면 null — 늘 허용 폴더 저장에 쓴다.</summary>
+    public static string? FinalFolder(string path) => Resolve(path);
 
     private static bool Same(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 

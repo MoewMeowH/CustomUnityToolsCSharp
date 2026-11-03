@@ -1053,6 +1053,79 @@ public sealed class ApprovalFlowTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// 앱 단계 "폴더 밖 쓰기 묻기" (ask 규칙으로 모든 쓰기가 앱에 온다): 작업 폴더 안은 카드 없이 허용, 밖은 카드(이 폴더 늘 허용 단추) —
+    /// 늘 허용하면 목록에 들어가 같은 폴더의 다음 쓰기는 카드 없이 허용되고 승인 기록에 남는다. 명령 방 카드에는 그 단추가 없다.
+    /// </summary>
+    [Fact]
+    public async Task AppRoom_AskWrites_InsideNoCard_OutsideCard_AlwaysFolder()
+    {
+        _options.AppWrites = new AppWriteStore(Path.Combine(_dir, "data", "app-writes.json"), p => Directory.Exists(p) ? null : "없는 폴더입니다.");
+        var room = _store.Create("ws", PermissionLevel.App, "opus", null);
+        var ch = _hub.Subscribe(room.Id);
+
+        // 작업 폴더 안: 카드 없이
+        _hub.Send(room.Id, "writeto " + Path.Combine(_dir, "ws", "inside.txt"));
+        var seen = await Until(ch, e => e.Kind == "idle");
+        Assert.DoesNotContain(seen, e => e.Kind == "approval");
+        Assert.True(seen.Single(e => e.Kind == "end").Ok);
+        Assert.True(_specs.Last().AskWrites);
+
+        // 밖, 바로 위 폴더가 아직 없음: 카드는 뜨지만 늘 허용 단추는 없다 (모델이 넓은 상위 폴더를 후보로 만들지 못하게)
+        var outside = Path.Combine(_dir, "elsewhere");
+        Directory.CreateDirectory(outside);
+        _hub.Send(room.Id, "writeto " + Path.Combine(outside, "new", "note.txt"));
+        var first = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        Assert.True(first.OutsideWrite);
+        Assert.Null(first.AlwaysFolder);
+        Assert.NotNull(_hub.Decide(room.Id, first.Id, ApprovalChoice.AllowFolder, null));
+        Assert.Null(_hub.Decide(room.Id, first.Id, ApprovalChoice.Deny, null));
+        await Until(ch, e => e.Kind == "idle");
+
+        // 밖, 바로 위 폴더가 있음: 늘 허용 대상 = 그 폴더의 최종 경로
+        _hub.Send(room.Id, "writeto " + Path.Combine(outside, "note.txt"));
+        var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        Assert.True(card.OutsideWrite);
+        Assert.Equal(WorkspaceStore.FinalFolder(outside), card.AlwaysFolder);
+        Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.AllowFolder, null));
+        seen = await Until(ch, e => e.Kind == "idle");
+        Assert.Equal(RoomHub.AlwaysFolderLabel, seen.Single(e => e.Kind == "approval-done").Text);
+        Assert.True(seen.Single(e => e.Kind == "end").Ok);
+        Assert.Contains(_options.AppWrites.Folders(), f => string.Equals(f, card.AlwaysFolder, StringComparison.OrdinalIgnoreCase));
+
+        // 같은 폴더 다음 쓰기: 카드 없이 · 기록에 남김
+        _hub.Send(room.Id, "writeto " + Path.Combine(outside, "other.txt"));
+        seen = await Until(ch, e => e.Kind == "idle");
+        Assert.DoesNotContain(seen, e => e.Kind == "approval");
+        Assert.True(seen.Single(e => e.Kind == "end").Ok);
+        Assert.Contains("허용 (늘 허용 폴더)", Log());
+
+        // 명령 방의 폴더 밖 쓰기 카드에는 늘 허용이 없다
+        var command = CommandRoom();
+        var cch = _hub.Subscribe(command.Id);
+        _hub.Send(command.Id, "writeto " + Path.Combine(_dir, "third", "x.txt"));
+        var commandCard = (await Until(cch, e => e.Kind == "approval")).Last().Approval!;
+        Assert.Null(commandCard.AlwaysFolder);
+        Assert.NotNull(_hub.Decide(command.Id, commandCard.Id, ApprovalChoice.AllowFolder, null));
+        Assert.Null(_hub.Decide(command.Id, commandCard.Id, ApprovalChoice.Deny, null));
+        await Until(cch, e => e.Kind == "idle");
+    }
+
+    /// <summary>"그냥 허용"이면 ask 규칙을 넣지 않는다 — 앱으로 온 쓰기(CLI가 스스로 물은 것)는 그 전 길(작업 폴더 안은 거절).</summary>
+    [Fact]
+    public async Task AppRoom_AllowWrites_NoAskRule_OldPath()
+    {
+        _options.AppWrites = new AppWriteStore(Path.Combine(_dir, "data", "app-writes.json"), _ => null);
+        Assert.Null(_options.AppWrites.SetAsk(false));
+        var room = _store.Create("ws", PermissionLevel.App, "opus", null);
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "writeto " + Path.Combine(_dir, "ws", "inside.txt"));
+        var seen = await Until(ch, e => e.Kind == "idle");
+        Assert.False(_specs.Last().AskWrites);
+        Assert.DoesNotContain(seen, e => e.Kind == "approval");
+        Assert.False(seen.Single(e => e.Kind == "end").Ok);
+    }
+
     /// <summary>쓰기 대상 검사의 모양: 상대 · UNC 경로 거절, 보통 경로는 통과, 이름 규칙은 편집 금지 목록의 이름 규칙과 같다 (+ .git).</summary>
     [Fact]
     public void WhyNoWrite_Shapes()

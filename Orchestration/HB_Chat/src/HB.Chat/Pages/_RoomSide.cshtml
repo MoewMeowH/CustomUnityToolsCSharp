@@ -52,12 +52,12 @@
             <select name="level">
                 @foreach (var lv in Enum.GetValues<PermissionLevel>())
                 {
-                    <option value="@lv" selected="@(lv == room.Level)" title="@RoomRules.Describe(lv)">@RoomRules.LevelName(lv)</option>
+                    <option value="@lv" selected="@(lv == room.Level)" title="@RoomRules.Describe(lv, AppOptions.Value.AskAppWrites)">@RoomRules.LevelName(lv)</option>
                 }
             </select>
         </label>
         <button class="btn" type="submit">@Icons.Svg("check") 바꾸기</button>
-        <p class="muted side-settings-note">다음 말부터 적용됩니다 — 명령 아래로 내리면 실행 중인 턴의 명령도 바로 거절되고, 앱 단계에서 내리면 지금 턴을 멈춥니다. @RoomRules.Describe(room.Level)</p>
+        <p class="muted side-settings-note">다음 말부터 적용됩니다 — 명령 아래로 내리면 실행 중인 턴의 명령도 바로 거절되고, 앱 단계에서 내리면 지금 턴을 멈춥니다. @RoomRules.Describe(room.Level, AppOptions.Value.AskAppWrites)</p>
     </form>
     <dl class="side-info">
         <dt>작업 폴더</dt><dd>@room.Workspace <span class="mono muted">@(Model.WorkspacePath ?? "(허용 목록에 없음)")</span></dd>

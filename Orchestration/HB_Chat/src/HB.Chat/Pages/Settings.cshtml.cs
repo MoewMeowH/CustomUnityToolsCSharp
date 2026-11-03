@@ -153,7 +153,8 @@ public sealed class SettingsModel(
     public static string? TabFor(string? done, string? handler) => (handler ?? done)?.ToLowerInvariant() switch
     {
         "theme" or "notify" or "profile" or "image-size" => "general",
-        "addworkspace" or "removeworkspace" or "addunity" or "removeunity" or "rename" or "added" or "removed" or "renamed" => "work",
+        "addworkspace" or "removeworkspace" or "addunity" or "removeunity" or "rename" or "added" or "removed" or "renamed"
+            or "appwrites" or "addappwritefolder" or "removeappwritefolder" or "appwrites-added" or "appwrites-removed" => "work",
         "cliselftest" or "cli" or "codexworkspaces" or "codex" or "addmcpfields" or "addmcpjson" or "importmcp" or "removemcp"
             or "mcp-added" or "mcp-secret" or "mcp-removed" => "connect",
         "stickerpack" or "pack" or "faces" => "decor",
@@ -186,6 +187,9 @@ public sealed class SettingsModel(
         "mcp-secret" => "MCP 서버를 더했습니다 — 다만 확인할 점이 있습니다 (평문 토큰 · 원격 http · 원격으로 보내는 환경 변수 — 목록의 경고 줄). 토큰은 ${변수} 자리표시를 권합니다.",
         "mcp-removed" => "MCP 서버를 목록에서 뺐고, 켜 두었던 방에서도 껐습니다.",
         "codex" => "Codex 구성원을 켤 작업 폴더를 저장했습니다.",
+        "appwrites" => "앱 단계 폴더 밖 쓰기 설정을 바꿨습니다 — 방의 다음 실행부터 적용됩니다.",
+        "appwrites-added" => "늘 허용 폴더를 더했습니다.",
+        "appwrites-removed" => "늘 허용 폴더를 뺐습니다 — 그 폴더 쓰기는 다시 카드로 묻습니다.",
         "cli" => Cli.LastTest is { } t ? t.Passed ? $"카드 자가 시험 통과 — claude CLI {t.Version}을 확인한 판으로 적었습니다." : "카드 자가 시험이 통과하지 못했습니다 — 아래 단계를 보세요." : null,
         _ => null,
     };
@@ -438,6 +442,40 @@ public sealed class SettingsModel(
         Fill();
         return Page();
     }
+
+    // ---- 앱 단계 폴더 밖 쓰기 (묻기 · 그냥 허용, 늘 허용 폴더 — 앱 전체) ----
+
+    public AppWriteStore? AppWrites => options.Value.AppWrites;
+
+    /// <summary>묻기(ask) · 그냥 허용(allow) 저장. 방의 다음 실행부터 (규칙 글 · ask 규칙이 같이 바뀐다).</summary>
+    public IActionResult OnPostAppWrites(string? mode)
+    {
+        Error = mode is not ("ask" or "allow") ? "알 수 없는 값입니다."
+            : AppWrites is { } writes ? writes.SetAsk(mode == "ask") : "폴더 밖 쓰기 설정 저장소가 준비되지 않았습니다.";
+        if (Error is null) return RedirectToPage(new { done = "appwrites" });
+        Fill();
+        return Page();
+    }
+
+    public IActionResult OnPostAddAppWriteFolder(string? path)
+    {
+        Error = AppWrites is { } writes ? writes.AddFolder(path) : "폴더 밖 쓰기 설정 저장소가 준비되지 않았습니다.";
+        if (Error is null) return RedirectToPage(new { done = "appwrites-added" });
+        NewWriteFolder = path;
+        Fill();
+        return Page();
+    }
+
+    public IActionResult OnPostRemoveAppWriteFolder(string? folder)
+    {
+        Error = AppWrites is { } writes ? writes.RemoveFolder(folder) : "폴더 밖 쓰기 설정 저장소가 준비되지 않았습니다.";
+        if (Error is null) return RedirectToPage(new { done = "appwrites-removed" });
+        Fill();
+        return Page();
+    }
+
+    /// <summary>늘 허용 폴더 더하기가 실패했을 때 입력칸에 다시 보일 값.</summary>
+    public string? NewWriteFolder { get; private set; }
 
     /// <summary>방 이름 바꾸기 — 방 화면의 Rename과 같은 검사 · 저장 · 목록 알림.</summary>
     public IActionResult OnPostRename(string? id, string? title)

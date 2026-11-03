@@ -111,6 +111,14 @@ if (builder.Configuration["Chat:StickerSettingsDir"] is { Length: > 0 } configur
     foreach (var warning in chat.AppWorkspaces.LoadWarnings)
         app.Logger.LogWarning("앱에서 더한 작업 폴더를 쓰지 않습니다: {Warning}", warning);
 
+    // 앱 단계 폴더 밖 쓰기 (묻기 · 늘 허용 폴더): 폴더는 작업 폴더와 같은 검사
+    var workspaces = chat.AppWorkspaces;
+    chat.AppWrites = new AppWriteStore(Path.Combine(chat.DataFolder, "app-writes.json"), workspaces.WhyUnsafe);
+    if (chat.AppWrites.LoadError is { } writesError)
+        app.Logger.LogWarning("앱 단계 폴더 밖 쓰기 설정(app-writes.json)을 읽지 못했습니다 — 덮어쓰지 않고 묻기로 둡니다: {Error}", writesError);
+    foreach (var warning in chat.AppWrites.LoadWarnings)
+        app.Logger.LogWarning("늘 허용한 폴더를 쓰지 않습니다: {Warning}", warning);
+
     // Unity 프로젝트: 작업 폴더와 같은 검사 + Unity 프로젝트 모양. 방은 UnityProject 칸으로 가리킨다.
     chat.AppUnityProjects = new WorkspaceStore(Path.Combine(chat.DataFolder, "unity-projects.json"), chat.UnityProjects, guarded,
         usedBy: r => r.UnityProject,

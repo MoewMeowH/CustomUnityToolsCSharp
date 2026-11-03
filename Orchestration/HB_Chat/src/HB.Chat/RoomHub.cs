@@ -99,6 +99,9 @@ public sealed record ApprovalView(string Id, string Tool, string Summary, string
 
     /// <summary>"이 턴 동안 묻지 않기" 단추를 보이는 명령 카드 (<see cref="ApprovalRequest.TurnAllowable"/>).</summary>
     public bool TurnAllow { get; init; }
+
+    /// <summary>"이 폴더 늘 허용" 단추의 폴더 (앱 단계 폴더 밖 쓰기 카드). 없으면 null.</summary>
+    public string? AlwaysFolder { get; init; }
 }
 
 /// <summary>
@@ -160,6 +163,9 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         /// 바꿀 때는 <see cref="SetTrust"/>로 (화면 표시).
         /// </summary>
         public bool TrustCommands;
+
+        /// <summary>계획 카드를 허용한 실행의 세대 — 그 뒤로는 계획 모드가 아니다 (앱 단계 쓰기 판정이 계획 중 쓰기를 그 전처럼 거절하게).</summary>
+        public int PlanApprovedGeneration = -1;
         public readonly Dictionary<string, PendingApproval> Approvals = [];
         public readonly Dictionary<string, PendingQuestion> Questions = [];
 
@@ -195,6 +201,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             Plan = Request.IsPlan,
             FromAgent = Request.FromAgent,
             TurnAllow = Request.TurnAllowable,
+            AlwaysFolder = Request.DenyOnly ? null : Request.AlwaysFolder,
             // 서브에이전트가 낸 요청이면 그 서브에이전트를 기다리는 상한(30분)까지 돈다 (/self-review 6f64f4b039 C5)
             BackgroundMinutes = !Request.Background ? null
                 : Request.FromAgent ? ClaudeRunner.BackgroundAgentMinutes : ClaudeRunner.BackgroundBashMinutes,
@@ -613,8 +620,9 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     /// <param name="attached">이 실행에 붙인 방별 서버 (더한 .mcp.json 서버 · unity) — 미리 허용하지 않고 여기서 받는다.</param>
     /// <param name="unity">이 실행에 붙인 Unity 프로젝트 이름.</param>
     /// <param name="workspace">작업 폴더 — run_mode 모델 선택 카드가 모드 목록을 읽는다 (<see cref="ModeCatalog"/>).</param>
+    /// <param name="askWrites">이 실행을 앱 단계 "폴더 밖 쓰기 묻기"(ask 규칙)로 띄웠는지 — 실행 중에 설정을 바꿔도 띄운 값으로 가른다.</param>
     private async Task<string> DecideToolAsync(Room room, Live live, int generation, ToolPermission ask, CancellationToken aborted,
-        IReadOnlyCollection<string>? attached = null, string? unity = null, string? workspace = null)
+        IReadOnlyCollection<string>? attached = null, string? unity = null, string? workspace = null, bool askWrites = false)
     {
         if (attached is { Count: > 0 } && McpServerOf(ask.Tool) is { } server && attached.Contains(server))
             return await DecideRoomServerAsync(room, live, generation, ask, aborted, server, unity);
@@ -640,6 +648,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 {
                     // 못 꺼도 이번 승인은 그대로 — 다음 말이 다시 계획부터 시작할 뿐
                 }
+                lock (live.Gate) live.PlanApprovedGeneration = generation;
                 // 입력은 계획 글 · 파일 경로만 다시 담아 돌려준다 — 카드에 보이지 않는 키는 승인하지 않는다 (d3dd55b237 C1)
                 return PermissionDecision.AllowPlan(ApprovalRequest.PlanInput(ask.InputJson), mode);
             }
@@ -725,6 +734,12 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         var target = summary is { Length: > 0 } s ? $" {(s.Length > 120 ? s[..120] + "…" : s)}" : "";
         if (ClaudeRunner.WriteTools.Contains(ask.Tool))
         {
+            // 앱 단계 "폴더 밖 쓰기 묻기" (ask 규칙으로 모든 쓰기가 온다): 작업 폴더 안 · 메모리 · 늘 허용 폴더는 카드 없이, 그 밖은 카드.
+            // 계획 모드 중(계획 먼저로 시작해 아직 허용 전)이면 그 전처럼 아래 길 — 작업 폴더 안 쓰기는 거절된다
+            bool planning;
+            lock (live.Gate) planning = room.PlanNext && live.PlanApprovedGeneration != generation;
+            if (askWrites && room.Level == PermissionLevel.App && workspace is not null && !planning && store.Get(room.Id) is { Level: PermissionLevel.App })
+                return await DecideAppWriteAsync(room, live, generation, ask, aborted, workspace, summary, target);
             // CLI가 스스로 허용하지 않은 파일 쓰기(작업 폴더 밖 등). 명령 방은 카드로 묻는다 (결정 "명령 단계만" — 명령으로 이미 카드를 거쳐 폴더 밖에
             // 쓸 수 있는 단계라 권한이 넓어지지 않는다). 위험한 곳(앱 · 설정 폴더 · 지시 · 스크립트 이름 · 링크)은 카드 없이 거절
             if (ClaudeArgs.RunsCommands(room.Level) && store.Get(room.Id) is { Level: PermissionLevel.Command or PermissionLevel.App })
@@ -763,6 +778,63 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
         }
         HostDenied(room, live, generation, ask.Tool, summary, "승인할 곳 없음", $"{ask.Tool}{target}: 승인할 곳이 없어 자동 거절");
         return PermissionDecision.Deny(ClaudeRunner.NoApprover);
+    }
+
+    /// <summary>
+    /// 앱 단계 "폴더 밖 쓰기 묻기"의 쓰기 요청 (<see cref="WorkspaceStore.AppWrite(string?, string, string?, IEnumerable{string})"/>):
+    /// 작업 폴더 안 · 그 작업 폴더의 자동 메모리 → 카드 없이 허용, 늘 허용 폴더 → 카드 없이 허용하고 승인 기록에 남김, 보호된 곳 → 카드 없이 거절,
+    /// 그 밖 → 폴더 밖 쓰기 카드 (허용 · 이 폴더 늘 허용 · 거절). 허용한 뒤 다시 갈라 거절로 바뀌었으면(링크로 바꿈) 허용하지 않는다.
+    /// </summary>
+    private async Task<string> DecideAppWriteAsync(Room room, Live live, int generation, ToolPermission ask, CancellationToken aborted,
+        string workspace, string summary, string target)
+    {
+        var o = options.Value;
+        var path = ApprovalRequest.WritePath(ask.Tool, ask.InputJson);
+        // CLI가 자동 메모리를 두는 곳: <세션 기록 폴더>/<작업 폴더 인코딩>/memory (비공식 규칙). 인코딩은 claude의 작업 디렉터리 모양 — 전체 경로 · 끝 구분자 없음.
+        // 어긋나면 메모리 폴더는 Claude 설정 폴더(보호) 안이라 카드 없이 거절된다 (sub_self 47b774c535 C2)
+        var memory = Path.Combine(o.ProjectsRoot,
+            HB.Orchestration.Shared.ClaudeTranscriptReader.EncodeProjectDir(Path.TrimEndingDirectorySeparator(Path.GetFullPath(workspace))), "memory");
+        (WorkspaceStore.AppWriteRoute Route, string? Why) Route() =>
+            path is null ? (WorkspaceStore.AppWriteRoute.Deny, "쓸 파일 경로를 읽지 못했습니다 (경로 키가 없거나 둘 이상).")
+            : o.AppWorkspaces is { } guard ? guard.AppWrite(path, workspace, memory, o.AppWrites?.Folders() ?? [])
+            : WorkspaceStore.AppWrite(path, WorkspaceStore.GuardedFolders(o, AppContext.BaseDirectory), workspace, memory, o.AppWrites?.Folders() ?? []);
+        var (route, why) = Route();
+        switch (route)
+        {
+            case WorkspaceStore.AppWriteRoute.Allow:
+                return PermissionDecision.Allow(ask.InputJson);
+            case WorkspaceStore.AppWriteRoute.AllowMemory:
+                // 다음 세션 문맥에 실리는 파일이라 기록에 남긴다 (sub_security 16f49d6897 C4 — 권한은 그 전 auto와 같음)
+                Log?.Write(room.Id, new ApprovalRequest(ask.Tool, summary, null), "허용 (자동 메모리)");
+                return PermissionDecision.Allow(ask.InputJson);
+            case WorkspaceStore.AppWriteRoute.AllowFolder:
+                Log?.Write(room.Id, new ApprovalRequest(ask.Tool, summary, null), "허용 (늘 허용 폴더)");
+                return PermissionDecision.Allow(ask.InputJson);
+            case WorkspaceStore.AppWriteRoute.Deny:
+                why ??= "쓰지 않는 곳입니다.";
+                HostDenied(room, live, generation, ask.Tool, summary, "쓰지 않는 곳", $"{ask.Tool}{target}: {why} — 카드 없이 거절");
+                return PermissionDecision.Deny($"{why} 이 파일은 쓰지 않습니다. 같은 쓰기를 다시 시도하거나 명령으로 우회하지 말고, 무엇이 필요한지 사용자에게 말하세요.");
+        }
+        if (ApprovalRequest.ForWrite(ask.Tool, ask.InputJson, path!) is not { } card)
+        {
+            HostDenied(room, live, generation, ask.Tool, summary, "쓰지 않는 곳", $"{ask.Tool}{target}: 쓰기 입력을 읽지 못했습니다 — 카드 없이 거절");
+            return PermissionDecision.Deny("쓰기 입력을 읽지 못했습니다. 같은 쓰기를 다시 시도하지 말고, 무엇이 필요한지 사용자에게 말하세요.");
+        }
+        // 늘 허용 대상: 쓸 파일의 바로 위 폴더가 이미 있고 늘 허용할 수 있을 때만, 그 최종 경로 (보인 것 = 저장되는 것).
+        // 새 폴더를 만들며 쓰면 단추가 없다 — 모델이 없는 하위 경로로 넓은 상위 폴더를 후보로 만들지 못하게 (sub_security 16f49d6897 C1 · C2, sub_self C3)
+        var parentDir = Path.GetDirectoryName(Path.GetFullPath(path!));
+        var folder = o.AppWrites is { } writes && parentDir is not null && Directory.Exists(parentDir) && writes.WhyNotFolder(parentDir) is null
+            ? AppWriteStore.FinalOf(parentDir) : null;
+        var answer = await RequestApprovalAsync(room.Id, live, generation, card with { AlwaysFolder = folder }, aborted);
+        if (answer is { Allow: true } && Route() is { Route: WorkspaceStore.AppWriteRoute.Deny } again)
+        {
+            var changed = again.Why ?? "쓰지 않는 곳입니다.";
+            HostDenied(room, live, generation, ask.Tool, summary, "허용 뒤 경로 바뀜", $"{ask.Tool}{target}: 허용 뒤 다시 보니 {changed} — 거절");
+            return PermissionDecision.Deny($"허용한 뒤 다시 확인해 보니 쓰지 않는 곳입니다: {changed} 같은 쓰기를 다시 시도하지 말고 사용자에게 말하세요.");
+        }
+        if (answer is { Allow: true, RememberFolder: true } && folder is not null && o.AppWrites?.AddFolder(folder) is { } addError)
+            Notice(live, $"'{folder}'를 늘 허용 목록에 넣지 못했습니다 ({addError}) — 이번 쓰기만 허용합니다.");
+        return (answer ?? new ApprovalAnswer(false, "실행이 이미 끝나 거절했습니다.")).ToDecisionJson(ask.InputJson);
     }
 
     /// <summary>
@@ -1019,6 +1091,9 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
     /// <summary>"이 턴 동안 묻지 않기"로 허용한 명령의 기록 문구.</summary>
     public const string TurnAllowLabel = "이 턴 허용";
 
+    /// <summary>"이 폴더 늘 허용"으로 허용한 쓰기의 기록 문구.</summary>
+    public const string AlwaysFolderLabel = "허용 + 폴더 늘 허용";
+
     /// <summary>앱 단계 도구 호출의 승인 기록 라벨. 채팅 줄에는 보이지 않는다 — 도구 칩이 이미 있다.</summary>
     public const string AppCallLabel = "앱 단계 호출";
 
@@ -1090,14 +1165,19 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                     : "명령이나 입력이 너무 길어 다 보이지 않습니다 — 거절만 할 수 있습니다.";
             if (choice == ApprovalChoice.AllowTurn && !pending.Request.TurnAllowable)
                 return "이 요청에는 '이 턴 동안 묻지 않기'를 쓸 수 없습니다.";
+            // 늘 허용은 앱 단계 폴더 밖 쓰기 카드만 — 카드가 뜬 뒤 앱 아래로 내렸으면 받지 않는다 (명령 단계에는 그 목록이 걸리지 않음)
+            if (choice == ApprovalChoice.AllowFolder && (pending.Request.AlwaysFolder is null || level != PermissionLevel.App))
+                return "이 요청에는 '이 폴더 늘 허용'을 쓸 수 없습니다.";
             var label = choice switch
             {
                 ApprovalChoice.Allow => "허용",
                 ApprovalChoice.AllowTurn => TurnAllowLabel,
+                ApprovalChoice.AllowFolder => AlwaysFolderLabel,
                 _ => "거절",
             };
             var message = string.IsNullOrWhiteSpace(reason) ? "사용자가 거절했습니다." : $"사용자가 거절했습니다: {reason.Trim()}";
-            if (!pending.Answer.TrySetResult(new ApprovalAnswer(choice != ApprovalChoice.Deny, choice == ApprovalChoice.Deny ? message : null)))
+            if (!pending.Answer.TrySetResult(new ApprovalAnswer(choice != ApprovalChoice.Deny, choice == ApprovalChoice.Deny ? message : null)
+                { RememberFolder = choice == ApprovalChoice.AllowFolder }))
                 return ApprovalDone;
             pending.Label = label;
             if (choice == ApprovalChoice.AllowTurn)
@@ -1649,7 +1729,9 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             Notice(live, "데이터 폴더 경로에 괄호 · * ? [ ] { } 글자가 있어 이번 실행에서는 첨부를 열지 않습니다 (편집 금지 규칙에 쓸 수 없음) — 설정 Chat:DataDir을 바꾸세요.");
         }
 
-        var rules = RoomRules.For(room.Level, terminal: terminalConfig is not null, unity: unityName,
+        // 실행 하나 동안 같은 값 — 규칙 글과 ask 규칙이 어긋나지 않게 한 번 읽는다
+        var askWrites = o.AskAppWrites;
+        var rules = RoomRules.For(room.Level, terminal: terminalConfig is not null, unity: unityName, askWrites: askWrites,
             extras: [.. extraServers.Where(s => s != McpConfigFile.UnityServer)],
             // 모델 선택창 안내는 기본 서버가 붙고 요청 창 · 스위치가 있는 방에만 (785ebb5e97 C7)
             modeCard: mcpConfig is not null && !room.McpOff.Contains(o.McpServer) && room.GroupId is null)
@@ -1687,6 +1769,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
             Plan = room.PlanNext && ClaudeArgs.PlanMode(room.Level) is not null, // "계획 먼저" (C) — 명령 단계만
             AskRunMode = room.AskRunMode || runPick is not null, // 외부 요청 전에 묻기 · + 요청 창 말
             ProtectedWorkspaces = room.Level == PermissionLevel.App ? [.. o.AllWorkspaces.Select(w => w.Path)] : [],
+            AskWrites = room.Level == PermissionLevel.App && askWrites, // 앱 단계 폴더 밖 쓰기 묻기 (설정 · 규칙 글과 같은 값)
             TerminalMcpConfigPath = terminalConfig, // 명령 방: 앱 MCP(터미널 도구)
         };
         ProcessSpec process;
@@ -1789,7 +1872,7 @@ public sealed class RoomHub(RoomStore store, ChatTranscripts transcripts, IOptio
                 };
                 if (shown is not null) Broadcast(live, shown);
             }
-        }, (ask, aborted) => DecideToolAsync(room, live, generation, ask, aborted, extraServers, unityName, workspace), stopOnMismatch.Token, wrapUp);
+        }, (ask, aborted) => DecideToolAsync(room, live, generation, ask, aborted, extraServers, unityName, workspace, spec.AskWrites), stopOnMismatch.Token, wrapUp);
 
         // 턴 끝에 한 번 더 — 마지막 변경이 출력 뒤에 써졌거나 중지된 경우 (실제 확인). 중지는 세대를 올리므로 세대 · 간격 검사 없이 (ea28ba9185 C2).
         if (RefreshSteps(room, live, generation, turnEnd: true) is { } last)
@@ -2056,9 +2139,11 @@ public static class RoomRules
     /// <param name="unity">이 실행에 붙인 Unity 프로젝트 이름 (명령 방에서 연결했을 때). null이면 안내 없음.</param>
     /// <param name="extras">이 실행에 더 붙인 작업 폴더 MCP 서버 (unity 빼고) — 단계와 상관없이 묻지 않는다는 안내.</param>
     /// <param name="modeCard">모델 선택창 안내(+ 요청 창 머리 줄 · run_mode 카드)를 넣을지 — 기본 서버가 붙은 보통 방.</param>
-    public static string For(PermissionLevel level, bool terminal = false, string? unity = null, IReadOnlyList<string>? extras = null, bool modeCard = false) =>
+    /// <param name="askWrites">앱 단계: 작업 폴더 밖 Write · Edit를 카드로 묻는지 (설정 — <see cref="ChatOptions.AskAppWrites"/>).</param>
+    public static string For(PermissionLevel level, bool terminal = false, string? unity = null, IReadOnlyList<string>? extras = null, bool modeCard = false,
+        bool askWrites = true) =>
         "이 대화는 HB_Chat 채팅 앱의 방이다. 사용자는 브라우저 채팅 화면으로 읽고 말한다. " +
-        $"이 방의 권한: {Describe(level)}. " +
+        $"이 방의 권한: {Describe(level, askWrites)}. " +
         (extras is { Count: > 0 }
             ? $"이 방에는 MCP 서버 {string.Join(", ", extras)}도 붙어 있고, 그 도구는 이 방 권한 단계와 상관없이 묻지 않고 돈다 — " +
               "밖에 쓰거나 지우는 것처럼 되돌리기 어려운 호출은 먼저 사용자에게 말로 확인한다. "
@@ -2131,7 +2216,8 @@ public static class RoomRules
     /// 단계 설명 (화면 · 방 규칙). MCP는 사용자 결정대로 읽기 · 명령 모두 허용하되 하는 일을 그대로 적는다
     /// (/self-review 0a3b1d5155 C10 · b19234c862 C3: run_mode는 작업 폴더 파일을 외부 에이전트로 보낼 수 있고, save_result · record_verdicts는 기록 파일을 쓴다).
     /// </summary>
-    public static string Describe(PermissionLevel level) => level switch
+    /// <param name="askWrites">앱 단계: 작업 폴더 밖 Write · Edit를 카드로 묻는지 (설정). 다른 단계는 보지 않는다.</param>
+    public static string Describe(PermissionLevel level, bool askWrites = true) => level switch
     {
         PermissionLevel.Read =>
             "작업 폴더 읽기 · 검색과 hb-orchestration MCP (run_mode는 작업 폴더 파일을 외부 에이전트로 보낼 수 있고 비용이 든다, " +
@@ -2145,7 +2231,12 @@ public static class RoomRules
             "\"이 턴 동안 묻지 않기\"를 누르면 그 턴이 끝날 때까지 명령을 카드 없이 허용하고 승인 기록에 남긴다 — 그 턴에는 편집 금지 경로를 명령으로 쓰는 것을 카드가 막지 않는다 " +
             "(git push · git clean · reset --hard · 재귀 삭제 · 지시 · 설정 파일을 건드리는 모양과 잘린 명령은 그래도 묻지만 글자 검사라 비껴갈 수 있다)",
         PermissionLevel.App =>
-            "Claude 앱과 같은 쓰임: 작업 폴더 편집 · 명령 실행 · 스킬 · 서브에이전트 · 폴더 밖 읽기를 묻지 않고 쓴다. 위험한 명령은 CLI auto 판정이 거절하지만 폴더 밖 쓰기는 막지 않고, " +
+            "Claude 앱과 같은 쓰임: 작업 폴더 편집 · 명령 실행 · 스킬 · 서브에이전트 · 폴더 밖 읽기를 묻지 않고 쓴다. " +
+            (askWrites
+                ? "Write · Edit로 작업 폴더 밖에 쓰는 것은 카드로 묻는다(자동 메모리 · 사용자가 늘 허용한 폴더는 묻지 않음, 이 앱 · 설정 · 시작프로그램 폴더와 " +
+                  "지시 · 설정 · 실행으로 이어지는 파일은 카드 없이 거절 — 거절되면 명령으로 우회하지 말고 무엇이 막혔는지 말한다). 위험한 명령은 CLI auto 판정이 거절하지만 " +
+                  "명령으로 폴더 밖에 쓰는 것은 카드 없이 auto 판정만 받고, "
+                : "위험한 명령은 CLI auto 판정이 거절하지만 폴더 밖 쓰기는 막지 않고, ") +
             "명령으로 하는 네트워크 접근은 카드 · 주소 검사를 거치지 않는다. 외부 에이전트(run_mode) · 터미널 · 지휘자 브라우저 · 웹 페이지 가져오기 · Unity 코드 실행은 카드로 묻고, " +
             ".claude · .mcp.json · 사용자 설정은 Write · Edit로 고칠 수 없다. 프로젝트 훅은 그대로 돈다. 앱 설정 · 스크립트는 고칠 수 있다",
         _ => level.ToString(),

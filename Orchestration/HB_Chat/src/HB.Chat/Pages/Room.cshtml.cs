@@ -917,7 +917,7 @@ public sealed partial class RoomModel(
         return new JsonResult(new { ok = true });
     }
 
-    /// <summary>승인 카드 단추: choice = allow · turn · deny, reason은 거절 이유 (선택), picks는 모델 선택 카드에서 고른 값 (JSON, 선택).</summary>
+    /// <summary>승인 카드 단추: choice = allow · turn · folder(이 폴더 늘 허용) · deny, reason은 거절 이유 (선택), picks는 모델 선택 카드에서 고른 값 (JSON, 선택).</summary>
     public IActionResult OnPostApprove(string id, string? approval, string? choice, string? reason, string? picks)
     {
         if (!RoomStore.IsRoomId(id) || string.IsNullOrEmpty(approval)) return NotFound();
@@ -926,6 +926,7 @@ public sealed partial class RoomModel(
         {
             "allow" => ApprovalChoice.Allow,
             "turn" => ApprovalChoice.AllowTurn,
+            "folder" => ApprovalChoice.AllowFolder,
             "deny" => ApprovalChoice.Deny,
             _ => null,
         };

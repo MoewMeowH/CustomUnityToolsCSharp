@@ -28,7 +28,7 @@
             <span class="status-line@(st?.NeedsAction is not null ? " needs" : "")" id="status-line" title="@stText"
                   @(stLine is null ? "hidden" : null)>@stText</span>
         </div>
-        <span class="badge" title="@RoomRules.Describe(room.Level)">@RoomRules.LevelName(room.Level)</span>
+        <span class="badge" title="@RoomRules.Describe(room.Level, AppOptions.Value.AskAppWrites)">@RoomRules.LevelName(room.Level)</span>
         <span class="mono muted" title="모델 · 추론 강도 (곁칸 방 정보에서 바꿈)">@Model.ModelLabel@(room.Effort is { } effort ? " · " + effort : "")</span>
         <span class="ctx" id="ctx" title="마지막 턴이 끝날 때의 컨텍스트 크기 / 모델 컨텍스트 창 (토큰, claude stream-json usage)"
               data-window="@(room.ContextWindow ?? 0)" @(room.ContextTokens is null ? "hidden" : null)>
@@ -195,7 +195,7 @@
             <button class="btn" type="button" id="stop" disabled>@Icons.Svg("stop") 중지</button>
         </form>
         @* 단계 설명은 접어 둔다 — 좁은 폭에서 입력칸 아래를 다 차지했다 (2-2 b 실제 확인) *@
-        <details class="hint"><summary>권한: @RoomRules.LevelName(room.Level)</summary>@RoomRules.Describe(room.Level)</details>
+        <details class="hint"><summary>권한: @RoomRules.LevelName(room.Level)</summary>@RoomRules.Describe(room.Level, AppOptions.Value.AskAppWrites)</details>
     </div>
     </div>
     @* 오른쪽 곁칸 (3차 c, Claude 앱처럼): 단계는 화면이 steps 알림으로 그리고, 나머지 탭은 열 때 · 턴이 끝날 때 ?handler=Side로 받는다 *@

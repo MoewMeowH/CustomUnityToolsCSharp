@@ -50,6 +50,9 @@ public sealed record RunSpec(
 
     /// <summary>앱 단계: 이 앱의 작업 폴더들 (절대 경로). 그 폴더의 .claude · .mcp.json 편집을 막는다 — 상대 규칙은 지금 작업 폴더 밖에 걸리지 않는다.</summary>
     public IReadOnlyList<string> ProtectedWorkspaces { get; init; } = [];
+
+    /// <summary>앱 단계: 모든 Write · Edit를 앱에 묻는다 (<see cref="ClaudeArgs.AppWriteAskRule"/> — 앱이 작업 폴더 밖만 카드로, 설정 "폴더 밖 쓰기 묻기").</summary>
+    public bool AskWrites { get; init; }
 }
 
 /// <summary>
@@ -93,9 +96,15 @@ public static partial class ClaudeArgs
     public static IReadOnlyList<string> AppAskTools(RunSpec spec) =>
         [$"mcp__{spec.McpServer}__{RunModeTool}", TerminalMcp.StartTool, TerminalMcp.BrowserOpenTool, WebFetchTool, .. spec.ExtraMcpServers.Select(s => $"mcp__{s}")];
 
-    /// <summary>--settings 값: <see cref="AppAskTools"/>를 ask 규칙으로.</summary>
+    /// <summary>
+    /// 앱 단계 "폴더 밖 쓰기 묻기"의 ask 규칙 — 모든 절대 경로. auto 모드에서도 이 규칙이 Write · Edit를 호스트에 묻게 한다
+    /// (2026-11-03 실측, 2.1.316: 작업 폴더 안 · 메모리 · 밖 모두 물음). Edit 규칙은 Write에도 걸린다 (2.1.311 실측). deny 규칙은 ask보다 먼저다.
+    /// </summary>
+    public const string AppWriteAskRule = "Edit(//**)";
+
+    /// <summary>--settings 값: <see cref="AppAskTools"/>를 ask 규칙으로 (+ 폴더 밖 쓰기 묻기면 <see cref="AppWriteAskRule"/>).</summary>
     public static string AppSettings(RunSpec spec) =>
-        System.Text.Json.JsonSerializer.Serialize(new { permissions = new { ask = AppAskTools(spec) } });
+        System.Text.Json.JsonSerializer.Serialize(new { permissions = new { ask = spec.AskWrites ? [.. AppAskTools(spec), AppWriteAskRule] : AppAskTools(spec) } });
 
     /// <summary>모델 · MCP 서버 이름에 쓸 수 있는 모양인지 (인자 · 파일 이름에 들어간다).</summary>
     public static bool IsSafeName(string? value) => value is not null && SafeOption().IsMatch(value);

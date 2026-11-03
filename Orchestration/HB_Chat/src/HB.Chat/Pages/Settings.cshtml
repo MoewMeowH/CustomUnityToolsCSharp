@@ -155,6 +155,65 @@
                     </p>
                 </section>
 
+                @* 앱 단계 폴더 밖 쓰기 (claude 2.1.316 · 경로 ask 규칙): 묻기면 작업 폴더 밖 Write · Edit를 카드로, 늘 허용 폴더는 묻지 않음 *@
+                <section class="panel" style="padding:12px 14px">
+                    <h3 style="margin:0 0 6px;font-size:15px">앱 단계 폴더 밖 쓰기</h3>
+                    <p class="muted" style="margin:0 0 8px;font-size:12.5px">
+                        앱 단계 방에서 지휘자가 Write · Edit로 작업 폴더 밖에 쓰려 할 때. <b>묻기</b>면 카드로 묻고(허용 · 이 폴더 늘 허용 · 거절), 작업 폴더 안 · 자동 메모리 ·
+                        아래 늘 허용 폴더는 묻지 않습니다. <b>그냥 허용</b>이면 CLI auto 판정대로 묻지 않고 씁니다. 명령(Bash · PowerShell)으로 쓰는 것은 어느 쪽이든 auto 판정만 받습니다.
+                        방의 다음 실행부터 적용됩니다.
+                    </p>
+                    @if (Model.AppWrites is not { } writes)
+                    {
+                        <p style="color:var(--warn);margin:0">설정 저장소가 준비되지 않았습니다.</p>
+                    }
+                    else
+                    {
+                        @if (writes.LoadError is { } writesError)
+                        {
+                            <p style="color:var(--warn);margin:0 0 8px">app-writes.json을 읽지 못해 바꾸기를 막고 묻기로 둡니다 (덮어쓰지 않음): @writesError</p>
+                        }
+                        @foreach (var warning in writes.LoadWarnings)
+                        {
+                            <p style="color:var(--warn);margin:0 0 6px">쓰지 않는 늘 허용 폴더 — @warning</p>
+                        }
+                        <form method="post" asp-page-handler="AppWrites" class="settings-add">
+                            <label><input type="radio" name="mode" value="ask" @(writes.Ask ? "checked" : null) /> 묻기 (카드)</label>
+                            <label><input type="radio" name="mode" value="allow" @(writes.Ask ? null : "checked") /> 그냥 허용</label>
+                            <button class="btn" type="submit">저장</button>
+                        </form>
+                        <table class="settings-table" style="margin-top:8px">
+                            <thead><tr><th>늘 허용 폴더 (하위 포함 · 모든 앱 단계 방)</th><th></th></tr></thead>
+                            <tbody>
+                                @if (writes.SavedFolders().Count == 0)
+                                {
+                                    <tr><td class="muted" colspan="2">없음 — 카드의 '이 폴더 늘 허용'이나 아래에서 더합니다.</td></tr>
+                                }
+                                @foreach (var folder in writes.SavedFolders())
+                                {
+                                    <tr>
+                                        <td class="mono">@folder</td>
+                                        <td>
+                                            <form method="post" asp-page-handler="RemoveAppWriteFolder">
+                                                <input type="hidden" name="folder" value="@folder" />
+                                                <button class="btn" type="submit">@Icons.Svg("minus") 빼기</button>
+                                            </form>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                        <form method="post" asp-page-handler="AddAppWriteFolder" class="settings-add">
+                            <input type="text" name="path" placeholder="절대 경로 (예: D:/Exports)" maxlength="400" required value="@Model.NewWriteFolder" class="mono" />
+                            <button class="btn primary" type="submit">@Icons.Svg("plus") 더하기</button>
+                        </form>
+                        <p class="muted" style="margin:6px 0 0;font-size:12px">
+                            작업 폴더와 같은 검사 — 드라이브 루트 · Windows · Program Files · 사용자 홈 전체 · 이 앱과 그 저장소 · 데이터 · Claude 설정 폴더를 품거나 그 안인 폴더,
+                            링크를 거치는 경로는 받지 않습니다. 늘 허용 폴더 안이어도 지시 · 설정 · 실행으로 이어지는 파일은 쓰지 않습니다.
+                        </p>
+                    }
+                </section>
+
                 @* Unity 프로젝트: 명령 방이 곁칸 '연결'에서 하나를 고르면 그 실행에 unity mcp가 붙는다 *@
                 <section class="panel" style="padding:12px 14px">
                     <h3 style="margin:0 0 6px;font-size:15px">Unity 프로젝트</h3>

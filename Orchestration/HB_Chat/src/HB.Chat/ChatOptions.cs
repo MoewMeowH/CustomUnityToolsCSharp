@@ -11,7 +11,8 @@ public enum PermissionLevel
     Command,
     /// <summary>
     /// Claude 앱과 같은 쓰임: 편집 · 명령을 CLI auto 판정으로 묻지 않고 돌리고, 스킬 · 서브에이전트 · 폴더 밖 읽기를 쓴다.
-    /// 카드가 필요한 도구만 ask 규칙으로 호스트에 보낸다 (<see cref="ClaudeArgs.AppAskTools"/>).
+    /// 카드가 필요한 도구만 ask 규칙으로 호스트에 보낸다 (<see cref="ClaudeArgs.AppAskTools"/>). 설정 "폴더 밖 쓰기 묻기"면 Write · Edit도 호스트에 와서
+    /// 작업 폴더 밖만 카드로 묻는다 (<see cref="ClaudeArgs.AppWriteAskRule"/> · <see cref="WorkspaceStore.AppWrite"/>).
     /// </summary>
     App,
 }
@@ -173,6 +174,15 @@ public sealed class ChatOptions
     /// <summary>새 방 화면 · 설정 화면에 보일 작업 폴더 전체 (설정 파일 것 먼저).</summary>
     public IReadOnlyList<WorkspaceEntry> AllWorkspaces =>
         AppWorkspaces?.All() ?? [.. Workspaces.Where(p => !string.IsNullOrWhiteSpace(p.Value)).Select(p => new WorkspaceEntry(p.Key, p.Value.Trim(), true))];
+
+    /// <summary>
+    /// 앱 단계 폴더 밖 쓰기 설정 (데이터 폴더 app-writes.json — 묻기 · 늘 허용 폴더). 켤 때 Program이 채운다. 없으면(테스트) 묻기 · 늘 허용 없음.
+    /// </summary>
+    [Microsoft.Extensions.Configuration.ConfigurationKeyName("__app_writes_not_bound__")]
+    public AppWriteStore? AppWrites { get; set; }
+
+    /// <summary>앱 단계 폴더 밖 쓰기를 카드로 묻는지 (<see cref="AppWrites"/>가 없으면 묻기).</summary>
+    public bool AskAppWrites => AppWrites?.Ask ?? true;
 
     /// <summary>앱에서 더한 MCP 서버 (데이터 폴더 mcp-servers.json). 켤 때 Program이 채운다.</summary>
     [Microsoft.Extensions.Configuration.ConfigurationKeyName("__app_mcp_not_bound__")]

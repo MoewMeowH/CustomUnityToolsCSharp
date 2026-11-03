@@ -672,6 +672,8 @@
             if (a.description) card.append(el("div", "desc", (a.tool === "터미널" || a.tool === "브라우저" || a.tool === "웹 가져오기" ? "" : "Claude 설명: ") + a.description));
             // 작업 폴더 밖 파일 쓰기 (명령 방): 경로가 위, 쓸 내용은 앞부분만 — 잘려도 허용 (결정 "앞 2,000자 · 잘려도 허용")
             if (a.outsideWrite) card.append(el("div", "warn-line", "작업 폴더 밖 파일 쓰기입니다 — 허용하면 위 경로의 파일이 만들어지거나 바뀝니다."));
+            // 앱 단계: 늘 허용하면 이 폴더(하위 포함) 쓰기는 모든 앱 단계 방에서 다시 묻지 않는다 — 설정 화면에서 뺄 수 있다
+            if (a.alwaysFolder) card.append(el("div", "desc", "'이 폴더 늘 허용' 대상: " + a.alwaysFolder + " (하위 폴더 포함 · 모든 앱 단계 방 · 설정 화면에서 뺌)"));
             // 명령 밖의 입력도 허용하면 같이 실행된다 — 본 것 = 허용되는 것 (/self-review 5e747ff851 C1)
             if (a.extra) card.append(el("div", "cmd", (a.outsideWrite ? "쓸 내용: " : "추가 입력: ") + a.extra));
             // 백그라운드 실행 명령 — 답이 끝난 뒤에도 돈다 (결정 "넣음")
@@ -691,6 +693,7 @@
             if (!denyOnly) {
                 button("허용", "allow", "primary");
                 if (a.turnAllow) button("이 턴 동안 묻지 않기", "turn");
+                if (a.alwaysFolder) button("이 폴더 늘 허용", "folder");
             }
             const reasonBox = el("input", "reason");
             reasonBox.type = "text"; reasonBox.maxLength = 500; reasonBox.placeholder = "거절 이유 (선택, 지휘자에게 전해짐)";

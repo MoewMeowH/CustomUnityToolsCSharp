@@ -53,6 +53,11 @@ public sealed record ApprovalRequest(string Tool, string Summary, string? Descri
     /// <summary>명령 방의 작업 폴더 밖 파일 쓰기 카드 (<see cref="ForWrite"/>) — 화면이 "쓸 내용 미리보기"와 안내 줄을 보인다.</summary>
     public bool OutsideWrite { get; init; }
 
+    /// <summary>
+    /// 앱 단계 폴더 밖 쓰기 카드의 "이 폴더 늘 허용" 대상 (쓸 파일의 있는 가장 가까운 폴더). null이면 그 단추가 없다 (명령 단계 · 다른 카드).
+    /// </summary>
+    public string? AlwaysFolder { get; init; }
+
     /// <summary>작업 폴더 밖 쓰기 카드의 내용 미리보기 상한 (글자, 결정 "앞 2,000자 · 잘려도 허용").</summary>
     public const int WritePreviewChars = 2_000;
 
@@ -231,6 +236,8 @@ public enum ApprovalChoice
     /// <summary>허용 + 이 턴이 끝날 때까지 명령을 묻지 않음 (저장하지 않음).</summary>
     AllowTurn,
     Deny,
+    /// <summary>허용 + 그 폴더를 앱 단계 늘 허용 목록에 넣음 (앱 단계 폴더 밖 쓰기 카드 — <see cref="ApprovalRequest.AlwaysFolder"/>).</summary>
+    AllowFolder,
 }
 
 /// <summary>승인 카드의 답. Message는 거절 때 Claude가 보는 문구.</summary>
@@ -238,6 +245,9 @@ public sealed record ApprovalAnswer(bool Allow, string? Message)
 {
     /// <summary>모델 선택 카드에서 고른 값 (원래 에이전트 → 고른 값). 다른 카드 · 고르지 않음은 null.</summary>
     public IReadOnlyDictionary<string, ModeRowPick>? Picks { get; init; }
+
+    /// <summary>"이 폴더 늘 허용"을 눌렀다 — 받은 쪽이 <see cref="ApprovalRequest.AlwaysFolder"/>를 늘 허용 목록에 넣는다.</summary>
+    public bool RememberFolder { get; init; }
 
     /// <summary>호스트 답 JSON (<see cref="PermissionDecision"/>). 허용이면 입력을 그대로 돌려준다.</summary>
     public string ToDecisionJson(string inputJson) =>
