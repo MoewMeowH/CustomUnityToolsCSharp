@@ -75,6 +75,26 @@ public sealed class PetForm : Form
         Restart();
     }
 
+    /// <summary>화면 설정이 바뀌었다 (메시지 이름) — 부른 쪽이 로그에 남기고 <see cref="Revive"/>.</summary>
+    public event Action<string>? DisplayChanged;
+
+    /// <summary>
+    /// 그림을 잃었을 수 있다 — 보이는 중이면 숨겼다 다시 띄운다 (다시 보일 때 Restart가 다시 그린다). 사진 앱을 열고 닫은 뒤 창은 '보임'인데
+    /// 그림만 사라지고, 펫 보이기를 껐다 켜면 돌아오던 일 (2026-11-03 사용자 보고).
+    /// </summary>
+    public void Revive()
+    {
+        if (!Visible || IsDisposed) return;
+        Hide();
+        Show();
+    }
+
+    protected override void WndProc(ref Message m)
+    {
+        base.WndProc(ref m);
+        if (Layered.DisplayMessage(m.Msg) is { } name) DisplayChanged?.Invoke(name);
+    }
+
     /// <summary>오른쪽 메뉴 "움직이기" (설정 Move). 끄면 걷던 자리에서 멈춘다.</summary>
     public void SetMotion(bool move)
     {

@@ -88,6 +88,24 @@ public sealed class PetBubble : Form
         Hide();
     }
 
+    /// <summary>화면 설정이 바뀌었다 (메시지 이름) — 부른 쪽이 로그에 남기고 <see cref="Revive"/>.</summary>
+    public event Action<string>? DisplayChanged;
+
+    /// <summary>그림을 잃었을 수 있다 — 보이는 중이면 숨겼다 다시 띄우고 다시 그린다 (사용자가 펫 보이기를 껐다 켜면 돌아오던 것과 같게).</summary>
+    public void Revive()
+    {
+        if (!Visible || IsDisposed) return;
+        Hide();
+        Show();
+        Render();
+    }
+
+    protected override void WndProc(ref Message m)
+    {
+        base.WndProc(ref m);
+        if (Layered.DisplayMessage(m.Msg) is { } name) DisplayChanged?.Invoke(name);
+    }
+
     private Size Measure(PetSaying saying) => Measure(saying, _bold, _plain);
 
     internal static Size Measure(PetSaying saying, Font bold, Font plain)
@@ -251,6 +269,24 @@ internal static class Layered
     private const int UlwAlpha = 2;
     private const byte AcSrcOver = 0, AcSrcAlpha = 1;
 
+    /// <summary>
+    /// 그림 올리기(UpdateLayeredWindow)가 실패함 — 창 · Win32 오류 번호. 사진 앱을 열고 닫은 뒤 펫 · 말풍선이 창은 '보임'인데 그림만 사라진 일
+    /// (2026-11-03 사용자 보고, 펫 보이기를 껐다 켜면 돌아옴)의 원인을 남기고 되살리려고. UI 스레드에서만 오른다.
+    /// </summary>
+    public static event Action<Form, int>? Failed;
+
+    /// <summary>
+    /// 화면 구성 · 색 설정이 바뀐 메시지(WM_DISPLAYCHANGE · WM_DPICHANGED · WM_DWMCOMPOSITIONCHANGED)인지 — 받으면 창이 그림을 다시 올린다.
+    /// 이름은 로그용, 아니면 null.
+    /// </summary>
+    public static string? DisplayMessage(int msg) => msg switch
+    {
+        0x007E => "WM_DISPLAYCHANGE",
+        0x02E0 => "WM_DPICHANGED",
+        0x031E => "WM_DWMCOMPOSITIONCHANGED",
+        _ => null,
+    };
+
     public static void Push(Form form, Bitmap canvas, byte alpha = 255)
     {
         var screen = GetDC(IntPtr.Zero);
@@ -263,7 +299,8 @@ internal static class Layered
             var source = new NativePoint(0, 0);
             var top = new NativePoint(form.Left, form.Top);
             var blend = new BlendFunction { BlendOp = AcSrcOver, SourceConstantAlpha = alpha, AlphaFormat = AcSrcAlpha };
-            UpdateLayeredWindow(form.Handle, screen, ref top, ref size, memory, ref source, 0, ref blend, UlwAlpha);
+            if (!UpdateLayeredWindow(form.Handle, screen, ref top, ref size, memory, ref source, 0, ref blend, UlwAlpha))
+                Failed?.Invoke(form, Marshal.GetLastWin32Error());
         }
         finally
         {
