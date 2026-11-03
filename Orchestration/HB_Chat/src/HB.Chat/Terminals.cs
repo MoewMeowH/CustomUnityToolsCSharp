@@ -178,6 +178,9 @@ public sealed partial class Terminals : IDisposable
     /// <summary>시작 · 끝 등 목록이 바뀜 (방 ID).</summary>
     public event Action<string>? Changed;
 
+    /// <summary>실행 토큰을 거둠 (방 id, 잠금 밖) — 그 방에 쓰지 않은 다른 승인 표(새 방 열기)도 버리게.</summary>
+    public event Action<string>? Revoked;
+
     /// <summary>시작됨 · 끝남 (방 기록 줄용).</summary>
     public event Action<TerminalSession>? Started;
     public event Action<TerminalSession>? Ended;
@@ -213,11 +216,14 @@ public sealed partial class Terminals : IDisposable
     /// <summary>토큰을 거두고, 그 방에 쓰지 않은 승인 표도 버린다 — 카드를 허용한 뒤 실행이 끝나면 다음 실행이 카드 없이 띄우지 못하게 (/self-review 57b59ef134 C10).</summary>
     public void Revoke(string token)
     {
+        string? revoked;
         lock (_gate)
         {
             if (!_tokens.Remove(token, out var room)) return;
             _approved.RemoveAll(a => a.Room == room);
+            revoked = room;
         }
+        Revoked?.Invoke(revoked);
     }
 
     /// <summary>토큰의 방 (없거나 지난 토큰이면 null). 길이가 다른 값은 바로 거절.</summary>

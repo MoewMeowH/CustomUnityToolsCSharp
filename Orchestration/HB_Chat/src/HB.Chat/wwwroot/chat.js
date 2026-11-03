@@ -661,6 +661,7 @@
             if (cards.has(a.id)) return;
             if (a.plan) { showPlan(a); return; }
             if (a.mode) { showModeCard(a); return; }
+            if (a.roomOpen) { showRoomCard(a); return; }
             const follow = atBottom();
             const card = el("div", "approval");
             const head = el("div", "head");
@@ -786,6 +787,80 @@
             place(a, card);
             if (follow) toBottom();
         }
+        // 새 방 열기 카드 (room_open): 지휘자가 낸 값을 미리 채운 칸 — 작업 폴더 · 단계 · 모델 · 제목 · 첫 말을 고쳐 허용 · 거절.
+        // 여는 방보다 높은 단계를 고르면 경고 줄 (결정 "카드에서는 올릴 수 있음" — 지휘자 값은 서버가 이미 낮춰 채웠다)
+        const levelLabels = { read: "읽기", command: "명령", app: "앱" };
+        function showRoomCard(a) {
+            const r = a.roomOpen;
+            const follow = atBottom();
+            const card = el("div", "approval room-card");
+            const head = el("div", "head");
+            const left = el("span"); left.style.marginLeft = "auto";
+            head.append(el("span", null, who(a) + "새 방 열기 요청"), left);
+            card.append(head, el("div", "desc", "허용하면 새 방이 아래 첫 말로 바로 시작하고, 이 방에는 [열기] 줄이 남습니다. 새 방은 이 대화를 모릅니다 — 첫 말이 인계의 전부입니다."));
+            if (r.note) card.append(el("div", "warn-line", r.note));
+            const field = (label, input) => { const f = el("label", "room-field"); f.append(el("span", "muted", label), input); card.append(f); return input; };
+            const select = (values, current, names) => {
+                const s = el("select");
+                for (const v of values) { const o = el("option", null, names?.[v] || v); o.value = v; if (v === current) o.selected = true; s.append(o); }
+                return s;
+            };
+            const ws = field("작업 폴더", select(r.workspaces, r.workspace));
+            // 다른 작업 폴더도 단계처럼 권한 범위가 바뀐다 — 눈에 띄게 (/self-review 3eda32c3fb C2)
+            const wsWarn = el("div", "warn-line ws-warn");
+            card.append(wsWarn);
+            const warnWs = () => {
+                const other = !!r.fromWorkspace && ws.value !== r.fromWorkspace;
+                wsWarn.hidden = !other;
+                wsWarn.textContent = other ? "이 방(" + r.fromWorkspace + ")과 다른 작업 폴더입니다 — 새 방은 그 폴더에서 일합니다." : "";
+            };
+            ws.addEventListener("change", warnWs);
+            warnWs();
+            const levelSel = field("권한 단계", select(r.levels, r.level, levelLabels));
+            const levelWarn = el("div", "warn-line level-warn");
+            card.append(levelWarn);
+            const order = r.levels;
+            const warnLevel = () => {
+                const higher = order.indexOf(levelSel.value) > order.indexOf(r.fromLevel);
+                levelWarn.hidden = !higher;
+                levelWarn.textContent = higher ? "이 방(" + (levelLabels[r.fromLevel] || r.fromLevel) + ")보다 높은 단계입니다 — 새 방에서 지휘자가 더 많은 일을 묻지 않고 합니다." : "";
+            };
+            levelSel.addEventListener("change", warnLevel);
+            warnLevel();
+            const model = field("모델", select(r.models, r.model));
+            const title = field("제목", el("input"));
+            title.type = "text"; title.maxLength = 200; title.value = r.title || ""; title.placeholder = "비우면 첫 말로";
+            const prompt = field("첫 말", el("textarea", "room-prompt"));
+            prompt.value = r.prompt || "";
+            // 첫 말 크기: 글 칸은 높이가 정해져 있어 긴 글 끝을 놓치기 쉽다 — 길면 끝까지 읽으라고 (/self-review 3eda32c3fb C3)
+            const size = el("div", "desc prompt-size");
+            card.append(size);
+            const showSize = () => {
+                const lines = prompt.value.split("\n").length;
+                const long = lines > 30 || prompt.value.length > 3000;
+                size.textContent = prompt.value.length.toLocaleString() + "자 · " + lines.toLocaleString() + "줄" + (long ? " — 길어요. 끝까지 읽어 본 뒤 허용하세요 (새 방에서는 이 글이 사용자 말로 읽힙니다)." : "");
+                size.classList.toggle("warn-line", long);
+            };
+            prompt.addEventListener("input", showSize);
+            showSize();
+            card.readRoom = () => ({ workspace: ws.value, level: levelSel.value, model: model.value, title: title.value.trim() || null, prompt: prompt.value });
+            const acts = el("div", "acts");
+            const ok = el("button", "btn primary", "허용");
+            ok.type = "button";
+            ok.addEventListener("click", () => decide(a, "allow", card));
+            const reasonBox = el("input", "reason");
+            reasonBox.type = "text"; reasonBox.maxLength = 500; reasonBox.placeholder = "거절 이유 (선택, 지휘자에게 전해짐)";
+            reasonBox.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); decide(a, "deny", card); } });
+            const no = el("button", "btn", "거절");
+            no.type = "button";
+            no.addEventListener("click", () => decide(a, "deny", card));
+            acts.append(ok, reasonBox, no);
+            card.append(acts);
+            card.dataset.expires = String(Date.parse(a.expiresAt));
+            card.left = left;
+            place(a, card);
+            if (follow) toBottom();
+        }
         // 끝난 카드는 한 줄로 바꾼다. 줄에도 구성원 ID를 달아 단톡방이 그 구성원 턴이 끝나면 지운다
         function line(a, cls, text) {
             const l = el("div", "live-line " + cls, text);
@@ -803,9 +878,10 @@
             }
             // approval-line: 턴이 끝나 기록을 다시 그리면 지운다 — 같은 줄이 기록 속 제자리(방 기록 줄)에 있다
             // 모델 선택 카드의 허가는 "허용 (바꾼 줄)"로 온다
-            const allowed = label === "허용" || label === "항상 허용" || label === "이 턴 허용" || (a.mode && label?.startsWith("허용"));
+            const allowed = label === "허용" || label === "항상 허용" || label === "이 턴 허용" || ((a.mode || a.roomOpen) && label?.startsWith("허용"));
             card.replaceWith(line(a, "approval-line" + (allowed ? "" : " denied"),
-                who(a) + "승인 " + (label || "끝남") + " — " + (a.mode ? "외부 에이전트 " + a.mode.mode : a.tool + ": " + a.summary.slice(0, 120))));
+                who(a) + "승인 " + (label || "끝남") + " — " + (a.mode ? "외부 에이전트 " + a.mode.mode
+                    : a.roomOpen ? "새 방 열기" : a.tool + ": " + a.summary.slice(0, 120))));
         }
         // 질문 카드 (3차 a): 지휘자의 AskUserQuestion. 질문마다 선택지(하나 · 여러 개) + "기타" 직접 쓰기. 남은 시간은 승인 카드와 같이 다시 쓴다.
         function showQuestion(q) {
@@ -894,6 +970,7 @@
             data.append("approval", a.id); data.append("choice", choice);
             if (reason) data.append("reason", reason);
             if (choice === "allow" && card.readPicks) data.append("picks", JSON.stringify(card.readPicks())); // 모델 선택 카드
+            if (choice === "allow" && card.readRoom) data.append("room", JSON.stringify(card.readRoom())); // 새 방 열기 카드
             const r = await opts.post(a, "Approve", data);
             if (r === "gone") setTimeout(() => { if (cards.get(a.id) === card) doneApproval(a, null); }, 3000); // 위 질문과 같음 (A3 · C2)
             else if (!r) buttons.forEach(b => b.disabled = false);
@@ -2145,6 +2222,17 @@
                     if (!s?.msg.isConnected) break;
                     const follow = atBottom();
                     subSaid(s, ev.text, ev.narration === true);
+                    if (follow) toBottom();
+                    break;
+                }
+                case "room-opened": {
+                    // 지휘자가 새 방을 열었다 — 기록 줄은 턴 끝에 생기므로 진행 칸에 바로 링크 줄 (턴 끝 정리 때 기록 줄로 바뀐다)
+                    const follow = atBottom();
+                    const l = el("div", "live-line approval-line room-opened", ev.text + " ");
+                    const a = el("a", "note-room", "열기");
+                    a.href = "/Room/" + encodeURIComponent(ev.detail || "");
+                    l.append(a);
+                    live.append(l);
                     if (follow) toBottom();
                     break;
                 }

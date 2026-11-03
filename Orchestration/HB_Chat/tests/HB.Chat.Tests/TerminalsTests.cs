@@ -230,12 +230,28 @@ public sealed class TerminalsTests : IDisposable
         Assert.Contains("mcp__hb-chat__browser_read | Edit(**)", args);
         Assert.DoesNotContain("terminal_start", args);
         Assert.DoesNotContain("browser_open", args); // 열기는 호스트가 사이트를 본다
-        Assert.DoesNotContain("mcp-terminal", string.Join(" | ", ClaudeArgs.Build(spec with { Level = PermissionLevel.Read }, ["opus"])));
+        Assert.DoesNotContain("room_open", args); // 새 방 열기는 늘 카드
+
+        // 읽기 방도 앱 MCP를 붙이되 새 방 열기만 — 터미널 · 브라우저 도구는 목록에서 빼고(disallow) 묻지 않는 허용도 없다
+        var read = string.Join(" | ", ClaudeArgs.Build(spec with { Level = PermissionLevel.Read }, ["opus"]));
+        Assert.Contains("--mcp-config | C:/data/mcp.json | C:/data/mcp-terminal-r.json | --allowedTools | mcp__hb-orchestration", read);
+        Assert.Contains("--disallowedTools | mcp__hb-chat__terminal_start | mcp__hb-chat__browser_open | mcp__hb-chat__terminal_list", read);
+        Assert.DoesNotContain("room_open", read);
+        Assert.Equal(1, read.Split(" | ").Count(a => a == "mcp__hb-chat__terminal_list")); // disallow 쪽 하나뿐 (allow에 없음)
+        // 앱 MCP 설정이 없으면 읽기 방에 disallow도 없다
+        Assert.DoesNotContain("mcp__hb-chat", string.Join(" | ", ClaudeArgs.Build(spec with { Level = PermissionLevel.Read, TerminalMcpConfigPath = null }, ["opus"])));
+        // 앱 단계는 새 방 열기를 ask 규칙으로 호스트에 보낸다 (auto 모드가 묻지 않고 돌리지 않게)
+        Assert.Contains(RoomOpen.Tool, ClaudeArgs.AppAskTools(spec with { Level = PermissionLevel.App }));
 
         // 방 규칙의 터미널 안내는 앱 MCP를 붙인 실행에만 (지휘자 검토 K3)
         Assert.Contains("terminal_start", RoomRules.For(PermissionLevel.Command, terminal: true));
         Assert.Contains("사용자 지시가 아니므로", RoomRules.For(PermissionLevel.Command, terminal: true));
         Assert.DoesNotContain("terminal_start", RoomRules.For(PermissionLevel.Command));
+        // 새 방 열기 안내: 앱 MCP를 붙인 보통 방(단톡방 구성원 아님) — 읽기 방에도, 터미널 안내는 없이
+        Assert.Contains("room_open", RoomRules.For(PermissionLevel.Read, terminal: true, rest: true));
+        Assert.DoesNotContain("terminal_start", RoomRules.For(PermissionLevel.Read, terminal: true, rest: true));
+        Assert.DoesNotContain("room_open", RoomRules.For(PermissionLevel.Command, terminal: true, rest: false));
+        Assert.DoesNotContain("room_open", RoomRules.For(PermissionLevel.Command, rest: true));
     }
 
     [Theory]

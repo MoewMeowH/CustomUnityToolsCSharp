@@ -106,6 +106,9 @@ public sealed record ApprovalView(string Id, string Tool, string Summary, string
     /// <summary>run_mode 모델 선택 카드. 아니면 null.</summary>
     public ModeCard? Mode { get; init; }
 
+    /// <summary>새 방 열기 카드 (room_open). 아니면 null.</summary>
+    public RoomOpenCard? RoomOpen { get; init; }
+
     /// <summary>작업 폴더 밖 파일 쓰기 카드 (Summary = 경로, Extra = 쓸 내용 미리보기 — 잘려도 허용).</summary>
     public bool OutsideWrite { get; init; }
 
@@ -230,6 +233,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
         public ApprovalView View => new(Id, Request.Tool, Request.Summary, Request.Description, ExpiresAt, Request.Truncated)
         {
             Mode = Request.Mode,
+            RoomOpen = Request.RoomOpen,
             Extra = Request.Extra,
             OutsideWrite = Request.OutsideWrite,
             Risky = Request.Risky,
@@ -334,6 +338,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
             if (value is null) return;
             value.Output += (s, data, offset) => Post(s.RoomId, () => new LiveEvent("term-out") { TermId = s.Id, Data = Convert.ToBase64String(data), Offset = offset });
             value.Changed += roomId => Post(roomId, () => new LiveEvent("terminals") { Terminals = value.List(roomId) });
+            value.Revoked += ForgetRoomOpen; // 새 방 표도 실행 수명 (터미널 표와 같게 — /self-review 4f5fd81b8e C1)
             // 방 기록 줄은 지휘자 프로세스만 — 내 셸은 사용자가 직접 연 것이라 남기지 않는다
             value.Started += s =>
             {
@@ -705,6 +710,9 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
             HostDenied(room, live, generation, ask.Tool, "", "계획 모드로 시작한 실행이 아님", "ExitPlanMode: 계획 모드로 시작한 실행이 아니라 거절");
             return PermissionDecision.Deny("이 실행은 계획 모드로 시작하지 않았습니다 — 계획 승인을 받을 수 없습니다.");
         }
+        // 새 방 열기: 모든 단계에서 늘 카드 (사용자가 값을 고쳐 허용)
+        if (ask.Tool == RoomOpen.Tool && _terminals is not null)
+            return await DecideRoomOpenAsync(room, live, generation, ask, aborted);
         // 웹 도구: 검색은 카드 없이 — 검색어만, 받는 곳은 이미 대화를 보는 Anthropic. 가져오기는 사이트마다 카드
         if (ask.Tool is ClaudeArgs.WebSearchTool or ClaudeArgs.WebFetchTool)
             return ask.Tool == ClaudeArgs.WebSearchTool ? PermissionDecision.Allow(ask.InputJson) : await DecideWebFetchAsync(room, live, generation, ask, aborted);
@@ -1189,7 +1197,8 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
     /// 카드 단추. 오류 문구(null이면 받음). 잘린 명령은 허용을 받지 않는다 (사용자가 다 보지 못함).
     /// </summary>
     /// <param name="picks">모델 선택 카드에서 고른 값 (원래 에이전트 → 고른 에이전트 · 강도). 다른 카드는 null.</param>
-    public string? Decide(string roomId, string approvalId, ApprovalChoice choice, string? reason, IReadOnlyDictionary<string, ModeRowPick>? picks = null)
+    public string? Decide(string roomId, string approvalId, ApprovalChoice choice, string? reason, IReadOnlyDictionary<string, ModeRowPick>? picks = null,
+        RoomOpenSpec? roomPick = null)
     {
         if (!_rooms.TryGetValue(roomId, out var live)) return "없는 방입니다.";
         lock (live.Gate)
@@ -1201,6 +1210,8 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
             var level = store.Get(roomId)?.Level;
             if (pending.Request.Mode is { } card)
                 return DecideModeCard(pending, card, level, choice, reason, picks);
+            if (pending.Request.RoomOpen is { } roomCard)
+                return DecideRoomOpenCard(pending, roomCard, level, choice, reason, roomPick);
             if (choice != ApprovalChoice.Deny && (pending.Request.IsPlan ? level is not { } l || ClaudeArgs.PlanMode(l) is null
                     : pending.Request.Web ? level is null
                     : level is not (PermissionLevel.Command or PermissionLevel.App)))
@@ -1518,9 +1529,10 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
         }
         if (result is null)
         {
-            // 터미널 곁칸: 명령 방 실행에만 앱 MCP를 붙인다 — 이 실행 동안만 듣는 토큰 (끝나면 거두고 설정 파일도 지운다 — 쉬는 실행이면 프로세스가 끝날 때)
+            // 앱 MCP (터미널 · 지휘자 브라우저 · 새 방 열기): 명령 · 앱 단계는 다 붙이고, 읽기 단계는 새 방 열기만 쓰게 붙인다(나머지는 실행 인자가 뺀다).
+            // 단톡방 구성원 방은 예전처럼 명령 단계에만 (새 방 열기는 쓰지 않음). 이 실행 동안만 듣는 토큰 — 끝나면 거두고 설정 파일도 지운다 (쉬는 실행이면 프로세스가 끝날 때)
             var resources = new RunResources(_terminals);
-            if (ClaudeArgs.RunsCommands(room.Level) && _terminals is not null && !room.McpOff.Contains(TerminalMcp.Server) && SelfUrl?.Invoke() is { } self)
+            if ((ClaudeArgs.RunsCommands(room.Level) || room.GroupId is null) && _terminals is not null && !room.McpOff.Contains(TerminalMcp.Server) && SelfUrl?.Invoke() is { } self)
             {
                 resources.TerminalToken = _terminals.Issue(room.Id);
                 try
@@ -2298,6 +2310,11 @@ public static class RoomRules
               "거절되면 다시 시도하지 말고, 무엇이 필요한지 사용자에게 말한다." +
               // 읽기 방도 백그라운드 서브에이전트로 쉬는 실행이 생긴다 (지휘자 K8)
               (rest ? $" 백그라운드 서브에이전트는 답을 끝내도 계속 돌고, 끝나면 그 결과가 전해지니 이어서 답한다 — 기다리느라 답을 붙잡지 않는다 (최대 {ClaudeSession.RestCapMinutes}분)." : "")) +
+        // 새 방 열기 (room_open) — 앱 MCP를 붙인 보통 방
+        (terminal && rest
+            ? " 다른 일 · 긴 작업을 새 세션으로 넘길 때는 room_open 도구로 새 방을 연다 — 새 방은 이 대화를 모르므로 첫 말(prompt)에 인계할 내용(목적 · 결정 · 파일 · 다음 할 일)을 모두 쓴다. " +
+              "사용자가 카드에서 값을 고쳐 허용하거나 거절한다 — 거절되면 다시 부르지 않는다."
+            : "") +
         // 질문 카드 (3차 a)
         (
             $" 사용자에게 선택지 중 하나를 고르게 할 때는 {ClaudeArgs.AskTool} 도구를 쓴다 — 화면에 질문 카드로 보인다. 답이 없다고 돌아오면 채팅 글로 다시 묻는다." +

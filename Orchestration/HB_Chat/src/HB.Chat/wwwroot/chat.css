@@ -411,6 +411,11 @@ input.rename { font-size: 15px; font-weight: 600; min-width: 200px; }
 .msg.live-sub:not(.sub-done) .sub-said:empty::after { content: "작업 중…"; color: var(--muted); font-size: 13px; }
 .msg.live-sub.failed-sub .who .sub-state { color: var(--warn); }
 .msg.subagent.interim .bubble { opacity: .85; }
+/* 새 방 열기 카드 (room_open): 칸마다 이름 + 값, 첫 말은 높이 제한 글 칸 */
+.approval.room-card .room-field { display: flex; flex-direction: column; gap: 2px; margin: 6px 0; font-size: 13px; }
+.approval.room-card .room-field select, .approval.room-card .room-field input { max-width: 420px; }
+.approval.room-card .room-prompt { width: 100%; box-sizing: border-box; min-height: 90px; max-height: 260px; resize: vertical; font: inherit; font-size: 13px; }
+.system.note .note-room { margin-left: 6px; }
 /* 질문 카드 답 (4차 D1): 질문은 작게, 고른 답이 본문 */
 .msg.answer .answer-q { font-size: 12px; color: var(--muted); }
 .msg.answer .answer-a { font-weight: 600; white-space: pre-wrap; }

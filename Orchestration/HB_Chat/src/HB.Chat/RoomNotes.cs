@@ -10,6 +10,9 @@ public sealed record RoomNote(DateTimeOffset At, string Text, bool Denied)
 {
     /// <summary>지휘자 브라우저 스크린샷 파일 이름 (그 방 browser-shots 폴더) — 기록 화면이 작은 그림으로 그린다.</summary>
     public string? Image { get; init; }
+
+    /// <summary>지휘자가 연 새 방 id (room_open) — 기록 화면이 [열기] 링크로 그린다.</summary>
+    public string? Room { get; init; }
 }
 
 /// <summary>방 기록 줄의 자리: 말 → 그 말 앞에 보일 줄들, 마지막 말 뒤의 줄(Trailing). 외부 실행 말풍선(RunPlacement)과 같은 규칙.</summary>
@@ -131,13 +134,17 @@ public sealed class RoomNotes(Func<string> dataFolder)
             if (decision == RoomHub.AppCallLabel) return null; // 앱 단계 호출은 approvals.jsonl에만 — 도구 칩이 이미 있다
             var summary = FirstLine(Str(e, "summary") ?? "", 120);
             if (tool is BrowserShotTool or UnityShotTool) return (room, new RoomNote(at, decision, false) { Image = Str(e, "summary") });
+            if (tool == RoomHub.RoomOpenedTool)
+                return (room, new RoomNote(at, decision, false) { Room = Str(e, "summary") is { } opened && RoomStore.IsRoomId(opened) ? opened : null });
             var text = tool switch
             {
                 BackgroundTool or TerminalTool => decision,
                 ApprovalRequest.PlanTool => "계획 " + (decision == "허용" ? "승인" : decision),
                 _ => summary.Length > 0 ? $"승인 {decision} — {tool}: {summary}" : $"승인 {decision} — {tool}",
             };
-            var denied = tool is not (BackgroundTool or TerminalTool) && decision is not ("허용" or "항상 허용" or RoomHub.TurnAllowLabel); // "항상 허용"은 없앤 단추의 옛 기록
+            // "항상 허용"은 없앤 단추의 옛 기록. 고쳐 허용한 카드(모델 선택 · 새 방)는 "허용 (…)"로 남는다
+            var denied = tool is not (BackgroundTool or TerminalTool) && decision is not ("허용" or "항상 허용" or RoomHub.TurnAllowLabel)
+                && !decision.StartsWith("허용 (", StringComparison.Ordinal);
             return (room, new RoomNote(at, text, denied));
         }
         catch (JsonException)

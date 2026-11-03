@@ -47,6 +47,9 @@ public sealed record ApprovalRequest(string Tool, string Summary, string? Descri
     /// <summary>run_mode 모델 선택 카드 — 허가하면 고른 교체 · 강도로 입력을 다시 쓴다. 아니면 null.</summary>
     public ModeCard? Mode { get; init; }
 
+    /// <summary>새 방 열기 카드 (room_open) — 허용하면 사용자가 고친 값으로 입력을 다시 쓴다. 아니면 null.</summary>
+    public RoomOpenCard? RoomOpen { get; init; }
+
     /// <summary>웹 가져오기(WebFetch) 사이트 카드 — 읽기 이상 단계에서 허용을 받는다 (명령 카드는 명령 단계만).</summary>
     public bool Web { get; init; }
 
@@ -245,6 +248,9 @@ public sealed record ApprovalAnswer(bool Allow, string? Message)
 {
     /// <summary>모델 선택 카드에서 고른 값 (원래 에이전트 → 고른 값). 다른 카드 · 고르지 않음은 null.</summary>
     public IReadOnlyDictionary<string, ModeRowPick>? Picks { get; init; }
+
+    /// <summary>새 방 열기 카드에서 고친 값 (허용 때만).</summary>
+    public RoomOpenSpec? RoomPick { get; init; }
 
     /// <summary>"이 폴더 늘 허용"을 눌렀다 — 받은 쪽이 <see cref="ApprovalRequest.AlwaysFolder"/>를 늘 허용 목록에 넣는다.</summary>
     public bool RememberFolder { get; init; }

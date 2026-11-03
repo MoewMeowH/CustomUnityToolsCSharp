@@ -46,7 +46,7 @@ builder.Services.AddHttpContextAccessor();
 // 지휘자 브라우저: 방마다 화면 없는 Chrome(없으면 Edge) · 별도 프로필 — 같은 앱 MCP
 builder.Services.AddSingleton(sp => new AgentBrowser(() => sp.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder,
     blockedPorts: () => TerminalMcp.BlockedPorts(sp.GetRequiredService<Microsoft.AspNetCore.Hosting.Server.IServer>(), sp.GetRequiredService<IOptions<ChatOptions>>().Value)));
-builder.Services.AddMcpServer().WithHttpTransport(o => o.Stateless = true).WithTools<TerminalTools>().WithTools<BrowserTools>();
+builder.Services.AddMcpServer().WithHttpTransport(o => o.Stateless = true).WithTools<TerminalTools>().WithTools<BrowserTools>().WithTools<RoomTools>();
 // 구독 한도: Claude는 실행 때 받은 값을 데이터 폴더에, Codex는 ~/.codex 세션 기록에서
 builder.Services.AddSingleton(sp => new UsageLimits(() => sp.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder));
 // claude CLI 판 기록 (카드 자가 시험 · 확인하지 않은 판 띠)

@@ -94,7 +94,7 @@ public static partial class ClaudeArgs
     /// 방별 서버는 서버 단위로 — 호스트가 지금 연결을 다시 보고 Unity 코드 실행만 카드로 묻는다 (<see cref="RunSpec.ExtraMcpServers"/>, /cross-review a30ebb2d3a 1-F1).
     /// </summary>
     public static IReadOnlyList<string> AppAskTools(RunSpec spec) =>
-        [$"mcp__{spec.McpServer}__{RunModeTool}", TerminalMcp.StartTool, TerminalMcp.BrowserOpenTool, WebFetchTool, .. spec.ExtraMcpServers.Select(s => $"mcp__{s}")];
+        [$"mcp__{spec.McpServer}__{RunModeTool}", TerminalMcp.StartTool, TerminalMcp.BrowserOpenTool, RoomOpen.Tool, WebFetchTool, .. spec.ExtraMcpServers.Select(s => $"mcp__{s}")];
 
     /// <summary>
     /// 앱 단계 "폴더 밖 쓰기 묻기"의 ask 규칙 — 모든 절대 경로. auto 모드에서도 이 규칙이 Write · Edit를 호스트에 묻게 한다
@@ -180,6 +180,12 @@ public static partial class ClaudeArgs
         {
             case PermissionLevel.Read:
                 args.AddRange(["--tools", "Read,Grep,Glob," + HostTools + "," + WebTools + "," + AgentTool]);
+                // 앱 MCP를 붙였으면 새 방 열기만 쓴다 — 터미널 · 지휘자 브라우저 도구는 목록에서 뺀다 (호출돼도 호스트가 거절하지만 보이지 않게)
+                if (!string.IsNullOrWhiteSpace(spec.TerminalMcpConfigPath))
+                {
+                    args.Add("--disallowedTools");
+                    args.AddRange([TerminalMcp.StartTool, TerminalMcp.BrowserOpenTool, .. TerminalMcp.QuietTools]);
+                }
                 AddMcp(args, spec);
                 break;
             case PermissionLevel.Command:
@@ -314,8 +320,9 @@ public static partial class ClaudeArgs
     {
         if (string.IsNullOrWhiteSpace(spec.McpConfigPath))
             throw new ArgumentException($"{spec.Level} 단계에는 MCP 설정 파일이 필요하다");
-        // 명령 방은 앱 MCP(터미널)도 붙인다 — --mcp-config는 여러 파일을 받는다. 목록 · 읽기 · 중지는 묻지 않고, 시작은 승인 카드로
-        var terminal = RunsCommands(spec.Level) && !string.IsNullOrWhiteSpace(spec.TerminalMcpConfigPath);
+        // 앱 MCP(터미널 · 브라우저 · 새 방 열기)도 붙인다 — --mcp-config는 여러 파일을 받는다. 명령 방의 목록 · 읽기 · 중지는 묻지 않고,
+        // 시작 · 열기는 승인 카드로. 읽기 방은 새 방 열기만 (나머지는 위에서 뺀다)
+        var terminal = !string.IsNullOrWhiteSpace(spec.TerminalMcpConfigPath);
         args.AddRange(["--strict-mcp-config", "--mcp-config", spec.McpConfigPath]);
         if (terminal) args.Add(spec.TerminalMcpConfigPath!);
         args.Add("--allowedTools");
@@ -324,7 +331,7 @@ public static partial class ClaudeArgs
         else args.Add($"mcp__{spec.McpServer}");
         foreach (var extra in spec.ExtraMcpServers)
             if (!IsServerName(extra) || extra == TerminalMcp.Server) throw new ArgumentException($"MCP 서버 이름 형식이 올바르지 않다: {extra}");
-        if (terminal) args.AddRange(TerminalMcp.QuietTools);
+        if (terminal && RunsCommands(spec.Level)) args.AddRange(TerminalMcp.QuietTools);
     }
 
     /// <summary>모델 · 서버 이름: 영숫자로 시작, 영숫자 . _ : / - 만 64자까지.</summary>

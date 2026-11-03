@@ -89,6 +89,11 @@
     void NoteLine(RoomNote n, bool trailing)
     {
         <div class="system note@(n.Denied ? " denied" : "")@(trailing ? " run-trailing" : "")"><span class="body">@n.Text</span> <span class="when">@n.At.ToLocalTime().ToString("HH:mm")</span>
+            @* 지휘자가 연 새 방 (room_open) — 휴지통 · 지워진 방이면 링크 없이 *@
+            @if (n.Room is { } openedId && Model.RoomAlive(openedId))
+            {
+                <a class="note-room" href="/Room/@openedId">열기</a>
+            }
             @* 지휘자 브라우저 스크린샷 (결정 "기록에 그림으로 남김"): 같은 출처 · 방 · 이름 모양을 서버가 확인한 뒤 내준다. 누르면 새 탭에 원본 *@
             @if (n.Image is { Length: > 0 } image)
             {

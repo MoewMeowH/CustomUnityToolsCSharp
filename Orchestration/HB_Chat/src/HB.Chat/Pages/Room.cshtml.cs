@@ -939,10 +939,12 @@ public sealed partial class RoomModel(
     }
 
     /// <summary>승인 카드 단추: choice = allow · turn · folder(이 폴더 늘 허용) · deny, reason은 거절 이유 (선택), picks는 모델 선택 카드에서 고른 값 (JSON, 선택).</summary>
-    public IActionResult OnPostApprove(string id, string? approval, string? choice, string? reason, string? picks)
+    public IActionResult OnPostApprove(string id, string? approval, string? choice, string? reason, string? picks, string? room)
     {
         if (!RoomStore.IsRoomId(id) || string.IsNullOrEmpty(approval)) return NotFound();
         if (ModeCard.ParsePicks(picks) is not { } chosen) return BadRequest("고른 값을 읽지 못했습니다.");
+        // 새 방 열기 카드에서 고친 값 (허용 때) — 모양이 틀리면 null로 넘겨 허브가 "카드 값을 읽지 못했습니다"로 거절한다
+        var roomPick = RoomOpen.Parse(room);
         ApprovalChoice? parsed = choice switch
         {
             "allow" => ApprovalChoice.Allow,
@@ -953,7 +955,7 @@ public sealed partial class RoomModel(
         };
         if (parsed is null) return BadRequest("알 수 없는 선택입니다.");
         if (reason is { Length: > 500 }) reason = reason[..500];
-        return hub.Decide(id, approval, parsed.Value, reason, chosen.Count == 0 ? null : chosen) is { } error ? CardError(error) : new JsonResult(new { ok = true });
+        return hub.Decide(id, approval, parsed.Value, reason, chosen.Count == 0 ? null : chosen, roomPick) is { } error ? CardError(error) : new JsonResult(new { ok = true });
     }
 
     /// <summary>
@@ -1086,6 +1088,9 @@ public sealed partial class RoomModel(
     /// <summary>끝난 턴 표정을 앞으로 보일 밀리초 (없으면 0) · 그 표정을 보이는 전체 시간 (화면 타이머, 83b453653b C11).</summary>
     public long EndFaceLeftMs => (long)(hub.EndFaceLeft(Room.Id)?.TotalMilliseconds ?? 0);
     public static long EndFaceMs => (long)RoomHub.EndFaceFor.TotalMilliseconds;
+
+    /// <summary>방 기록 "새 방" 줄의 [열기] 링크를 둘지 — 있고 휴지통에 없는 방만.</summary>
+    public bool RoomAlive(string id) => store.Get(id) is { DeletedAt: null };
 
     public HtmlString Render(ChatEntry e)
     {

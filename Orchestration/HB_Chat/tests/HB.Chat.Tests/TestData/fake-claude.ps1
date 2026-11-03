@@ -349,6 +349,13 @@ switch ($mode) {
         $d2 = Ask 'req_say2' '{"subtype":"can_use_tool","tool_name":"Bash","display_name":"Bash","input":{"command":"echo after","description":"After"},"tool_use_id":"toolu_fake_say2"}'
         Finish $d2 'Bash' 'say done'
     }
+    'roomopen' {
+        # the conductor asks to open a new room (app MCP room_open) with a higher level than a read room: the host card answers; allow -> the edited input back
+        $d = Ask 'req_ro' '{"subtype":"can_use_tool","tool_name":"mcp__hb-chat__room_open","display_name":"room_open","input":{"workspace":"ws","level":"app","model":"opus","title":"handoff","prompt":"carry on"},"tool_use_id":"toolu_ro1"}'
+        if ($d -and $d.behavior -eq 'allow') {
+            Emit ('{"type":"result","subtype":"error_during_execution","is_error":true,"result":' + (ConvertTo-Json ('ALLOWED ' + ($d.updatedInput | ConvertTo-Json -Compress -Depth 5)) -Compress) + ',"total_cost_usd":0.001,"permission_denials":[]}')
+        } else { Finish $d 'mcp__hb-chat__room_open' 'opened' }
+    }
     'subhand' {
         # a subagent that hands its report back with the SubagentHandback tool (2026-11-03 app session): the notification summary is only a notice
         Emit '{"type":"system","subtype":"task_started","task_id":"t_hand","tool_use_id":"toolu_hand","description":"Hand back","subagent_type":"Explore","is_backgrounded":false,"task_type":"local_agent"}'

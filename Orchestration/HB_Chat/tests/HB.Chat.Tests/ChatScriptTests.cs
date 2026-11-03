@@ -759,4 +759,51 @@ public sealed class ChatScriptTests(ChatApp app, ChatBrowser browser) : IClassFi
         Assert.Equal(0, await page.EvalAsync<int>("[...document.querySelectorAll('#chat')].filter(c => c.textContent.includes('hand-back') || c.textContent.includes('Async agent')).length"));
         page.AssertNoErrors();
     }
+
+    /// <summary>
+    /// 새 방 열기 카드: 지휘자 값이 미리 채워지고(읽기 방이라 단계는 읽기로 낮춤 + 안내), 더 높은 단계를 고르면 경고 줄,
+    /// 제목 · 단계를 고쳐 허용하면 고친 값이 지휘자 도구 입력으로 간다.
+    /// </summary>
+    [Fact]
+    public async Task RoomOpenCard_PrefilledEditableAllow()
+    {
+        if (!browser.Available) return;
+        var room = app.Room("room-open-card", ChatApp.User("q", 0), ChatApp.Conductor("a", 1));
+        await using var page = await browser.OpenAsync(app.RoomUrl(room));
+        await page.SendAsync("roomopen please");
+        await page.WaitForAsync("!!document.querySelector('#live .room-card')", "새 방 열기 카드", ChatPage.TurnWait);
+        const string fields = "[...document.querySelectorAll('#live .room-card select, #live .room-card input:not(.reason), #live .room-card textarea')].map(e => e.value).join('|')";
+        Assert.Equal("ws|read|opus|handoff|carry on", await page.EvalAsync<string>(fields));
+        Assert.Contains("낮춰", await page.EvalAsync<string>("document.querySelector('#live .room-card .warn-line').textContent"));
+        const string levelWarn = "document.querySelectorAll('#live .room-card .level-warn:not([hidden])').length";
+        Assert.Equal(0, await page.EvalAsync<int>(levelWarn));
+        // 첫 말 크기 표시 · 다른 작업 폴더 경고 (같은 폴더면 없음)
+        Assert.StartsWith("8자 · 1줄", await page.EvalAsync<string>("document.querySelector('#live .room-card .prompt-size').textContent"));
+        Assert.Equal(0, await page.EvalAsync<int>("document.querySelectorAll('#live .room-card .ws-warn:not([hidden])').length"));
+        await page.EvalAsync("(() => { const s = document.querySelectorAll('#live .room-card select')[1]; s.value = 'app'; s.dispatchEvent(new Event('change')); " +
+            "document.querySelector('#live .room-card input:not(.reason)').value = '바꾼 제목'; })()");
+        Assert.Equal(1, await page.EvalAsync<int>(levelWarn));
+        await page.EvalAsync("[...document.querySelectorAll('#live .room-card button')].find(b => b.textContent === '허용').click()");
+        await page.WaitForAsync("[...document.querySelectorAll('#live .live-line')].some(l => l.textContent.includes('ALLOWED'))", "고친 값으로 허용", ChatPage.TurnWait);
+        var allowed = await page.EvalAsync<string>("[...document.querySelectorAll('#live .live-line')].find(l => l.textContent.includes('ALLOWED')).textContent");
+        Assert.Contains("\"level\":\"app\"", allowed);
+        Assert.Contains("바꾼 제목", allowed);
+        page.AssertNoErrors();
+    }
+
+    /// <summary>여는 방 기록의 "새 방" 줄: 글 옆 [열기] 링크가 새 방으로 — 휴지통에 간 방이면 링크 없이.</summary>
+    [Fact]
+    public async Task RoomOpenedNote_LinksToNewRoom()
+    {
+        if (!browser.Available) return;
+        var room = app.Room("room-open-note", ChatApp.User("q", 0), ChatApp.Conductor("a", 1));
+        var opened = app.Store.Create("ws", PermissionLevel.Read, "opus", "열린 방");
+        var hub = app.Services.GetRequiredService<RoomHub>();
+        hub.NoteRoomOpened(room.Id, opened.Id, "열린 방");
+        await using var page = await browser.OpenAsync(app.RoomUrl(room));
+        await page.WaitForAsync("!!document.querySelector('#chat .system.note .note-room')", "새 방 줄 링크", ChatPage.TurnWait);
+        Assert.Equal("/Room/" + opened.Id, await page.EvalAsync<string>("document.querySelector('#chat .system.note .note-room').getAttribute('href')"));
+        Assert.Contains("새 방 '열린 방'을 열었습니다", await page.EvalAsync<string>("document.querySelector('#chat .system.note').textContent"));
+        page.AssertNoErrors();
+    }
 }
