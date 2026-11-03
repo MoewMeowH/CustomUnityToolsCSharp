@@ -336,15 +336,42 @@ switch ($mode) {
         Emit ('{"type":"system","subtype":"task_notification","task_id":"t_sub1","tool_use_id":"toolu_a","status":"' + $status + '","subagent_type":"general-purpose"}')
         Finish $d 'Bash' 'sub done'
     }
+    'subsay' {
+        # subagent words (2.1.316 probe shape): subagent assistant lines carry parent_tool_use_id = the Agent call, no deltas;
+        # task_notification carries summary = the final answer. A line for an unknown parent is dropped.
+        Emit '{"type":"system","subtype":"task_started","task_id":"t_say","tool_use_id":"toolu_s","description":"Check apples","subagent_type":"general-purpose","is_backgrounded":false,"task_type":"local_agent"}'
+        Emit '{"type":"assistant","parent_tool_use_id":"toolu_s","message":{"role":"assistant","content":[{"type":"text","text":"apples are red"}]}}'
+        Emit '{"type":"assistant","parent_tool_use_id":"toolu_other","message":{"role":"assistant","content":[{"type":"text","text":"lost words"}]}}'
+        $d = Ask 'req_say' '{"subtype":"can_use_tool","tool_name":"Bash","display_name":"Bash","input":{"command":"echo hi","description":"Say hi"},"agent_id":"say1","tool_use_id":"toolu_fake_say"}'
+        Emit '{"type":"assistant","parent_tool_use_id":"toolu_s","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_fake_say","name":"Bash","input":{"command":"echo hi"}},{"type":"text","text":"second line"}]}}'
+        Emit '{"type":"system","subtype":"task_notification","task_id":"t_say","tool_use_id":"toolu_s","status":"completed","summary":"FINAL apples"}'
+        # the conductor's own command after the subagent: the turn waits here so a test can see the finished bubble
+        $d2 = Ask 'req_say2' '{"subtype":"can_use_tool","tool_name":"Bash","display_name":"Bash","input":{"command":"echo after","description":"After"},"tool_use_id":"toolu_fake_say2"}'
+        Finish $d2 'Bash' 'say done'
+    }
+    'subhand' {
+        # a subagent that hands its report back with the SubagentHandback tool (2026-11-03 app session): the notification summary is only a notice
+        Emit '{"type":"system","subtype":"task_started","task_id":"t_hand","tool_use_id":"toolu_hand","description":"Hand back","subagent_type":"Explore","is_backgrounded":false,"task_type":"local_agent"}'
+        Emit '{"type":"assistant","parent_tool_use_id":"toolu_hand","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_hb","name":"SubagentHandback","input":{"message":"HANDED report"}}]}}'
+        Emit '{"type":"system","subtype":"task_notification","task_id":"t_hand","tool_use_id":"toolu_hand","status":"completed","summary":"This agent''s report was delivered to you as a message from \"t_hand\" (its SubagentHandback call)."}'
+        Emit '{"type":"result","subtype":"success","is_error":false,"result":"handed","total_cost_usd":0.001,"permission_denials":[]}'
+    }
+    'subcut' {
+        # a foreground subagent cut off without task_notification (interrupt / error): started, one line, then the turn just ends
+        Emit '{"type":"system","subtype":"task_started","task_id":"t_cut","tool_use_id":"toolu_cut","description":"Cut off","subagent_type":"general-purpose","is_backgrounded":false,"task_type":"local_agent"}'
+        Emit '{"type":"assistant","parent_tool_use_id":"toolu_cut","message":{"role":"assistant","content":[{"type":"text","text":"half way"}]}}'
+        Emit '{"type":"result","subtype":"success","is_error":false,"result":"cut","total_cost_usd":0.001,"permission_denials":[]}'
+    }
     'bgagent' {
         # background subagent (feature D, real check 2026-10-28 / 2.1.316 shape): the turn ends first, then the subagent asks for approval while the
         # process rests, then task_notification, the task list empties and an automatic turn (init + result) follows.
         TaskList '{"task_id":"t_bg1","task_type":"local_agent","subagent_type":"general-purpose","description":"Make dir"}'
         Emit '{"type":"system","subtype":"task_started","task_id":"t_bg1","tool_use_id":"toolu_b","description":"Make dir","subagent_type":"general-purpose","is_backgrounded":true,"task_type":"local_agent"}'
         Emit '{"type":"result","subtype":"success","is_error":false,"result":"launched","total_cost_usd":0.001,"permission_denials":[]}'
+        Emit '{"type":"assistant","parent_tool_use_id":"toolu_b","message":{"role":"assistant","content":[{"type":"text","text":"bg words"}]}}'
         $d = Ask 'req_bg' '{"subtype":"can_use_tool","tool_name":"Bash","display_name":"Bash","input":{"command":"mkdir bgdir","description":"Create bgdir"},"agent_id":"bg1","tool_use_id":"toolu_fake7"}'
         $status = if ($d -and $d.behavior -eq 'allow') { 'completed' } else { 'failed' }
-        Emit ('{"type":"system","subtype":"task_notification","task_id":"t_bg1","tool_use_id":"toolu_b","status":"' + $status + '","subagent_type":"general-purpose"}')
+        Emit ('{"type":"system","subtype":"task_notification","task_id":"t_bg1","tool_use_id":"toolu_b","status":"' + $status + '","subagent_type":"general-purpose","summary":"bg final"}')
         TaskList ''
         Init $Sid
         Finish $d 'Bash' 'bg done'

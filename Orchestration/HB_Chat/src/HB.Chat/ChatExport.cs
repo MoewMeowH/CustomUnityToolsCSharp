@@ -42,6 +42,12 @@ public static class ChatExport
                 sb.Append("> 안내 · ").Append(when).Append(": ").Append(e.Text.Replace("\n", " ")).Append("\n\n");
                 continue;
             }
+            if (e.Speaker == ChatSpeaker.Subagent)
+            {
+                sb.Append("### 서브에이전트 ").Append(e.Agent ?? "?").Append(e.Title is { } title ? " — " + title.Replace("\r", " ").Replace("\n", " ") : "").Append(e.Interim ? " (중간 보고)" : "")
+                  .Append(" · ").Append(when).Append("\n\n").Append(e.Text.TrimEnd()).Append("\n\n");
+                continue;
+            }
             sb.Append("### ").Append(e.Speaker == ChatSpeaker.User ? "나" : "지휘자").Append(e.Narration ? " (요약)" : "").Append(" · ").Append(when).Append("\n\n");
             sb.Append(e.Text.TrimEnd()).Append("\n\n");
         }

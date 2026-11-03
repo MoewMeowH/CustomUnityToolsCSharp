@@ -80,27 +80,43 @@ public static class ChatRoomBuilder
         var runSet = runIds.ToHashSet(StringComparer.Ordinal);
         var messages = new List<RoomMessage>();
 
+        // 세션을 이어 열면 기록 안 첫 sessionId(앞 세션)와 파일 이름이 다르다 — 둘 중 하나만 맞아도 이 방의 서브에이전트다.
+        var roomSubagents = subagents.Where(v => string.Equals(v.Result.SessionId, transcript.FileSessionId, StringComparison.OrdinalIgnoreCase)
+            || (transcript.SessionId is { } recorded && string.Equals(v.Result.SessionId, recorded, StringComparison.OrdinalIgnoreCase))).ToList();
+        // 서브에이전트 결과(SubagentHandback — 검토형)로 아래에서 따로 그리는 agentId: 기록의 같은 답은 두 번 두지 않는다
+        var handedBack = roomSubagents.Select(v => v.Result.AgentId).ToHashSet(StringComparer.Ordinal);
+
         // 한 줄(assistant 메시지 하나)에 text 블록이 여럿일 수 있어 줄 번호 + 줄 안 순번.
         var (prevLine, inLine) = (-1, 0);
         foreach (var e in transcript.Entries)
         {
+            if (e.Speaker == ChatSpeaker.Subagent && e.AgentId is { } shownId && handedBack.Contains(shownId)) continue;
             inLine = e.Line == prevLine ? inLine + 1 : 0;
             prevLine = e.Line;
             messages.Add(new RoomMessage
             {
                 Key = $"s{e.Line}.{inLine}",
                 At = e.Timestamp,
-                Role = e.Speaker switch { ChatSpeaker.User => RoomRole.User, ChatSpeaker.Conductor => RoomRole.Conductor, _ => RoomRole.System },
-                Name = e.Speaker switch { ChatSpeaker.User => "나", ChatSpeaker.Conductor => "지휘자", _ => "안내" },
+                Role = e.Speaker switch
+                {
+                    ChatSpeaker.User => RoomRole.User,
+                    ChatSpeaker.Conductor => RoomRole.Conductor,
+                    ChatSpeaker.Subagent => RoomRole.Subagent,
+                    _ => RoomRole.System,
+                },
+                Name = e.Speaker switch
+                {
+                    ChatSpeaker.User => "나",
+                    ChatSpeaker.Conductor => "지휘자",
+                    ChatSpeaker.Subagent => e.Agent ?? "서브에이전트",
+                    _ => "안내",
+                },
                 Markdown = e.Text,
-                Detail = e.Narration ? "요약" : null, // 서버가 요약한 중간 글 — 원문이 아니다
+                // 서버가 요약한 중간 글 — 원문이 아니다. 서브에이전트는 지휘자가 붙인 설명 (중간 보고 표시)
+                Detail = e.Narration ? "요약" : e.Speaker == ChatSpeaker.Subagent ? SubagentDetail(e) : null,
                 ToolsBefore = e.ToolsBefore,
             });
         }
-
-        // 세션을 이어 열면 기록 안 첫 sessionId(앞 세션)와 파일 이름이 다르다 — 둘 중 하나만 맞아도 이 방의 서브에이전트다.
-        var roomSubagents = subagents.Where(v => string.Equals(v.Result.SessionId, transcript.FileSessionId, StringComparison.OrdinalIgnoreCase)
-            || (transcript.SessionId is { } recorded && string.Equals(v.Result.SessionId, recorded, StringComparison.OrdinalIgnoreCase))).ToList();
         // /self-review 기록(self_review 호출)은 서브에이전트 결과 원문과 같은 글이다 — 서브에이전트 말풍선 하나만 둔다.
         var selfReviewShown = roomSubagents
             .Where(v => v.Link is { Kind: SubagentLinkKind.Exact or SubagentLinkKind.Near, Via: "selfReview", RunId: not null })
@@ -156,6 +172,13 @@ public static class ChatRoomBuilder
     }
 
     /// <summary>Shared 실행 말풍선 → 채팅방 말풍선 (시작 줄은 안내, 스티커는 상황 → 태그, 링크는 호출 상세).</summary>
+    /// <summary>기록의 서브에이전트 답 머리 옆 글: 설명 · 중간 보고 (없으면 null).</summary>
+    private static string? SubagentDetail(ChatEntry e)
+    {
+        var parts = new[] { e.Title, e.Interim ? "중간 보고" : null }.OfType<string>().ToList();
+        return parts.Count == 0 ? null : string.Join(" · ", parts);
+    }
+
     private static RoomMessage FromBubble(RunBubble b, Func<string, string?> auto) => new()
     {
         Key = b.Key,

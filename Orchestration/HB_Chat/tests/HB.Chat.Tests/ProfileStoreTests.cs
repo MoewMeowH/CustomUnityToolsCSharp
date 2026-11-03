@@ -41,6 +41,40 @@ public sealed class ProfileStoreTests : IDisposable
         Assert.Equal(new Profile(), New().Get(ProfileStore.User));
     }
 
+    /// <summary>서브에이전트 종류 프로필 (sub:종류): 외부 에이전트와 같은 이름이어도 따로, 화면 스크립트용 목록에는 프로필을 둔 종류만, 이름 없으면 종류 그대로.</summary>
+    [Fact]
+    public void Subagent_Profiles_SeparateFromExternalAgents()
+    {
+        var store = New();
+        Assert.Equal("sub:Plan", ProfileStore.SubKey(" Plan "));
+        Assert.Null(ProfileStore.SubKey("a\nb"));
+        Assert.Null(ProfileStore.SubKey(""));
+        Assert.Null(store.Save(ProfileStore.SubKey("Plan"), "계획이", "#112233"));
+        Assert.Null(store.Save(ProfileStore.AgentKey("Plan"), "외부 플랜", null));
+        Assert.NotNull(store.Save("sub:a\nb", "x", null)); // 키 모양
+        var again = New();
+        Assert.Equal(["Plan"], again.Subagents());
+        Assert.Equal(["Plan"], again.Agents());
+        var view = new ProfileView(again);
+        Assert.Equal(("계획이", "Explore", "서브에이전트"), (view.SubName("Plan"), view.SubName("Explore"), view.SubName(null)));
+        var json = System.Text.Json.JsonDocument.Parse(view.Json()).RootElement.GetProperty("subagents");
+        Assert.Equal("계획이", json.GetProperty("Plan").GetProperty("name").GetString());
+        Assert.False(json.TryGetProperty("Explore", out _));
+    }
+
+    /// <summary>설정 탭 종류 목록: 기본 종류 + 작업 폴더 .claude/agents/*.md 이름 (없는 폴더는 건너뜀).</summary>
+    [Fact]
+    public void SubagentTypes_BuiltInPlusAgentFiles()
+    {
+        var agents = Directory.CreateDirectory(Path.Combine(_dir, "ws", ".claude", "agents")).FullName;
+        File.WriteAllText(Path.Combine(agents, "self-reviewer.md"), "---\nname: self-reviewer\n---");
+        File.WriteAllText(Path.Combine(agents, "notes.txt"), "x");
+        File.WriteAllText(Path.Combine(agents, "file-name.md"), "---\ndescription: d\nname: \" real-name \"\n---\nbody"); // 앞머리 name이 이긴다 (H-C3)
+        File.WriteAllText(Path.Combine(agents, "no-head.md"), "name: not-front-matter");
+        Assert.Equal(["Explore", "Plan", "general-purpose", "no-head", "real-name", "self-reviewer"],
+            SubagentTypes.Known([Path.Combine(_dir, "ws"), Path.Combine(_dir, "none")], null));
+    }
+
     [Fact]
     public async Task Image_SniffsContent_ReplacesAndClears()
     {

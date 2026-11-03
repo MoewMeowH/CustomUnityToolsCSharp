@@ -402,6 +402,15 @@ input.rename { font-size: 15px; font-weight: 600; min-width: 200px; }
 #live .msg.pending .bubble { opacity: .7; }
 /* 서버가 요약한 중간 글: 일반 답과 구분되게 흐리게 */
 .msg.narration .body, .narration-line { color: var(--muted); font-size: 13px; }
+/* 진행 칸 서브에이전트 말풍선: 도는 동안 중간 글(흐리게) → 끝나면 최종 답 */
+.msg.live-sub .who .sub-title, .msg.live-sub .who .sub-state { color: var(--muted); font-size: 12px; font-weight: normal; }
+.msg.live-sub .sub-said { display: flex; flex-direction: column; gap: 4px; }
+.msg.live-sub .sub-line { color: var(--muted); font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg.live-sub .sub-line.narration { font-style: italic; }
+.msg.live-sub .sub-final { white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg.live-sub:not(.sub-done) .sub-said:empty::after { content: "작업 중…"; color: var(--muted); font-size: 13px; }
+.msg.live-sub.failed-sub .who .sub-state { color: var(--warn); }
+.msg.subagent.interim .bubble { opacity: .85; }
 /* 질문 카드 답 (4차 D1): 질문은 작게, 고른 답이 본문 */
 .msg.answer .answer-q { font-size: 12px; color: var(--muted); }
 .msg.answer .answer-a { font-weight: 600; white-space: pre-wrap; }

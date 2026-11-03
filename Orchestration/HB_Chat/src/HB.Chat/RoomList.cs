@@ -197,7 +197,11 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
             {
                 if (IsStoppedTurn(e)) continue;
                 var at = e.Text.IndexOf(q, StringComparison.OrdinalIgnoreCase);
-                if (at >= 0) hits.Add(new SearchHit(room.Id, title, e.Line, e.Speaker, e.Timestamp, Snippet(e.Text, at, q.Length)));
+                if (at >= 0)
+                    hits.Add(new SearchHit(room.Id, title, e.Line, e.Speaker, e.Timestamp, Snippet(e.Text, at, q.Length))
+                    {
+                        Name = e.Speaker == ChatSpeaker.Subagent ? e.Agent : null, // 서브에이전트는 종류 (없으면 화면이 "서브에이전트")
+                    });
             }
             // 질문 카드 답 (4차 D1 보류 K1): 고른 답 · 질문 글도 찾는다. 답 말풍선은 줄 번호가 없어 그 다음 말(말풍선이 놓인 자리)로 데려간다
             foreach (var a in transcript?.Answers ?? [])
@@ -284,7 +288,9 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
         var shown = entries.LastOrDefault(e => !e.Narration);
         var preview = shown is null ? null
             : IsStoppedTurn(shown) ? "중지된 턴"
-            : shown.Speaker == ChatSpeaker.User ? "나: " + Preview(Attachments.WithoutLines(shown.Text)) : Preview(shown.Text); // 첨부 경로는 빼고 (2-2 d)
+            : shown.Speaker == ChatSpeaker.User ? "나: " + Preview(Attachments.WithoutLines(shown.Text)) // 첨부 경로는 빼고 (2-2 d)
+            : shown.Speaker == ChatSpeaker.Subagent ? "서브에이전트: " + Preview(shown.Text)
+            : Preview(shown.Text);
         // ReadUpTo null(이 필드 전의 방, 켤 때 옮기므로 남지 않음)은 모두 읽음으로 — 잘못 세면 안 읽음이 쏟아지는 쪽보다 낫다.
         // 도는 턴(마지막 사용자 말 뒤)의 중간 글은 세지 않는다 — 열어 둔 방도 읽음 표시가 턴 끝에야 따라와서, 지휘자가 일하는 동안 숫자가 계속 늘었다
         // (사용자 보고 2026-11-03). 턴이 끝나면 센다.

@@ -529,6 +529,12 @@ public sealed partial class RoomHub
                 live.BackgroundCount = 0;
                 live.BackgroundUntil = null;
                 live.BgTasks = [];
+                // 프로세스와 함께 끝난 서브에이전트 말풍선: 화면 턴이 돌면 그 끝이 정리한다, 아니면 지금 비운다
+                if (!live.Busy && live.Subagents.Count > 0)
+                {
+                    live.Subagents.Clear();
+                    Broadcast(live, SubagentsEvent(live));
+                }
             }
         }
         wait?.Ended.TrySetResult(null);

@@ -95,7 +95,7 @@ public sealed class SettingsModel(
         return Page();
     }
 
-    /// <summary>프로필 줄 (3차 e): 나 · 지휘자 · 외부 에이전트(호출 기록에 나온 이름 + 프로필을 둔 이름).</summary>
+    /// <summary>프로필 줄 (3차 e): 나 · 지휘자 · 외부 에이전트(호출 기록에 나온 이름 + 프로필을 둔 이름) · 서브에이전트 종류.</summary>
     public IReadOnlyList<(string Key, string Label, string DefaultName)> ProfileRows { get; private set; } = [];
 
     /// <summary>
@@ -528,15 +528,23 @@ public sealed class SettingsModel(
         Rooms = [.. all.Where(r => r.DeletedAt is null).OrderByDescending(r => r.LastRunAt ?? r.CreatedAt)
             .Select(r => (r, RoomList.TitleOf(r, transcripts.Read(r.SessionId))))];
         // 프로필을 둔 이름이 먼저 자리를 잡고(상한에 밀려 고칠 수 없게 되지 않게), 남은 자리를 호출 기록 이름으로 (3차 e /self-review security)
+        // 서브에이전트 종류 (sub:종류)도 같은 상한(외부 · 서브 합쳐 MaxAgents)을 쓴다: 남은 자리를 기본 종류 · .claude/agents가 먼저(몇 개뿐),
+        // 그다음 호출 기록의 외부 에이전트 이름 — 줄이 보이는데 저장하면 상한 오류가 나지 않게 (/self-review 60ef26a7bf H-C5)
         var saved = profiles.Store.Agents();
+        var savedSubs = profiles.Store.Subagents();
+        var left = Math.Max(0, ProfileStore.MaxAgents - saved.Count - savedSubs.Count);
+        var subSeen = savedSubs.ToHashSet(StringComparer.Ordinal);
+        var knownSubs = SubagentTypes.Known(options.Value.AllWorkspaces.Select(w => w.Path), Environment.GetFolderPath(Environment.SpecialFolder.UserProfile))
+            .Where(subSeen.Add).Take(left).ToList();
         var seen = saved.Select(ProfileStore.AgentKey).OfType<string>().ToHashSet(StringComparer.Ordinal);
         var known = runs.KnownAgents().Where(n => ProfileStore.AgentKey(n) is { } k && seen.Add(k))
-            .Order(StringComparer.Ordinal).Take(Math.Max(0, ProfileStore.MaxAgents - saved.Count));
+            .Order(StringComparer.Ordinal).Take(left - knownSubs.Count);
         ProfileRows =
         [
             (ProfileStore.User, "나", "나"),
             (ProfileStore.Conductor, "지휘자", "지휘자"),
             .. saved.Concat(known).Order(StringComparer.Ordinal).Select(n => (ProfileStore.AgentKey(n)!, "외부: " + n, n)),
+            .. savedSubs.Concat(knownSubs).Order(StringComparer.Ordinal).Select(n => (ProfileStore.SubKey(n)!, "서브에이전트: " + n, n)),
         ];
     }
 }

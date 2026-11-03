@@ -229,6 +229,118 @@ public sealed class ChatRoomTests : IDisposable
         Assert.DoesNotContain(chat.Entries, e => e.Text.Contains("Request interrupted"));
     }
 
+    /// <summary>
+    /// 서브에이전트 최종 답 (CLI 2.1.316 실측 모양, 글은 합성): 전경은 Agent tool_result의 hand-back 머리 · 꼬리 · 들여쓰기를 걷고,
+    /// 백그라운드는 띄운 결과를 건너뛰고 알림 &lt;result&gt;(HTML 풀기)를. 명령 알림은 안내 그대로. 지휘자 도구 칩은 다음 지휘자 말에 남는다.
+    /// </summary>
+    [Fact]
+    public void Reader_SubagentAnswers_ForegroundHandBackAndBackgroundNotification()
+    {
+        const string handBack = "  <tools-used-before-summary>Bash</tools-used-before-summary>\n  \n[Subagent hand-back] The text below is the final report of a subagent. The report follows:\n"
+            + "  사과는 맛있다.\n  \n    들여쓴 줄\nagentId: a7da19195ad9e180f\n<usage>subagent_tokens: 1\ntool_uses: 1</usage>";
+        var path = Write(
+            Assistant(1, Text("둘 띄울게요"), Use("fg1", "Agent", new { description = "fg check", subagent_type = "general-purpose", prompt = "p" })),
+            User(2, new object[] { Result("fg1", handBack) }),
+            Assistant(3, Use("bg1", "Agent", new { description = "bg check", subagent_type = "Explore", run_in_background = true, prompt = "p" })),
+            User(4, new object[] { Result("bg1", "Async agent launched successfully. (internal)\nagentId: x") }),
+            Assistant(5, Text("기다리는 중")),
+            User(6, "<task-notification>\n<task-id>t1</task-id>\n<tool-use-id>bg1</tool-use-id>\n<status>completed</status>\n<summary>Agent \"bg check\" is waiting</summary>\n"
+                + "<note>may be interim</note>\n<result>배 &amp;&amp; 사과 &lt;b&gt;</result>\n<usage><tool_uses>1</tool_uses></usage>\n</task-notification>"),
+            User(7, "<task-notification>\n<task-id>t1</task-id>\n<tool-use-id>bg1</tool-use-id>\n<status>completed</status>\n<summary>Agent \"bg check\" completed</summary>\n<result>끝난 배</result>\n</task-notification>"),
+            User(8, "<task-notification>\n<task-id>b1</task-id>\n<tool-use-id>sh1</tool-use-id>\n<summary>빌드 끝</summary>\n</task-notification>"),
+            // 거절 · 중지된 Agent 호출의 오류 결과는 서브에이전트가 한 말이 아니다 (H-C2)
+            Assistant(9, Use("cut1", "Agent", new { description = "cut", subagent_type = "Plan", prompt = "p" })),
+            User(10, new object[] { new { type = "tool_result", tool_use_id = "cut1", is_error = true, content = new object[] { new { type = "text", text = "[Request interrupted by user for tool use]" } } } }));
+
+        var chat = ClaudeChatReader.Read(path);
+
+        var subs = chat.Entries.Where(e => e.Speaker == ChatSpeaker.Subagent).ToList();
+        Assert.Equal(3, subs.Count);
+        Assert.Equal(("general-purpose", "fg check", "사과는 맛있다.\n\n  들여쓴 줄", false), (subs[0].Agent, subs[0].Title, subs[0].Text, subs[0].Interim));
+        Assert.Equal(("Explore", "bg check", "배 && 사과 <b>", true), (subs[1].Agent, subs[1].Title, subs[1].Text, subs[1].Interim));
+        Assert.Equal(("끝난 배", false), (subs[2].Text, subs[2].Interim));
+        Assert.Equal(["a7da19195ad9e180f", "t1", "t1"], subs.Select(e => e.AgentId)); // 전경 꼬리 agentId · 백그라운드 task-id
+        Assert.DoesNotContain(chat.Entries, e => e.Text.Contains("Request interrupted"));
+        Assert.DoesNotContain(chat.Entries, e => e.Text.Contains("Async agent") || e.Text.Contains("agentId") || e.Text.Contains("hand-back"));
+        Assert.Contains(chat.Entries, e => e.Speaker == ChatSpeaker.System && e.Text == "백그라운드 작업: 빌드 끝");
+        // 서브에이전트 답은 칩을 먹지 않는다 — fg1 · bg1 칩은 다음 지휘자 말 "기다리는 중"에
+        Assert.All(subs, e => Assert.Empty(e.Tools));
+        Assert.Equal(["Agent", "Agent"], chat.Entries.Single(e => e.Text == "기다리는 중").Tools);
+    }
+
+    /// <summary>
+    /// SubagentHandback으로 답을 넘긴 서브에이전트 (2026-11-03 HB_Chat 세션 기록 모양, 글은 합성):
+    /// 전경은 결과가 "delivered as a message" 안내이고 답은 queued_command의 &lt;agent-message&gt;, 백그라운드는 띄운 결과의 agentId ·
+    /// isMeta 사용자 줄의 &lt;agent-message&gt;(닫는 태그 뒤 하네스 문단) · 알림 &lt;result&gt;도 안내뿐. 둘 다 서브에이전트 말풍선 하나씩,
+    /// 안내 · 알림은 말풍선이 아니다. queued_command로 온 명령 알림은 사용자 글이 아니라 안내 줄.
+    /// </summary>
+    [Fact]
+    public void Reader_SubagentHandback_AgentMessages()
+    {
+        static string Queued(int second, string prompt) => Line(new
+        {
+            type = "attachment", sessionId = Session, timestamp = Ts(second),
+            attachment = new { type = "queued_command", prompt, commandMode = "prompt" },
+        });
+        const string frame = "[Subagent hand-back] x. The report follows:\n";
+        var path = Write(
+            Assistant(1, Use("fg", "Agent", new { description = "요약", subagent_type = "Explore", prompt = "p" })),
+            User(2, new object[] { Result("fg", "  This agent's report was delivered to you as a message from \"aaa111\" (its SubagentHandback call). Read it there.\n  ") }),
+            Queued(3, "<agent-message from=\"aaa111\">\n" + frame + "  세 문장 요약\n</agent-message>"),
+            Assistant(4, Use("bg", "Agent", new { description = "리뷰", subagent_type = "self-reviewer", run_in_background = true, prompt = "p" })),
+            User(5, new object[] { Result("bg", "Async agent launched successfully. (internal)\nagentId: bbb222 (internal ID - do not mention to user.)\nmore") }),
+            User(6, "Another Claude session sent a message:\n<agent-message from=\"bbb222\">\n" + frame + "  ## 지적\n  - 없음\n</agent-message>\n\nThat \"other Claude session\" is an agent.", meta: true),
+            Queued(7, "<task-notification>\n<task-id>bbb222</task-id>\n<tool-use-id>bg</tool-use-id>\n<summary>Agent \"리뷰\" finished</summary>\n<result>This agent's report was delivered to you as a message from \"bbb222\" (its SubagentHandback call).\n</result>\n</task-notification>"),
+            Queued(8, "<task-notification>\n<task-id>sh</task-id>\n<summary>빌드 끝</summary>\n</task-notification>"));
+
+        var chat = ClaudeChatReader.Read(path);
+
+        var subs = chat.Entries.Where(e => e.Speaker == ChatSpeaker.Subagent).ToList();
+        Assert.Equal([("Explore", "요약", "세 문장 요약", "aaa111"), ("self-reviewer", "리뷰", "## 지적\n- 없음", "bbb222")],
+            subs.Select(e => (e.Agent, e.Title, e.Text, e.AgentId)));
+        Assert.DoesNotContain(chat.Entries, e => e.Speaker == ChatSpeaker.User);
+        Assert.DoesNotContain(chat.Entries, e => e.Text.Contains("delivered") || e.Text.Contains("agent-message") || e.Text.Contains("other Claude session"));
+        Assert.Contains(chat.Entries, e => e.Speaker == ChatSpeaker.System && e.Text == "백그라운드 작업: 빌드 끝");
+    }
+
+    /// <summary>
+    /// 머리를 못 찾는 다른 판의 결과는 꼬리(agentId · usage)만 걷고 원문 그대로 (숨기지 않는다).
+    /// 본문이 "The report follows:"를 인용해도 "[Subagent hand-back]" 머리 없이는 자르지 않는다 (H-C4).
+    /// </summary>
+    [Fact]
+    public void HandBack_WithoutFrame_KeepsTextDropsTail()
+    {
+        Assert.Equal("  그대로\n둘째", ClaudeChatReader.HandBack("  그대로\n둘째\nagentId: x\n<usage>u</usage>"));
+        Assert.Equal("", ClaudeChatReader.HandBack("agentId: x"));
+        Assert.Equal("인용: The report follows:\n  코드 줄", ClaudeChatReader.HandBack("인용: The report follows:\n  코드 줄\nagentId: abc"));
+        Assert.Equal("abc", ClaudeChatReader.AgentIdOf("x\nagentId: abc\n<usage>u</usage>"));
+        Assert.Null(ClaudeChatReader.AgentIdOf("agentId 없음"));
+    }
+
+    /// <summary>
+    /// 대시보드: 기록의 서브에이전트 답은 서브에이전트 결과(SubagentHandback — 검토형)와 agentId가 겹칠 때만 건너뛰고,
+    /// 아니면(일반 서브에이전트) 서브에이전트 말풍선으로 그린다 (H-C1 — 다 건너뛰면 일반 서브에이전트 답이 사라졌다).
+    /// </summary>
+    [Fact]
+    public void Build_SubagentEntries_SkipOnlyHandedBack()
+    {
+        var transcript = Transcript(
+            new ChatEntry(1, At(1), ChatSpeaker.Subagent, "리뷰 원문", 0) { Agent = "self-reviewer", AgentId = "rev1" },
+            new ChatEntry(2, At(2), ChatSpeaker.Subagent, "찾은 파일", 0) { Agent = "Explore", Title = "find", AgentId = "exp1", Interim = true });
+        var result = new SubagentResult
+        {
+            Key = "rev1_use", AgentId = "rev1", AgentType = "self-reviewer", SessionId = Session, ReturnedAt = At(1), Message = "리뷰 원문",
+        };
+
+        var room = ChatRoomBuilder.Build(transcript, [], [], [new SubagentView(result, new SubagentLink(SubagentLinkKind.None, null, null, 0))], [], _ => null);
+
+        var subs = room.Messages.Where(m => m.Role == RoomRole.Subagent).ToList();
+        Assert.Equal(2, subs.Count);
+        Assert.Single(subs, m => m.Markdown == "리뷰 원문");
+        var explore = Assert.Single(subs, m => m.Markdown == "찾은 파일");
+        Assert.Equal(("Explore", "find · 중간 보고"), (explore.Name, explore.Detail));
+    }
+
     [Fact]
     public void Reader_QueuedCommand_IsUserText()
     {

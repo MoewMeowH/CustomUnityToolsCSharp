@@ -1908,8 +1908,73 @@
         const { showApproval, doneApproval, showQuestion, doneQuestion } = kit;
         // 서브에이전트 진행 줄 (Claude 앱 기능 D): task_id마다 한 줄 — 시작 · 진행(설명 · 도구 수) · 끝. 턴이 끝나면 다른 진행 줄처럼 지워진다.
         const agentLines = new Map();
+        // 서브에이전트 말풍선 (Claude 앱처럼): 작업(task id)마다 하나 — 도는 동안 중간 글이 쌓이고, 끝나면 최종 답(summary)으로 바뀐다.
+        // 서버가 말풍선 상태를 들고 있어 턴 시작 · 끝 · 다시 붙기에 목록(subagents)으로 갈아 끼운다. 끝난 것은 턴 끝에 기록 쪽 말풍선이 대신한다.
+        const subBubbles = new Map();
+        const subSaidMax = 30;
+        function subBubble(b) {
+            let s = subBubbles.get(b.taskId);
+            if (s?.msg.isConnected) return s;
+            const p = (profiles.subagents || {})[b.agent || ""];
+            const name = p?.name || b.agent || "서브에이전트";
+            const m = el("div", "msg subagent live-sub"), bb = el("div", "bubble");
+            m.dataset.speaker = "subagent";
+            m.dataset.task = b.taskId;
+            m.append(avatar(p, Array.from(name)[0]?.toUpperCase() || "S"), bb);
+            const w = el("div", "who");
+            w.append(el("b", null, name));
+            const title = el("span", "sub-title", b.title ? " · " + b.title : "");
+            const state = el("span", "sub-state");
+            w.append(title, state);
+            const body = el("div", "body sub-said");
+            bb.append(w, body);
+            live.append(m);
+            s = { msg: m, body, state, done: false };
+            subBubbles.set(b.taskId, s);
+            return s;
+        }
+        function subState(s, b) {
+            s.state.textContent = " — " + (b.done || b.phase === "done"
+                ? (b.status === "completed" ? "끝" : "끝남(" + (b.status || "?") + ")")
+                : "진행 중" + (b.toolUses ? " · 도구 " + b.toolUses : ""));
+            s.msg.classList.toggle("failed-sub", (b.done || b.phase === "done") && b.status !== "completed");
+        }
+        function subSaid(s, text, narration) {
+            if (s.done || !text) return;
+            s.body.append(el("div", "sub-line" + (narration ? " narration" : ""), text));
+            while (s.body.childElementCount > subSaidMax) s.body.firstElementChild.remove();
+        }
+        function subDone(s, summary) {
+            s.done = true;
+            s.msg.classList.add("sub-done");
+            if (summary) s.body.replaceChildren(el("div", "sub-final", summary));
+        }
+        // 서버 목록으로 도는 말풍선을 갈아 끼운다. 끝난 말풍선은 두고 간다 — 턴 끝에 기록을 다시 받지 못했을 때 그 답이 사라지지 않게
+        // (/self-review ad101bcdb6 R-C7). 끝난 것은 기록을 받은 턴 끝 · 턴 시작(진행 칸 비우기)에서 지워진다.
+        function renderSubagents(list) {
+            live.querySelectorAll(":scope > .live-sub:not(.sub-done)").forEach(n => n.remove());
+            for (const [id, s] of subBubbles) if (!s.msg.isConnected || !s.done) subBubbles.delete(id);
+            for (const b of list || []) {
+                const s = subBubble(b);
+                for (const x of b.said || []) subSaid(s, x.text, x.narration);
+                subState(s, b);
+                if (b.done) subDone(s, b.summary);
+            }
+        }
         function showAgent(t) {
             if (!t || !t.taskId) return;
+            // 서브에이전트(local_agent)는 말풍선으로 — 시작을 못 본 작업의 진행 · 끝 알림은 그리지 않는다
+            if (t.kind === "local_agent" || subBubbles.get(t.taskId)?.msg.isConnected) {
+                const had = subBubbles.get(t.taskId);
+                if (t.phase !== "started" && !had?.msg.isConnected) return;
+                if (had?.msg.isConnected && had.done && t.phase !== "done") return; // 끝난 뒤 늦게 온 진행 알림은 상태를 되돌리지 않는다
+                const follow = atBottom();
+                const s = subBubble({ taskId: t.taskId, agent: t.agent, title: t.description });
+                subState(s, t);
+                if (t.phase === "done") subDone(s, t.summary);
+                if (follow) toBottom();
+                return;
+            }
             let line = agentLines.get(t.taskId);
             // 시작을 못 본 작업의 끝 알림(지난 실행에서 정리된 백그라운드 작업 — 세션을 이어 갈 때 CLI가 먼저 냄)은 줄을 만들지 않는다
             if ((!line || !line.isConnected) && t.phase === "done") return;
@@ -2039,6 +2104,7 @@
                     if (ev.status) showStatus(ev.status);
                     // 서버는 실행 중이거나 쉬는 실행(답 뒤에도 작업이 남음)일 때만 정리 시각을 보낸다
                     if (ev.backgroundUntil) showBackground(ev.backgroundCount || 0, ev.backgroundUntil, ev.tasks); else clearBackground();
+                    renderSubagents(ev.subagents);
                     showTrust(ev.trust === true);
                     renderTerms(ev.terminals);
                     for (const v of termViews.values()) loadBuffer(v); // 끊긴 사이 출력은 알림으로 오지 않았다
@@ -2074,6 +2140,20 @@
                 case "agent":
                     showAgent(ev.task);
                     break;
+                case "subagent-said": {
+                    const s = subBubbles.get(ev.taskId);
+                    if (!s?.msg.isConnected) break;
+                    const follow = atBottom();
+                    subSaid(s, ev.text, ev.narration === true);
+                    if (follow) toBottom();
+                    break;
+                }
+                case "subagents": {
+                    const follow = atBottom(); // 그리기 전에 잰다 — 붙인 뒤에는 이미 바닥이 아니다
+                    renderSubagents(ev.subagents);
+                    if (follow) toBottom();
+                    break;
+                }
                 case "approval-done":
                     doneApproval(ev.approval, ev.text);
                     break;
@@ -2156,7 +2236,8 @@
                     // 보내지 못한 말은 남김 (C2). 질문 답 말풍선은 세션 기록의 것으로 바뀌므로 지운다 (4차 D1).
                     // 답하지 않은 질문 줄(q-done)은 성공으로 끝난 턴에서만 — 중지 · 실패면 기록에 결과 줄이 없을 수 있어 남긴다 (e8091295fe C4)
                     // 승인 결과 줄 · 백그라운드 명령 진행 줄도 지운다 — 기록 속 제자리에 방 기록 줄 · 백그라운드 알림 줄로 다시 그려졌다.
-                    // 서브에이전트 진행 줄은 기록에 같은 줄이 없어 다음 턴까지 둔다 (/self-review e464ec29ba 자료 부족)
+                    // 서브에이전트는 말풍선(.live-sub, .msg)이라 위에서 같이 지워지고, 쉬는 실행에서 도는 것은 곧 오는 subagents 목록으로 다시 그려진다.
+                    // 종류를 모르는 작업 진행 줄은 기록에 같은 줄이 없어 다음 턴까지 둔다 (/self-review e464ec29ba 자료 부족)
                     // 턴 도중 붙인 외부 에이전트 말풍선(.live-run)도 — 기록 제자리에 다시 그려졌다 (다시 받기를 미뤘으면 기록 쪽에 없는 것은 남긴다)
                     if (refreshed) {
                         live.querySelectorAll(":scope > .msg:not(.failed), :scope > .approval-line, :scope > .agent-line[data-kind=\"local_bash\"]" + (ev.ok ? ", :scope > .q-done" : "")).forEach(m => m.remove());

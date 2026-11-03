@@ -190,6 +190,81 @@ public sealed class ApprovalFlowTests : IDisposable
     }
 
     [Fact]
+    public async Task Subagent_Words_LiveBubble_SnapshotAndTurnEnd()
+    {
+        // 서브에이전트 말: parent 달린 글 → subagent-said(그 작업 말풍선), 모르는 parent의 글은 버림, 다시 붙으면 snapshot에 말풍선 목록,
+        // 끝 알림의 summary가 최종 답, 턴이 끝나면(쉬지 않는 실행) 말풍선을 비운다 — 기록 쪽 말풍선이 대신한다
+        var room = CommandRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "subsay please");
+        var before = await Until(ch, e => e.Kind == "approval");
+        var said = before.Where(e => e.Kind == "subagent-said").ToList();
+        Assert.Equal([("t_say", "apples are red")], said.Select(e => (e.TaskId!, e.Text!)));
+        Assert.Equal("toolu_s", before.Single(e => e.Kind == "agent").Task!.ToolUseId);
+
+        var again = _hub.Subscribe(room.Id);
+        Assert.True(again.Reader.TryRead(out var snap));
+        var bubble = Assert.Single(snap!.Subagents!);
+        Assert.Equal(("t_say", "general-purpose", "Check apples", false), (bubble.TaskId, bubble.Agent, bubble.Title, bubble.Done));
+        Assert.Equal(["apples are red"], bubble.Said.Select(s => s.Text));
+        _hub.Unsubscribe(room.Id, again);
+
+        Assert.Null(_hub.Decide(room.Id, before.Last().Approval!.Id, ApprovalChoice.Allow, null));
+        var middle = await Until(ch, e => e.Kind == "approval"); // 서브에이전트가 끝난 뒤 지휘자 자기 명령 카드
+        Assert.Contains(middle, e => e.Kind == "subagent-said" && e.Text == "second line");
+        var done = middle.Single(e => e.Kind == "agent").Task!;
+        Assert.Equal(("done", "FINAL apples"), (done.Phase, done.Summary));
+        // 끝난 말풍선은 snapshot에 넣지 않는다 — 다시 붙은 화면은 기록을 먼저 받으므로 두 번 보인다 (R-C2)
+        var midSnap = _hub.Subscribe(room.Id);
+        Assert.True(midSnap.Reader.TryRead(out var doneSnap));
+        Assert.Null(doneSnap!.Subagents);
+        _hub.Unsubscribe(room.Id, midSnap);
+
+        Assert.Null(_hub.Decide(room.Id, middle.Last().Approval!.Id, ApprovalChoice.Allow, null));
+        var after = await Until(ch, e => e.Kind == "idle");
+        Assert.DoesNotContain(after.Concat(middle).Concat(before), e => e.Text == "lost words");
+        Assert.DoesNotContain(after, e => e.Kind == "subagents"); // 남은 말풍선이 없다
+
+        var last = _hub.Subscribe(room.Id);
+        Assert.True(last.Reader.TryRead(out var idleSnap));
+        Assert.Null(idleSnap!.Subagents);
+        _hub.Unsubscribe(room.Id, last);
+    }
+
+    /// <summary>
+    /// 쉬는 경로(실제 기본처럼 IdleGrace &gt; 0 — 턴 끝에 프로세스가 쉬는 중): 백그라운드 작업 목록에 없는 말풍선(전경 · 끝 알림 없이 끊긴 것)은
+    /// 턴 끝에 빠진다 — 남기면 다음 턴들 내내 "진행 중" 유령이었다 (/self-review ad101bcdb6 R-C1). 가짜 CLI는 시작만 내고 끝 알림 없이 턴을 끝낸다.
+    /// </summary>
+    /// <summary>SubagentHandback으로 답을 넘긴 서브에이전트: 끝 알림 summary("delivered as a message" 안내) 대신 넘긴 답이 최종 답.</summary>
+    [Fact]
+    public async Task Subagent_Handback_IsFinalAnswer()
+    {
+        var room = CommandRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "subhand please");
+        var seen = await Until(ch, e => e.Kind == "idle");
+        var done = seen.Single(e => e.Kind == "agent" && e.Task!.Phase == "done").Task!;
+        Assert.Equal("HANDED report", done.Summary);
+    }
+
+    [Fact]
+    public async Task Subagent_RestingTurnEnd_DropsBubblesNotInTaskList()
+    {
+        _hub.SessionTimings = new() { IdleGrace = TimeSpan.FromSeconds(3) };
+        var room = CommandRoom();
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "subcut please");
+        var seen = await Until(ch, e => e.Kind == "idle");
+        Assert.Contains(seen, e => e.Kind == "subagent-said" && e.TaskId == "t_cut");
+        Assert.True(_hub.IsResting(room.Id), "턴 끝에 쉬는 중이어야 쉬는 경로를 탄다");
+        var snap = _hub.Subscribe(room.Id);
+        Assert.True(snap.Reader.TryRead(out var first));
+        Assert.Null(first!.Subagents);
+        _hub.Unsubscribe(room.Id, snap);
+        _hub.EndRest(room.Id);
+    }
+
+    [Fact]
     public async Task BackgroundSubagent_ApprovalAfterMainResult_StillAnswered()
     {
         // 실제 확인(2026-10-28): 백그라운드 서브에이전트는 메인 result 뒤에 승인을 묻는다 — 프로세스가 쉬는 동안 카드 답이 간다.
@@ -197,7 +272,9 @@ public sealed class ApprovalFlowTests : IDisposable
         var room = CommandRoom();
         var ch = _hub.Subscribe(room.Id);
         _hub.Send(room.Id, "bgagent please");
-        var card = (await Until(ch, e => e.Kind == "approval")).Last().Approval!;
+        // 첫 턴의 끝(진행 칸 정리 · 도는 말풍선 목록)을 본 뒤 답한다 — 답이 먼저 가면 끝 알림이 첫 턴 끝보다 앞설 수 있다 (부하 때 차례가 바뀜)
+        var first = await UntilAll(ch, e => e.Kind == "approval", e => e.Kind == "end");
+        var card = first.Last(e => e.Kind == "approval").Approval!;
         Assert.True(card.FromAgent);
         Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null));
         var after = await UntilAll(ch, e => e.Kind == "agent" && e.Task!.Phase == "done", e => e.Kind == "start" && e.Prompt is null);
@@ -212,6 +289,16 @@ public sealed class ApprovalFlowTests : IDisposable
         var ends = after.Skip(autoStart + 1).Where(e => e.Kind == "end").ToList();
         Assert.True(autoStart >= 0, order);
         Assert.True(ends.Count == 1 && ends[0].Ok == true, order);
+        // 서브에이전트 말풍선: 쉬는 동안 온 글도 보이고, 첫 턴 끝(화면이 진행 칸을 비움)에 도는 말풍선을 목록으로 되살린다.
+        // 자동 턴이 끝나면 끝난 말풍선은 빠진다 — 기록 쪽 말풍선이 대신한다
+        var all = first.Concat(after).ToList();
+        Assert.Contains(all, e => e.Kind == "subagent-said" && e.TaskId == "t_bg1" && e.Text == "bg words");
+        Assert.Contains(all, e => e.Kind == "subagents" && e.Subagents!.Any(b => b.TaskId == "t_bg1" && !b.Done));
+        Assert.Equal("bg final", done[0].Task!.Summary);
+        var snap = _hub.Subscribe(room.Id);
+        Assert.True(snap.Reader.TryRead(out var idle));
+        Assert.Null(idle!.Subagents);
+        _hub.Unsubscribe(room.Id, snap);
     }
 
     /// <summary>모든 조건을 본 뒤까지 읽는다 (차례가 정해지지 않은 알림 — 턴 끝과 쉬는 실행의 작업 줄).</summary>

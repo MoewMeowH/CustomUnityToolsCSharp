@@ -12,7 +12,33 @@ public sealed class StreamParserTests
         var ev = Assert.IsType<SubagentToolsEvent>(StreamParser.Parse(
             """{"type":"assistant","parent_tool_use_id":"toolu_1","message":{"content":[{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"echo sub"}}],"usage":{"input_tokens":9}}}"""));
         Assert.Equal("Bash", Assert.Single(ev.Tools).Name);
-        Assert.IsType<OtherEvent>(StreamParser.Parse("""{"type":"assistant","parent_tool_use_id":"toolu_1","message":{"content":[{"type":"text","text":"hi"}]}}"""));
+        Assert.Equal("toolu_1", ev.ParentId);
+        Assert.IsType<OtherEvent>(StreamParser.Parse("""{"type":"assistant","parent_tool_use_id":"toolu_1","message":{"content":[]}}"""));
+    }
+
+    /// <summary>서브에이전트 글 (2.1.316 실측 모양): 글 블록은 말풍선용으로 — 지휘자 글 · 컨텍스트(UsageEvent)에는 넣지 않는다.</summary>
+    [Fact]
+    public void Subagent_Text_IsSubagentEvent_NotConductor()
+    {
+        var ev = Assert.IsType<SubagentToolsEvent>(StreamParser.Parse(
+            """{"type":"assistant","parent_tool_use_id":"toolu_1","message":{"content":[{"type":"text","text":" Pears are sweet. "},{"type":"text","text":"  "}]}}"""));
+        Assert.Equal(("toolu_1", 0), (ev.ParentId, ev.Tools.Count));
+        Assert.Equal(["Pears are sweet."], ev.Texts);
+        var handed = Assert.IsType<SubagentToolsEvent>(StreamParser.Parse(
+            """{"type":"assistant","parent_tool_use_id":"toolu_1","message":{"content":[{"type":"tool_use","id":"h1","name":"SubagentHandback","input":{"message":" report "}}]}}"""));
+        Assert.Equal("report", handed.Handback);
+    }
+
+    /// <summary>작업 알림: 띄운 도구 호출 ID, 끝 알림의 summary(서브에이전트 최종 답 — 시작 · 진행에는 없다).</summary>
+    [Fact]
+    public void TaskNotification_KeepsToolUseIdAndSummary()
+    {
+        var done = Assert.IsType<TaskEvent>(StreamParser.Parse(
+            """{"type":"system","subtype":"task_notification","task_id":"aeb4","tool_use_id":"toolu_G","status":"completed","output_file":"x","summary":"FINAL_PEAR\n\nok"}"""));
+        Assert.Equal(("done", "toolu_G", "FINAL_PEAR\n\nok"), (done.Phase, done.ToolUseId, done.Summary));
+        var started = Assert.IsType<TaskEvent>(StreamParser.Parse(
+            """{"type":"system","subtype":"task_started","task_id":"aeb4","tool_use_id":"toolu_G","description":"bg check","subagent_type":"general-purpose","task_type":"local_agent","summary":"x"}"""));
+        Assert.Equal(("started", "toolu_G", null, "local_agent"), (started.Phase, started.ToolUseId, started.Summary, started.Kind));
     }
 
     [Fact]

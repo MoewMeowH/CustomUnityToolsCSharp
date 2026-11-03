@@ -19,6 +19,9 @@ public sealed record Profile(string? Name = null, string? Color = null, string? 
 public sealed partial class ProfileStore
 {
     public const string User = "user", Conductor = "conductor", AgentPrefix = "agent:";
+
+    /// <summary>서브에이전트 종류별 프로필 키 앞머리 — 외부 에이전트(agent:)와 이름이 겹쳐도("Plan" 등) 섞이지 않게 따로 둔다.</summary>
+    public const string SubPrefix = "sub:";
     public const int MaxNameChars = 30, MaxAgentChars = 60, MaxImageBytes = 1024 * 1024, MaxAgents = 100;
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
@@ -73,6 +76,12 @@ public sealed partial class ProfileStore
     public IReadOnlyList<string> Agents()
     {
         lock (_lock) return [.. _profiles.Keys.Where(k => k.StartsWith(AgentPrefix, StringComparison.Ordinal)).Select(k => k[AgentPrefix.Length..]).Order()];
+    }
+
+    /// <summary>프로필을 둔 서브에이전트 종류들.</summary>
+    public IReadOnlyList<string> Subagents()
+    {
+        lock (_lock) return [.. _profiles.Keys.Where(k => k.StartsWith(SubPrefix, StringComparison.Ordinal)).Select(k => k[SubPrefix.Length..]).Order(StringComparer.Ordinal)];
     }
 
     /// <summary>지휘자 표정 덮어쓰기 (상태 이름 → 스티커 태그). 설정 파일 Chat:Expressions보다 먼저.</summary>
@@ -240,20 +249,26 @@ public sealed partial class ProfileStore
     };
 
     /// <summary>외부 에이전트 키 (이름은 앞뒤 공백 걷고 60자 · 제어 문자 없음). 모양이 아니면 null.</summary>
-    public static string? AgentKey(string? name)
+    public static string? AgentKey(string? name) => NamedKey(AgentPrefix, name);
+
+    /// <summary>서브에이전트 종류 키 (subagent_type, 규칙은 <see cref="AgentKey"/>와 같다). 모양이 아니면 null.</summary>
+    public static string? SubKey(string? type) => NamedKey(SubPrefix, type);
+
+    private static string? NamedKey(string prefix, string? name)
     {
         var n = name?.Trim();
-        return string.IsNullOrEmpty(n) || n.Length > MaxAgentChars || n.Any(char.IsControl) ? null : AgentPrefix + n;
+        return string.IsNullOrEmpty(n) || n.Length > MaxAgentChars || n.Any(char.IsControl) ? null : prefix + n;
     }
+
+    private static bool IsNamed(string key) => key.StartsWith(AgentPrefix, StringComparison.Ordinal) || key.StartsWith(SubPrefix, StringComparison.Ordinal);
 
     private string? Change(string key, Func<Profile, Profile> change)
     {
         lock (_lock)
         {
             if (LoadError is not null) return $"profiles.json을 읽지 못해 쓰지 않습니다: {LoadError}";
-            if (!_profiles.ContainsKey(key) && key.StartsWith(AgentPrefix, StringComparison.Ordinal)
-                && _profiles.Keys.Count(k => k.StartsWith(AgentPrefix, StringComparison.Ordinal)) >= MaxAgents)
-                return $"외부 에이전트 프로필은 {MaxAgents}개까지입니다.";
+            if (!_profiles.ContainsKey(key) && IsNamed(key) && _profiles.Keys.Count(IsNamed) >= MaxAgents)
+                return $"외부 에이전트 · 서브에이전트 프로필은 합쳐 {MaxAgents}개까지입니다.";
             var had = _profiles.TryGetValue(key, out var before);
             var next = change(before ?? new Profile());
             if (next == new Profile()) _profiles.Remove(key); else _profiles[key] = next;
@@ -293,7 +308,9 @@ public sealed partial class ProfileStore
         : null;
 
     private static bool IsKey(string key) =>
-        key is User or Conductor || (key.StartsWith(AgentPrefix, StringComparison.Ordinal) && AgentKey(key[AgentPrefix.Length..]) == key);
+        key is User or Conductor
+        || (key.StartsWith(AgentPrefix, StringComparison.Ordinal) && AgentKey(key[AgentPrefix.Length..]) == key)
+        || (key.StartsWith(SubPrefix, StringComparison.Ordinal) && SubKey(key[SubPrefix.Length..]) == key);
 
     private static string? CleanName(string? name, string key) =>
         name is { Length: > 0 and <= MaxNameChars } && !name.Any(char.IsControl) ? name : null;
@@ -338,6 +355,9 @@ public sealed class ProfileView(ProfileStore store)
     public string ConductorName => store.Get(ProfileStore.Conductor).Name ?? "지휘자";
     public string AgentName(string name) => ProfileStore.AgentKey(name) is { } k ? store.Get(k).Name ?? name : name;
 
+    /// <summary>서브에이전트 종류의 보이는 이름 (프로필 이름, 없으면 종류 그대로 · 종류가 없으면 "서브에이전트").</summary>
+    public string SubName(string? type) => ProfileStore.SubKey(type) is { } k ? store.Get(k).Name ?? type!.Trim() : "서브에이전트";
+
     /// <summary>그림 주소 — 파일이 있을 때만 (지워진 그림이면 깨진 그림 대신 글자 아바타).</summary>
     public string? ImageUrl(string? key) =>
         key is not null && store.Get(key).Image is { } f && store.ImagePath(f) is not null ? "/profile-image/" + f : null;
@@ -366,5 +386,12 @@ public sealed class ProfileView(ProfileStore store)
     {
         user = new { name = UserName, letter = Letter(ProfileStore.User, UserName), color = store.Get(ProfileStore.User).Color, image = ImageUrl(ProfileStore.User) },
         conductor = new { name = ConductorName, letter = Letter(ProfileStore.Conductor, ConductorName), color = store.Get(ProfileStore.Conductor).Color, image = ImageUrl(ProfileStore.Conductor) },
+        // 진행 칸 서브에이전트 말풍선: 프로필을 둔 종류만 (없는 종류는 화면이 종류 이름 · 첫 글자로)
+        subagents = store.Subagents().ToDictionary(t => t, t =>
+        {
+            var key = ProfileStore.SubPrefix + t;
+            var name = SubName(t);
+            return new { name, letter = Letter(key, name), color = store.Get(key).Color, image = ImageUrl(key) };
+        }, StringComparer.Ordinal),
     });
 }

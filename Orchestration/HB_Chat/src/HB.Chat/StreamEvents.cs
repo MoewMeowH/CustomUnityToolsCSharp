@@ -38,6 +38,12 @@ public sealed record TaskEvent(string Phase, string TaskId, string? Agent, strin
     /// <summary>끝 알림(task_notification)의 출력 파일 경로.</summary>
     public string? OutputFile { get; init; }
 
+    /// <summary>그 작업을 띄운 도구 호출 ID (Agent · Bash tool_use id) — 서브에이전트 글(<see cref="SubagentToolsEvent.ParentId"/>)을 이 작업에 잇는다.</summary>
+    public string? ToolUseId { get; init; }
+
+    /// <summary>끝 알림의 summary — 서브에이전트면 그 최종 답 (CLI 2.1.316 실측, 상한 <see cref="StreamParser.SubagentChars"/>).</summary>
+    public string? Summary { get; init; }
+
     public const string BashKind = "local_bash";
 }
 
@@ -56,8 +62,24 @@ public sealed record TextBlockStartEvent : StreamEvent;
 /// <summary>도구 호출 시작 (stream_event content_block_start / tool_use).</summary>
 public sealed record ToolEvent(string Name) : StreamEvent;
 
-/// <summary>서브에이전트가 부른 도구 (parent_tool_use_id가 있는 assistant 줄). 컨텍스트 · 화면에는 넣지 않고 앱 단계 승인 기록에만 쓴다.</summary>
-public sealed record SubagentToolsEvent(IReadOnlyList<ToolUse> Tools) : StreamEvent;
+/// <summary>
+/// 서브에이전트의 assistant 줄 (parent_tool_use_id가 있음). 도구는 컨텍스트에 넣지 않고 앱 단계 승인 기록에만,
+/// 글(Texts · 서버가 요약한 중간 글 Narrations)은 서브에이전트 말풍선에 쌓는다 (흘림 delta는 오지 않는다 — 2.1.316 실측).
+/// </summary>
+public sealed record SubagentToolsEvent(IReadOnlyList<ToolUse> Tools) : StreamEvent
+{
+    /// <summary>그 서브에이전트를 띄운 Agent 호출의 tool_use id.</summary>
+    public string? ParentId { get; init; }
+
+    public IReadOnlyList<string> Texts { get; init; } = [];
+    public IReadOnlyList<string> Narrations { get; init; } = [];
+
+    /// <summary>
+    /// 서브에이전트가 SubagentHandback 도구로 넘긴 최종 답 (input.message). 이런 서브에이전트는 끝 알림 summary · 지휘자 쪽 결과가
+    /// "report was delivered to you as a message …" 안내뿐이다 (2026-11-03 이 앱 세션 확인).
+    /// </summary>
+    public string? Handback { get; init; }
+}
 
 /// <summary>system/permission_denied: 승인이 필요해 자동으로 거절된 호출. 이유는 비어 올 수 있다.</summary>
 public sealed record DeniedEvent(string? Tool, string? Reason, string? ToolUseId = null) : StreamEvent;
@@ -222,6 +244,8 @@ public static class StreamParser
                     {
                         Kind = Cap(Str(e, "task_type"), 40),
                         OutputFile = Cap(Str(e, "output_file"), 1000),
+                        ToolUseId = Cap(Str(e, "tool_use_id"), 200),
+                        Summary = subtype == "task_notification" ? Cap(Str(e, "summary"), SubagentChars) : null,
                     },
                 "system" when subtype == "permission_denied" => new DeniedEvent(Str(e, "tool_name"), Str(e, "decision_reason"), Str(e, "tool_use_id")),
                 "system" when subtype == "api_retry" => new RetryEvent(Int(e, "attempt") ?? 0, Str(e, "error")),
@@ -301,6 +325,9 @@ public static class StreamParser
         return new OtherEvent($"stream_event/{type}");
     }
 
+    /// <summary>서브에이전트 글 한 덩이 · 최종 답(summary) 상한 (글자) — 실시간 말풍선용, 기록은 세션 jsonl 원문.</summary>
+    public const int SubagentChars = 20_000;
+
     /// <summary>상태 한 줄 · 할 일 글 상한 (글자).</summary>
     public const int StatusChars = 300;
 
@@ -310,9 +337,19 @@ public static class StreamParser
     private static StreamEvent ParseUsage(JsonElement e)
     {
         if (e.TryGetProperty("parent_tool_use_id", out var parent) && parent.ValueKind == JsonValueKind.String)
-            return e.TryGetProperty("message", out var sub) && sub.ValueKind == JsonValueKind.Object && ToolUses(sub) is { Count: > 0 } subTools
+        {
+            if (!e.TryGetProperty("message", out var sub) || sub.ValueKind != JsonValueKind.Object) return new OtherEvent("assistant/subagent");
+            var (subTools, subTexts, subSaid, handback) = (ToolUses(sub), Texts(sub), Narrations(sub), HandbackOf(sub));
+            return subTools.Count > 0 || subTexts.Count > 0 || subSaid.Count > 0
                 ? new SubagentToolsEvent(subTools)
+                {
+                    ParentId = Cap(parent.GetString(), 200),
+                    Texts = [.. subTexts.Select(t => Cap(t, SubagentChars)!)],
+                    Narrations = [.. subSaid.Select(t => Cap(t, SubagentChars)!)],
+                    Handback = Cap(handback, SubagentChars),
+                }
                 : new OtherEvent("assistant/subagent");
+        }
         if (!e.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object) return new OtherEvent("assistant");
         var total = message.TryGetProperty("usage", out var usage) && usage.ValueKind == JsonValueKind.Object
             ? Long(usage, "input_tokens") + Long(usage, "cache_creation_input_tokens") + Long(usage, "cache_read_input_tokens") + Long(usage, "output_tokens")
@@ -323,6 +360,17 @@ public static class StreamParser
         return total > 0 || tools.Count > 0 || said.Count > 0 || texts.Count > 0
             ? new UsageEvent(total) { Model = Str(message, "model"), Tools = tools, Narrations = said, Texts = texts }
             : new OtherEvent("assistant");
+    }
+
+    /// <summary>서브에이전트 메시지 안 SubagentHandback tool_use의 input.message (없으면 null).</summary>
+    private static string? HandbackOf(JsonElement message)
+    {
+        if (!message.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array) return null;
+        foreach (var c in content.EnumerateArray())
+            if (c.ValueKind == JsonValueKind.Object && Str(c, "type") == "tool_use" && Str(c, "name") == "SubagentHandback"
+                && c.TryGetProperty("input", out var input) && input.ValueKind == JsonValueKind.Object && Str(input, "message")?.Trim() is { Length: > 0 } said)
+                return said;
+        return null;
     }
 
     private static IReadOnlyList<string> Texts(JsonElement message)

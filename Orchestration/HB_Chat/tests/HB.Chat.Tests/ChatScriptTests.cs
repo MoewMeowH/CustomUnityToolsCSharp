@@ -690,4 +690,73 @@ public sealed class ChatScriptTests(ChatApp app, ChatBrowser browser) : IClassFi
             "return n.textContent.includes('trailing-note') && !!(n.compareDocumentPosition(m) & Node.DOCUMENT_POSITION_FOLLOWING); })()"));
         page.AssertNoErrors();
     }
+
+    /// <summary>
+    /// 서브에이전트 말풍선 (진행 칸): 도는 동안 중간 글이 쌓이고(모르는 Agent 호출의 글은 없음), 끝 알림의 최종 답으로 바뀌고,
+    /// 다시 연 화면도 서버 목록으로 같은 말풍선을 받는다. 턴이 끝나면 진행 칸에서 빠진다 (쉬지 않는 실행).
+    /// </summary>
+    [Fact]
+    public async Task SubagentBubble_LiveWordsThenFinal()
+    {
+        if (!browser.Available) return;
+        var room = app.Store.Create("ws", PermissionLevel.Command, "opus", "sub-live");
+        await using var page = await browser.OpenAsync(app.RoomUrl(room));
+        await page.SendAsync("subsay please");
+        await page.WaitForAsync("!!document.querySelector('#live .approval')", "서브에이전트 명령 카드", ChatPage.TurnWait);
+        const string lines = "[...document.querySelectorAll('#live .msg.live-sub .sub-line')].map(n => n.textContent).join('|')";
+        Assert.Equal("apples are red", await page.EvalAsync<string>(lines));
+        Assert.Equal("general-purpose · Check apples — 진행 중", await page.EvalAsync<string>("document.querySelector('#live .msg.live-sub .who').textContent"));
+
+        await using var again = await browser.OpenAsync(app.RoomUrl(room));
+        await again.WaitForAsync("!!document.querySelector('#live .msg.live-sub .sub-line')", "다시 연 화면의 서브에이전트 말풍선", ChatPage.TurnWait);
+        Assert.Equal("apples are red", await again.EvalAsync<string>(lines));
+
+        await page.EvalAsync("[...document.querySelectorAll('#live .approval button')].find(b => b.textContent === '허용').click()");
+        // 끝 알림 뒤 지휘자 자기 명령 카드에서 멈춘다 — 그 사이 말풍선은 최종 답으로 바뀌어 있다
+        await page.WaitForAsync("document.querySelector('#live .msg.live-sub .sub-final')?.textContent === 'FINAL apples'", "서브에이전트 최종 답", ChatPage.TurnWait);
+        Assert.Equal("general-purpose · Check apples — 끝", await page.EvalAsync<string>("document.querySelector('#live .msg.live-sub .who').textContent"));
+        Assert.Equal(0, await page.EvalAsync<int>("document.querySelectorAll('#live .msg.live-sub .sub-line').length"));
+        await page.WaitForAsync("!!document.querySelector('#live .approval')", "지휘자 명령 카드", ChatPage.TurnWait);
+        await page.EvalAsync("[...document.querySelectorAll('#live .approval button')].find(b => b.textContent === '허용').click()");
+        await page.WaitForAsync("!document.querySelector('#live .approval') && !document.querySelector('#live .msg.live-sub')",
+            "턴 끝 — 진행 칸 말풍선 정리", ChatPage.TurnWait);
+        page.AssertNoErrors();
+        again.AssertNoErrors();
+    }
+
+    /// <summary>
+    /// 기록의 서브에이전트 답: 전경(Agent 결과의 hand-back을 걷은 글) · 백그라운드(알림 &lt;result&gt;) 둘 다 서브에이전트 말풍선 —
+    /// 이름은 종류, 설명은 옆에, 중간 보고 표시. 백그라운드 명령 알림은 안내 줄 그대로.
+    /// </summary>
+    [Fact]
+    public async Task SubagentBubble_FromTranscript()
+    {
+        if (!browser.Available) return;
+        static string Agent(string id, string type, string desc, int second) => ChatApp.Tool("Agent", new JsonObject { ["subagent_type"] = type, ["description"] = desc, ["prompt"] = "p" }, second)
+            .Replace("\"id\":\"t" + second + "\"", "\"id\":\"" + id + "\"");
+        static string Result(string id, string text, int second) => new JsonObject
+        {
+            ["type"] = "user",
+            ["timestamp"] = new DateTimeOffset(2026, 10, 29, 0, 0, second, TimeSpan.Zero).ToString("O"),
+            ["message"] = new JsonObject
+            {
+                ["role"] = "user",
+                ["content"] = new JsonArray(new JsonObject { ["type"] = "tool_result", ["tool_use_id"] = id, ["content"] = text }),
+            },
+        }.ToJsonString();
+        var room = app.Room("sub-history", ChatApp.User("q", 0), Agent("fg", "Explore", "find files", 1),
+            Result("fg", "[Subagent hand-back] x. The report follows:\n  찾은 파일 둘\nagentId: a1\n<usage>u</usage>", 2),
+            Agent("bg", "Plan", "plan it", 3), Result("bg", "Async agent launched successfully.\nagentId: a2", 4), ChatApp.Conductor("기다려요", 5),
+            ChatApp.User("<task-notification>\n<tool-use-id>bg</tool-use-id>\n<summary>Agent \"plan it\" waiting</summary>\n<note>interim</note>\n<result>계획 &amp; 메모</result>\n</task-notification>", 6),
+            ChatApp.User("<task-notification>\n<tool-use-id>sh</tool-use-id>\n<summary>빌드 끝</summary>\n</task-notification>", 7));
+        await using var page = await browser.OpenAsync(app.RoomUrl(room));
+        await page.WaitForAsync("document.querySelectorAll('#chat .msg.subagent').length === 2", "기록의 서브에이전트 말풍선 둘", ChatPage.TurnWait);
+        Assert.Equal("Explore|find files|찾은 파일 둘", await page.EvalAsync<string>(
+            "(() => { const m = document.querySelectorAll('#chat .msg.subagent')[0]; return [m.querySelector('.who b').textContent, m.querySelector('.who .detail').textContent, m.querySelector('.body').textContent.trim()].join('|'); })()"));
+        Assert.Equal("Plan|계획 & 메모|1", await page.EvalAsync<string>(
+            "(() => { const m = document.querySelectorAll('#chat .msg.subagent')[1]; return [m.querySelector('.who b').textContent, m.querySelector('.body').textContent.trim(), m.classList.contains('interim') ? 1 : 0].join('|'); })()"));
+        Assert.Equal(1, await page.EvalAsync<int>("[...document.querySelectorAll('#chat .system .body')].filter(b => b.textContent.includes('빌드 끝')).length"));
+        Assert.Equal(0, await page.EvalAsync<int>("[...document.querySelectorAll('#chat')].filter(c => c.textContent.includes('hand-back') || c.textContent.includes('Async agent')).length"));
+        page.AssertNoErrors();
+    }
 }

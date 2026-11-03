@@ -1119,6 +1119,7 @@ public sealed partial class RoomModel(
     {
         ChatSpeaker.User => "user",
         ChatSpeaker.Conductor => "conductor",
+        ChatSpeaker.Subagent => "subagent",
         _ => "system",
     };
 }

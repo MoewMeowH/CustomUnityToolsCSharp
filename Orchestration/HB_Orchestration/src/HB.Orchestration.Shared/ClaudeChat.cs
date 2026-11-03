@@ -11,6 +11,8 @@ public enum ChatSpeaker
     Conductor,
     /// <summary>백그라운드 작업 알림 · 대화 압축 같은 안내.</summary>
     System,
+    /// <summary>서브에이전트(Agent 도구)의 최종 답 — <see cref="ChatEntry.Agent"/> · <see cref="ChatEntry.Title"/>.</summary>
+    Subagent,
 }
 
 /// <summary>
@@ -28,10 +30,23 @@ public sealed record ChatEntry(int Line, DateTimeOffset? Timestamp, ChatSpeaker 
     /// <summary>서버가 요약한 도구 호출 사이 글 (<see cref="ClaudeThinking"/>) — 지휘자가 쓴 원문이 아니다.</summary>
     public bool Narration { get; init; }
 
+    /// <summary>Subagent: 서브에이전트 종류 (Agent 입력의 subagent_type, 없으면 null).</summary>
+    public string? Agent { get; init; }
+
+    /// <summary>Subagent: 지휘자가 붙인 설명 (Agent 입력의 description).</summary>
+    public string? Title { get; init; }
+
+    /// <summary>Subagent: 서브에이전트가 자기 백그라운드 작업을 남기고 멈춰 낸 중간 보고 (알림의 &lt;note&gt;) — 같은 작업이 다시 알릴 수 있다.</summary>
+    public bool Interim { get; init; }
+
+    /// <summary>Subagent: 그 서브에이전트의 agentId (전경 결과 꼬리 "agentId: …" · 백그라운드 알림 &lt;task-id&gt;, 모르면 null) — 대시보드가 같은 결과를 겹쳐 그리지 않게.</summary>
+    public string? AgentId { get; init; }
+
     /// <summary>값 비교: Tools는 목록 내용으로 (기본 레코드 비교는 참조라 이어 읽기 = 전체 읽기 검사가 깨진다).</summary>
     public bool Equals(ChatEntry? other) =>
         other is not null && Line == other.Line && Timestamp == other.Timestamp && Speaker == other.Speaker && Text == other.Text
-        && ToolsBefore == other.ToolsBefore && Narration == other.Narration && Tools.SequenceEqual(other.Tools) && ToolTargets.SequenceEqual(other.ToolTargets);
+        && ToolsBefore == other.ToolsBefore && Narration == other.Narration && Tools.SequenceEqual(other.Tools) && ToolTargets.SequenceEqual(other.ToolTargets)
+        && Agent == other.Agent && Title == other.Title && Interim == other.Interim && AgentId == other.AgentId;
 
     public override int GetHashCode() => HashCode.Combine(Line, Timestamp, Speaker, Text, ToolsBefore, Tools.Count);
 }
@@ -169,6 +184,26 @@ public static partial class ClaudeChatReader
         /// <summary>답을 기다리는 AskUserQuestion 호출: tool_use ID → 질문들 (답 줄에 toolUseResult가 없을 때 질문을 보이려고).</summary>
         public readonly Dictionary<string, List<ChatAnswerItem>> AskCalls = new(StringComparer.Ordinal);
 
+        /// <summary>
+        /// 서브에이전트 호출 (Agent · 옛 이름 Task): tool_use ID → (종류, 설명). 전경은 tool_result에서 지우고,
+        /// 백그라운드는 알림이 여러 번 올 수 있어(중간 보고) 남긴다 — 세션 하나의 호출 수만큼만 자란다.
+        /// </summary>
+        public readonly Dictionary<string, (string? Agent, string? Title)> AgentCalls = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// agentId → (종류, 설명): 백그라운드로 띄운 결과의 "agentId: …" · 답을 SubagentHandback으로 따로 넘겼다는 안내에서.
+        /// 답이 따로 오는 &lt;agent-message from="agentId"&gt;를 그 서브에이전트 말풍선으로 만들 때 쓴다.
+        /// </summary>
+        public readonly Dictionary<string, (string? Agent, string? Title)> AgentIds = new(StringComparer.Ordinal);
+
+        /// <summary>서브에이전트 답 — 지휘자 도구 칩(PendingTools)은 먹지 않고 다음 지휘자 말에 남긴다.</summary>
+        public void AddSubagent(int line, DateTimeOffset? ts, (string? Agent, string? Title) who, string text, bool interim, string? agentId)
+        {
+            text = text.Trim();
+            if (text.Length == 0) return;
+            Entries.Add(new ChatEntry(line, ts, ChatSpeaker.Subagent, text, 0) { Agent = who.Agent, Title = who.Title, Interim = interim, AgentId = agentId });
+        }
+
         /// <summary>목록은 복사한다 — 이어 읽기가 같은 State에 계속 더하므로, 앞서 돌려준 결과가 바뀌지 않게.</summary>
         public ChatTranscript ToTranscript(string path) => new()
         {
@@ -208,9 +243,17 @@ public static partial class ClaudeChatReader
                 s.SessionId ??= Str(root, "sessionId");
                 s.Cwd ??= Str(root, "cwd");
                 // 서브에이전트(사이드체인) · 메타 줄 · 압축 요약은 대화가 아니다.
-                if (Bool(root, "isSidechain") || Bool(root, "isMeta")) return;
-                var ts = Str(root, "timestamp") is { } t && DateTimeOffset.TryParse(t, System.Globalization.CultureInfo.InvariantCulture,
-                    System.Globalization.DateTimeStyles.AssumeUniversal, out var parsed) ? parsed : (DateTimeOffset?)null;
+                if (Bool(root, "isSidechain")) return;
+                // 메타 줄은 대화가 아니다 — 단, 백그라운드 서브에이전트가 SubagentHandback으로 넘긴 답("Another Claude session sent a message:
+                // <agent-message …>")은 isMeta 사용자 줄로 온다 (2026-11-03 이 앱 세션 기록 확인)
+                if (Bool(root, "isMeta"))
+                {
+                    if (Str(root, "type") == "user" && root.TryGetProperty("message", out var meta) && meta.ValueKind == JsonValueKind.Object
+                        && Str(meta, "content") is { } metaText && AgentMessageRegex().Match(metaText) is { Success: true } metaMessage)
+                        AddAgentMessage(metaMessage, lineNo, TimeOf(root), s);
+                    return;
+                }
+                var ts = TimeOf(root);
 
                 switch (Str(root, "type"))
                 {
@@ -225,7 +268,13 @@ public static partial class ClaudeChatReader
                         if (root.TryGetProperty("attachment", out var att) && att.ValueKind == JsonValueKind.Object
                             && Str(att, "type") == "queued_command" && Str(att, "commandMode") is null or "prompt"
                             && Str(att, "prompt") is { } queued)
-                            s.Add(lineNo, ts, ChatSpeaker.User, CleanUserText(queued));
+                        {
+                            // 작업 중에 큐로 들어온 백그라운드 알림 · 서브에이전트 답도 같은 모양으로 온다 — 사용자 글이 아니다
+                            if (queued.TrimStart().StartsWith("<task-notification>", StringComparison.Ordinal) || AgentMessageRegex().IsMatch(queued))
+                                ReadUserString(queued, lineNo, ts, s);
+                            else
+                                s.Add(lineNo, ts, ChatSpeaker.User, CleanUserText(queued));
+                        }
                         break;
                     case "assistant":
                         ReadAssistant(root, lineNo, ts, s);
@@ -262,6 +311,10 @@ public static partial class ClaudeChatReader
                         ? ToolTargets.Of(toolName, toolInput) : null);
                     if (Str(block, "name") == AskTool && Str(block, "id") is { } askId && block.TryGetProperty("input", out var askInput))
                         s.AskCalls[askId] = QuestionItems(askInput, null);
+                    if (Str(block, "name") is AgentTool or OldAgentTool && Str(block, "id") is { } agentId)
+                        s.AgentCalls[agentId] = block.TryGetProperty("input", out var agentInput) && agentInput.ValueKind == JsonValueKind.Object
+                            ? (Str(agentInput, "subagent_type"), Str(agentInput, "description"))
+                            : (null, null);
                     if (Str(block, "name") is { } usedName && block.TryGetProperty("input", out var usedInput))
                         AddFileMentions(usedName, usedInput, lineNo, ts, s.FileMentions);
                     break;
@@ -320,12 +373,93 @@ public static partial class ClaudeChatReader
                 case "tool_result" when Str(block, "tool_use_id") is { } id && s.AskCalls.Remove(id, out var asked):
                     s.Answers.Add(ReadAnswer(root, block, lineNo, ts, asked));
                     break;
+                case "tool_result" when Str(block, "tool_use_id") is { } agentId && s.AgentCalls.TryGetValue(agentId, out var who):
+                    // 백그라운드로 띄운 결과("Async agent launched …")는 답이 아니다 — 답은 나중 알림의 <result>. 호출은 그때까지 남긴다
+                    var report = ResultText(block);
+                    if (report.TrimStart().StartsWith(AsyncLaunched, StringComparison.Ordinal))
+                    {
+                        if (LaunchedIdRegex().Match(report) is { Success: true } launched) s.AgentIds[launched.Groups[1].Value] = who;
+                        break;
+                    }
+                    s.AgentCalls.Remove(agentId);
+                    // 답을 SubagentHandback으로 따로 넘김 — 답은 뒤의 <agent-message>로 온다
+                    if (DeliveredRegex().Match(report) is { Success: true } delivered)
+                    {
+                        s.AgentIds[delivered.Groups[1].Value] = who;
+                        break;
+                    }
+                    // 오류 결과(앱 단계에서 거절 · 도는 중 중지 — "[Request interrupted …]" 등)는 서브에이전트가 한 말이 아니다
+                    if (Bool(block, "is_error")) break;
+                    s.AddSubagent(lineNo, ts, who, HandBack(report), interim: false, AgentIdOf(report));
+                    break;
             }
         }
         if (text.Length > 0) ReadUserString(text.ToString(), lineNo, ts, s);
     }
 
     private const string AskTool = "AskUserQuestion";
+    private const string AgentTool = "Agent", OldAgentTool = "Task";
+    private const string AsyncLaunched = "Async agent launched";
+
+    /// <summary>
+    /// 전경 서브에이전트 결과에서 답만 (CLI 2.1.316 실측 모양): 머리("… The report follows:" 줄까지)와
+    /// 꼬리(마지막 "agentId: " 줄부터)를 걷고, 하네스가 줄마다 넣은 들여쓰기 2칸을 뺀다. 머리가 없으면(다른 판) 꼬리만 걷은 원문.
+    /// </summary>
+    public static string HandBack(string report)
+    {
+        var text = report.Replace("\r\n", "\n");
+        // 머리는 "[Subagent hand-back]" 뒤의 첫 "The report follows:" — 본문이 그 문구를 인용해도 거기서 자르지 않게
+        var frame = text.IndexOf(HandBackMark, StringComparison.Ordinal);
+        var head = frame < 0 ? -1 : text.IndexOf(ReportFollows, frame, StringComparison.Ordinal);
+        var framed = head >= 0;
+        if (framed)
+        {
+            var lineEnd = text.IndexOf('\n', head);
+            text = lineEnd < 0 ? "" : text[(lineEnd + 1)..];
+        }
+        var tail = text.LastIndexOf("\nagentId: ", StringComparison.Ordinal);
+        if (tail >= 0) text = text[..tail];
+        else if (text.StartsWith("agentId: ", StringComparison.Ordinal)) text = "";
+        if (framed) text = string.Join('\n', text.Split('\n').Select(l => l.StartsWith("  ", StringComparison.Ordinal) ? l[2..] : l));
+        return text;
+    }
+
+    private const string ReportFollows = "The report follows:", HandBackMark = "[Subagent hand-back]";
+
+    /// <summary>
+    /// 서브에이전트가 SubagentHandback으로 넘긴 답 (&lt;agent-message from="agentId"&gt; … &lt;/agent-message&gt;, 앞에 "Another Claude session sent a message:"가
+    /// 붙을 수 있다). 종류 · 설명은 앞서 본 agentId에서 (모르면 없이). 머리 · 들여쓰기는 <see cref="HandBack"/>로 걷는다.
+    /// </summary>
+    private static void AddAgentMessage(Match m, int lineNo, DateTimeOffset? ts, State s)
+    {
+        var id = m.Groups[1].Value;
+        var who = s.AgentIds.TryGetValue(id, out var known) ? known : (null, null);
+        s.AddSubagent(lineNo, ts, who, HandBack(m.Groups[2].Value), interim: false, id);
+    }
+
+    private static DateTimeOffset? TimeOf(JsonElement root) =>
+        Str(root, "timestamp") is { } t && DateTimeOffset.TryParse(t, System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AssumeUniversal, out var parsed) ? parsed : null;
+
+    /// <summary>
+    /// agent-message로 시작하는 글 (앞의 "… sent a message:" 줄 · 공백 허용). 메타 줄은 닫는 태그 뒤에 하네스 안내 문단이 붙는다 — 본문은 첫 닫는 태그까지
+    /// (하네스가 본문 줄을 들여 써서 본문 안의 줄머리 태그는 위조할 수 없다).
+    /// </summary>
+    [GeneratedRegex(@"\A\s*(?:Another Claude session sent a message[^\n]*\n)?\s*<agent-message from=""([0-9A-Za-z_-]{1,80})"">\n?(.*?)\n?</agent-message>", RegexOptions.Singleline)]
+    private static partial Regex AgentMessageRegex();
+
+    [GeneratedRegex(@"This agent's report was delivered to you as a message from ""([0-9A-Za-z_-]{1,80})""")]
+    private static partial Regex DeliveredRegex();
+
+    [GeneratedRegex(@"(?m)^agentId: ([0-9A-Za-z_-]{1,80})")]
+    private static partial Regex LaunchedIdRegex();
+
+    /// <summary>전경 결과 꼬리의 agentId (마지막 "agentId: " 줄). 없으면 null.</summary>
+    public static string? AgentIdOf(string report) =>
+        AgentIdRegex().Matches(report.Replace("\r\n", "\n")) is { Count: > 0 } m ? m[^1].Groups[1].Value : null;
+
+    [GeneratedRegex(@"(?m)^agentId: ([0-9A-Za-z_-]{1,80})\s*$")]
+    private static partial Regex AgentIdRegex();
 
     /// <summary>
     /// 객관식 질문의 답 줄 (HB_Chat 3차 0번 실측 A: 답한 결과는 줄의 toolUseResult = { questions, answers: { 질문 글: 고른 답 } }).
@@ -384,8 +518,27 @@ public static partial class ClaudeChatReader
         var trimmed = raw.TrimStart();
         if (trimmed.StartsWith("<task-notification>", StringComparison.Ordinal))
         {
+            // 서브에이전트의 끝 알림: <result>가 그 최종 답 (CLI 2.1.316 실측 — 글은 HTML 이스케이프됨)
+            if (TagText(trimmed, "tool-use-id") is { } noticeId && s.AgentCalls.TryGetValue(noticeId, out var who)
+                && TagText(trimmed, "result") is { Length: > 0 } result)
+            {
+                // 답을 SubagentHandback으로 따로 넘겼다는 안내 — 답은 <agent-message>가 이미(또는 곧) 말풍선으로 만든다
+                if (DeliveredRegex().Match(result) is { Success: true } handedOff)
+                {
+                    s.AgentIds[handedOff.Groups[1].Value] = who;
+                    return;
+                }
+                s.AddSubagent(lineNo, ts, who, System.Net.WebUtility.HtmlDecode(result), interim: TagText(trimmed, "note") is not null,
+                    TagText(trimmed, "task-id")); // 서브에이전트 작업 ID = agentId (subagents/agent-<id>.jsonl, 2.1.316 실측)
+                return;
+            }
             var summary = TagText(trimmed, "summary");
             s.Add(lineNo, ts, ChatSpeaker.System, summary is null ? "백그라운드 작업 알림" : $"백그라운드 작업: {summary}");
+            return;
+        }
+        if (AgentMessageRegex().Match(raw) is { Success: true } agentMessage)
+        {
+            AddAgentMessage(agentMessage, lineNo, ts, s);
             return;
         }
         if (trimmed.StartsWith("<command-name>", StringComparison.Ordinal) || trimmed.StartsWith("<command-message>", StringComparison.Ordinal))

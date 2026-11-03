@@ -56,7 +56,7 @@
                     <h3 style="margin:0 0 6px;font-size:15px">프로필</h3>
                     <p class="muted" style="margin:0 0 8px;font-size:12.5px">
                         말풍선 · 방 목록 · 미니 창에 보이는 이름 · 아바타. 그림은 png · jpg · webp, @(ProfileStore.MaxImageBytes / 1024)KB까지 (회사 모드에서는 숨김).
-                        외부 에이전트는 호출 기록에 나온 이름입니다. 비우면 기본값.
+                        외부 에이전트는 호출 기록에 나온 이름, 서브에이전트는 종류(기본 종류 · 작업 폴더 .claude/agents)입니다. 비우면 기본값.
                     </p>
                     @if (Model.Profiles.Store.LoadError is { } pError)
                     {

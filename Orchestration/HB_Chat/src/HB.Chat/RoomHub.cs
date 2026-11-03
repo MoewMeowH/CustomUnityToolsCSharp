@@ -38,6 +38,15 @@ public sealed record LiveEvent(string Kind)
     /// <summary>tool 알림: 도구의 짧은 대상 (파일 이름 · 명령 첫 줄 …, 3차 b). 없으면 null.</summary>
     public string? Detail { get; init; }
 
+    /// <summary>subagent-said 알림: 글을 쌓을 서브에이전트 말풍선 (작업 ID).</summary>
+    public string? TaskId { get; init; }
+
+    /// <summary>subagent-said 알림: 서버가 요약한 중간 글이면 true.</summary>
+    public bool? Narration { get; init; }
+
+    /// <summary>subagents 알림 · snapshot: 진행 칸의 서브에이전트 말풍선 전체 (화면은 이 목록으로 갈아 끼운다).</summary>
+    public IReadOnlyList<SubagentBubble>? Subagents { get; init; }
+
     /// <summary>steps 알림 · snapshot: 지휘자 할 일 목록 전체 (3차 b).</summary>
     public IReadOnlyList<StepItem>? Steps { get; init; }
 
@@ -193,6 +202,9 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
 
         /// <summary>쉬는 실행의 백그라운드 작업 목록 (화면 · 방 목록). 바꿀 때는 잠금 안에서.</summary>
         public IReadOnlyList<BgTaskView> BgTasks = [];
+
+        /// <summary>진행 칸의 서브에이전트 말풍선 (<see cref="RoomHub.TrackSubagent"/>). 잠금 안에서.</summary>
+        public readonly List<SubagentBubble> Subagents = [];
 
         /// <summary>답을 기다리는 카드(승인 · 질문)가 있는지.</summary>
         public bool Waiting => Approvals.Values.Any(p => !p.Answer.Task.IsCompleted) || Questions.Values.Any(q => !q.Answer.Task.IsCompleted);
@@ -1325,6 +1337,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
                 BackgroundCount = (live.Busy || Resting(live)) && live.BackgroundUntil is not null ? live.BackgroundCount : null,
                 BackgroundUntil = live.Busy || Resting(live) ? live.BackgroundUntil : null,
                 Tasks = Resting(live) && live.BackgroundUntil is not null ? live.BgTasks : null,
+                Subagents = SnapshotSubagents(live),
                 Trust = live.TrustCommands,
                 Terminals = _terminals?.List(roomId), // 곁칸 터미널 탭 — 출력은 탭을 열 때 버퍼로 받는다
                 Browser = _browser?.View(roomId), // 곁칸 브라우저 탭 — 마지막 화면은 탭을 열 때 받는다
@@ -1404,15 +1417,17 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
                 live.Notice = null;
                 cts = live.Cts = new CancellationTokenSource();
                 wrapUp = live.WrapUpCts = new CancellationTokenSource();
-                // 쉬는 실행의 작업 줄은 턴 사이에도 남긴다
+                // 쉬는 실행의 작업 줄 · 도는 서브에이전트 말풍선은 턴 사이에도 남긴다
                 if (!Resting(live))
                 {
                     live.BackgroundCount = 0;
                     live.BgTasks = [];
                     live.BackgroundUntil = null;
+                    live.Subagents.Clear();
                 }
                 Broadcast(live, QueueEvent("start", live) with { Prompt = text });
                 RestLine(live); // 화면은 턴 시작에 진행 칸을 비운다 — 쉬는 실행의 작업 줄을 다시 보인다
+                SubagentLines(live);
                 SetFace(live, Face.Thinking);
             }
 
@@ -1456,8 +1471,10 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
                     live.BackgroundCount = 0;
                     live.BgTasks = [];
                     live.BackgroundUntil = null;
+                    live.Subagents.Clear();
                     EndApprovals(live, "실행 끝남");
                 }
+                else KeepRunningSubagents(live);
                 live.LastEnd = result.Ok ? Face.Done : result.Cancelled ? Face.Stopped : Face.Failed;
                 live.LastEndAt = DateTimeOffset.Now;
                 live.Phase = Face.Idle; // 다음 턴의 start가 생각 중으로 바꾼다
@@ -1470,6 +1487,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
                     Prompt = result.NotStarted ? text : null, // 보내지 못한 말 (4차 C2) — 화면이 남기고 입력칸에 돌려준다
                 });
                 RestLine(live); // 화면은 턴 끝에 작업 줄을 지운다 — 쉬는 중이면 다시 보인다
+                SubagentLines(live);
             }
             try { TurnEnded?.Invoke(roomId, result); } catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException) { }
             cts.Dispose();
@@ -1936,7 +1954,11 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
                         if (tool.Name is "TaskCreate" or "TaskUpdate") live.StepsWatch = true; // 목록을 바꾸는 도구만
                     }
                 if (ev is SubagentToolsEvent subagent)
+                {
                     foreach (var tool in subagent.Tools) LogAppCall(room, tool);
+                    SubagentSaidLines(live, subagent);
+                }
+                if (ev is TaskEvent task) TrackSubagent(live, task);
                 if (ev is UsageEvent blocks)
                 {
                     // 서버가 요약한 중간 글 — Partial에 넣지 않는다: 일반 방은 다시 열면 세션 기록으로 그려진다 (단톡방은 ReplayLive의 also로 다시 보낸다)
@@ -1950,7 +1972,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
                     TextBlockStartEvent => BlockGap(live),
                     RetryEvent r => new LiveEvent("retry") { Text = $"API 재시도 {r.Attempt}회 ({r.Error})" },
                     StatusEvent s => new LiveEvent("status") { Status = new RoomStatus(s.Category, s.Detail, s.NeedsAction) },
-                    TaskEvent t => new LiveEvent("agent") { Task = t }, // 서브에이전트 · 백그라운드 명령 진행 줄 (Claude 앱 기능 D)
+                    TaskEvent t => new LiveEvent("agent") { Task = ShownTask(live, t) }, // 서브에이전트 · 백그라운드 명령 진행 줄 (Claude 앱 기능 D)
                     BackgroundWaitEvent b => Background(live, b), // 메인 답 뒤 기다림 — "지금 끝내기" 줄
                     _ => null,
                 };
