@@ -278,8 +278,8 @@ public static class PetSources
     public const string Faces = "faces";
     /// <summary>내장 펫 키 앞부분 ("builtin:이름"). 이것만 있는 옛 설정 키는 기본 내장 펫으로 읽는다.</summary>
     public const string Builtin = "builtin";
-    /// <summary>기본 펫 폴더 이름 (사용자 결정 "기본 펫 이름은 gpt_chan").</summary>
-    public const string DefaultPet = "gpt_chan";
+    /// <summary>기본 펫 폴더 이름 (사용자 결정 2026-11-03 "펫의 기본값을 crow로", 그 전 gpt_chan).</summary>
+    public const string DefaultPet = "crow";
     public const string SheetFile = "spritesheet.webp";
 
     public static IReadOnlyList<PetSource> Find(string builtinRoot, string? codexPetsDir, string dataPetsDir)
@@ -292,7 +292,7 @@ public static class PetSources
     }
 
     /// <summary>
-    /// 설정 키를 실제로 읽을 펫 키로: 비었거나 옛 "builtin"이면 기본 내장 펫(gpt_chan, 없으면 첫 내장 펫), 그 밖은 그대로. 표정 그림 키도 그대로.
+    /// 설정 키를 실제로 읽을 펫 키로: 비었거나 옛 "builtin"이면 기본 내장 펫(DefaultPet, 없으면 첫 내장 펫), 그 밖은 그대로. 표정 그림 키도 그대로.
     /// </summary>
     public static string Resolve(string? key, IReadOnlyList<PetSource> sources)
     {

@@ -153,9 +153,9 @@ public sealed class PetTests : IDisposable
         var builtin = Path.Combine(_dir, "builtin");
         var codex = Path.Combine(_dir, "codex");
         var data = Path.Combine(_dir, "data");
-        Directory.CreateDirectory(Path.Combine(builtin, "gpt_chan")); // 내장 펫 = exe 옆 Pets/<이름> (원본 IconPack/Pets)
-        File.WriteAllText(Path.Combine(builtin, "gpt_chan", PetSources.SheetFile), "x");
-        File.WriteAllText(Path.Combine(builtin, "gpt_chan", "pet.json"), "{\"displayName\":\"gpt_chan\",\"spriteVersionNumber\":2}");
+        Directory.CreateDirectory(Path.Combine(builtin, "crow")); // 내장 펫 = exe 옆 Pets/<이름> (원본 IconPack/Pets)
+        File.WriteAllText(Path.Combine(builtin, "crow", PetSources.SheetFile), "x");
+        File.WriteAllText(Path.Combine(builtin, "crow", "pet.json"), "{\"displayName\":\"crow\",\"spriteVersionNumber\":2}");
         Directory.CreateDirectory(Path.Combine(codex, "cat"));
         File.WriteAllText(Path.Combine(codex, "cat", PetSources.SheetFile), "x");
         File.WriteAllText(Path.Combine(codex, "cat", "pet.json"), "{\"displayName\":\"고양이\",\"spriteVersionNumber\":2}");
@@ -165,18 +165,18 @@ public sealed class PetTests : IDisposable
         File.WriteAllText(Path.Combine(data, "dog", "pet.json"), "[1,2]"); // 깨진 메타는 폴더 이름
 
         var found = PetSources.Find(builtin, codex, data);
-        Assert.Equal(["builtin:gpt_chan", "codex:cat", "data:dog"], found.Select(s => s.Key));
-        Assert.Equal("gpt_chan (내장)", found[0].Label);
+        Assert.Equal(["builtin:crow", "codex:cat", "data:dog"], found.Select(s => s.Key));
+        Assert.Equal("crow (내장)", found[0].Label);
         Assert.Equal(("고양이 (Codex)", 2), (found[1].Label, found[1].Version));
         Assert.Equal(("dog", (int?)null), (found[2].Label, found[2].Version));
         Assert.Empty(PetSources.Find(Path.Combine(_dir, "none"), null, Path.Combine(_dir, "none2")));
 
-        // 설정 키: 비었거나 옛 "builtin"이면 기본 내장 펫(gpt_chan), 고른 키 · 표정 그림은 그대로 (결정 "기본 펫 이름은 gpt_chan")
-        Assert.Equal("builtin:gpt_chan", PetSources.Resolve(null, found));
-        Assert.Equal("builtin:gpt_chan", PetSources.Resolve("builtin", found));
+        // 설정 키: 비었거나 옛 "builtin"이면 기본 내장 펫(crow), 고른 키 · 표정 그림은 그대로 (결정 2026-11-03 "펫의 기본값을 crow로")
+        Assert.Equal("builtin:crow", PetSources.Resolve(null, found));
+        Assert.Equal("builtin:crow", PetSources.Resolve("builtin", found));
         Assert.Equal("codex:cat", PetSources.Resolve("codex:cat", found));
         Assert.Equal(PetSources.Faces, PetSources.Resolve(PetSources.Faces, found));
-        Assert.Equal("builtin:gpt_chan", PetSources.Resolve(null, [])); // 목록이 비어도 키는 정해진다 (읽기에서 실패 → 표정 그림)
+        Assert.Equal("builtin:crow", PetSources.Resolve(null, [])); // 목록이 비어도 키는 정해진다 (읽기에서 실패 → 표정 그림)
     }
 
     [Fact]

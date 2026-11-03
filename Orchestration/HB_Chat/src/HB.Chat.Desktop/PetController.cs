@@ -168,7 +168,7 @@ public sealed class PetController : IDisposable
         _shownPet = PetSources.Faces;
         if (key != PetSources.Faces)
         {
-            var fallback = PetSources.Resolve(null, sources); // 고른 펫을 못 읽으면 기본 내장 펫 (gpt_chan)
+            var fallback = PetSources.Resolve(null, sources); // 고른 펫을 못 읽으면 기본 내장 펫 (PetSources.DefaultPet)
             foreach (var source in new[] { sources.FirstOrDefault(s => s.Key == key), sources.FirstOrDefault(s => s.Key == fallback) }.OfType<PetSource>().Distinct())
             {
                 try
