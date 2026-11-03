@@ -1402,6 +1402,11 @@
         }
         // 보낸 글의 끝 [첨부] 줄을 "파일 n개: 이름"으로 — 절대 경로를 그대로 보이지 않게 (5b26cff7df C7, 서버 Attachments.Split과 같은 규칙)
         function displayText(text) {
+            const shell = /^\s*(?:<system-reminder>[\s\S]*?<\/system-reminder>\s*)?<bash-input>([\s\S]*?)<\/bash-input>\s*(?:<bash-stdout>([\s\S]*?)<\/bash-stdout>)?/.exec(text);
+            if (shell) {
+                const out = (shell[2] || "").replace(/\r\n/g, "\n").split("\n");
+                return "! " + shell[1].trim() + (out.join("").trim() ? "\n" + out.slice(0, 8).join("\n") + (out.length > 8 ? "\n… " + (out.length - 8) + "줄 더" : "") : "");
+            }
             const lines = text.replace(/\r\n/g, "\n").split("\n");
             const names = [];
             let end = lines.length;
@@ -1417,7 +1422,41 @@
             return (body ? body + "\n" : "") + "📎 파일 " + names.length + "개: " + names.join(", ");
         }
         // 진행 중 칸 비우기 — '보내지 못함' 말풍선은 남긴다 (세션 기록에 없어 지우면 되찾을 곳이 없다, /self-review bd52c6f0d1 C2)
-        function clearLive() { live.replaceChildren(...live.querySelectorAll(":scope > .msg.failed")); }
+        function clearLive() { live.replaceChildren(...live.querySelectorAll(":scope > .msg.failed, :scope > .shell-run")); }
+
+        // ---- '!' 명령 말풍선: 사용자가 직접 돌리는 명령 (끝나면 결과가 지휘자에게 말로 간다). 턴이 끝나도 남고, 끝난 것은 다음 턴 끝에 기록으로 바뀐다 ----
+        let shellNode = null;
+        function shellStart(view) {
+            const follow = atBottom();
+            live.querySelectorAll(":scope > .shell-run:not(.done)").forEach(n => n.remove());
+            const box = el("div", "shell-run");
+            const head = el("div", "shell-head");
+            head.append(el("code", "shell-cmd", "! " + view.command), el("span", "shell-state", "도는 중 · 직접 실행 (승인 없음)"));
+            const stop = el("button", "shell-stop", "중지");
+            stop.type = "button";
+            stop.addEventListener("click", () => post("ShellStop", new FormData()));
+            head.append(stop);
+            const out = el("pre", "shell-out", view.output || "");
+            box.append(head, out);
+            live.append(box);
+            shellNode = box;
+            if (follow) toBottom();
+        }
+        function shellOutput(text) {
+            if (!shellNode) return;
+            const follow = atBottom();
+            const out = shellNode.querySelector(".shell-out");
+            out.textContent = (out.textContent + text).slice(-30000);
+            out.scrollTop = out.scrollHeight;
+            if (follow) toBottom();
+        }
+        function shellEnd(state, ok) {
+            if (!shellNode) return;
+            shellNode.classList.add("done", ok ? "ok" : "failed-run");
+            shellNode.querySelector(".shell-state").textContent = "(" + state + ") → 지휘자에게 보냄";
+            shellNode.querySelector(".shell-stop")?.remove();
+            shellNode = null;
+        }
         function startTurn(prompt, partial, pending) {
             const follow = atBottom();
             clearLive();
@@ -2189,6 +2228,7 @@
                     // 서버는 실행 중이거나 쉬는 실행(답 뒤에도 작업이 남음)일 때만 정리 시각을 보낸다
                     if (ev.backgroundUntil) showBackground(ev.backgroundCount || 0, ev.backgroundUntil, ev.tasks); else clearBackground();
                     renderSubagents(ev.subagents);
+                    if (ev.shell) shellStart(ev.shell); else { live.querySelectorAll(":scope > .shell-run:not(.done)").forEach(n => n.remove()); shellNode = null; }
                     showTrust(ev.trust === true);
                     renderTerms(ev.terminals);
                     for (const v of termViews.values()) loadBuffer(v); // 끊긴 사이 출력은 알림으로 오지 않았다
@@ -2232,6 +2272,9 @@
                     if (follow) toBottom();
                     break;
                 }
+                case "shell-start": shellStart(ev.shell); break;
+                case "shell-output": shellOutput(ev.text || ""); break;
+                case "shell-end": shellEnd(ev.detail || "", !!ev.ok); break;
                 case "room-opened": {
                     // 지휘자가 새 방을 열었다 — 기록 줄은 턴 끝에 생기므로 진행 칸에 바로 링크 줄 (턴 끝 정리 때 기록 줄로 바뀐다)
                     const follow = atBottom();
@@ -2322,6 +2365,7 @@
                     // 이 턴의 말은 세션 기록으로 다시 그린다. 다시 받지 못하면 진행 중 말풍선을 남겨 둔다 (지휘자 검토 R7).
                     // 실패 · 중지면 이유를 한 줄 남긴다.
                     let refreshed = await refreshMessages();
+                    if (refreshed) live.querySelectorAll(":scope > .shell-run.done").forEach(n => n.remove());
                     // 진행 칸 외부 말풍선이 기록 쪽에 다시 그려지지 않았으면(턴 도중 새 말 받기가 그 자리를 지나침 · 늦은 받기가 미뤄 둠) 쪽을 다시 받는다 —
                     // 그대로 지우면 새로고침 전까지 사라진다 (8f79e1752f C1). 검색 보이기 중이면 다음 턴 끝으로 미루고 그 말풍선은 남긴다 (C3)
                     if (refreshed && (runsReloadPending || [...live.querySelectorAll(":scope > .live-run")].some(n => !runInChat(n.dataset.runKey)))) {
@@ -2567,6 +2611,15 @@
             if (!text.trim() && attached.length === 0) return;
             // 올리는 중에 보내면 그 파일이 다음 말로 넘어간다 — 다 올라간 뒤에 보낸다 (C2)
             if (uploading > 0) { alert("첨부를 올리는 중입니다 — 다 올라간 뒤 보내세요."); return; }
+            // '!' 명령: 인용 · 첨부 · 요청 창이 없을 때만 — 앱이 작업 폴더에서 바로 돌리고 결과를 지휘자에게 보낸다 (한 줄만)
+            const bang = /^!\s*(\S[\s\S]*)$/.exec(text.trim());
+            if (bang && !quote && attached.length === 0 && !modeReq) {
+                if (/[\r\n]/.test(bang[1])) { alert("'!' 명령은 한 줄만 됩니다."); return; }
+                textBox.value = "";
+                const sd = new FormData(); sd.append("command", bang[1].trim());
+                if (!(await post("Shell", sd)) && !disposed && !textBox.value) textBox.value = text;
+                return;
+            }
             const q = quote, files = [...attached]; // 보낸 것만 나중에 뺀다 (그사이 바뀌어도)
             textBox.value = "";
             let full = q ? quoteBlock(q) + "\n\n" + text : text;

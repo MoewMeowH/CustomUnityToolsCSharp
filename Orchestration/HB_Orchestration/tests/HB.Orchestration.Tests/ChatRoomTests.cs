@@ -230,6 +230,36 @@ public sealed class ChatRoomTests : IDisposable
     }
 
     /// <summary>
+    /// 사용자가 직접 돌린 셸 명령: CLI bash 모드(명령 줄 · 출력 줄이 따로)와 HB_Chat '!'(한 말에 명령 · 출력, 앞에 규칙 알림 가능, 뒤에 말).
+    /// 출력은 코드 블록 · 40줄까지, 빈 stderr는 안 보임.
+    /// </summary>
+    [Fact]
+    public void Reader_ShellCommands_ShowCommandOutputAndRest()
+    {
+        var many = string.Join("\n", Enumerable.Range(1, 45).Select(i => "줄" + i));
+        var path = Write(
+            User(1, "<bash-input>git status</bash-input>"),
+            User(2, "<bash-stdout>On branch main</bash-stdout><bash-stderr></bash-stderr>"),
+            User(3, "<system-reminder>규칙 바뀜</system-reminder>\n<bash-input>dir</bash-input>\n<bash-stdout>" + many + "</bash-stdout>\n<bash-stderr>종료 코드 1</bash-stderr>\n\n이거 봐 줘"),
+            User(4, "그냥 말 <bash-input>x</bash-input>"),
+            User(5, "<bash-stdout></bash-stdout><bash-stderr></bash-stderr>"),                                       // 빈 출력 줄은 건너뜀
+            User(6, "<bash-input>type a</bash-input>\n<bash-stdout>앞 <system-reminder>숨은 글</system-reminder> 뒤</bash-stdout>")); // 출력 속 알림은 보인다
+
+        var texts = ClaudeChatReader.Read(path).Entries.Where(e => e.Speaker == ChatSpeaker.User).Select(e => e.Text).ToList();
+
+        Assert.Equal("`! git status`", texts[0]);
+        Assert.Equal("```text\nOn branch main\n```", texts[1]);
+        Assert.StartsWith("`! dir`\n\n```text\n줄1\n", texts[2]);
+        Assert.Contains("줄40\n… 6줄 더\n```", texts[2]);               // 출력 45줄 + 종료 코드 줄 = 46줄 중 40줄
+        Assert.DoesNotContain("줄41", texts[2]);
+        Assert.EndsWith("```\n\n이거 봐 줘", texts[2]);
+        Assert.DoesNotContain("규칙 바뀜", texts[2]);
+        Assert.Equal("그냥 말 <bash-input>x</bash-input>", texts[3]);  // 맨 앞이 아니면 보통 말
+        Assert.Equal(5, texts.Count);
+        Assert.Contains("숨은 글", texts[4]);
+    }
+
+    /// <summary>
     /// 서브에이전트 최종 답 (CLI 2.1.316 실측 모양, 글은 합성): 전경은 Agent tool_result의 hand-back 머리 · 꼬리 · 들여쓰기를 걷고,
     /// 백그라운드는 띄운 결과를 건너뛰고 알림 &lt;result&gt;(HTML 풀기)를. 명령 알림은 안내 그대로. 지휘자 도구 칩은 다음 지휘자 말에 남는다.
     /// </summary>

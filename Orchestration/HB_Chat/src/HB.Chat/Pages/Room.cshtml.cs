@@ -616,6 +616,7 @@ public sealed partial class RoomModel(
         hub.EndRest(id); // 답 뒤 쉬던 백그라운드 작업도 끝낸다 — 휴지통 방에서 프로세스 · 자동 답이 남지 않게 (/cross-review 52ac1810e1 1-F4)
         hub.ForgetCommands(id);
         terminals.StopRoom(id, "방 삭제"); // 그 방 터미널도 끝낸다
+        hub.StopShell(id); // 도는 '!' 명령도 (결과는 휴지통 방이라 지휘자에게 가지 않는다)
         browser.Close(id, "방 삭제");
         probe.Forget(id); // 연결 탭 확인 결과
         return Change(id, r => r with { DeletedAt = DateTimeOffset.Now }, "휴지통에 넣지 못했습니다");
@@ -700,6 +701,24 @@ public sealed partial class RoomModel(
         if (store.Get(id) is { IsGroup: true }) return groups.Send(id, text ?? "") is { } groupError ? BadRequest(groupError) : new JsonResult(new { ok = true });
         if (ChildRefusal(id) is { } refusal) return BadRequest(refusal);
         return hub.Send(id, text ?? "") is { } error ? BadRequest(error) : new JsonResult(new { ok = true });
+    }
+
+    /// <summary>
+    /// 채팅창 '!' 명령 — 사용자가 친 명령이라 승인 카드 없이 방 작업 폴더에서 돌고, 끝나면 결과가 지휘자에게 간다 (<see cref="RoomHub.RunShell"/>).
+    /// 일반 방만 (단톡방 · 구성원 방은 '!'도 말로 간다 — 화면이 여기로 보내지 않는다). 모든 권한 단계 (결정 "모든 단계").
+    /// </summary>
+    public IActionResult OnPostShell(string id, string? command)
+    {
+        if (!RoomStore.IsRoomId(id) || store.Get(id) is not { } room) return NotFound();
+        if (room.IsGroup || room.GroupId is not null) return BadRequest("'!' 명령은 일반 방에서만 됩니다.");
+        if (options.Value.WorkspacePath(room.Workspace) is not { } workspace) return BadRequest("작업 폴더를 찾지 못했습니다.");
+        return hub.RunShell(id, command ?? "", workspace) is { } error ? BadRequest(error) : new JsonResult(new { ok = true });
+    }
+
+    public IActionResult OnPostShellStop(string id)
+    {
+        if (!RoomStore.IsRoomId(id)) return NotFound();
+        return hub.StopShell(id) ? new JsonResult(new { ok = true }) : BadRequest("도는 '!' 명령이 없습니다.");
     }
 
     /// <summary>

@@ -60,7 +60,8 @@ public sealed class PipedProcess : ITerminalProcess
 
     private PipedProcess(Process process) => _process = process;
 
-    public static PipedProcess Start(string command, string workingDirectory)
+    /// <param name="extraEnv">더 넣을 환경 변수 (앱 기본 위에 덮어씀).</param>
+    public static PipedProcess Start(string command, string workingDirectory, IReadOnlyDictionary<string, string>? extraEnv = null)
     {
         var shell = Environment.GetEnvironmentVariable("ComSpec") is { Length: > 0 } c ? c : "cmd.exe";
         var info = new ProcessStartInfo(shell)
@@ -75,27 +76,32 @@ public sealed class PipedProcess : ITerminalProcess
             RedirectStandardError = true,
         };
         info.Environment.Clear();
-        foreach (var (k, v) in TerminalEnvironment.Current(new Dictionary<string, string> { ["PYTHONUNBUFFERED"] = "1", ["PYTHONIOENCODING"] = "utf-8" }))
+        var extra = new Dictionary<string, string> { ["PYTHONUNBUFFERED"] = "1", ["PYTHONIOENCODING"] = "utf-8" };
+        foreach (var (k, v) in extraEnv ?? new Dictionary<string, string>()) extra[k] = v;
+        foreach (var (k, v) in TerminalEnvironment.Current(extra))
             info.Environment[k] = v;
         var process = Process.Start(info) ?? throw new InvalidOperationException("프로세스를 띄우지 못했습니다.");
         try { process.StandardInput.Close(); } catch (IOException) { }
         return new PipedProcess(process);
     }
 
-    public Task PumpAsync(Action<byte[]> onChunk)
+    public Task PumpAsync(Action<byte[]> onChunk) => PumpAsync((_, chunk) => onChunk(chunk));
+
+    /// <summary>스트림을 가려 넘긴다 (0 = stdout, 1 = stderr) — 글자 디코더를 스트림마다 둘 때 ('!' 명령).</summary>
+    public Task PumpAsync(Action<int, byte[]> onChunk)
     {
         var gate = new Lock();
-        async Task Read(Stream stream)
+        async Task Read(Stream stream, int index)
         {
             var buffer = new byte[16 * 1024];
             try
             {
                 while (await stream.ReadAsync(buffer) is > 0 and var n)
-                    lock (gate) onChunk(buffer[..n]);
+                    lock (gate) onChunk(index, buffer[..n]);
             }
             catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException) { }
         }
-        return Task.WhenAll(Read(_process.StandardOutput.BaseStream), Read(_process.StandardError.BaseStream));
+        return Task.WhenAll(Read(_process.StandardOutput.BaseStream, 0), Read(_process.StandardError.BaseStream, 1));
     }
 
     public async Task<int> WaitForExitAsync()

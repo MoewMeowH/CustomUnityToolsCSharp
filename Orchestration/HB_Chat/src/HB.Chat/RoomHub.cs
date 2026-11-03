@@ -82,6 +82,9 @@ public sealed record LiveEvent(string Kind)
 
     /// <summary>trust 알림 · snapshot: 이 턴 동안 명령을 묻지 않는 중인지.</summary>
     public bool? Trust { get; init; }
+
+    /// <summary>shell-start · snapshot: 사용자가 '!'로 돌리는 명령 (snapshot은 도는 중일 때만).</summary>
+    public ShellView? Shell { get; init; }
 }
 
 /// <summary>
@@ -140,6 +143,9 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
         public bool Busy;
         public readonly List<QueuedMessage> Pending = [];
         public CancellationTokenSource? Cts;
+
+        /// <summary>도는 '!' 명령 (방마다 하나). 바꿀 때는 잠금 안에서.</summary>
+        public ShellRun? Shell;
 
         /// <summary>"지금 끝내기" — 메인 답 뒤 백그라운드 작업을 기다리는 실행을 끝낸다 (Cts와 같은 수명). 기다리는 수 · 정리 시각은 snapshot용.</summary>
         public CancellationTokenSource? WrapUpCts;
@@ -1364,6 +1370,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
                 Trust = live.TrustCommands,
                 Terminals = _terminals?.List(roomId), // 곁칸 터미널 탭 — 출력은 탭을 열 때 버퍼로 받는다
                 Browser = _browser?.View(roomId), // 곁칸 브라우저 탭 — 마지막 화면은 탭을 열 때 받는다
+                Shell = ShellSnapshot(live),
             });
             if (live.Busy && live.Tool is { } tool) ch.Writer.TryWrite(new LiveEvent("tool") { Text = tool.Name, Detail = tool.Detail });
             if (live.Notice is { } notice) ch.Writer.TryWrite(new LiveEvent("notice") { Text = notice });
@@ -2241,6 +2248,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
                 EndApprovals(live, "앱 종료");
                 live.Cts?.Cancel();
                 live.Session?.Proc.Stop(); // 쉬는 실행 · 그 백그라운드 작업도 (앱을 끄면 같이 끝난다 — 계획 위험)
+                if (live.Shell is { } shell) { shell.Stopped = true; lock (shell.Sync) shell.Process?.Kill(); } // '!' 명령도
                 foreach (var ch in live.Subscribers) ch.Writer.TryComplete();
                 live.Subscribers.Clear();
             }

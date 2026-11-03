@@ -425,6 +425,15 @@ input.rename { font-size: 15px; font-weight: 600; min-width: 200px; }
 #live .stream { white-space: pre-wrap; }
 .live-line { text-align: center; font-size: 12.5px; color: var(--muted); }
 .live-line.denied { color: var(--warn); }
+/* 채팅창 '!' 명령 말풍선 (사용자가 직접 실행 — 끝나면 결과가 지휘자에게 간다) */
+.shell-run { margin: 6px 0 6px auto; max-width: 92%; border: 1px solid var(--border, #444); border-radius: 8px; padding: 6px 8px; font-size: 12.5px; }
+.shell-run .shell-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.shell-run .shell-cmd { font-weight: 600; word-break: break-all; }
+.shell-run .shell-state { color: var(--muted); flex: 1; }
+.shell-run .shell-stop { font-size: 12px; padding: 1px 10px; }
+.shell-run .shell-out { margin: 6px 0 0; max-height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-all; font-size: 12px; }
+.shell-run .shell-out:empty { display: none; }
+.shell-run.failed-run .shell-state { color: var(--warn); }
 /* 방 기록 줄 (승인 결과 · 정리 표시, 2026-10-29): 거절 · 시간 초과는 진행 칸처럼 경고 색 */
 .system.note.denied .body { color: var(--warn); }
 /* 메인 답 뒤 백그라운드 작업 기다림 줄 + 지금 끝내기 (2026-10-29) */

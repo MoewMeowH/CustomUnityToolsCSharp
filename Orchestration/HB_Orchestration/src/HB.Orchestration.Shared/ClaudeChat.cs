@@ -548,14 +548,15 @@ public static partial class ClaudeChatReader
             s.Add(lineNo, ts, ChatSpeaker.User, $"`{(name.StartsWith('/') ? name : "/" + name)}` {args}");
             return;
         }
-        if (trimmed.StartsWith("<bash-input>", StringComparison.Ordinal))
+        // 사용자가 직접 돌린 셸 명령 (CLI bash 모드 · HB_Chat '!' 명령): 명령 · 출력 묶음과 뒤따르는 말. 앞에 방 규칙 알림이 붙을 수 있다 —
+        // 맨 앞 알림만 걷는다 (출력 속 알림 모양 글을 지우면 지휘자는 받고 사용자 기록에는 안 보인다, HB_Chat /self-review bd240df0ac C2).
+        if (ShellBlocks(LeadingReminderRegex().Replace(raw, "")) is { } shell)
         {
-            s.Add(lineNo, ts, ChatSpeaker.User, $"`! {TagText(trimmed, "bash-input")}`");
+            if (shell.Length > 0) s.Add(lineNo, ts, ChatSpeaker.User, shell); // 빈 출력만 있는 CLI 줄은 건너뛴다
             return;
         }
-        // 명령 · 셸 출력은 말이 아니다.
-        if (trimmed.StartsWith("<local-command-stdout>", StringComparison.Ordinal) || trimmed.StartsWith("<local-command-stderr>", StringComparison.Ordinal)
-            || trimmed.StartsWith("<bash-stdout>", StringComparison.Ordinal) || trimmed.StartsWith("<bash-stderr>", StringComparison.Ordinal))
+        // 슬래시 명령 출력은 말이 아니다.
+        if (trimmed.StartsWith("<local-command-stdout>", StringComparison.Ordinal) || trimmed.StartsWith("<local-command-stderr>", StringComparison.Ordinal))
             return;
         // 하네스가 넣는 중단 문구 ("[Request interrupted by user]" · "… for tool use]")는 사용자가 쓴 글이 아니다.
         if (InterruptedRegex().IsMatch(trimmed.TrimEnd()))
@@ -581,6 +582,48 @@ public static partial class ClaudeChatReader
             var fence = new string('`', Math.Max(3, longest + 1));
             return $"\n\n**붙여 넣은 글**\n\n{fence}text\n{body}\n{fence}\n\n";
         });
+    }
+
+    /// <summary>셸 출력 말풍선에 보일 최대 줄 수 (넘으면 "… N줄 더"). 원문은 세션 기록에 그대로 있다.</summary>
+    internal const int ShellShownLines = 40;
+
+    /// <summary>
+    /// 맨 앞의 <c>&lt;bash-input&gt;</c> · <c>&lt;bash-stdout&gt;</c> · <c>&lt;bash-stderr&gt;</c> 묶음을 "`! 명령`" + 출력 코드 블록으로, 뒤 글은 사용자 말로.
+    /// 묶음으로 시작하지 않으면 null, 보일 것이 없으면(빈 출력 묶음만) 빈 글. 출력이 빈 묶음(CLI가 stderr를 늘 붙임)은 보이지 않는다.
+    /// </summary>
+    internal static string? ShellBlocks(string text)
+    {
+        var rest = text;
+        var parts = new List<string>();
+        var output = new List<string>();
+        void FlushOutput()
+        {
+            if (output.Count == 0) return;
+            var lines = string.Join("\n", output).Replace("\r\n", "\n").Split('\n');
+            var shown = string.Join("\n", lines.Take(ShellShownLines));
+            if (lines.Length > ShellShownLines) shown += $"\n… {lines.Length - ShellShownLines}줄 더";
+            var longest = BacktickRunRegex().Matches(shown).Select(r => r.Length).DefaultIfEmpty(0).Max();
+            var fence = new string('`', Math.Max(3, longest + 1));
+            parts.Add($"{fence}text\n{shown}\n{fence}");
+            output.Clear();
+        }
+        while (ShellTagRegex().Match(rest) is { Success: true } m)
+        {
+            var body = m.Groups[2].Value.Trim('\r', '\n');
+            if (m.Groups[1].Value == "bash-input")
+            {
+                FlushOutput();
+                parts.Add($"`! {body.Trim()}`");
+            }
+            else if (body.Trim().Length > 0)
+                output.Add(body);
+            rest = rest[m.Length..];
+        }
+        if (rest.Length == text.Length) return null;
+        FlushOutput();
+        var tail = CleanUserText(rest).Trim();
+        if (tail.Length > 0) parts.Add(tail);
+        return string.Join("\n\n", parts);
     }
 
     private static string? TagText(string text, string tag) =>
@@ -610,6 +653,12 @@ public static partial class ClaudeChatReader
 
     [GeneratedRegex(@"`+")]
     private static partial Regex BacktickRunRegex();
+
+    [GeneratedRegex(@"^\s*<(bash-input|bash-stdout|bash-stderr)>(.*?)</\1>", RegexOptions.Singleline)]
+    private static partial Regex ShellTagRegex();
+
+    [GeneratedRegex(@"^\s*(?:<system-reminder>.*?</system-reminder>\s*)+", RegexOptions.Singleline)]
+    private static partial Regex LeadingReminderRegex();
 
     [GeneratedRegex(@"^\[Request interrupted by user[^\]\n]*\]$")]
     private static partial Regex InterruptedRegex();

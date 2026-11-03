@@ -130,6 +130,7 @@ public sealed class RoomNotes(Func<string> dataFolder)
             if (Str(e, "room") is not { Length: > 0 } room || Str(e, "tool") is not { Length: > 0 } tool) return null;
             if (!e.TryGetProperty("at", out var atEl) || atEl.ValueKind != JsonValueKind.String || !atEl.TryGetDateTimeOffset(out var at)) return null;
             if (tool == ClaudeArgs.AskTool) return null; // 질문 카드 답은 '나' 말풍선으로 이미 있다
+            if (tool == RoomHub.ShellTool) return null;  // '!' 명령은 결과 말(세션 기록)로 보인다 — 승인 기록에는 감사용으로만
             var decision = Str(e, "decision") ?? "";
             if (decision == RoomHub.AppCallLabel) return null; // 앱 단계 호출은 approvals.jsonl에만 — 도구 칩이 이미 있다
             var summary = FirstLine(Str(e, "summary") ?? "", 120);
