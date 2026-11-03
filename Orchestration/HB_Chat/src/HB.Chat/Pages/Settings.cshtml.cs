@@ -141,6 +141,28 @@ public sealed class SettingsModel(
         return Page();
     }
 
+    // ---- 탭 (노션 "채팅 설정내 탭", 결정 "이대로 5개") ----
+
+    /// <summary>탭 차례: id · 보이는 이름. 화면 스크립트가 id로 고른다 (주소 #tab-id).</summary>
+    public static readonly IReadOnlyList<(string Id, string Label)> Tabs =
+        [("general", "일반"), ("work", "작업"), ("connect", "연결"), ("decor", "꾸미기"), ("data", "데이터")];
+
+    /// <summary>
+    /// 처음 열 탭: 방금 저장한 것(리다이렉트의 done · fail)이나 실패해 다시 그린 POST의 handler가 든 탭. 모르면 null — 화면이 마지막에 본 탭을 연다.
+    /// </summary>
+    public static string? TabFor(string? done, string? handler) => (handler ?? done)?.ToLowerInvariant() switch
+    {
+        "theme" or "notify" or "profile" or "image-size" => "general",
+        "addworkspace" or "removeworkspace" or "addunity" or "removeunity" or "rename" or "added" or "removed" or "renamed" => "work",
+        "cliselftest" or "cli" or "codexworkspaces" or "codex" or "addmcpfields" or "addmcpjson" or "importmcp" or "removemcp"
+            or "mcp-added" or "mcp-secret" or "mcp-removed" => "connect",
+        "stickerpack" or "pack" or "faces" => "decor",
+        "backup" => "data",
+        _ => null,
+    };
+
+    public string? ActiveTab => TabFor(Done ?? Fail, HttpMethods.IsPost(Request.Method) ? Request.Query["handler"].FirstOrDefault() : null);
+
     public SidebarView Sidebar { get; private set; } = new([], null);
     public string? Error { get; private set; }
 

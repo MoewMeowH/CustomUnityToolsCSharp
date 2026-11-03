@@ -2800,6 +2800,62 @@
         });
     });
 
+    // ---- 설정 화면 탭 (노션 "채팅 설정내 탭"): 한 탭만 보인다. 고를 탭 = 주소 #id(탭 또는 그 안 섹션) → 서버가 정한 탭(방금 저장한 것)
+    // → 마지막에 본 탭 → 첫 탭. 스크립트가 없으면 탭 줄은 숨은 채 모든 섹션이 보인다. ----
+    const settingsTabs = document.querySelector("nav.settings-tabs");
+    if (settingsTabs) {
+        const TabKey = "hbchat.settingsTab";
+        const panels = [...document.querySelectorAll(".settings-tab")];
+        const buttons = [...settingsTabs.querySelectorAll("button[role=tab]")];
+        const known = id => panels.some(p => p.dataset.tab === id);
+        function showTab(id, focus) {
+            for (const p of panels) p.hidden = p.dataset.tab !== id;
+            for (const b of buttons) {
+                const on = b.dataset.tab === id;
+                b.setAttribute("aria-selected", on ? "true" : "false");
+                b.tabIndex = on ? 0 : -1;
+                if (on && focus) b.focus();
+            }
+            try { localStorage.setItem(TabKey, id); } catch { }
+        }
+        // 깨진 퍼센트 인코딩(#%)이면 decodeURIComponent가 던진다 — 이 스크립트가 멈추면 사이드바 실시간 갱신도 안 붙는다 (088647d699 C2)
+        function hashId() { try { return decodeURIComponent(location.hash.slice(1)); } catch { return ""; } }
+        function fromHash() {
+            const hash = hashId();
+            const target = hash ? document.getElementById(hash) : null;
+            return target?.closest(".settings-tab")?.dataset.tab ?? null;
+        }
+        // 섹션 주소(#cli 등)면 탭을 연 뒤 그 섹션으로 — 숨은 채로는 브라우저가 내려가지 못했다
+        function scrollToSection() {
+            const hash = hashId();
+            if (hash && !hash.startsWith("tab-")) document.getElementById(hash)?.scrollIntoView();
+        }
+        let saved = null;
+        try { saved = localStorage.getItem(TabKey); } catch { }
+        const start = [fromHash(), settingsTabs.dataset.active, saved].find(id => id && known(id)) ?? panels[0]?.dataset.tab;
+        settingsTabs.hidden = false;
+        showTab(start, false);
+        scrollToSection();
+        settingsTabs.addEventListener("click", (e) => {
+            const b = e.target.closest("button[role=tab]");
+            if (!b) return;
+            showTab(b.dataset.tab, false);
+            history.replaceState(null, "", location.pathname + location.search + "#tab-" + b.dataset.tab);
+        });
+        // 키보드: 탭 줄에서 ← · → · Home · End (tablist 관례)
+        settingsTabs.addEventListener("keydown", (e) => {
+            const at = buttons.findIndex(b => b.getAttribute("aria-selected") === "true");
+            const next = e.key === "ArrowRight" ? (at + 1) % buttons.length : e.key === "ArrowLeft" ? (at - 1 + buttons.length) % buttons.length
+                : e.key === "Home" ? 0 : e.key === "End" ? buttons.length - 1 : -1;
+            if (next < 0) return;
+            e.preventDefault();
+            showTab(buttons[next].dataset.tab, true);
+            history.replaceState(null, "", location.pathname + location.search + "#tab-" + buttons[next].dataset.tab);
+        });
+        // 같은 쪽에서 사이드바 #cli 띠를 누르면 다시 불러오지 않고 hashchange만 온다 — 탭을 열고 그 섹션으로 (088647d699 C3)
+        window.addEventListener("hashchange", () => { const id = fromHash(); if (id) { showTab(id, false); scrollToSection(); } });
+    }
+
     const first = pane?.querySelector(".room");
     if (first) room = first.dataset.group ? mountGroup(first) : mountRoom(first);
     else openAppEvents();

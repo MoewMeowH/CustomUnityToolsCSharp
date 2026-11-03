@@ -98,6 +98,16 @@ select, input[type=text], textarea { background: var(--panel); border: 1px solid
 /* 설정 화면 (3차 d) */
 /* 설정 화면 (4차 B3): 칸 너비 그대로 — 폭을 묶으면 넓은 창에서 스크롤바가 화면 중간에 서고 오른쪽이 빈다 */
 .welcome.settings { max-width: none; }
+/* 설정 탭 (노션 "채팅 설정내 탭"): 좁은 폭에서는 가로로 밀어 본다 */
+.settings-tabs { display: flex; gap: 2px; margin: 0 0 14px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.settings-tabs[hidden] { display: none; }
+.settings-tabs button { flex: none; border: 0; background: none; padding: 8px 14px; cursor: pointer; font-size: 13.5px; color: var(--muted);
+                        border-bottom: 2px solid transparent; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
+.settings-tabs button:hover, .settings-tabs button:focus-visible { color: var(--text); }
+.settings-tabs button[aria-selected=true] { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+.settings-tabs .tab-warn { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
+.settings-tab > .panel + .panel { margin-top: 16px; }
+.settings-tab + .settings-tab { margin-top: 16px; } /* 스크립트 없이 다 보일 때 묶음 사이 */
 .settings-table td, .settings-table th { padding: 6px 8px; font-size: 13px; overflow-wrap: anywhere; }
 .settings-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
 .settings-add input[name=path] { flex: 1; min-width: 220px; }

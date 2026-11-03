@@ -280,6 +280,42 @@ public sealed class ChatScriptTests(ChatApp app, ChatBrowser browser) : IClassFi
         page.AssertNoErrors();
     }
 
+    /// <summary>
+    /// 설정 탭: 한 탭만 보이고, 누르면 바뀌고, 다시 열면 마지막 탭 · 방금 저장한 것(done)의 탭 · 섹션 주소(#cli)의 탭이 열린다.
+    /// </summary>
+    [Fact]
+    public async Task SettingsTabs_OneShown_RememberedAndPicked()
+    {
+        if (!browser.Available) return;
+        const string Ready = "nav.settings-tabs:not([hidden])";
+        const string Shown = "[...document.querySelectorAll('.settings-tab')].filter(p => !p.hidden).map(p => p.dataset.tab).join()";
+        Uri At(string path) => new(app.BaseAddress, path);
+        await using (var page = await browser.OpenAsync(At("/Settings#tab-general"), ready: Ready))
+        {
+            Assert.Equal("general", await page.EvalAsync<string>(Shown));
+            Assert.Equal("true", await page.EvalAsync<string>("document.querySelector('#tab-btn-general').getAttribute('aria-selected')"));
+            await page.EvalAsync("document.querySelector('#tab-btn-connect').click()");
+            Assert.Equal("connect", await page.EvalAsync<string>(Shown));
+            Assert.Equal("#tab-connect", await page.EvalAsync<string>("location.hash"));
+            page.AssertNoErrors();
+        }
+        await using (var page = await browser.OpenAsync(At("/Settings"), ready: Ready))
+            Assert.Equal("connect", await page.EvalAsync<string>(Shown)); // 마지막에 본 탭
+        await using (var page = await browser.OpenAsync(At("/Settings?done=theme"), ready: Ready))
+            Assert.Equal("general", await page.EvalAsync<string>(Shown)); // 방금 저장한 것 — 기억보다 먼저
+        await using (var page = await browser.OpenAsync(At("/Settings#backup"), ready: Ready))
+        {
+            Assert.Equal("data", await page.EvalAsync<string>(Shown)); // 섹션 주소면 그 섹션이 든 탭
+            // 같은 쪽에서 섹션 주소로 (사이드바 #cli 띠) — 다시 불러오지 않고 hashchange (088647d699 C3)
+            await page.EvalAsync("location.hash = 'cli'");
+            await page.WaitForAsync("[...document.querySelectorAll('.settings-tab')].filter(p => !p.hidden).map(p => p.dataset.tab).join() === 'connect'", "#cli → 연결 탭");
+            page.AssertNoErrors();
+        }
+        // 깨진 퍼센트 인코딩 해시여도 탭 줄이 켜지고 오류가 없다 (088647d699 C2)
+        await using (var page = await browser.OpenAsync(At("/Settings#%E0%A4%A"), ready: Ready))
+            page.AssertNoErrors();
+    }
+
     /// <summary>서버 요약 중간 글: 진행 중 칸에 흐린 말풍선 + "요약" 표시, '입력 중' 말풍선은 그 아래에 남는다.</summary>
     [Fact]
     public async Task Narration_ShownInLiveBubble()

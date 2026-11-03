@@ -19,461 +19,487 @@
                 <div class="panel" style="padding:8px 12px;margin-bottom:12px;border-color:var(--warn)" role="alert">@error</div>
             }
 
-            @* 데이터 백업 (결정: 설정 단추로 zip 내려받기 · 앱 데이터 + 세션 기록 · 복원은 zip 안 글대로 · 암호 없음) *@
-            @{ var backup = Model.BackupPlan; }
-            <section class="panel" id="backup" style="padding:12px 14px;margin-bottom:16px">
-                <h3 style="margin:0 0 6px;font-size:15px">데이터 백업</h3>
-                <p class="muted" style="margin:0 0 8px;font-size:12.5px">
-                    방 색인 · 단톡방 대화 · 승인 기록 · 첨부 · 프로필 · 설정 파일과, 이 앱 방들의 세션 기록(대화 본문) · 할 일을 zip 하나로 받습니다.
-                    브라우저 캐시 · 로그와 단톡방 Codex 구성원의 스레드(~/.codex)는 빠집니다. 복원은 zip 안 "복원 방법.txt"대로 복사합니다.
-                    대화 · 첨부 · MCP 설정(토큰이 있을 수 있음)이 들어 있으니 다른 사람에게 보내지 마세요.
-                </p>
-                <p style="margin:0 0 8px;font-size:13px">
-                    지금 담길 것: 파일 @(backup.Files.Count)개 · 세션 기록 @(backup.Sessions)개 · 압축 전 @(backup.Bytes < 1024 * 1024 ? $"{backup.Bytes / 1024.0:0.#}KB" : $"{backup.Bytes / 1024.0 / 1024.0:0.#}MB")
-                </p>
-                @if (Model.RunningRooms is > 0 and var running)
+            @* 탭 (노션 "채팅 설정내 탭", 결정 "이대로 5개"): 스크립트가 탭 줄을 켜고 한 탭만 보인다 — 스크립트가 없으면 모든 섹션이 보인다. *@
+            <nav class="settings-tabs" role="tablist" aria-label="설정 분류" hidden data-active="@Model.ActiveTab">
+                @foreach (var (tabId, tabLabel) in SettingsModel.Tabs)
                 {
-                    <p style="margin:0 0 8px;font-size:12.5px;color:var(--warn)">지금 실행 중인 방이 @(running)개 있습니다 — 끝난 뒤 받기를 권합니다 (실행 중인 대화는 그 순간까지만 담깁니다).</p>
-                }
-                <form method="post" asp-page-handler="Backup">
-                    <button class="btn" type="submit">@Icons.Svg("check") 백업 zip 받기</button>
-                </form>
-            </section>
-
-            @* claude CLI 판 · 카드 자가 시험 (결정 "사이드바 + 설정" · "설정 단추로만") *@
-            @{ var cli = Model.Cli; }
-            <section class="panel" id="cli" style="padding:12px 14px;margin-bottom:16px@(cli.NeedsCheck ? ";border-color:var(--warn)" : "")">
-                <h3 style="margin:0 0 6px;font-size:15px">claude CLI · 카드 자가 시험</h3>
-                <p class="muted" style="margin:0 0 8px;font-size:12.5px">
-                    승인 · 질문 카드는 claude CLI의 제어 요청 모양에 기댑니다. CLI가 바뀌면 자가 시험으로 확인하세요 —
-                    임시 폴더에서 haiku로 짧은 턴 하나를 돌려 앱이 카드에 자동으로 답합니다 (토큰 조금).
-                </p>
-                <p style="margin:0 0 8px;font-size:13px">
-                    지금 본 판 <b>@(cli.Seen ?? "아직 모름")</b> · 확인한 판 <b>@(cli.Checked ?? "없음")</b>@(cli.CheckedAt is { } at ? $" ({at.ToLocalTime():MM-dd HH:mm})" : "")
-                    @if (cli.NeedsCheck) { <span class="badge warn">확인 필요</span> }
-                </p>
-                @if (cli.LastTest is { } test)
-                {
-                    <p class="muted" style="margin:0;font-size:12.5px">마지막 자가 시험 @test.At.ToLocalTime().ToString("MM-dd HH:mm") · 판 @(test.Version ?? "?") · @(test.Passed ? "통과" : "통과 못 함")@(test.Error is { } err ? " — " + err : "")</p>
-                    <ul class="cli-steps">
-                        @foreach (var step in test.Steps)
+                    var warn = tabId == "connect" && Model.Cli.NeedsCheck;
+                    <button type="button" role="tab" id="tab-btn-@tabId" data-tab="@tabId" aria-controls="tab-@tabId" aria-selected="false">
+                        @tabLabel
+                        @if (warn)
                         {
-                            <li class="@(step.State == CliSelfTest.Passed ? "pass" : step.State == CliSelfTest.Failed ? "fail" : "miss")">@step.Name: @step.State@(step.Detail is { } d ? " — " + d : "")</li>
+                            <span class="tab-warn" title="claude CLI 확인 필요" aria-label="확인 필요"></span>
                         }
-                    </ul>
+                    </button>
                 }
-                <form method="post" asp-page-handler="CliSelfTest" style="margin-top:8px" onsubmit="this.querySelector('button').disabled = true; this.querySelector('button').textContent = '시험 중… (최대 2분)';">
-                    <button class="btn" type="submit" disabled="@Model.CliTestRunning">@Icons.Svg("check") 카드 자가 시험</button>
-                </form>
-            </section>
+            </nav>
 
-            <section class="panel" style="padding:12px 14px;margin-bottom:16px">
-                <h3 style="margin:0 0 6px;font-size:15px">작업 폴더</h3>
-                <p class="muted" style="margin:0 0 8px;font-size:12.5px">
-                    방은 작업 폴더 안에서 읽고 · 편집하고 · (명령 방이면) 명령을 실행합니다. 설정 파일(appsettings) 것은 여기서 바꿀 수 없습니다.
-                    읽기 이상 방은 그 폴더 .mcp.json의 <span class="mono">@Model.McpServer</span> 항목 명령을 <b>승인 없이</b> MCP 서버로 띄우고,
-                    그 폴더 .claude/settings.json의 훅도 돕니다 — 믿을 수 있는 폴더만 더하세요.
-                </p>
-                @if (Model.WorkspaceLoadError is { } wsError)
-                {
-                    <p style="color:var(--warn);margin:0 0 8px">workspaces.json을 읽지 못해 더하기 · 지우기를 막았습니다 (덮어쓰지 않음): @wsError</p>
-                }
-                @foreach (var warning in Model.WorkspaceWarnings)
-                {
-                    <p style="color:var(--warn);margin:0 0 6px">쓰지 않는 앱 항목 — @warning (workspaces.json에는 남겨 둠 — 고치려면 앱을 끄고 그 파일을 고친 뒤 다시 켭니다)</p>
-                }
-                <table class="settings-table">
-                    <thead><tr><th>이름</th><th>경로</th><th>출처</th><th>MCP 서버 명령</th><th>훅</th><th>방</th><th></th></tr></thead>
-                    <tbody>
-                        @foreach (var w in Model.Workspaces)
-                        {
-                            <tr>
-                                <td>@w.Entry.Name</td>
-                                <td class="mono">@w.Entry.Path@(w.Exists ? "" : " (없는 폴더)")
-                                    @if (w.Unusable is { } why)
-                                    {
-                                        <br /><span style="color:var(--warn);font-family:inherit">지금 쓸 수 없음 — @why</span>
-                                    }
-                                </td>
-                                <td class="muted">@(w.Entry.FromConfig ? "설정 파일" : "앱")</td>
-                                <td class="mono">@(w.McpCommand ?? "없음 (읽기 이상 방은 실패)")</td>
-                                <td>@(w.HasHooks ? "있음" : "없음")</td>
-                                <td>@w.Rooms</td>
-                                <td>
-                                    @if (!w.Entry.FromConfig)
-                                    {
-                                        <form method="post" asp-page-handler="RemoveWorkspace" onsubmit="return confirm('목록에서 뺄까요? 폴더 · 파일은 지우지 않습니다.')">
-                                            <input type="hidden" name="name" value="@w.Entry.Name" />
-                                            <button class="btn" type="submit" @(w.Rooms > 0 ? "disabled" : null)
-                                                    title="@(w.Rooms > 0 ? "이 폴더를 쓰는 방(휴지통 포함)이 있어 뺄 수 없습니다" : "목록에서 빼기")">@Icons.Svg("minus") 빼기</button>
-                                        </form>
-                                    }
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-                <form method="post" asp-page-handler="AddWorkspace" class="settings-add">
-                    <input type="text" name="name" placeholder="이름 (예: MyProject)" maxlength="40" required value="@Model.NewName" />
-                    <input type="text" name="path" placeholder="절대 경로 (예: F:/AI/MyProject)" maxlength="400" required value="@Model.NewPath" class="mono" />
-                    <label class="muted"><input type="checkbox" name="confirm" value="true" /> 이 폴더에서 지휘자가 편집 · 명령 실행을 하고, 그 폴더의 MCP 서버 명령 · 프로젝트 훅이 돈다는 것을 압니다</label>
-                    <button class="btn primary" type="submit">@Icons.Svg("plus") 더하기</button>
-                </form>
-                <p class="muted" style="margin:6px 0 0;font-size:12px">
-                    드라이브 문자 경로만 받습니다. 드라이브 루트 · Windows · Program Files · 사용자 홈 전체 · 이 앱과 그 저장소 · 데이터 폴더 · Claude 설정 폴더(.claude)를
-                    품거나 그 안인 폴더, 링크(정션)를 거치는 경로, 방이 쓰던 이름은 받지 않습니다.
-                </p>
-            </section>
+            <div class="settings-tab" id="tab-general" data-tab="general" role="tabpanel" aria-labelledby="tab-btn-general">
+                @* 화면 테마 (5차 a — 노션 "UI/UX 변경 희망": 디코 같은 어두운 테마, 결정 "설정으로") *@
+                <section class="panel" style="padding:12px 14px">
+                    <h3 style="margin:0 0 6px;font-size:15px">화면 테마</h3>
+                    <p class="muted" style="margin:0 0 8px;font-size:12.5px">데스크톱 앱에서는 대시보드 탭과 맨 위 줄도 같은 테마로 보입니다.</p>
+                    <form method="post" asp-page-handler="Theme" class="settings-add">
+                        @{ var theme = Model.Profiles.Store.Theme(); }
+                        <select name="theme" aria-label="화면 테마">
+                            @foreach (var t in ProfileStore.Themes)
+                            {
+                                <option value="@t" selected="@(t == theme)">@SettingsModel.ThemeName(t)</option>
+                            }
+                        </select>
+                        <button class="btn primary" type="submit">@Icons.Svg("check") 테마 저장</button>
+                    </form>
+                </section>
 
-            @* Unity 프로젝트: 명령 방이 곁칸 '연결'에서 하나를 고르면 그 실행에 unity mcp가 붙는다 *@
-            <section class="panel" style="padding:12px 14px;margin-bottom:16px">
-                <h3 style="margin:0 0 6px;font-size:15px">Unity 프로젝트</h3>
-                <p class="muted" style="margin:0 0 8px;font-size:12.5px">
-                    명령 방의 곁칸 → 연결에서 고르면 그 방 지휘자가 열린 에디터를 <b>묻지 않고</b> 조작합니다 (씬 · 에셋 편집 · 빌드 · 패키지 포함, C# 코드 실행만 카드로 묻습니다).
-                    Unity CLI: <span class="mono">@(Model.UnityCli ?? "찾지 못함 — Chat:UnityCliPath")</span>
-                </p>
-                @if (Model.UnityLoadError is { } uError)
-                {
-                    <p style="color:var(--warn);margin:0 0 8px">unity-projects.json을 읽지 못해 더하기 · 지우기를 막았습니다 (덮어쓰지 않음): @uError</p>
-                }
-                @foreach (var warning in Model.UnityWarnings)
-                {
-                    <p style="color:var(--warn);margin:0 0 6px">쓰지 않는 앱 항목 — @warning</p>
-                }
-                <table class="settings-table">
-                    <thead><tr><th>이름</th><th>경로</th><th>출처</th><th>방</th><th></th></tr></thead>
-                    <tbody>
-                        @foreach (var u in Model.UnityRows)
-                        {
-                            <tr>
-                                <td>@u.Entry.Name</td>
-                                <td class="mono">@u.Entry.Path@(u.Exists ? "" : " (없는 폴더)")
-                                    @if (u.Unusable is { } why)
-                                    {
-                                        <br /><span style="color:var(--warn);font-family:inherit">지금 쓸 수 없음 — @why</span>
-                                    }
-                                </td>
-                                <td class="muted">@(u.Entry.FromConfig ? "설정 파일" : "앱")</td>
-                                <td>@u.Rooms</td>
-                                <td>
-                                    @if (!u.Entry.FromConfig)
-                                    {
-                                        <form method="post" asp-page-handler="RemoveUnity" onsubmit="return confirm('목록에서 뺄까요? 프로젝트 파일은 지우지 않습니다.')">
-                                            <input type="hidden" name="name" value="@u.Entry.Name" />
-                                            <button class="btn" type="submit" @(u.Rooms > 0 ? "disabled" : null)
-                                                    title="@(u.Rooms > 0 ? "이 프로젝트를 연결한 방(휴지통 포함)이 있어 뺄 수 없습니다" : "목록에서 빼기")">@Icons.Svg("minus") 빼기</button>
-                                        </form>
-                                    }
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-                @if (Model.UnityRows.Count == 0)
-                {
-                    <p class="muted" style="margin:6px 0 0">아직 없습니다.</p>
-                }
-                <form method="post" asp-page-handler="AddUnity" class="settings-add">
-                    <input type="text" name="name" placeholder="이름 (예: ToolCreate)" maxlength="40" required value="@Model.NewUnityName" />
-                    <input type="text" name="path" placeholder="프로젝트 폴더 (예: F:/AI/ToolCreate)" maxlength="400" required value="@Model.NewUnityPath" class="mono" />
-                    <label class="muted"><input type="checkbox" name="confirm" value="true" /> 연결한 명령 방의 지휘자가 이 프로젝트 에디터를 묻지 않고 조작한다는 것을 압니다</label>
-                    <button class="btn primary" type="submit">@Icons.Svg("plus") 더하기</button>
-                </form>
-            </section>
-
-            @* 앱에서 더한 MCP 서버: 모든 방 연결 탭에 "앱 서버"로, 방마다 켬. 작업 폴더 .mcp.json에 같은 이름이 있으면 그쪽 *@
-            @* Codex 구성원: 켤 수 있는 작업 폴더 — 기본 없음 *@
-            <section class="panel" style="padding:12px 14px;margin-bottom:16px">
-                <h3 style="margin:0 0 6px;font-size:15px">Codex (단톡방 구성원)</h3>
-                <p class="muted" style="margin:0 0 8px;font-size:12.5px">
-                    단톡방에 OpenAI Codex CLI 구성원을 넣을 수 있는 작업 폴더를 고릅니다(기본 없음). Codex는 ChatGPT 로그인(터미널에서 <code class="mono">codex login</code>)으로 돌고,
-                    늘 <b>읽기 전용</b>이지만 <b>디스크 전체를 읽을 수 있습니다</b> — 작업 폴더 밖 파일(사내 자료 등)도 읽어 OpenAI로 보낼 수 있으니 그런 자료가 있는 PC · 폴더에서는 켜지 마세요.
-                </p>
-                <p class="muted" style="margin:0 0 8px;font-size:12.5px">
-                    실행 파일: @(Model.CodexExe is { } exe ? exe : "찾지 못함 — npm i -g @openai/codex (또는 설정 Chat:CodexPath)") ·
-                    모델: @(Model.CodexModelList.Count == 0 ? "목록 없음 (Codex 기본만)" : string.Join(", ", Model.CodexModelList.Select(m => m.Name)))
-                </p>
-                <form method="post" asp-page-handler="CodexWorkspaces" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
-                    @foreach (var w in Model.AllWorkspaceList)
+                @* 프로필 (3차 e — 결정 4 "이름 · 그림 · 색 + 지휘자 표정"). 말투 · 프롬프트는 바꾸지 않는다 *@
+                <section class="panel" style="padding:12px 14px">
+                    <h3 style="margin:0 0 6px;font-size:15px">프로필</h3>
+                    <p class="muted" style="margin:0 0 8px;font-size:12.5px">
+                        말풍선 · 방 목록 · 미니 창에 보이는 이름 · 아바타. 그림은 png · jpg · webp, @(ProfileStore.MaxImageBytes / 1024)KB까지 (회사 모드에서는 숨김).
+                        외부 에이전트는 호출 기록에 나온 이름입니다. 비우면 기본값.
+                    </p>
+                    @if (Model.Profiles.Store.LoadError is { } pError)
                     {
-                        <label><input type="checkbox" name="names" value="@w.Name" checked="@Model.CodexWorkspaces.Contains(w.Name, StringComparer.OrdinalIgnoreCase)" /> @w.Name</label>
+                        <p style="color:var(--warn);margin:0 0 8px">profiles.json을 읽지 못해 저장을 막았습니다 (덮어쓰지 않음): @pError</p>
                     }
-                    <button class="btn" type="submit">저장</button>
-                </form>
-            </section>
-            <section class="panel" style="padding:12px 14px;margin-bottom:16px">
-                <h3 style="margin:0 0 6px;font-size:15px">MCP 서버 (앱)</h3>
-                <p class="muted" style="margin:0 0 8px;font-size:12.5px">
-                    여기 더한 서버는 모든 방의 곁칸 → 연결에 "앱 서버"로 보이고, 방마다 켭니다(기본 꺼짐). 켠 방에서는 이 명령이 <b>승인 없이</b> 돌고 도구도 묻지 않고 씁니다.
-                    작업 폴더 .mcp.json에 같은 이름이 있으면 그쪽을 씁니다. OAuth로 로그인하는 서버(Notion 등)는 터미널 claude의 /mcp에서 한 번 로그인해 두세요.
-                </p>
-                @if (Model.McpLoadError is { } mError)
-                {
-                    <p style="color:var(--warn);margin:0 0 8px">mcp-servers.json을 읽지 못해 더하기 · 빼기를 막았습니다 (덮어쓰지 않음): @mError</p>
-                }
-                @foreach (var warning in Model.McpWarnings)
-                {
-                    <p style="color:var(--warn);margin:0 0 6px">쓰지 않는 항목 — @warning</p>
-                }
-                @if (Model.McpRows.Count > 0)
-                {
+                    @foreach (var (key, label, defaultName) in Model.ProfileRows)
+                    {
+                        var p = Model.Profiles.Store.Get(key);
+                        <form method="post" asp-page-handler="Profile" enctype="multipart/form-data" class="settings-profile">
+                            <input type="hidden" name="key" value="@key" />
+                            @Model.Profiles.Avatar(key, p.Name ?? defaultName)
+                            <span class="who-key">@label</span>
+                            <input type="text" name="name" value="@(p.Name ?? "")" placeholder="@defaultName" maxlength="@ProfileStore.MaxNameChars" aria-label="@label 보이는 이름" />
+                            <input type="text" name="color" value="@(p.Color ?? "")" placeholder="#c26b3a" maxlength="7" class="mono" style="width:90px" aria-label="@label 색" />
+                            <input type="file" name="image" accept="image/png,image/jpeg,image/webp" aria-label="@label 그림" />
+                            @if (p.Image is not null)
+                            {
+                                <label class="muted"><input type="checkbox" name="clearImage" value="true" /> 그림 지우기</label>
+                            }
+                            <button class="btn" type="submit">@Icons.Svg("check") 저장</button>
+                        </form>
+                    }
+                </section>
+
+                @* 데스크톱 알림 (노션 "데스크톱 알림에 답변 내용 보이기", 결정 "설정 화면 토글" · 기본 끔). 승인 · 질문 풍선은 늘 제목만 *@
+                <section class="panel" style="padding:12px 14px">
+                    <h3 style="margin:0 0 6px;font-size:15px">데스크톱 알림</h3>
+                    <p class="muted" style="margin:0 0 8px;font-size:12.5px">켜면 '답 끝' · '실패' 풍선에 지휘자 답 앞부분(방 목록 미리보기와 같은 80자)이 보입니다. 글이 Windows 알림 센터에 남으니 회사에서는 끄세요. 승인 · 질문 풍선은 늘 방 제목만.</p>
+                    <form method="post" asp-page-handler="Notify" class="settings-add">
+                        <label class="switch">
+                            <input type="checkbox" name="notifyBody" value="true" checked="@Model.Profiles.Store.NotifyBody()" />
+                            <span class="track"></span>
+                            알림에 답 앞부분 보이기
+                        </label>
+                        <button class="btn primary" type="submit">@Icons.Svg("check") 알림 저장</button>
+                    </form>
+                </section>
+            </div>
+
+            <div class="settings-tab" id="tab-work" data-tab="work" role="tabpanel" aria-labelledby="tab-btn-work">
+                <section class="panel" style="padding:12px 14px">
+                    <h3 style="margin:0 0 6px;font-size:15px">작업 폴더</h3>
+                    <p class="muted" style="margin:0 0 8px;font-size:12.5px">
+                        방은 작업 폴더 안에서 읽고 · 편집하고 · (명령 방이면) 명령을 실행합니다. 설정 파일(appsettings) 것은 여기서 바꿀 수 없습니다.
+                        읽기 이상 방은 그 폴더 .mcp.json의 <span class="mono">@Model.McpServer</span> 항목 명령을 <b>승인 없이</b> MCP 서버로 띄우고,
+                        그 폴더 .claude/settings.json의 훅도 돕니다 — 믿을 수 있는 폴더만 더하세요.
+                    </p>
+                    @if (Model.WorkspaceLoadError is { } wsError)
+                    {
+                        <p style="color:var(--warn);margin:0 0 8px">workspaces.json을 읽지 못해 더하기 · 지우기를 막았습니다 (덮어쓰지 않음): @wsError</p>
+                    }
+                    @foreach (var warning in Model.WorkspaceWarnings)
+                    {
+                        <p style="color:var(--warn);margin:0 0 6px">쓰지 않는 앱 항목 — @warning (workspaces.json에는 남겨 둠 — 고치려면 앱을 끄고 그 파일을 고친 뒤 다시 켭니다)</p>
+                    }
                     <table class="settings-table">
-                        <thead><tr><th>이름</th><th>종류</th><th>명령 · URL</th><th>켠 방</th><th></th></tr></thead>
+                        <thead><tr><th>이름</th><th>경로</th><th>출처</th><th>MCP 서버 명령</th><th>훅</th><th>방</th><th></th></tr></thead>
                         <tbody>
-                            @foreach (var m in Model.McpRows)
+                            @foreach (var w in Model.Workspaces)
                             {
                                 <tr>
-                                    <td class="mono">@m.Name</td>
-                                    <td>@m.Transport</td>
-                                    <td class="mono">@m.Command
-                                        @if (m.Secrets.Count > 0)
+                                    <td>@w.Entry.Name</td>
+                                    <td class="mono">@w.Entry.Path@(w.Exists ? "" : " (없는 폴더)")
+                                        @if (w.Unusable is { } why)
                                         {
-                                            <br /><span style="color:var(--warn);font-family:inherit">확인할 점: @string.Join(" · ", m.Secrets) (토큰은 ${변수} 자리표시를 권합니다)</span>
+                                            <br /><span style="color:var(--warn);font-family:inherit">지금 쓸 수 없음 — @why</span>
                                         }
                                     </td>
-                                    <td>@m.Rooms</td>
+                                    <td class="muted">@(w.Entry.FromConfig ? "설정 파일" : "앱")</td>
+                                    <td class="mono">@(w.McpCommand ?? "없음 (읽기 이상 방은 실패)")</td>
+                                    <td>@(w.HasHooks ? "있음" : "없음")</td>
+                                    <td>@w.Rooms</td>
                                     <td>
-                                        <form method="post" asp-page-handler="RemoveMcp" onsubmit="return confirm('목록에서 뺄까요? 켜 둔 방에서도 꺼집니다 (같은 이름을 다시 더해도 방마다 다시 켜야 합니다).')">
-                                            <input type="hidden" name="name" value="@m.Name" />
-                                            <button class="btn" type="submit">@Icons.Svg("minus") 빼기</button>
-                                        </form>
+                                        @if (!w.Entry.FromConfig)
+                                        {
+                                            <form method="post" asp-page-handler="RemoveWorkspace" onsubmit="return confirm('목록에서 뺄까요? 폴더 · 파일은 지우지 않습니다.')">
+                                                <input type="hidden" name="name" value="@w.Entry.Name" />
+                                                <button class="btn" type="submit" @(w.Rooms > 0 ? "disabled" : null)
+                                                        title="@(w.Rooms > 0 ? "이 폴더를 쓰는 방(휴지통 포함)이 있어 뺄 수 없습니다" : "목록에서 빼기")">@Icons.Svg("minus") 빼기</button>
+                                            </form>
+                                        }
                                     </td>
                                 </tr>
                             }
                         </tbody>
                     </table>
-                }
-                else
-                {
-                    <p class="muted" style="margin:0 0 6px">아직 없습니다.</p>
-                }
+                    <form method="post" asp-page-handler="AddWorkspace" class="settings-add">
+                        <input type="text" name="name" placeholder="이름 (예: MyProject)" maxlength="40" required value="@Model.NewName" />
+                        <input type="text" name="path" placeholder="절대 경로 (예: F:/AI/MyProject)" maxlength="400" required value="@Model.NewPath" class="mono" />
+                        <label class="muted"><input type="checkbox" name="confirm" value="true" /> 이 폴더에서 지휘자가 편집 · 명령 실행을 하고, 그 폴더의 MCP 서버 명령 · 프로젝트 훅이 돈다는 것을 압니다</label>
+                        <button class="btn primary" type="submit">@Icons.Svg("plus") 더하기</button>
+                    </form>
+                    <p class="muted" style="margin:6px 0 0;font-size:12px">
+                        드라이브 문자 경로만 받습니다. 드라이브 루트 · Windows · Program Files · 사용자 홈 전체 · 이 앱과 그 저장소 · 데이터 폴더 · Claude 설정 폴더(.claude)를
+                        품거나 그 안인 폴더, 링크(정션)를 거치는 경로, 방이 쓰던 이름은 받지 않습니다.
+                    </p>
+                </section>
 
-                <details class="mcp-add" open="@(Model.NewMcpName is not null || Model.NewMcpJson is not null)">
-                    <summary>더하기 — 칸 채우기</summary>
-                    <form method="post" asp-page-handler="AddMcpFields" class="settings-add">
-                        <input type="text" name="name" placeholder="이름 (예: notion)" maxlength="64" required value="@Model.NewMcpName" />
-                        <select name="type" aria-label="종류">
-                            <option value="stdio" selected="@(Model.NewMcpType is null or "stdio")">stdio (명령)</option>
-                            <option value="http" selected="@(Model.NewMcpType == "http")">http (URL)</option>
-                            <option value="sse" selected="@(Model.NewMcpType == "sse")">sse (URL)</option>
-                        </select>
-                        <input type="text" name="command" placeholder="명령 줄 (stdio — 예: npx -y @@modelcontextprotocol/server-memory)" maxlength="2000" value="@Model.NewMcpCommand" class="mono" />
-                        <input type="text" name="url" placeholder="URL (http · sse — 예: https://mcp.notion.com/mcp)" maxlength="2000" value="@Model.NewMcpUrl" class="mono" />
-                        <label class="muted"><input type="checkbox" name="confirm" value="true" /> 켠 방에서 이 서버 명령이 승인 없이 돈다는 것을 압니다</label>
-                        <button class="btn primary" type="submit">@Icons.Svg("plus") 더하기</button>
-                    </form>
-                </details>
-                <details class="mcp-add" open="@(Model.NewMcpJson is not null)">
-                    <summary>더하기 — JSON 붙여넣기</summary>
-                    <form method="post" asp-page-handler="AddMcpJson" class="settings-add">
-                        <textarea name="json" rows="6" class="mono" style="width:100%" maxlength="20000"
-                                  placeholder='{"mcpServers": {"이름": {"command": "…", "args": ["…"]}}} · {"이름": {…}} · 항목 하나(claude mcp add-json 모양 — 아래 이름 칸과 함께)'>@Model.NewMcpJson</textarea>
-                        <input type="text" name="name" placeholder="이름 (항목 하나만 붙일 때)" maxlength="64" value="@Model.NewMcpName" />
-                        <label class="muted"><input type="checkbox" name="confirm" value="true" /> 켠 방에서 이 서버 명령이 승인 없이 돈다는 것을 압니다</label>
-                        <button class="btn primary" type="submit">@Icons.Svg("plus") 더하기</button>
-                    </form>
-                </details>
-                <details class="mcp-add">
-                    <summary>더하기 — ~/.claude.json에서 가져오기 (@(Model.McpImports.Count)개)</summary>
-                    @if (Model.McpImports.Count == 0)
+                @* Unity 프로젝트: 명령 방이 곁칸 '연결'에서 하나를 고르면 그 실행에 unity mcp가 붙는다 *@
+                <section class="panel" style="padding:12px 14px">
+                    <h3 style="margin:0 0 6px;font-size:15px">Unity 프로젝트</h3>
+                    <p class="muted" style="margin:0 0 8px;font-size:12.5px">
+                        명령 방의 곁칸 → 연결에서 고르면 그 방 지휘자가 열린 에디터를 <b>묻지 않고</b> 조작합니다 (씬 · 에셋 편집 · 빌드 · 패키지 포함, C# 코드 실행만 카드로 묻습니다).
+                        Unity CLI: <span class="mono">@(Model.UnityCli ?? "찾지 못함 — Chat:UnityCliPath")</span>
+                    </p>
+                    @if (Model.UnityLoadError is { } uError)
                     {
-                        <p class="muted" style="margin:6px 0 0">~/.claude.json에 서버가 없거나 읽지 못했습니다.</p>
+                        <p style="color:var(--warn);margin:0 0 8px">unity-projects.json을 읽지 못해 더하기 · 지우기를 막았습니다 (덮어쓰지 않음): @uError</p>
                     }
-                    else
+                    @foreach (var warning in Model.UnityWarnings)
+                    {
+                        <p style="color:var(--warn);margin:0 0 6px">쓰지 않는 앱 항목 — @warning</p>
+                    }
+                    <table class="settings-table">
+                        <thead><tr><th>이름</th><th>경로</th><th>출처</th><th>방</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var u in Model.UnityRows)
+                            {
+                                <tr>
+                                    <td>@u.Entry.Name</td>
+                                    <td class="mono">@u.Entry.Path@(u.Exists ? "" : " (없는 폴더)")
+                                        @if (u.Unusable is { } why)
+                                        {
+                                            <br /><span style="color:var(--warn);font-family:inherit">지금 쓸 수 없음 — @why</span>
+                                        }
+                                    </td>
+                                    <td class="muted">@(u.Entry.FromConfig ? "설정 파일" : "앱")</td>
+                                    <td>@u.Rooms</td>
+                                    <td>
+                                        @if (!u.Entry.FromConfig)
+                                        {
+                                            <form method="post" asp-page-handler="RemoveUnity" onsubmit="return confirm('목록에서 뺄까요? 프로젝트 파일은 지우지 않습니다.')">
+                                                <input type="hidden" name="name" value="@u.Entry.Name" />
+                                                <button class="btn" type="submit" @(u.Rooms > 0 ? "disabled" : null)
+                                                        title="@(u.Rooms > 0 ? "이 프로젝트를 연결한 방(휴지통 포함)이 있어 뺄 수 없습니다" : "목록에서 빼기")">@Icons.Svg("minus") 빼기</button>
+                                            </form>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                    @if (Model.UnityRows.Count == 0)
+                    {
+                        <p class="muted" style="margin:6px 0 0">아직 없습니다.</p>
+                    }
+                    <form method="post" asp-page-handler="AddUnity" class="settings-add">
+                        <input type="text" name="name" placeholder="이름 (예: ToolCreate)" maxlength="40" required value="@Model.NewUnityName" />
+                        <input type="text" name="path" placeholder="프로젝트 폴더 (예: F:/AI/ToolCreate)" maxlength="400" required value="@Model.NewUnityPath" class="mono" />
+                        <label class="muted"><input type="checkbox" name="confirm" value="true" /> 연결한 명령 방의 지휘자가 이 프로젝트 에디터를 묻지 않고 조작한다는 것을 압니다</label>
+                        <button class="btn primary" type="submit">@Icons.Svg("plus") 더하기</button>
+                    </form>
+                </section>
+
+                <section class="panel" style="padding:12px 14px">
+                    <h3 style="margin:0 0 6px;font-size:15px">방 이름</h3>
+                    <p class="muted" style="margin:0 0 8px;font-size:12.5px">비우면 첫 말이 제목이 됩니다. 방의 작업 폴더는 바꿀 수 없습니다 — 세션 기록이 폴더마다 저장돼서 새 방을 만들어야 합니다.</p>
+                    <table class="settings-table">
+                        <thead><tr><th>제목</th><th>작업 폴더</th><th>권한</th></tr></thead>
+                        <tbody>
+                            @foreach (var (room, title) in Model.Rooms)
+                            {
+                                <tr>
+                                    <td>
+                                        <form method="post" asp-page-handler="Rename" class="settings-rename">
+                                            <input type="hidden" name="id" value="@room.Id" />
+                                            <input type="text" name="title" value="@(room.Title ?? "")" placeholder="@title" maxlength="200" aria-label="@title 방 제목" />
+                                            <button class="btn" type="submit">@Icons.Svg("check") 바꾸기</button>
+                                            <a href="/Room/@room.Id" class="icon-link" title="방 열기">@Icons.Svg("open") 열기</a>
+                                        </form>
+                                    </td>
+                                    <td>@room.Workspace</td>
+                                    <td>@RoomRules.LevelName(room.Level)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                    @if (Model.Rooms.Count == 0)
+                    {
+                        <p class="muted" style="margin:6px 0 0">아직 방이 없습니다.</p>
+                    }
+                </section>
+            </div>
+
+            <div class="settings-tab" id="tab-connect" data-tab="connect" role="tabpanel" aria-labelledby="tab-btn-connect">
+                @* claude CLI 판 · 카드 자가 시험 (결정 "사이드바 + 설정" · "설정 단추로만") *@
+                @{ var cli = Model.Cli; }
+                <section class="panel" id="cli" style="padding:12px 14px@(cli.NeedsCheck ? ";border-color:var(--warn)" : "")">
+                    <h3 style="margin:0 0 6px;font-size:15px">claude CLI · 카드 자가 시험</h3>
+                    <p class="muted" style="margin:0 0 8px;font-size:12.5px">
+                        승인 · 질문 카드는 claude CLI의 제어 요청 모양에 기댑니다. CLI가 바뀌면 자가 시험으로 확인하세요 —
+                        임시 폴더에서 haiku로 짧은 턴 하나를 돌려 앱이 카드에 자동으로 답합니다 (토큰 조금).
+                    </p>
+                    <p style="margin:0 0 8px;font-size:13px">
+                        지금 본 판 <b>@(cli.Seen ?? "아직 모름")</b> · 확인한 판 <b>@(cli.Checked ?? "없음")</b>@(cli.CheckedAt is { } at ? $" ({at.ToLocalTime():MM-dd HH:mm})" : "")
+                        @if (cli.NeedsCheck) { <span class="badge warn">확인 필요</span> }
+                    </p>
+                    @if (cli.LastTest is { } test)
+                    {
+                        <p class="muted" style="margin:0;font-size:12.5px">마지막 자가 시험 @test.At.ToLocalTime().ToString("MM-dd HH:mm") · 판 @(test.Version ?? "?") · @(test.Passed ? "통과" : "통과 못 함")@(test.Error is { } err ? " — " + err : "")</p>
+                        <ul class="cli-steps">
+                            @foreach (var step in test.Steps)
+                            {
+                                <li class="@(step.State == CliSelfTest.Passed ? "pass" : step.State == CliSelfTest.Failed ? "fail" : "miss")">@step.Name: @step.State@(step.Detail is { } d ? " — " + d : "")</li>
+                            }
+                        </ul>
+                    }
+                    <form method="post" asp-page-handler="CliSelfTest" style="margin-top:8px" onsubmit="this.querySelector('button').disabled = true; this.querySelector('button').textContent = '시험 중… (최대 2분)';">
+                        <button class="btn" type="submit" disabled="@Model.CliTestRunning">@Icons.Svg("check") 카드 자가 시험</button>
+                    </form>
+                </section>
+
+                @* 앱에서 더한 MCP 서버: 모든 방 연결 탭에 "앱 서버"로, 방마다 켬. 작업 폴더 .mcp.json에 같은 이름이 있으면 그쪽 *@
+                @* Codex 구성원: 켤 수 있는 작업 폴더 — 기본 없음 *@
+                <section class="panel" style="padding:12px 14px">
+                    <h3 style="margin:0 0 6px;font-size:15px">Codex (단톡방 구성원)</h3>
+                    <p class="muted" style="margin:0 0 8px;font-size:12.5px">
+                        단톡방에 OpenAI Codex CLI 구성원을 넣을 수 있는 작업 폴더를 고릅니다(기본 없음). Codex는 ChatGPT 로그인(터미널에서 <code class="mono">codex login</code>)으로 돌고,
+                        늘 <b>읽기 전용</b>이지만 <b>디스크 전체를 읽을 수 있습니다</b> — 작업 폴더 밖 파일(사내 자료 등)도 읽어 OpenAI로 보낼 수 있으니 그런 자료가 있는 PC · 폴더에서는 켜지 마세요.
+                    </p>
+                    <p class="muted" style="margin:0 0 8px;font-size:12.5px">
+                        실행 파일: @(Model.CodexExe is { } exe ? exe : "찾지 못함 — npm i -g @openai/codex (또는 설정 Chat:CodexPath)") ·
+                        모델: @(Model.CodexModelList.Count == 0 ? "목록 없음 (Codex 기본만)" : string.Join(", ", Model.CodexModelList.Select(m => m.Name)))
+                    </p>
+                    <form method="post" asp-page-handler="CodexWorkspaces" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+                        @foreach (var w in Model.AllWorkspaceList)
+                        {
+                            <label><input type="checkbox" name="names" value="@w.Name" checked="@Model.CodexWorkspaces.Contains(w.Name, StringComparer.OrdinalIgnoreCase)" /> @w.Name</label>
+                        }
+                        <button class="btn" type="submit">저장</button>
+                    </form>
+                </section>
+
+                <section class="panel" style="padding:12px 14px">
+                    <h3 style="margin:0 0 6px;font-size:15px">MCP 서버 (앱)</h3>
+                    <p class="muted" style="margin:0 0 8px;font-size:12.5px">
+                        여기 더한 서버는 모든 방의 곁칸 → 연결에 "앱 서버"로 보이고, 방마다 켭니다(기본 꺼짐). 켠 방에서는 이 명령이 <b>승인 없이</b> 돌고 도구도 묻지 않고 씁니다.
+                        작업 폴더 .mcp.json에 같은 이름이 있으면 그쪽을 씁니다. OAuth로 로그인하는 서버(Notion 등)는 터미널 claude의 /mcp에서 한 번 로그인해 두세요.
+                    </p>
+                    @if (Model.McpLoadError is { } mError)
+                    {
+                        <p style="color:var(--warn);margin:0 0 8px">mcp-servers.json을 읽지 못해 더하기 · 빼기를 막았습니다 (덮어쓰지 않음): @mError</p>
+                    }
+                    @foreach (var warning in Model.McpWarnings)
+                    {
+                        <p style="color:var(--warn);margin:0 0 6px">쓰지 않는 항목 — @warning</p>
+                    }
+                    @if (Model.McpRows.Count > 0)
                     {
                         <table class="settings-table">
-                            <thead><tr><th>범위</th><th>이름</th><th>명령 · URL</th><th></th></tr></thead>
+                            <thead><tr><th>이름</th><th>종류</th><th>명령 · URL</th><th>켠 방</th><th></th></tr></thead>
                             <tbody>
-                                @foreach (var i in Model.McpImports)
+                                @foreach (var m in Model.McpRows)
                                 {
-                                    var added = Model.McpRows.Any(m => string.Equals(m.Name, i.Name, StringComparison.OrdinalIgnoreCase));
                                     <tr>
-                                        <td class="muted">@i.Scope</td>
-                                        <td class="mono">@i.Name</td>
-                                        <td class="mono">@AppMcpStore.Describe(i.Entry)</td>
+                                        <td class="mono">@m.Name</td>
+                                        <td>@m.Transport</td>
+                                        <td class="mono">@m.Command
+                                            @if (m.Secrets.Count > 0)
+                                            {
+                                                <br /><span style="color:var(--warn);font-family:inherit">확인할 점: @string.Join(" · ", m.Secrets) (토큰은 ${변수} 자리표시를 권합니다)</span>
+                                            }
+                                        </td>
+                                        <td>@m.Rooms</td>
                                         <td>
-                                            @if (added)
-                                            {
-                                                <span class="muted">이미 있음</span>
-                                            }
-                                            else
-                                            {
-                                                <form method="post" asp-page-handler="ImportMcp" class="settings-add">
-                                                    <input type="hidden" name="scope" value="@i.Scope" />
-                                                    <input type="hidden" name="name" value="@i.Name" />
-                                                    <label class="muted"><input type="checkbox" name="confirm" value="true" /> 승인 없이 돈다는 것을 압니다</label>
-                                                    <button class="btn" type="submit">@Icons.Svg("plus") 가져오기</button>
-                                                </form>
-                                            }
+                                            <form method="post" asp-page-handler="RemoveMcp" onsubmit="return confirm('목록에서 뺄까요? 켜 둔 방에서도 꺼집니다 (같은 이름을 다시 더해도 방마다 다시 켜야 합니다).')">
+                                                <input type="hidden" name="name" value="@m.Name" />
+                                                <button class="btn" type="submit">@Icons.Svg("minus") 빼기</button>
+                                            </form>
                                         </td>
                                     </tr>
                                 }
                             </tbody>
                         </table>
                     }
-                </details>
-            </section>
+                    else
+                    {
+                        <p class="muted" style="margin:0 0 6px">아직 없습니다.</p>
+                    }
 
-            <section class="panel" style="padding:12px 14px">
-                <h3 style="margin:0 0 6px;font-size:15px">방 이름</h3>
-                <p class="muted" style="margin:0 0 8px;font-size:12.5px">비우면 첫 말이 제목이 됩니다. 방의 작업 폴더는 바꿀 수 없습니다 — 세션 기록이 폴더마다 저장돼서 새 방을 만들어야 합니다.</p>
-                <table class="settings-table">
-                    <thead><tr><th>제목</th><th>작업 폴더</th><th>권한</th></tr></thead>
-                    <tbody>
-                        @foreach (var (room, title) in Model.Rooms)
+                    <details class="mcp-add" open="@(Model.NewMcpName is not null || Model.NewMcpJson is not null)">
+                        <summary>더하기 — 칸 채우기</summary>
+                        <form method="post" asp-page-handler="AddMcpFields" class="settings-add">
+                            <input type="text" name="name" placeholder="이름 (예: notion)" maxlength="64" required value="@Model.NewMcpName" />
+                            <select name="type" aria-label="종류">
+                                <option value="stdio" selected="@(Model.NewMcpType is null or "stdio")">stdio (명령)</option>
+                                <option value="http" selected="@(Model.NewMcpType == "http")">http (URL)</option>
+                                <option value="sse" selected="@(Model.NewMcpType == "sse")">sse (URL)</option>
+                            </select>
+                            <input type="text" name="command" placeholder="명령 줄 (stdio — 예: npx -y @@modelcontextprotocol/server-memory)" maxlength="2000" value="@Model.NewMcpCommand" class="mono" />
+                            <input type="text" name="url" placeholder="URL (http · sse — 예: https://mcp.notion.com/mcp)" maxlength="2000" value="@Model.NewMcpUrl" class="mono" />
+                            <label class="muted"><input type="checkbox" name="confirm" value="true" /> 켠 방에서 이 서버 명령이 승인 없이 돈다는 것을 압니다</label>
+                            <button class="btn primary" type="submit">@Icons.Svg("plus") 더하기</button>
+                        </form>
+                    </details>
+                    <details class="mcp-add" open="@(Model.NewMcpJson is not null)">
+                        <summary>더하기 — JSON 붙여넣기</summary>
+                        <form method="post" asp-page-handler="AddMcpJson" class="settings-add">
+                            <textarea name="json" rows="6" class="mono" style="width:100%" maxlength="20000"
+                                      placeholder='{"mcpServers": {"이름": {"command": "…", "args": ["…"]}}} · {"이름": {…}} · 항목 하나(claude mcp add-json 모양 — 아래 이름 칸과 함께)'>@Model.NewMcpJson</textarea>
+                            <input type="text" name="name" placeholder="이름 (항목 하나만 붙일 때)" maxlength="64" value="@Model.NewMcpName" />
+                            <label class="muted"><input type="checkbox" name="confirm" value="true" /> 켠 방에서 이 서버 명령이 승인 없이 돈다는 것을 압니다</label>
+                            <button class="btn primary" type="submit">@Icons.Svg("plus") 더하기</button>
+                        </form>
+                    </details>
+                    <details class="mcp-add">
+                        <summary>더하기 — ~/.claude.json에서 가져오기 (@(Model.McpImports.Count)개)</summary>
+                        @if (Model.McpImports.Count == 0)
                         {
-                            <tr>
-                                <td>
-                                    <form method="post" asp-page-handler="Rename" class="settings-rename">
-                                        <input type="hidden" name="id" value="@room.Id" />
-                                        <input type="text" name="title" value="@(room.Title ?? "")" placeholder="@title" maxlength="200" aria-label="@title 방 제목" />
-                                        <button class="btn" type="submit">@Icons.Svg("check") 바꾸기</button>
-                                        <a href="/Room/@room.Id" class="icon-link" title="방 열기">@Icons.Svg("open") 열기</a>
-                                    </form>
-                                </td>
-                                <td>@room.Workspace</td>
-                                <td>@RoomRules.LevelName(room.Level)</td>
-                            </tr>
+                            <p class="muted" style="margin:6px 0 0">~/.claude.json에 서버가 없거나 읽지 못했습니다.</p>
                         }
-                    </tbody>
-                </table>
-                @if (Model.Rooms.Count == 0)
-                {
-                    <p class="muted" style="margin:6px 0 0">아직 방이 없습니다.</p>
-                }
-            </section>
-
-            @* 프로필 (3차 e — 결정 4 "이름 · 그림 · 색 + 지휘자 표정"). 말투 · 프롬프트는 바꾸지 않는다 *@
-            <section class="panel" style="padding:12px 14px;margin-top:16px">
-                <h3 style="margin:0 0 6px;font-size:15px">프로필</h3>
-                <p class="muted" style="margin:0 0 8px;font-size:12.5px">
-                    말풍선 · 방 목록 · 미니 창에 보이는 이름 · 아바타. 그림은 png · jpg · webp, @(ProfileStore.MaxImageBytes / 1024)KB까지 (회사 모드에서는 숨김).
-                    외부 에이전트는 호출 기록에 나온 이름입니다. 비우면 기본값.
-                </p>
-                @if (Model.Profiles.Store.LoadError is { } pError)
-                {
-                    <p style="color:var(--warn);margin:0 0 8px">profiles.json을 읽지 못해 저장을 막았습니다 (덮어쓰지 않음): @pError</p>
-                }
-                @foreach (var (key, label, defaultName) in Model.ProfileRows)
-                {
-                    var p = Model.Profiles.Store.Get(key);
-                    <form method="post" asp-page-handler="Profile" enctype="multipart/form-data" class="settings-profile">
-                        <input type="hidden" name="key" value="@key" />
-                        @Model.Profiles.Avatar(key, p.Name ?? defaultName)
-                        <span class="who-key">@label</span>
-                        <input type="text" name="name" value="@(p.Name ?? "")" placeholder="@defaultName" maxlength="@ProfileStore.MaxNameChars" aria-label="@label 보이는 이름" />
-                        <input type="text" name="color" value="@(p.Color ?? "")" placeholder="#c26b3a" maxlength="7" class="mono" style="width:90px" aria-label="@label 색" />
-                        <input type="file" name="image" accept="image/png,image/jpeg,image/webp" aria-label="@label 그림" />
-                        @if (p.Image is not null)
+                        else
                         {
-                            <label class="muted"><input type="checkbox" name="clearImage" value="true" /> 그림 지우기</label>
+                            <table class="settings-table">
+                                <thead><tr><th>범위</th><th>이름</th><th>명령 · URL</th><th></th></tr></thead>
+                                <tbody>
+                                    @foreach (var i in Model.McpImports)
+                                    {
+                                        var added = Model.McpRows.Any(m => string.Equals(m.Name, i.Name, StringComparison.OrdinalIgnoreCase));
+                                        <tr>
+                                            <td class="muted">@i.Scope</td>
+                                            <td class="mono">@i.Name</td>
+                                            <td class="mono">@AppMcpStore.Describe(i.Entry)</td>
+                                            <td>
+                                                @if (added)
+                                                {
+                                                    <span class="muted">이미 있음</span>
+                                                }
+                                                else
+                                                {
+                                                    <form method="post" asp-page-handler="ImportMcp" class="settings-add">
+                                                        <input type="hidden" name="scope" value="@i.Scope" />
+                                                        <input type="hidden" name="name" value="@i.Name" />
+                                                        <label class="muted"><input type="checkbox" name="confirm" value="true" /> 승인 없이 돈다는 것을 압니다</label>
+                                                        <button class="btn" type="submit">@Icons.Svg("plus") 가져오기</button>
+                                                    </form>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
                         }
-                        <button class="btn" type="submit">@Icons.Svg("check") 저장</button>
-                    </form>
-                }
-            </section>
+                    </details>
+                </section>
+            </div>
 
-            @* 화면 테마 (5차 a — 노션 "UI/UX 변경 희망": 디코 같은 어두운 테마, 결정 "설정으로") *@
-            <section class="panel" style="padding:12px 14px;margin-top:16px">
-                <h3 style="margin:0 0 6px;font-size:15px">화면 테마</h3>
-                <p class="muted" style="margin:0 0 8px;font-size:12.5px">데스크톱 앱에서는 대시보드 탭과 맨 위 줄도 같은 테마로 보입니다.</p>
-                <form method="post" asp-page-handler="Theme" class="settings-add">
-                    @{ var theme = Model.Profiles.Store.Theme(); }
-                    <select name="theme" aria-label="화면 테마">
-                        @foreach (var t in ProfileStore.Themes)
-                        {
-                            <option value="@t" selected="@(t == theme)">@SettingsModel.ThemeName(t)</option>
-                        }
-                    </select>
-                    <button class="btn primary" type="submit">@Icons.Svg("check") 테마 저장</button>
-                </form>
-            </section>
+            <div class="settings-tab" id="tab-decor" data-tab="decor" role="tabpanel" aria-labelledby="tab-btn-decor">
+                @* 스티커 팩 (4차 D2 — 노션 "이모티콘 사용 종류 변경"): 스티커 폴더 아래 폴더 하나가 팩 하나, 파일 이름은 기본과 같다. 방마다는 곁칸 방 정보에서 *@
+                <section class="panel" style="padding:12px 14px">
+                    <h3 style="margin:0 0 6px;font-size:15px">스티커 팩</h3>
+                    @{ var packList = Model.Packs.List(); var current = Model.Profiles.Store.StickerPack(); }
+                    <p class="muted" style="margin:0 0 8px;font-size:12.5px">
+                        스티커 폴더 아래 폴더 하나가 팩 하나입니다 (안의 그림 이름은 기본과 같게, 팩에 없는 그림은 기본 것으로).
+                        폴더에 pack.json(<span class="mono">{"name": "보이는 이름"}</span>)을 두면 그 이름으로 보입니다. 방마다 다르게 하려면 방의 곁칸 → 방 정보.
+                    </p>
+                    @* 팩 폴더가 없어도 저장된 팩이 있으면 고르는 칸을 보인다 — 기본으로 되돌릴 수 있게 (ef2c83416c C9) *@
+                    @if (packList.Count == 0 && current is null)
+                    {
+                        <p class="muted" style="margin:0">팩 폴더가 없습니다 — 기본 그림만 씁니다.</p>
+                    }
+                    else
+                    {
+                        var total = Model.Packs.Total();
+                        <form method="post" asp-page-handler="StickerPack" class="settings-add">
+                            <select name="pack" aria-label="전체 스티커 팩">
+                                <option value="" selected="@(current is null)">@Model.Packs.DefaultName()</option>
+                                @foreach (var p in packList)
+                                {
+                                    <option value="@p.Id" selected="@(current == p.Id)">@p.Name (그림 @p.Files/@total)</option>
+                                }
+                                @if (current is { } gone && packList.All(p => p.Id != gone))
+                                {
+                                    <option value="@gone" selected>@gone (폴더 없음 — 기본으로 보임)</option>
+                                }
+                            </select>
+                            <button class="btn primary" type="submit">@Icons.Svg("check") 팩 저장</button>
+                        </form>
+                    }
+                </section>
 
-            @* 데스크톱 알림 (노션 "데스크톱 알림에 답변 내용 보이기", 결정 "설정 화면 토글" · 기본 끔). 승인 · 질문 풍선은 늘 제목만 *@
-            <section class="panel" style="padding:12px 14px;margin-top:16px">
-                <h3 style="margin:0 0 6px;font-size:15px">데스크톱 알림</h3>
-                <p class="muted" style="margin:0 0 8px;font-size:12.5px">켜면 '답 끝' · '실패' 풍선에 지휘자 답 앞부분(방 목록 미리보기와 같은 80자)이 보입니다. 글이 Windows 알림 센터에 남으니 회사에서는 끄세요. 승인 · 질문 풍선은 늘 방 제목만.</p>
-                <form method="post" asp-page-handler="Notify" class="settings-add">
-                    <label class="switch">
-                        <input type="checkbox" name="notifyBody" value="true" checked="@Model.Profiles.Store.NotifyBody()" />
-                        <span class="track"></span>
-                        알림에 답 앞부분 보이기
-                    </label>
-                    <button class="btn primary" type="submit">@Icons.Svg("check") 알림 저장</button>
-                </form>
-            </section>
-
-            @* 스티커 팩 (4차 D2 — 노션 "이모티콘 사용 종류 변경"): 스티커 폴더 아래 폴더 하나가 팩 하나, 파일 이름은 기본과 같다. 방마다는 곁칸 방 정보에서 *@
-            <section class="panel" style="padding:12px 14px;margin-top:16px">
-                <h3 style="margin:0 0 6px;font-size:15px">스티커 팩</h3>
-                @{ var packList = Model.Packs.List(); var current = Model.Profiles.Store.StickerPack(); }
-                <p class="muted" style="margin:0 0 8px;font-size:12.5px">
-                    스티커 폴더 아래 폴더 하나가 팩 하나입니다 (안의 그림 이름은 기본과 같게, 팩에 없는 그림은 기본 것으로).
-                    폴더에 pack.json(<span class="mono">{"name": "보이는 이름"}</span>)을 두면 그 이름으로 보입니다. 방마다 다르게 하려면 방의 곁칸 → 방 정보.
-                </p>
-                @* 팩 폴더가 없어도 저장된 팩이 있으면 고르는 칸을 보인다 — 기본으로 되돌릴 수 있게 (ef2c83416c C9) *@
-                @if (packList.Count == 0 && current is null)
-                {
-                    <p class="muted" style="margin:0">팩 폴더가 없습니다 — 기본 그림만 씁니다.</p>
-                }
-                else
-                {
-                    var total = Model.Packs.Total();
-                    <form method="post" asp-page-handler="StickerPack" class="settings-add">
-                        <select name="pack" aria-label="전체 스티커 팩">
-                            <option value="" selected="@(current is null)">@Model.Packs.DefaultName()</option>
-                            @foreach (var p in packList)
-                            {
-                                <option value="@p.Id" selected="@(current == p.Id)">@p.Name (그림 @p.Files/@total)</option>
-                            }
-                            @if (current is { } gone && packList.All(p => p.Id != gone))
-                            {
-                                <option value="@gone" selected>@gone (폴더 없음 — 기본으로 보임)</option>
-                            }
-                        </select>
-                        <button class="btn primary" type="submit">@Icons.Svg("check") 팩 저장</button>
-                    </form>
-                }
-            </section>
-
-            <section class="panel" style="padding:12px 14px;margin-top:16px">
-                <h3 style="margin:0 0 6px;font-size:15px">지휘자 표정</h3>
-                <p class="muted" style="margin:0 0 8px;font-size:12.5px">상태마다 보일 스티커 (설정 파일 Chat:Expressions보다 먼저). 비우면 기본.</p>
-                <form method="post" asp-page-handler="Faces">
-                    <table class="settings-table">
-                        <thead><tr><th>상태</th><th>스티커</th><th></th></tr></thead>
-                        <tbody>
-                            @foreach (var face in Enum.GetValues<Face>())
-                            {
-                                var chosen = Model.Profiles.Store.FaceTag(face);
-                                var url = Model.Faces.Url(face, Model.GlobalStickers);
-                                <tr>
-                                    <td>@FaceCatalog.Label(face)</td>
-                                    <td>
-                                        <select name="face[@face]">
-                                            <option value="">기본 (설정 파일 Chat:Expressions, 없으면 @FaceCatalog.DefaultTag(face))</option>
-                                            @* 저장한 태그가 지금 스티커 목록에 없으면(스티커 설정이 바뀜) 그대로 보이게 — 없으면 다음 저장이 조용히 기본으로 되돌린다 *@
-                                            @if (chosen is not null && !Model.Faces.KnownTags.Contains(chosen))
+                <section class="panel" style="padding:12px 14px">
+                    <h3 style="margin:0 0 6px;font-size:15px">지휘자 표정</h3>
+                    <p class="muted" style="margin:0 0 8px;font-size:12.5px">상태마다 보일 스티커 (설정 파일 Chat:Expressions보다 먼저). 비우면 기본.</p>
+                    <form method="post" asp-page-handler="Faces">
+                        <table class="settings-table">
+                            <thead><tr><th>상태</th><th>스티커</th><th></th></tr></thead>
+                            <tbody>
+                                @foreach (var face in Enum.GetValues<Face>())
+                                {
+                                    var chosen = Model.Profiles.Store.FaceTag(face);
+                                    var url = Model.Faces.Url(face, Model.GlobalStickers);
+                                    <tr>
+                                        <td>@FaceCatalog.Label(face)</td>
+                                        <td>
+                                            <select name="face[@face]">
+                                                <option value="">기본 (설정 파일 Chat:Expressions, 없으면 @FaceCatalog.DefaultTag(face))</option>
+                                                @* 저장한 태그가 지금 스티커 목록에 없으면(스티커 설정이 바뀜) 그대로 보이게 — 없으면 다음 저장이 조용히 기본으로 되돌린다 *@
+                                                @if (chosen is not null && !Model.Faces.KnownTags.Contains(chosen))
+                                                {
+                                                    <option value="@chosen" selected>@chosen (지금 스티커 목록에 없음)</option>
+                                                }
+                                                @foreach (var tag in Model.Faces.KnownTags)
+                                                {
+                                                    <option value="@tag" selected="@(tag == chosen)">@tag</option>
+                                                }
+                                            </select>
+                                        </td>
+                                        <td>@if (url is not null)
                                             {
-                                                <option value="@chosen" selected>@chosen (지금 스티커 목록에 없음)</option>
-                                            }
-                                            @foreach (var tag in Model.Faces.KnownTags)
-                                            {
-                                                <option value="@tag" selected="@(tag == chosen)">@tag</option>
-                                            }
-                                        </select>
-                                    </td>
-                                    <td>@if (url is not null)
-                                        {
-                                            <img src="@url" alt="" class="settings-face" />
-                                        }</td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                    <button class="btn primary" type="submit" style="margin-top:8px">@Icons.Svg("check") 표정 저장</button>
-                </form>
-            </section>
+                                                <img src="@url" alt="" class="settings-face" />
+                                            }</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                        <button class="btn primary" type="submit" style="margin-top:8px">@Icons.Svg("check") 표정 저장</button>
+                    </form>
+                </section>
+            </div>
+
+            <div class="settings-tab" id="tab-data" data-tab="data" role="tabpanel" aria-labelledby="tab-btn-data">
+                @* 데이터 백업 (결정: 설정 단추로 zip 내려받기 · 앱 데이터 + 세션 기록 · 복원은 zip 안 글대로 · 암호 없음) *@
+                @{ var backup = Model.BackupPlan; }
+                <section class="panel" id="backup" style="padding:12px 14px">
+                    <h3 style="margin:0 0 6px;font-size:15px">데이터 백업</h3>
+                    <p class="muted" style="margin:0 0 8px;font-size:12.5px">
+                        방 색인 · 단톡방 대화 · 승인 기록 · 첨부 · 프로필 · 설정 파일과, 이 앱 방들의 세션 기록(대화 본문) · 할 일을 zip 하나로 받습니다.
+                        브라우저 캐시 · 로그와 단톡방 Codex 구성원의 스레드(~/.codex)는 빠집니다. 복원은 zip 안 "복원 방법.txt"대로 복사합니다.
+                        대화 · 첨부 · MCP 설정(토큰이 있을 수 있음)이 들어 있으니 다른 사람에게 보내지 마세요.
+                    </p>
+                    <p style="margin:0 0 8px;font-size:13px">
+                        지금 담길 것: 파일 @(backup.Files.Count)개 · 세션 기록 @(backup.Sessions)개 · 압축 전 @(backup.Bytes < 1024 * 1024 ? $"{backup.Bytes / 1024.0:0.#}KB" : $"{backup.Bytes / 1024.0 / 1024.0:0.#}MB")
+                    </p>
+                    @if (Model.RunningRooms is > 0 and var running)
+                    {
+                        <p style="margin:0 0 8px;font-size:12.5px;color:var(--warn)">지금 실행 중인 방이 @(running)개 있습니다 — 끝난 뒤 받기를 권합니다 (실행 중인 대화는 그 순간까지만 담깁니다).</p>
+                    }
+                    <form method="post" asp-page-handler="Backup">
+                        <button class="btn" type="submit">@Icons.Svg("check") 백업 zip 받기</button>
+                    </form>
+                </section>
+            </div>
         </div>
     </section>
 </div>
