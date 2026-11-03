@@ -56,6 +56,9 @@ public sealed class RoomListTests : IDisposable
         Assert.Equal(1, RoomList.Build(NewRoom(readUpTo: 5), t, RoomActivity.Idle).Unread);
         Assert.Equal(0, RoomList.Build(NewRoom(readUpTo: 12), t, RoomActivity.Idle).Unread);
         Assert.Equal(0, RoomList.Build(NewRoom(), t, RoomActivity.Idle).Unread); // null(옛 방) = 모두 읽음 (5225b1ffaf C4)
+        // 도는 턴(마지막 사용자 말 뒤)의 중간 글은 세지 않는다 — 열어 둔 방에서 작업 중 숫자가 늘던 것 (사용자 보고 2026-11-03)
+        Assert.Equal(1, RoomList.Build(NewRoom(readUpTo: 0), t, RoomActivity.Busy).Unread);
+        Assert.Equal(1, RoomList.Build(NewRoom(readUpTo: 0), t, RoomActivity.Approval).Unread);
 
         var s = RoomList.Build(NewRoom(), t, RoomActivity.Idle);
         Assert.Equal("답 2", s.Preview);

@@ -202,8 +202,16 @@ public sealed class ApprovalFlowTests : IDisposable
         Assert.Null(_hub.Decide(room.Id, card.Id, ApprovalChoice.Allow, null));
         var after = await UntilAll(ch, e => e.Kind == "agent" && e.Task!.Phase == "done", e => e.Kind == "start" && e.Prompt is null);
         after.AddRange(await Until(ch, e => e.Kind == "idle"));
-        Assert.Equal("completed", after.Single(e => e.Kind == "agent" && e.Task!.Phase == "done").Task!.Status);
-        Assert.True(after.Single(e => e.Kind == "end" && after.IndexOf(e) > after.FindIndex(s => s.Kind == "start" && s.Prompt is null)).Ok);
+        // 첫 턴의 end가 자동 턴 시작보다 늦게 올 수 있다(앞 턴이 끝나는 사이 시작한 자동 턴). LiveEvent는 record라 같은 값의 end 둘을
+        // IndexOf가 첫 것으로 찾는다 — 위치로 센다 (10번에 1번꼴 실패하던 원인). 실패하면 알림 차례를 보인다
+        var order = string.Join(", ", after.Select(e => e.Kind + (e.Kind == "start" ? (e.Prompt is null ? "(auto)" : "(user)") : "")
+            + (e.Kind == "agent" ? "(" + e.Task!.Phase + ")" : "") + (e.Kind == "end" ? (e.Ok == true ? "(ok)" : "(" + e.Text + ")") : "")));
+        var done = after.Where(e => e.Kind == "agent" && e.Task!.Phase == "done").ToList();
+        Assert.True(done.Count == 1 && done[0].Task!.Status == "completed", order);
+        var autoStart = after.FindIndex(s => s.Kind == "start" && s.Prompt is null);
+        var ends = after.Skip(autoStart + 1).Where(e => e.Kind == "end").ToList();
+        Assert.True(autoStart >= 0, order);
+        Assert.True(ends.Count == 1 && ends[0].Ok == true, order);
     }
 
     /// <summary>모든 조건을 본 뒤까지 읽는다 (차례가 정해지지 않은 알림 — 턴 끝과 쉬는 실행의 작업 줄).</summary>

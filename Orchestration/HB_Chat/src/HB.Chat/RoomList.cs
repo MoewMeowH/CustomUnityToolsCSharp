@@ -286,7 +286,11 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
             : IsStoppedTurn(shown) ? "중지된 턴"
             : shown.Speaker == ChatSpeaker.User ? "나: " + Preview(Attachments.WithoutLines(shown.Text)) : Preview(shown.Text); // 첨부 경로는 빼고 (2-2 d)
         // ReadUpTo null(이 필드 전의 방, 켤 때 옮기므로 남지 않음)은 모두 읽음으로 — 잘못 세면 안 읽음이 쏟아지는 쪽보다 낫다.
-        var unread = entries.Count(e => e.Speaker == ChatSpeaker.Conductor && !e.Narration && !IsStoppedTurn(e) && e.Line > (room.ReadUpTo ?? int.MaxValue));
+        // 도는 턴(마지막 사용자 말 뒤)의 중간 글은 세지 않는다 — 열어 둔 방도 읽음 표시가 턴 끝에야 따라와서, 지휘자가 일하는 동안 숫자가 계속 늘었다
+        // (사용자 보고 2026-11-03). 턴이 끝나면 센다.
+        var turnStart = activity == RoomActivity.Idle ? int.MaxValue : entries.LastOrDefault(e => e.Speaker == ChatSpeaker.User)?.Line ?? -1;
+        var unread = entries.Count(e => e.Speaker == ChatSpeaker.Conductor && !e.Narration && !IsStoppedTurn(e)
+            && e.Line > (room.ReadUpTo ?? int.MaxValue) && e.Line <= turnStart);
         return new RoomSummary(room.Id, TitleOf(room, transcript), preview, lastAt, unread, activity,
             activity == RoomActivity.Idle && room.LastError is not null, room.Level, room.Model);
     }

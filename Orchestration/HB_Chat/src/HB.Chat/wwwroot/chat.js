@@ -1164,6 +1164,15 @@
             live.append(m);
             return body;
         }
+        // 흘림 글의 스티커 태그 [[icon:…]]는 감춘다 — 그림으로 바꾸는 것은 턴이 끝난 뒤 기록에서 하므로, 흘리는 동안 글자 그대로 보였다
+        // (사용자 보고 2026-11-03: 답 뒤 백그라운드를 기다리는 동안 [[icon:대기]]가 그대로 남음). 조각으로 나뉘어 와도 합친 뒤 지운다.
+        const liveTag = /\[\[icon:[^\[\]<>"\s]{1,40}\]\]/g;
+        function hideTags(body) {
+            if (!body || !body.textContent.includes("[[icon:")) return;
+            body.normalize();
+            for (const node of body.childNodes)
+                if (node.nodeType === Node.TEXT_NODE && node.data.includes("[[icon:")) node.data = node.data.replace(liveTag, "").replace(/\n{3,}$/, "\n\n");
+        }
         function typing() {
             const t = el("span", "typing");
             t.setAttribute("aria-label", "입력 중");
@@ -1332,6 +1341,7 @@
             chips = null;
             if (prompt) bubble("user pending", profiles.user?.name || "나", displayText(prompt));
             stream = bubble("conductor", profiles.conductor?.name || "지휘자", partial || null);
+            hideTags(stream); // 다시 붙었을 때 받은 흘림 글
             if (!partial) { stream.dataset.empty = "1"; stream.append(typing()); }
             setBusy(true);
             showQueue(pending);
@@ -2086,6 +2096,7 @@
                     if (!text) break;
                     if (stream.dataset.empty) { stream.textContent = ""; delete stream.dataset.empty; }
                     stream.append(text); // 글 조각을 텍스트 노드로 덧붙인다 (+= 는 매번 전체를 다시 만든다 — C11)
+                    if (text.includes("]")) hideTags(stream); // 태그가 닫힐 때만 본다
                     if (follow) toBottom();
                     break;
                 }
