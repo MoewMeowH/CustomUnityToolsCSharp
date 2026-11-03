@@ -12,6 +12,13 @@ public sealed class PetForm : Form
     private const int WsExLayered = 0x80000, WsExToolWindow = 0x80, WsExNoActivate = 0x08000000;
 
     private readonly System.Windows.Forms.Timer _timer = new();
+    /// <summary>걷기 · 바라보기 틱 (33ms) — 스프라이트 펫이 보이는 동안만.</summary>
+    private readonly System.Windows.Forms.Timer _motionTimer = new() { Interval = 33 };
+    private readonly PetMotion _motion = new(() => DateTime.UtcNow, Random.Shared);
+    private bool _moveEnabled, _hasRunRows;
+    private Func<int, int, bool>? _occupied;
+    private PetAction? _walkFacing;
+    private int? _look;
     private PetSprite? _sprite;
     private Image? _face;
     private string? _faceText;
@@ -39,6 +46,7 @@ public sealed class PetForm : Form
         StartPosition = FormStartPosition.Manual;
         Text = "HB Chat 펫";
         _timer.Tick += (_, _) => Advance();
+        _motionTimer.Tick += (_, _) => MotionTick();
     }
 
     protected override bool ShowWithoutActivation => true;
@@ -56,9 +64,22 @@ public sealed class PetForm : Form
     /// <summary>스프라이트 펫으로 (null이면 표정 그림 모드). 가진 시트는 부른 쪽이 정리한다.</summary>
     public void UseSprite(PetSprite? sprite)
     {
+        StopWalk();
+        _look = null;
         _sprite = sprite;
+        // 시트마다 한 번 — 33ms 틱에서 다시 세거나 델리게이트를 만들지 않게 (088647d699 C5)
+        _hasRunRows = sprite is not null && sprite.Has(PetAction.RunRight) && sprite.Has(PetAction.RunLeft);
+        _occupied = sprite is null ? null : sprite.Occupied;
         _frame = 0;
         _once = null;
+        Restart();
+    }
+
+    /// <summary>오른쪽 메뉴 "움직이기" (설정 Move). 끄면 걷던 자리에서 멈춘다.</summary>
+    public void SetMotion(bool move)
+    {
+        _moveEnabled = move;
+        if (!move) StopWalk();
         Restart();
     }
 
@@ -93,23 +114,73 @@ public sealed class PetForm : Form
     {
         if (_steady == action) return;
         _steady = action;
+        if (action != PetAction.Idle) { StopWalk(); _look = null; } // 실행 · 승인 · 질문이면 바로 멈춰 제자리 동작
         if (_once is null) { _frame = 0; Restart(); }
     }
 
     /// <summary>한 번 동작 (점프 · 손 흔들기 · 실패) — 끝나면 계속 동작으로.</summary>
     public void PlayOnce(PetAction action)
     {
+        StopWalk();
+        _look = null;
         _once = action;
         _frame = 0;
         Restart();
     }
 
-    /// <summary>서버와 끊김: 흐리게 (말풍선은 부른 쪽이 띄우지 않는다).</summary>
+    /// <summary>서버와 끊김: 흐리게 (말풍선은 부른 쪽이 띄우지 않는다). 끊긴 동안은 걷지 않는다.</summary>
     public void SetDim(bool dim)
     {
         if (_dim == dim) return;
         _dim = dim;
+        if (dim) { StopWalk(); _look = null; }
         Render();
+    }
+
+    // ---- 걷기 · 바라보기 (결정 "쉼 때 바닥 걸기" · "쉼 때 마우스 쫓기") ----
+
+    /// <summary>
+    /// 쉼 · 한 번 동작 없음 · 누르지 않음 · 오른쪽 메뉴 닫힘 · 보임 · 연결됨 (걷기 · 바라보기 공통 조건). 메뉴가 떠 있는 동안 걸으면 메뉴에서 멀어진다 (088647d699 C1).
+    /// </summary>
+    private bool Resting => _sprite is not null && Visible && !_dim && !_pressed && _once is null && _steady == PetAction.Idle && ContextMenuStrip is not { Visible: true };
+
+    private bool CanWalk => _moveEnabled && _hasRunRows && Resting;
+
+    /// <summary>바깥(크기 바꾸기 · 펫 바꾸기)에서 자리를 다시 잡기 전에 — 걷던 자리를 저장하고 멈춘다 (088647d699 C1).</summary>
+    public void StopWalking() => StopWalk();
+
+    private void MotionTick()
+    {
+        if (_sprite is null || _occupied is null) return;
+        var step = _motion.Tick(CanWalk, Bounds, Screen.FromRectangle(Bounds).WorkingArea);
+        var facing = _motion.Facing;
+        if (facing != _walkFacing)
+        {
+            _walkFacing = facing;
+            _frame = 0;
+            RestartAnimation();
+        }
+        if (step.X is { } x && x != Left) Location = new Point(x, Top); // 그리기 · 말풍선 따라가기는 OnLocationChanged
+        if (step.Ended) Moved?.Invoke();
+        var look = Resting && !_motion.Walking ? PetLook.At(Cursor.Position, Bounds, _occupied) : null;
+        if (look != _look)
+        {
+            _look = look;
+            Render();
+        }
+    }
+
+    /// <summary>걷기를 멈춘다 — 걷던 중이었으면 그 자리를 저장하라고 Moved.</summary>
+    private void StopWalk()
+    {
+        var was = _motion.Stop();
+        if (_walkFacing is not null)
+        {
+            _walkFacing = null;
+            _frame = 0;
+            RestartAnimation(); // 쉼 동작의 fps로
+        }
+        if (was) Moved?.Invoke();
     }
 
     public void SetPetSize(Size size)
@@ -119,9 +190,17 @@ public sealed class PetForm : Form
         Render();
     }
 
-    private PetAction Current => _once ?? _steady;
+    private PetAction Current => _once ?? _walkFacing ?? _steady;
 
     private void Restart()
+    {
+        RestartAnimation();
+        // 걷기 · 바라보기 틱: 스프라이트 펫이 보이고, 걷기가 켜졌거나 바라볼 칸이 있는 시트(v2)일 때만
+        var motion = _sprite is not null && Visible && (_moveEnabled || _sprite.Sheet.Rows == PetSheet.V2Rows);
+        if (motion != _motionTimer.Enabled) _motionTimer.Enabled = motion;
+    }
+
+    private void RestartAnimation()
     {
         _timer.Stop();
         if (_sprite is not null && Visible)
@@ -151,6 +230,7 @@ public sealed class PetForm : Form
     protected override void OnVisibleChanged(EventArgs e)
     {
         base.OnVisibleChanged(e);
+        if (!Visible) { StopWalk(); _look = null; }
         Animate(Visible);
         Restart(); // 숨기면 멈춘다 (위험: gif · 프레임 CPU)
     }
@@ -159,7 +239,7 @@ public sealed class PetForm : Form
     private void Render()
     {
         if (!IsHandleCreated || IsDisposed || Width <= 0 || Height <= 0) return;
-        using var canvas = new Bitmap(Width, Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        var canvas = new Bitmap(Width, Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
         using (var g = Graphics.FromImage(canvas))
         {
             g.Clear(Color.Transparent);
@@ -167,7 +247,12 @@ public sealed class PetForm : Form
             g.PixelOffsetMode = PixelOffsetMode.HighQuality;
             g.SmoothingMode = SmoothingMode.AntiAlias;
             var target = new Rectangle(0, 0, Width, Height);
-            if (_sprite is not null)
+            if (_sprite is not null && _look is { } direction && _once is null && _walkFacing is null)
+            {
+                var (row, column) = PetLook.Cell(direction); // 바라보기: 그 방향 칸 한 장
+                g.DrawImage(_sprite.Image, target, _sprite.Sheet.Cell(row, column), GraphicsUnit.Pixel);
+            }
+            else if (_sprite is not null)
             {
                 var frames = _sprite.Frames(Current);
                 var cell = _sprite.Sheet.Cell(PetActions.Info(Current, _sprite.Sheet.Rows).Row, frames[Math.Min(_frame, frames.Count - 1)]);
@@ -182,7 +267,11 @@ public sealed class PetForm : Form
         }
         if (_dim) Fade(canvas, 0.45f);
         Push(canvas);
+        _canvas?.Dispose();
+        _canvas = canvas; // 위치만 바뀔 때(걷기 · 끌기) 다시 그리지 않고 이것을 올린다 (088647d699 C4)
     }
+
+    private Bitmap? _canvas;
 
     private static Rectangle Fit(Size image, Rectangle box)
     {
@@ -227,7 +316,9 @@ public sealed class PetForm : Form
     protected override void OnLocationChanged(EventArgs e)
     {
         base.OnLocationChanged(e);
-        Render(); // UpdateLayeredWindow가 위치도 같이 정한다
+        // UpdateLayeredWindow가 위치도 같이 정한다 — 그림은 같으니 마지막 것을 다시 올린다 (걷는 동안 초당 30번 다시 그리던 것, 088647d699 C4)
+        if (_canvas is { } last && last.Size == Size && IsHandleCreated && !IsDisposed) Push(last);
+        else Render();
         Relocated?.Invoke();
     }
 
@@ -237,6 +328,8 @@ public sealed class PetForm : Form
     {
         base.OnMouseDown(e);
         if (e.Button != MouseButtons.Left) return;
+        StopWalk(); // 누르면 걷기를 멈춘다 (걷던 자리 저장 — 끌지 않고 떼면 클릭이라 Moved가 다시 오지 않는다)
+        _look = null;
         _pressed = true;
         _dragging = false;
         _down = Cursor.Position;
@@ -278,6 +371,9 @@ public sealed class PetForm : Form
         if (disposing)
         {
             _timer.Dispose();
+            _motionTimer.Dispose();
+            _canvas?.Dispose();
+            _canvas = null;
             Animate(false);
         }
         base.Dispose(disposing);

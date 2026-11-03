@@ -11,6 +11,7 @@ public sealed class PetController : IDisposable
     private readonly ContextMenuStrip _menu = new();
     private readonly ToolStripMenuItem _petMenu = new("펫");
     private readonly ToolStripMenuItem _sizeMenu = new("크기");
+    private readonly ToolStripMenuItem _moveItem = new("움직이기 (스프라이트 펫만)") { ToolTipText = "쉼일 때 바닥을 걸어 다닙니다 — 실행 · 승인 · 질문이 오거나 누르면 멈춤" };
     private readonly string _settingsPath, _builtinDir, _dataPetsDir;
     private readonly string? _codexPetsDir;
     private readonly Uri _chatUrl;
@@ -55,9 +56,11 @@ public sealed class PetController : IDisposable
         _menu.Items.Add(_sizeMenu);
         foreach (var (label, size) in new[] { ("작게", PetSettings.Small), ("보통", PetSettings.Medium), ("크게", PetSettings.Large) })
             _sizeMenu.DropDownItems.Add(new ToolStripMenuItem(label, null, (_, _) => SetSize(size)) { Tag = size });
+        _moveItem.Click += (_, _) => SetMove(!_settings.Move);
+        _menu.Items.Add(_moveItem);
         _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add("펫 숨기기", null, (_, _) => SetVisible(false));
-        _menu.Opening += (_, _) => FillMenus();
+        _menu.Opening += (_, _) => { _form.StopWalking(); FillMenus(); }; // 메뉴가 떠 있는 동안은 걷지 않는다 (PetForm.Resting)
         _form.ContextMenuStrip = _menu;
     }
 
@@ -70,6 +73,7 @@ public sealed class PetController : IDisposable
     public void Start(bool dark)
     {
         _dark = dark;
+        _form.SetMotion(_settings.Move);
         LoadPet();
         Place();
         if (_settings.Visible) _form.Show();
@@ -222,10 +226,19 @@ public sealed class PetController : IDisposable
         _petMenu.DropDownItems.Add(new ToolStripSeparator());
         _petMenu.DropDownItems.Add("펫 폴더 열기", null, (_, _) => OpenPetsFolder());
         foreach (ToolStripMenuItem item in _sizeMenu.DropDownItems) item.Checked = item.Tag is int size && size == _settings.Size;
+        _moveItem.Checked = _settings.Move;
+    }
+
+    /// <summary>"움직이기" 켜고 끄기 — 저장하고 바로 반영 (끄면 걷던 자리에서 멈춤).</summary>
+    private void SetMove(bool move)
+    {
+        Save(_settings with { Move = move });
+        _form.SetMotion(move);
     }
 
     private void SetPet(string key)
     {
+        _form.StopWalking(); // 걷던 자리를 먼저 저장 — Place가 옛 자리로 돌리지 않게 (088647d699 C1)
         Save(_settings with { Pet = key });
         _faceUrl = null;
         LoadPet();
@@ -234,6 +247,7 @@ public sealed class PetController : IDisposable
 
     private void SetSize(int size)
     {
+        _form.StopWalking();
         Save(_settings with { Size = size });
         _form.SetPetSize(_settings.WindowSize(_sprite is not null));
         Place();

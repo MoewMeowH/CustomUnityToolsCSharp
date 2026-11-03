@@ -26,8 +26,10 @@ public sealed record PetSheet(int Width, int Height, int Rows)
     }
 }
 
-/// <summary>펫 동작 = 시트 한 행 (CodePet renderer.js PET_STATES의 제자리 동작만 — 달리기 · 바라보기는 다음 단계).</summary>
-public enum PetAction { Idle, Waving, Jumping, Failed, Waiting, Running, Review }
+/// <summary>
+/// 펫 동작 = 시트 한 행 (CodePet renderer.js PET_STATES). RunRight · RunLeft는 걷기(설정 "움직이기"), 바라보기(9 · 10행)는 <see cref="PetLook"/>.
+/// </summary>
+public enum PetAction { Idle, Waving, Jumping, Failed, Waiting, Running, Review, RunRight, RunLeft }
 
 /// <param name="Once">한 번 돌고 <see cref="PetActions.After"/>로 돌아가는 동작.</param>
 public readonly record struct PetActionInfo(int Row, int Frames, int Fps, bool Once);
@@ -40,6 +42,8 @@ public static class PetActions
         var v2 = rows == PetSheet.V2Rows;
         return action switch
         {
+            PetAction.RunRight => new(1, 8, 5, false),
+            PetAction.RunLeft => new(2, 8, 5, false),
             PetAction.Waving => new(3, 4, 4, true),
             PetAction.Jumping => new(4, 5, 5, true),
             PetAction.Failed => new(5, 8, 4, true),
@@ -48,6 +52,61 @@ public static class PetActions
             PetAction.Review => new(8, v2 ? 6 : 8, 3, false),
             _ => new(0, 6, 3, false),
         };
+    }
+}
+
+/// <summary>
+/// 바라보기 16방향 (v2 시트 9 · 10행, CodePet sprite-layout.js와 같은 셈): 0번이 위, 시계 방향으로 22.5°씩. 칸은 행 9 + ⌊번호/8⌋, 열 번호%8.
+/// 쉼일 때 마우스가 펫 가까이 오면 그쪽을 본다 (결정 "쉼 때 마우스 쫓기").
+/// </summary>
+public static class PetLook
+{
+    public const int Directions = 16, FirstRow = 9;
+
+    /// <summary>마우스가 이 거리(펫 가운데에서, px) 안이면 본다.</summary>
+    public const int Range = 300;
+
+    /// <summary>화면 좌표 벡터(아래가 +y)의 방향 번호. (0,0)이면 null (CodePet directionIndexFromVector).</summary>
+    public static int? Direction(double dx, double dy)
+    {
+        if (!double.IsFinite(dx) || !double.IsFinite(dy) || dx == 0 && dy == 0) return null;
+        var clockwise = (Math.Atan2(dy, dx) * 180 / Math.PI + 90 + 360) % 360;
+        return (int)Math.Floor(clockwise / (360.0 / Directions) + 0.5) % Directions;
+    }
+
+    public static (int Row, int Column) Cell(int direction)
+    {
+        var d = (direction % Directions + Directions) % Directions;
+        return (FirstRow + d / PetSheet.Columns, d % PetSheet.Columns);
+    }
+
+    /// <summary>그 방향 칸이 비었으면 둘레로 가장 가까운 그려진 방향 (같은 거리면 시계 방향 먼저). 다 비었으면 null.</summary>
+    public static int? Playable(int direction, Func<int, int, bool> occupied)
+    {
+        // 33ms 틱에서 불리므로 할당 없이 (088647d699 C5)
+        for (var step = 0; step <= Directions / 2; step++)
+        {
+            if (Drawn(direction + step, occupied) is { } clockwise) return clockwise;
+            if (step > 0 && Drawn(direction - step, occupied) is { } counter) return counter;
+        }
+        return null;
+
+        static int? Drawn(int d, Func<int, int, bool> occupied)
+        {
+            var (row, column) = Cell(d);
+            return occupied(row, column) ? (d % Directions + Directions) % Directions : null;
+        }
+    }
+
+    /// <summary>
+    /// 펫 창 밖, 가운데에서 <see cref="Range"/> 안의 마우스 쪽 그려진 방향. 펫 위 · 멀리 · 그릴 칸 없음이면 null (보통 쉼 동작).
+    /// </summary>
+    public static int? At(Point cursor, Rectangle pet, Func<int, int, bool> occupied)
+    {
+        if (pet.Contains(cursor)) return null;
+        double dx = cursor.X - (pet.Left + pet.Width / 2.0), dy = cursor.Y - (pet.Top + pet.Height / 2.0);
+        if (dx * dx + dy * dy > (double)Range * Range) return null;
+        return Direction(dx, dy) is { } d ? Playable(d, occupied) : null;
     }
 }
 
@@ -100,10 +159,11 @@ public sealed record PetSaying(NoticeKind Kind, string Status, string Room, stri
 public readonly record struct BubblePlace(Point Location, bool Above, int TailX);
 
 /// <summary>
-/// 펫 설정 (데이터 폴더 desktop-pet.json): 보이기 · 위치 · 크기(가로 px) · 고른 펫. 읽지 못하면 기본값 (결정 "기본 켬").
+/// 펫 설정 (데이터 폴더 desktop-pet.json): 보이기 · 위치 · 크기(가로 px) · 고른 펫 · 움직이기. 읽지 못하면 기본값 (결정 "기본 켬").
 /// Pet: <see cref="PetSources.Faces"/>(방 표정 그림), "builtin", "codex:이름", "data:이름". null이면 기본 펫.
+/// Move: 쉼 때 바닥 걷기 (오른쪽 메뉴 "움직이기", 기본 꺼짐 — 옛 파일에는 없는 키라 false로 읽힌다).
 /// </summary>
-public sealed record PetSettings(bool Visible = true, int? X = null, int? Y = null, int Size = PetSettings.Medium, string? Pet = null)
+public sealed record PetSettings(bool Visible = true, int? X = null, int? Y = null, int Size = PetSettings.Medium, string? Pet = null, bool Move = false)
 {
     public const int Small = 72, Medium = 96, Large = 128;
 

@@ -30,6 +30,13 @@ public sealed class PetSprite : IDisposable
         return columns.Count > 0 ? columns : [0];
     }
 
+    /// <summary>그 동작 행에 그려진 칸이 하나라도 있는지 (없으면 걷기를 하지 않는다 — 빈 칸을 그리면 펫이 사라져 보인다).</summary>
+    public bool Has(PetAction action)
+    {
+        var info = PetActions.Info(action, Sheet.Rows);
+        return Enumerable.Range(0, Math.Min(info.Frames, PetSheet.Columns)).Any(c => Occupied(info.Row, c));
+    }
+
     /// <summary>시트 파일을 읽는다. 디코더가 없거나 규격이 아니면 예외 (부른 쪽이 그 펫을 빼고 로그에 남긴다).</summary>
     public static PetSprite Load(string path, int? version)
     {
