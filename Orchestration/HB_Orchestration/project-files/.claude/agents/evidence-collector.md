@@ -11,6 +11,7 @@ hooks:
       hooks:
         - type: command
           command: python -I "$CLAUDE_PROJECT_DIR/.claude/scripts/subagent_read_guard.py" || exit 2
+          onFailure: block
 ---
 
 너는 요구사항 추적 담당이다. 확정 사항(요구) 하나하나에 대해 최종 코드에서 근거를 찾아 적는다.

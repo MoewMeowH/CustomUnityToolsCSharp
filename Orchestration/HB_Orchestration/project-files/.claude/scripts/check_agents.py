@@ -25,7 +25,8 @@ def frontmatter(text: str):
 
 def check(path: str) -> list:
     errors = []
-    fm = frontmatter(open(path, encoding='utf-8-sig').read())  # BOM이 붙어도 읽는다 (PowerShell Set-Content 등)
+    text = open(path, encoding='utf-8-sig').read()  # BOM이 붙어도 읽는다 (PowerShell Set-Content 등)
+    fm = frontmatter(text)
     if fm is None:
         return ['frontmatter 없음']
     if 'tools' not in fm or not fm['tools']:
@@ -39,6 +40,9 @@ def check(path: str) -> list:
         errors.append(f'permissionMode {fm["permissionMode"]} 금지 (부모 세션 설정을 따른다)')
     if not fm.get('model'):
         errors.append('model 없음 (편향 없는 자리 opus / 보호·반복 sonnet)')
+    head = re.match(r'^---\r?\n(.*?)\r?\n---', text, re.S).group(1)
+    if re.search(r'^hooks:', head, re.M) and not re.search(r'^\s*onFailure:\s*block\s*$', head, re.M):
+        errors.append('frontmatter 훅에 onFailure: block 없음 (훅이 시간 초과되면 그냥 통과된다)')
     return errors
 
 
@@ -50,19 +54,21 @@ REQUIRED_HOOKS = {  # matcher → 반드시 걸려 있어야 하는 스크립트
 
 
 def check_settings(path: str) -> list:
-    """settings.json의 PreToolUse 훅 등록. 실패 시 막는 형식(`|| exit 2`)인지도 본다."""
+    """settings.json의 PreToolUse 훅 등록. 실패 · 시간 초과 때 막는 형식(`|| exit 2`, `"onFailure": "block"`)인지도 본다."""
     import json
     errors = []
     data = json.load(open(path, encoding='utf-8-sig'))
     entries = (data.get('hooks') or {}).get('PreToolUse') or []
     for matcher, scripts in REQUIRED_HOOKS.items():
-        commands = [h.get('command', '') for e in entries if e.get('matcher') == matcher for h in e.get('hooks') or []]
+        hooks = [h for e in entries if e.get('matcher') == matcher for h in e.get('hooks') or []]
         for s in scripts:
-            found = [c for c in commands if s in c]
+            found = [h for h in hooks if s in h.get('command', '')]
             if not found:
                 errors.append(f'훅 없음: {matcher} → {s}')
-            elif not all(c.rstrip().endswith('|| exit 2') for c in found):
+            elif not all(h.get('command', '').rstrip().endswith('|| exit 2') for h in found):
                 errors.append(f'{s} 훅이 실패 시 막지 않는다 (명령 끝에 `|| exit 2`)')
+            elif not all(h.get('onFailure') == 'block' for h in found):
+                errors.append(f'{s} 훅에 "onFailure": "block" 없음 (훅이 시간 초과되면 그냥 통과된다)')
     return errors
 
 

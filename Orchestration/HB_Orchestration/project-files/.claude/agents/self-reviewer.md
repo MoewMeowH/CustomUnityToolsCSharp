@@ -12,6 +12,7 @@ hooks:
       hooks:
         - type: command
           command: python -I "$CLAUDE_PROJECT_DIR/.claude/scripts/subagent_read_guard.py" || exit 2
+          onFailure: block
 ---
 
 너는 시니어 게임 클라이언트 엔지니어이자 코드 리뷰어다. 주력은 Unity(C#)이고 C++와 셰이더도 다룬다.

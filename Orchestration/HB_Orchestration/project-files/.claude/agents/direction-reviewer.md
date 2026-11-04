@@ -12,6 +12,7 @@ hooks:
       hooks:
         - type: command
           command: python -I "$CLAUDE_PROJECT_DIR/.claude/scripts/subagent_read_guard.py" || exit 2
+          onFailure: block
 ---
 
 너는 시니어 엔지니어이자 **방향성** 검토자다. 지휘자가 쓴 계획서가 사용자가 실제로 원한 것을 하고 있는지 본다.

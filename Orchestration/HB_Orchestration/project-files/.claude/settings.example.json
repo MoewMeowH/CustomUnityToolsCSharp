@@ -18,16 +18,19 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -I \"$CLAUDE_PROJECT_DIR/.claude/scripts/cleanup_guard.py\" || exit 2"
+            "command": "python -I \"$CLAUDE_PROJECT_DIR/.claude/scripts/cleanup_guard.py\" || exit 2",
+            "onFailure": "block"
           },
           {
             "type": "command",
             "command": "python -I \"$CLAUDE_PROJECT_DIR/.claude/scripts/push_guard.py\" || exit 2",
-            "timeout": 120
+            "timeout": 120,
+            "onFailure": "block"
           },
           {
             "type": "command",
-            "command": "python -I \"$CLAUDE_PROJECT_DIR/.claude/scripts/share_guard.py\" || exit 2"
+            "command": "python -I \"$CLAUDE_PROJECT_DIR/.claude/scripts/share_guard.py\" || exit 2",
+            "onFailure": "block"
           }
         ]
       },
@@ -36,7 +39,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -I \"$CLAUDE_PROJECT_DIR/.claude/scripts/run_mode_guard.py\" || exit 2"
+            "command": "python -I \"$CLAUDE_PROJECT_DIR/.claude/scripts/run_mode_guard.py\" || exit 2",
+            "onFailure": "block"
           }
         ]
       },
@@ -45,7 +49,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -I \"$CLAUDE_PROJECT_DIR/.claude/scripts/subagent_input_guard.py\" || exit 2"
+            "command": "python -I \"$CLAUDE_PROJECT_DIR/.claude/scripts/subagent_input_guard.py\" || exit 2",
+            "onFailure": "block"
           }
         ]
       }

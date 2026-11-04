@@ -11,6 +11,7 @@ hooks:
       hooks:
         - type: command
           command: python -I "$CLAUDE_PROJECT_DIR/.claude/scripts/subagent_read_guard.py" || exit 2
+          onFailure: block
 ---
 
 너는 외부 코드 리뷰 에이전트의 하네스(시스템 프롬프트에 항상 붙는 글)를 고치는 편집자다.
