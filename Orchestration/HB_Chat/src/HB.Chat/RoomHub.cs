@@ -1545,6 +1545,13 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
         {
             try { result = await TryRestTurnAsync(room, live, text, generation, ct); }
             catch (OperationCanceledException) { result = Record(room, new RunResult(false, true, "중지됨", null, null, null, 0, 0, null)); }
+            // 쉬는 실행을 끝냈으면 그때 적은 기록 크기(RetireAsync)를 새로 띄우기 전 검사가 쓰게 다시 읽는다. 끝나며 CLI가 쓴 줄 뒤로 before도 다시 잰다
+            // (안 재면 새 실행이 말을 기록하지 못하고 실패해도 크기가 달라 '보내지 못함'이 안 붙는다)
+            if (result is null && store.Get(roomId) is { } fresh)
+            {
+                room = fresh;
+                before = transcripts.Size(room.SessionId);
+            }
         }
         if (result is null)
         {

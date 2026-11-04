@@ -415,6 +415,29 @@ public sealed class RoomRestTests : IDisposable
     }
 
     /// <summary>
+    /// 새 말이 쉬는 실행을 끝내고 새로 띄울 때: 끝나며 CLI가 쓴 줄은 이 앱이 본 크기로 적지만(사용자 화면 2026-11-04: 1,171,421 → 1,173,341),
+    /// 끝내기 전에 이미 늘어 있던 것(쉬는 동안 다른 곳에서 이어 씀)은 덮지 않고 경고한다. 가짜 CLI는 죽을 때 기록을 쓸 수 없어 앞쪽은 이 시험으로 재현하지 못한다.
+    /// </summary>
+    [Fact]
+    public async Task TranscriptGrownWhileResting_ThenRetired_StillWarnsOutsideChange()
+    {
+        var room = CommandRoom();
+        var transcript = Path.Combine(_dir, "projects", "F--ws", room.SessionId + ".jsonl");
+        Directory.CreateDirectory(Path.GetDirectoryName(transcript)!);
+        File.WriteAllText(transcript, "{\"type\":\"user\"}\n");
+        var ch = _hub.Subscribe(room.Id);
+        _hub.Send(room.Id, "server s4");
+        await UntilAll(ch, Idle, Tasks(1));
+        File.AppendAllText(transcript, "{\"type\":\"user\"}\n"); // 쉬는 동안 다른 곳에서 이어 쓴 줄
+        _store.Update(room.Id, r => r with { AskRunMode = !r.AskRunMode }); // 새 말이 쉬는 실행을 끝내고 새로 띄우게
+        _hub.Send(room.Id, "say fresh");
+        var seen = await UntilAll(ch, Idle);
+        Assert.True(seen.Single(e => e.Kind == "end").Ok);
+        Assert.Equal(2, _launched);
+        Assert.Contains(seen, e => e.Kind == "notice" && e.Text!.Contains("앱 밖에서"));
+    }
+
+    /// <summary>
     /// 쉬는 실행에서 답하는 도중 끼어들기: 프로세스를 끊지 않고 interrupt만 보낸다 — 그 턴은 "끼어들기로 멈춤", 백그라운드 작업은 살고,
     /// 새 말은 같은 프로세스로 답한다 (결정 "끼어들기만 살림", 2.1.316 실측 2026-11-04).
     /// </summary>

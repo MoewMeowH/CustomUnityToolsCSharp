@@ -536,16 +536,32 @@ public sealed partial class RoomHub
     /// <summary>
     /// 쉬는 실행을 끝내고 자원 정리까지 기다린다 (새로 띄우기 전 — 방 설정 파일 경로가 같아 겹치지 않게). 제때 안 끝나면 false.
     /// why가 있으면(설정 바뀜 · 모델 못 바꿈) 작업이 남았을 때 알리고 기록 줄도 그 까닭으로 남긴다.
+    /// 끝나며 늘어난 세션 기록 크기는 이 앱이 본 크기(KnownSize)로 적는다 (끝내기 전에 이미 달랐으면 그대로 둔다).
     /// </summary>
     private async Task<bool> RetireAsync(Live live, RoomRun run, string? why)
     {
         var left = run.Proc.Tasks.Count;
         // 화면 확인을 거치지 않은 설정 변경(다른 탭 · 전역 설정)의 뒷받침 — 작업이 남았으면 알리고 끝낸다
         if (why is not null && left > 0) Notice(live, $"{why} 백그라운드 작업 {left}개를 끝내고 새로 시작합니다.");
+        // 끝나며 CLI가 쓴 줄도 이 앱이 쓴 것이다 — 새 말의 화면 턴이 돌고 있어 WatchRunAsync는 크기를 적지 않으니 아래에서 적는다 (새로 띄우기 전 검사가
+        // "이 앱 밖에서 바뀌었습니다"를 잘못 띄웠다, 사용자 화면 2026-11-04: 1,171,421 → 1,173,341). 끝내기 전에 이미 달랐으면(쉬는 동안 다른 곳에서
+        // 이어 씀) 그대로 두어 그 검사가 알리게 한다 (/self-review f7aa28507a C1). 부른 쪽은 방을 다시 읽어 이 값을 쓴다
+        bool unchanged;
+        try { unchanged = store.Get(live.Id) is { } before && transcripts.Size(before.SessionId) is { } was && was == before.KnownSize; }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException) { unchanged = false; }
         run.Proc.Stop(why is null ? "stop" : "settings");
         try
         {
             await run.Done.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            if (unchanged)
+            {
+                try
+                {
+                    if (store.Get(live.Id) is { } room && transcripts.Size(room.SessionId) is { } size && size != room.KnownSize)
+                        store.Update(live.Id, r => r with { KnownSize = size });
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException) { }
+            }
             return true;
         }
         catch (TimeoutException)
