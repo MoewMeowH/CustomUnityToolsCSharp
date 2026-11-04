@@ -2620,6 +2620,24 @@
                 if (!(await post("Shell", sd)) && !disposed && !textBox.value) textBox.value = text;
                 return;
             }
+            // 앱이 처리하는 기본 명령 (CLI는 새 세션으로 넘어가거나 이 세션에서만 바꾼다 — SlashCommands.cs): 첫 낱말이 명령이면
+            //   /clear · /reset · /new → 같은 설정의 새 방으로 옮긴다 (인자는 쓰지 않음), /model · /effort → 방 설정을 바꾼다 (값은 서버가 검사)
+            const slash = /^\/(clear|reset|new|model|effort)(?=\s|$)([\s\S]*)$/.exec(text.trim());
+            if (slash && !modeReq) {
+                // 인용 · 첨부는 명령과 같이 보낼 수 없다 — 초안은 그대로 두고 알린다 (/self-review c11df0ad3c C3)
+                if (quote || attached.length > 0) { alert(`/${slash[1]}에는 인용 · 첨부를 붙일 수 없습니다 — 빼고 다시 보내세요.`); return; }
+                textBox.value = "";
+                if (/^(clear|reset|new)$/.test(slash[1])) {
+                    const res = await post("NewSession", new FormData(), false, true);
+                    // 기다리는 사이 다른 방으로 옮겼으면 그 이동을 덮지 않는다 — 새 방은 목록에 보인다 (C1)
+                    if (res?.id) { if (!disposed) openRoom(res.id, true); return; }
+                } else {
+                    const sd = new FormData(); sd.append("name", slash[1]); sd.append("value", slash[2].trim());
+                    if (await post("SlashSetting", sd)) { if (!disposed) reopenRoom(roomId); return; }
+                }
+                if (!disposed && !textBox.value) textBox.value = text;
+                return;
+            }
             const q = quote, files = [...attached]; // 보낸 것만 나중에 뺀다 (그사이 바뀌어도)
             textBox.value = "";
             let full = q ? quoteBlock(q) + "\n\n" + text : text;

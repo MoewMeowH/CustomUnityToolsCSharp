@@ -670,6 +670,70 @@ public sealed partial class RoomModel(
         }
     }
 
+    /// <summary>
+    /// /clear · /reset · /new (<see cref="SlashCommands"/>): 같은 작업 폴더 · 단계 · 모델 · 강도에 연결 · 스티커 설정을 이어받은 새 방.
+    /// 대화는 이어받지 않고 이전 방은 그대로 남는다. 제목은 비워 둔다 (첫 말로). 실행 중이면 거절.
+    /// </summary>
+    public IActionResult OnPostNewSession(string id)
+    {
+        if (!RoomStore.IsRoomId(id) || store.Get(id) is not { } room) return NotFound();
+        if (room.IsGroup || room.GroupId is not null) return BadRequest("단톡방에서는 /clear를 쓸 수 없습니다.");
+        if (room.DeletedAt is not null) return BadRequest("휴지통에 있는 방입니다.");
+        if (hub.IsBusy(id)) return BadRequest("실행 중인 방입니다 — 턴이 끝난 뒤 다시 하세요.");
+        try
+        {
+            // 이어받기는 만들 때 한 번에 저장한다 — 따로 저장하다 실패하면 기본 연결로 된 방이 남는다 (/self-review c11df0ad3c C2)
+            var fresh = store.Create(room.Workspace, room.Level, room.Model, null, effort: room.Effort, shape: r => SlashCommands.CarryOver(r, room));
+            hub.Touch(fresh.Id);
+            return new JsonResult(new { ok = true, id = fresh.Id });
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            return BadRequest($"새 방을 만들지 못했습니다: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// /model · /effort (<see cref="SlashCommands"/>): 방 모델 · 추론 강도를 바꾼다 (곁칸 설정과 같은 값 검사 · 다음 턴부터).
+    /// 인자가 없거나 틀리면 400으로 지금 값과 고를 수 있는 값을 알린다.
+    /// </summary>
+    public IActionResult OnPostSlashSetting(string id, string? name, string? value)
+    {
+        if (!RoomStore.IsRoomId(id) || store.Get(id) is not { } room) return NotFound();
+        if (GroupSettingsRefusal(room) is { } refusal) return BadRequest(refusal);
+        var models = options.Value.ModelList;
+        Func<Room, Room> change;
+        switch (name)
+        {
+            case "model":
+                if (string.IsNullOrWhiteSpace(value)) return BadRequest(SlashCommands.ModelHelp(room.Model, models));
+                if (SlashCommands.ResolveModel(value, models) is not { } model || !ClaudeArgs.IsSafeName(model))
+                    return BadRequest(SlashCommands.ModelHelp(room.Model, models, value.Trim()));
+                change = r => r with { Model = model };
+                break;
+            case "effort":
+                if (string.IsNullOrWhiteSpace(value)) return BadRequest(SlashCommands.EffortHelp(room.Effort));
+                var (effort, error) = SlashCommands.CleanEffort(value);
+                if (error is not null) return BadRequest(SlashCommands.EffortHelp(room.Effort, value.Trim()));
+                change = r => r with { Effort = effort };
+                break;
+            default:
+                return BadRequest("알 수 없는 명령입니다.");
+        }
+        var result = Change(id, change, "방 설정을 바꾸지 못했습니다");
+        if (result is JsonResult)
+        {
+            hub.ForgetCommands(id); // 모델이 바뀌면 다음 실행의 init이 새 목록
+            hub.ProfilesChanged([id]);
+        }
+        return result;
+    }
+
+    /// <summary>앱이 처리하는 기본 명령이 보내기 · 끼어들기로 들어오면 거절 글 (화면이 먼저 가로챈다 — 다른 탭 · 옛 화면 대비).</summary>
+    private string? SlashRefusal(string id, string? text) => SlashCommands.Classify(text) is not { } slash ? null
+        : store.Get(id) is { IsGroup: true } or { GroupId: not null } ? $"단톡방에서는 /{slash.Name}을 쓸 수 없습니다."
+        : $"/{slash.Name}은 앱이 처리합니다 — 화면을 새로 고친 뒤 다시 보내세요.";
+
     /// <summary>Markdown 내보내기 (내려받기).</summary>
     public IActionResult OnGetExport(string id)
     {
@@ -698,6 +762,7 @@ public sealed partial class RoomModel(
     {
         if (!RoomStore.IsRoomId(id)) return NotFound();
         if (TooManyAttachments(text)) return BadRequest($"첨부는 한 말에 {Attachments.MaxPerMessage}개까지입니다.");
+        if (SlashRefusal(id, text) is { } slash) return BadRequest(slash);
         if (store.Get(id) is { IsGroup: true }) return groups.Send(id, text ?? "") is { } groupError ? BadRequest(groupError) : new JsonResult(new { ok = true });
         if (ChildRefusal(id) is { } refusal) return BadRequest(refusal);
         return hub.Send(id, text ?? "") is { } error ? BadRequest(error) : new JsonResult(new { ok = true });
@@ -1019,6 +1084,7 @@ public sealed partial class RoomModel(
     {
         if (!RoomStore.IsRoomId(id)) return NotFound();
         if (TooManyAttachments(text)) return BadRequest($"첨부는 한 말에 {Attachments.MaxPerMessage}개까지입니다.");
+        if (SlashRefusal(id, text) is { } slash) return BadRequest(slash);
         if (store.Get(id) is { IsGroup: true }) return BadRequest("단톡방에는 끼어들기가 없습니다 — 중지한 뒤 보내세요.");
         if (ChildRefusal(id) is { } refusal) return BadRequest(refusal);
         return hub.Interrupt(id, text ?? "") is { } error ? BadRequest(error) : new JsonResult(new { ok = true });

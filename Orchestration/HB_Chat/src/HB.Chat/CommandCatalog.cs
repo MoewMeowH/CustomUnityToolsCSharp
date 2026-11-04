@@ -20,9 +20,11 @@ public static partial class CommandCatalog
     public static readonly IReadOnlyDictionary<string, string> BuiltinDescriptions = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["compact"] = "대화를 요약해 컨텍스트를 줄임",
-        ["clear"] = "대화 기록을 비움",
-        ["model"] = "모델 바꾸기",
-        ["effort"] = "추론 강도 바꾸기",
+        ["clear"] = "같은 설정의 새 방으로 (앱이 처리 — 이 방은 남음)",
+        ["reset"] = "같은 설정의 새 방으로 (앱이 처리 — 이 방은 남음)",
+        ["new"] = "같은 설정의 새 방으로 (앱이 처리 — 이 방은 남음)",
+        ["model"] = "방 모델 바꾸기 (앱이 처리)",
+        ["effort"] = "방 추론 강도 바꾸기 (앱이 처리, default = 기본)",
         ["context"] = "컨텍스트 사용량 보기",
         ["usage"] = "사용량 · 한도 보기",
         ["init"] = "작업 폴더에 CLAUDE.md 만들기",
