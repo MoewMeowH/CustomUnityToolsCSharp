@@ -159,7 +159,9 @@ powershell -ExecutionPolicy Bypass -File tools\Test-SyncProjectFiles.ps1
 | `check_agents.py` | 서브에이전트 정의 · 훅 등록 검사 |
 | `image_prep.py` | `/image-prep`의 collect · shrink |
 
-- H1~H6은 규칙을 강제하는 훅입니다 (CLAUDE.md "훅이 막는 규칙").
+- H1~H6은 규칙을 강제하는 `.claude/settings.json` PreToolUse 훅입니다. 막을 때 이유 · 고칠 방법을 거절 메시지로 돌려주므로 CLAUDE.md에는 "우회하지 않는다"만 둡니다 (`훅` 절).
+  - H2는 `git push` 단독 명령만 받고, 비밀 값 모양 · `docs/image/` · `GoldenSet/` · `subagent_in/` · `review_tmp/` 파일이 든 커밋을 막습니다. 개인 값 패턴은 `.claude/push_guard.local.txt`.
+  - 훅 등록은 `python -I .claude/scripts/check_agents.py`, 동작은 `python -I .claude/scripts/test_hooks.py`로 검사합니다. settings.json을 고치면 새 세션에서 반영됩니다.
 - `xlsx_dump.py`:
   - 기획서 xlsx · csv를 Markdown 표로 뽑습니다 (병합 셀 · 메모 · 텍스트 상자 글 포함).
   - 이미지는 `review_tmp/work-order/<파일>/`에 붙은 셀 이름으로 저장합니다.

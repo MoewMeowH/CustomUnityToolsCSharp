@@ -6,7 +6,7 @@
 
 너(Claude)는 지휘자다. 외부 에이전트(GPT·Gemini·로컬)는 `run_mode`로만 부른다.
 모드 이름은 `{종류}_{등급}`(lite · main · high — high는 비싸거나 두 회사 동시), 단계 모드는 `{종류}_{단계}`다. 모를 때만 `list_modes`를 부른다.
-**`run_mode`를 부르기 전에 `/mode` 명령 파일(`.claude/commands/mode.md`)의 "run_mode 공통 규칙"을 읽는다** — input 범위 · 루트 밖 코드 · 이미지 · 결과 종합 · `record_verdicts` · 자료 요청 · 결과 저장 · 반복 호출 · Quota. `design_high` · `research_main` · `crash_main`은 같은 파일 "모드별 절차"도, 모델 교체(사용자가 명시적으로 요청했을 때만)는 "에이전트(모델) 교체"도.
+**`run_mode`를 부르기 전에 `/mode` 명령 파일(`.claude/commands/mode.md`)의 "run_mode 공통 규칙"을 읽는다**. `design_high` · `research_main` · `crash_main`은 같은 파일 "모드별 절차"도, 모델 교체(사용자가 명시적으로 요청했을 때만)는 "에이전트(모델) 교체"도.
 
 ### 언제 부르나 — 기본은 부르지 않는다
 
@@ -38,25 +38,30 @@
 ## 서브에이전트 (Claude Code)
 
 외부 에이전트를 대신하지 않는다 (교차 리뷰의 가치는 다른 회사 모델의 시선). 사용자가 `/self-review`를 고른 경우만 외부 리뷰 없이 끝낸다.
-* 검토형(self · perf · security · direction)은 기본이 API 리뷰(`sub_*` — Codex CLI 구독, 한도 소진이면 서버가 Claude `HB_REVIEWER_API_KEY`(구독에 딸린 월 크레딧)로 대신). 서브에이전트는 `/self-review sub …`로 고르거나 `[실패] Quota` 때 대신 쓴다. `/cross-review`에서는 외부 `review_main`도 Codex라 지휘자 쪽 리뷰어는 서브에이전트로 한다.
+* 검토형(self · perf · security · direction)은 기본이 API 리뷰(`sub_*` — Codex CLI 구독, 한도 소진이면 서버가 Claude API로 대신). 서브에이전트는 `/self-review sub …`로 고르거나 `[실패] Quota` 때 대신 쓴다. `/cross-review`에서는 외부 `review_main`도 Codex라 지휘자 쪽 리뷰어는 서브에이전트로 한다.
 * **서브에이전트를 부르기 전에 `/self-review` 명령 파일의 "서브에이전트 공통 규칙"을 읽는다** — 정의 · `subagent_in/` 입력 복사 · 실수 목록 · 결과 형식 검사.
 * 서브에이전트 결과를 판정·승인으로 쓰지 않는다.
+* 단순 · 순차 · 한 파일 작업은 직접 한다. 서브에이전트는 병렬로 돌릴 수 있거나 맥락을 떼어 둬야 할 때만 부른다.
+
+## 코드 작성 원칙
+
+* 코드에 대해 말하기 전에 연다 — 열어 보지 않은 파일 · 함수의 동작을 추측으로 말하지 않는다.
+* 요청한 것과 꼭 필요한 것만 바꾼다 — 버그 수정에 주변 정리를 붙이지 않고, 묻지 않은 기능 · 설정 · 한 번만 쓰는 헬퍼 · 가상의 미래 요구를 넣지 않는다. 바뀐 줄마다 요청까지 거슬러 갈 수 있어야 한다 (리뷰어 · 팀원이 diff를 읽기 쉽게).
+* 고치지 않은 코드에 주석 · 서식 변경을 더하지 않고 기존 스타일을 따른다. 내 변경으로 안 쓰게 된 것만 지우고, 원래 있던 죽은 코드는 말만 한다.
+* 일어날 수 없는 경우의 오류 처리 · 대체 경로를 넣지 않는다. 검증은 경계(사용자 입력 · 외부 API · 파일)에서만 한다.
+* 시험에 맞춘 값 하드코딩 · 특정 입력에서만 되는 풀이를 하지 않는다. 시험이 틀렸거나 요구가 무리면 우회하지 말고 말한다.
+* 버그 수정은 되도록 재현 시험부터 만든다.
+* 뜻이 둘 이상이고 고르는 쪽에 따라 결과가 달라지면 혼자 고르지 말고 묻는다. 더 단순한 방법이 있으면 먼저 말한다.
+* 오타 · 한 줄 수정 같은 사소한 일은 판단껏.
 
 ## 명령 실행
 
-* 폴더 삭제(`rm -rf` 등) 같은 정리 명령은 복구·빌드·테스트 명령에 이어 붙이지 않는다. 별도 호출로, 셸의 현재 폴더 밖(프로젝트 루트 등)에서 절대 경로로 실행한다 (현재 폴더가 지울 폴더 안이면 승인 창이 떠서 자리를 비운 세션은 멈춘다).
+* 폴더 삭제(`rm -rf` 등)는 다른 명령에 이어 붙이지 말고 별도 호출로, 셸의 현재 폴더 밖에서 절대 경로로 실행한다 (현재 폴더가 지울 폴더 안이면 승인 창이 떠서 자리를 비운 세션은 멈춘다).
   * Git Bash에서 "Device or resource busy"면 현재 폴더가 그 안이라는 뜻이다 → 다른 폴더에서 다시 하거나 PowerShell `Remove-Item`.
 
-## 훅이 막는 규칙 (`.claude/settings.json` PreToolUse)
+## 훅
 
-훅이 막으면 메시지(이유 · 고칠 방법)대로 고쳐 다시 한다. 우회하지 않는다 (사람이 직접 할 때는 `!` 명령). 검사 중 오류도 막는다.
-* H1 `cleanup_guard.py` — 재귀 삭제 ("명령 실행")
-* H2 `push_guard.py` — `git push`는 단독 명령만, 비밀 값 모양 · `docs/image/` · `GoldenSet/` · `subagent_in/` · `review_tmp/` 파일이 든 커밋 (개인 값 패턴 `.claude/push_guard.local.txt`)
-* H3 `run_mode_guard.py` — `review_*` 전에 오늘 계획서 ("계획서와 작업 로그")
-* H4 `run_mode_guard.py` — `review_*`의 `reason` 태그 `[ownReview:…]`와 ownReview 원문 (형식은 `/cross-review`)
-* H5 `share_guard.py` — `slackplan`으로 나가는 글 (호출은 단독 명령, heredoc 본문에 slackplan이 있으면 데이터 전용 명령에만)
-* H6 `subagent_input_guard.py` — 서브에이전트를 부를 때 `subagent_in/` 속 `CLAUDE.md` · `.claude` · 링크
-* 훅 등록은 `python -I .claude/scripts/check_agents.py`, 동작은 `python -I .claude/scripts/test_hooks.py`로 검사한다. settings.json을 고치면 새 세션에서 반영된다.
+`.claude/settings.json` PreToolUse 훅이 막으면 메시지(이유 · 고칠 방법)대로 고쳐 다시 한다. 우회하지 않는다 (사람이 직접 할 때는 `!` 명령).
 
 ## 계획서와 작업 로그
 
