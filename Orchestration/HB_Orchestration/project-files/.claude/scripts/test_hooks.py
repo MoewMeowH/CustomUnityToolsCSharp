@@ -1,4 +1,4 @@
-"""cleanup_guard · push_guard · run_mode_guard · share_guard · subagent_input_guard 회귀 시험 (/cross-review 10bfc8de41 반영).
+"""cleanup_guard · push_guard · run_mode_guard · share_guard · subagent_input_guard · habit_guard 회귀 시험 (/cross-review 10bfc8de41 반영).
 사용: python -I .claude/scripts/test_hooks.py  → 마지막 줄 'ALL True'면 통과 (exit 0), 아니면 exit 1.
 H2는 임시 폴더에 저장소와 bare 원격을 만들어 시험한다 (실제 원격·실제 저장소는 건드리지 않는다).
 입력은 UTF-8 바이트로 보낸다 (Claude Code가 보내는 것과 같게 — 한글 깨짐 회귀 시험).
@@ -753,6 +753,92 @@ try:
     expect('H6 깨진 입력은 막음', (lambda r: (r.returncode, r.stderr.decode('utf-8', 'replace')))(subprocess.run([sys.executable, '-I', os.path.join(HERE, 'subagent_input_guard.py')], input=b'{', capture_output=True, env=env6)), 2)
 finally:
     shutil.rmtree(proj6, ignore_errors=True)
+
+# ── H7 habit_guard ──
+# (가) 백슬래시 코드: 셸 종류와 상관없이 돈다. (나) cd: Windows 경로 기준이라 Windows에서만.
+ROOT7 = 'F:\\AI\\Proj' if os.name == 'nt' else '/proj'
+env7 = dict(os.environ, CLAUDE_PROJECT_DIR=ROOT7, LOCALAPPDATA='C:\\Users\\x\\AppData\\Local', TEMP='C:\\Users\\x\\AppData\\Local\\Temp')
+
+
+def h7(cmd: str, tool: str = 'Bash', cwd: str | None = ROOT7, env: dict | None = None) -> tuple[int, str]:
+    payload = {'tool_name': tool, 'tool_input': {'command': cmd}}
+    if cwd is not None:
+        payload['cwd'] = cwd
+    return run('habit_guard.py', payload, env or env7)
+
+
+expect('H7 python heredoc 백슬래시', h7("python -I - <<'EOF'\nprint('a\\nb')\nEOF"), 2, '[셸 습관 차단]')
+expect('H7 python heredoc 백슬래시 없음', h7("python -I - <<'EOF'\nprint(1)\nEOF"), 0)
+expect('H7 cat | python heredoc 백슬래시', h7("cat <<'EOF' | python -\nx = '\\t'\nEOF"), 2, '실행기')
+expect('H7 bash heredoc 백슬래시', h7("bash <<'EOF'\necho a\\b\nEOF"), 2)
+expect('H7 따옴표 없는 heredoc도', h7("python - <<EOF\nprint('\\n')\nEOF"), 2)
+expect('H7 python -c 백슬래시', h7('python -c "print(\'a\\nb\')"'), 2, '-c')
+expect('H7 python -I -X utf8 -c 백슬래시', h7('python -I -X utf8 -c "print(\'\\t\')"'), 2)
+expect('H7 묶음 뒤 python -c 백슬래시', h7('ls && python -c "import re; re.compile(\'\\d\')"'), 2)
+expect('H7 python -c 백슬래시 없음', h7('python -c "print(1)"'), 0)
+expect('H7 node -e 백슬래시', h7('node -e "console.log(\'a\\n\')"'), 2)
+expect('H7 python 스크립트 실행', h7('python -I F:/x/run.py "C:\\in.txt"'), 0)
+expect('H7 cat으로 코드 파일 쓰기', h7("cat > /f/x/a.py <<'EOF'\ns = '\\n'\nEOF"), 2, '코드 파일')
+expect('H7 cat heredoc | tee 코드 파일', h7("cat <<'EOF' | tee a.cs\nvar s = \"\\n\";\nEOF"), 2, '코드 파일')
+expect('H7 작업 로그 heredoc 뒤 다른 명령의 .py 쓰기', h7("cat >> docs/worklog.md <<'EOF'\n- F:\\AI\\x\nEOF\ngit show HEAD:a.py > b.py"), 0)
+expect('H7 작업 로그 heredoc 백슬래시',h7("cat >> docs/worklog.md <<'EOF'\n- 경로 F:\\AI\\x\nEOF"), 0)
+expect('H7 git commit heredoc 백슬래시', h7("git commit -F - <<'EOF'\nfix C:\\x path\nEOF"), 0)
+expect('H7 cat heredoc 뒤 git add', h7("cat > docs/a.md <<'EOF'\nF:\\AI\nEOF\ngit add docs/a.md"), 0)
+expect('H7 grep 인자의 py 낱말', h7("cat <<'EOF' | grep py\nC:\\x\nEOF"), 0)
+expect('H7 PS here-string → python', h7("$c = @'\nprint('a\\n')\n'@\n$c | python -", tool='PowerShell'), 2)
+expect('H7 PS here-string 커밋 메시지', h7("git commit -m @'\nfix C:\\x\n'@", tool='PowerShell'), 0)
+expect('H7 PS here-string 작업 로그', h7("@'\n- F:\\AI\\x\n'@ | Add-Content docs/worklog.md", tool='PowerShell'), 0)
+expect('H7 PS python -c 백슬래시', h7('python -c "print(\'\\n\')"', tool='PowerShell'), 2)
+expect('H7 PS 코드 파일로 Set-Content', h7("@'\nx = '\\n'\n'@ | Set-Content -Path a.py", tool='PowerShell'), 2, '코드 파일')
+expect('H7 다른 도구는 무시', run('habit_guard.py', {'tool_name': 'Read', 'tool_input': {}}, env7), 0)
+expect('H7 깨진 입력은 막음', (lambda r: (r.returncode, r.stderr.decode('utf-8', 'replace')))(subprocess.run([sys.executable, '-I', os.path.join(HERE, 'habit_guard.py')], input=b'{', capture_output=True, env=env7)), 2)
+
+if os.name == 'nt':
+    SUB7 = 'F:\\AI\\Proj\\src'
+    expect('H7 cd 상대 하위', h7('cd docs && ls'), 2, '하위 폴더')
+    expect('H7 cd 절대 하위 (Git Bash)', h7('cd /f/AI/Proj/src && dotnet build'), 2)
+    expect('H7 cd 하위 ; 묶음', h7('cd src; grep -n x y'), 2)
+    expect('H7 cd 하위 단독', h7('cd src'), 2)
+    expect('H7 서브셸 cd', h7('(cd docs && ls)'), 0)
+    expect('H7 명령 치환 안 cd', h7('x=$(cd src && pwd); echo $x'), 0)
+    expect('H7 bash -c 안 cd', h7('bash -c "cd src && ls"'), 0)
+    expect('H7 밖 cd /tmp', h7('cd /tmp && ls'), 0)
+    expect('H7 다른 드라이브', h7('cd /c/Users/x && ls'), 0)
+    expect('H7 하위에서 루트로 돌아감', h7('cd /f/AI/Proj', cwd=SUB7), 0)
+    expect('H7 하위에서 cd 없음', h7('ls', cwd=SUB7), 0)
+    expect('H7 하위에서 다른 하위로', h7('cd ../docs && ls', cwd=SUB7), 2)
+    expect('H7 하위에서 갔다가 돌아옴', h7('cd /f/AI/Proj/docs && ls && cd /f/AI/Proj/src', cwd=SUB7), 0)
+    expect('H7 갔다가 루트로', h7('cd src && make && cd /f/AI/Proj'), 0)
+    expect('H7 ~ 밖', h7('cd ~/.claude/projects && ls'), 0)
+    expect('H7 인자 없는 cd', h7('cd'), 0)
+    expect('H7 환경 변수 밖', h7('cd "$LOCALAPPDATA/Temp" && ls'), 0)
+    expect('H7 환경 변수가 하위', h7('cd "$CLAUDE_PROJECT_DIR/src"'), 2, '하위 폴더')
+    expect('H7 셸 변수는 못 풂', h7('S=/f/AI/Proj/src; cd $S && ls'), 2, '풀 수 없다')
+    expect('H7 같은 이름 환경 변수도 대입하면 못 풂', h7('LOCALAPPDATA=/f/AI/Proj; cd $LOCALAPPDATA'), 2, '풀 수 없다')
+    expect('H7 cd -', h7('cd -'), 2, '풀 수 없다')
+    expect('H7 pushd popd 짝', h7('pushd src && make && popd'), 0)
+    expect('H7 pushd만', h7('pushd src && make'), 2)
+    expect('H7 git -C', h7('git -C src status'), 0)
+    expect('H7 if 안 cd 하위', h7('if true; then cd src; fi'), 2)
+    expect('H7 if 안 cd 밖', h7('if true; then cd /tmp; fi'), 0)
+    expect('H7 heredoc 본문의 cd 글자', h7("cat >> docs/a.md <<'EOF'\ncd src && ls\nEOF"), 0)
+    expect('H7 따옴표 없는 heredoc 본문의 cd 글자', h7("cat >> docs/a.md <<EOF\ncd src\nEOF"), 0)
+    expect('H7 따옴표 안 cd 글자', h7('echo "cd src && ls"'), 0)
+    expect('H7 주석의 cd', h7('ls # cd src'), 0)
+    expect('H7 ${#x} 뒤 cd도 봄', h7('a=(1 2); echo ${#a}; cd src'), 2)
+    expect('H7 cwd 없이 상대 cd', h7('cd src', cwd=None), 2, '셸 현재 폴더를 몰라')
+    expect('H7 cwd 없이 절대 밖 cd', h7('cd /tmp', cwd=None), 0)
+    expect('H7 CLAUDE_PROJECT_DIR 없음', h7('cd src', env={k: v for k, v in env7.items() if k != 'CLAUDE_PROJECT_DIR'}), 2, 'CLAUDE_PROJECT_DIR')
+    expect('H7 PS Set-Location 하위', h7('Set-Location src; Get-ChildItem', tool='PowerShell'), 2, '하위 폴더')
+    expect('H7 PS cd 절대 하위', h7('cd F:\\AI\\Proj\\src', tool='PowerShell'), 2)
+    expect('H7 PS -Path 하위', h7('Set-Location -Path src', tool='PowerShell'), 2)
+    expect('H7 PS $env 밖', h7('Set-Location $env:TEMP', tool='PowerShell'), 0)
+    expect('H7 PS 셸 변수 못 풂', h7('$d = "src"; Set-Location $d', tool='PowerShell'), 2, '풀 수 없다')
+    expect('H7 PS Push/Pop 짝', h7('Push-Location src; dotnet build; Pop-Location', tool='PowerShell'), 0)
+    expect('H7 PS 드라이브 상대 \\', h7('cd \\Windows', tool='PowerShell'), 0)
+    expect('H7 PS 공급자 경로', h7('Set-Location HKCU:\\Software', tool='PowerShell'), 0)
+    expect('H7 PS 스크립트 블록 안 cd', h7('& { Set-Location src }', tool='PowerShell'), 2)
+    expect('H7 PS 하위에서 루트로', h7('Set-Location F:\\AI\\Proj', tool='PowerShell', cwd=SUB7), 0)
 
 print('ALL', ok)
 sys.exit(0 if ok else 1)
