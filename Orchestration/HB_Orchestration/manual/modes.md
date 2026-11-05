@@ -306,7 +306,7 @@ agents: "deepseek_main_flash=gemini_high_argon"
 프로젝트 밖 코드를 복사 없이 읽는 방법입니다.
 
 ```json
-"Context": { "ExtraRoots": { "orch": "F:/AI/ToolWithCS/Orchestration/HB_Orchestration" } }
+"Context": { "ExtraRoots": { "orch": "D:/Work/HB_Orchestration" } }
 ```
 
 쓰는 법:

@@ -160,7 +160,8 @@ appsettings.json을 메모장으로 직접 고쳐서 modes.json이 없는 이름
 
 - 폴더: 대시보드 `appsettings.json`의 `Dashboard:McpConfigDir`.
   - 배치로 실행하면 `HB_Orchestration.config`의 `PUBLISH_DIR`가 우선합니다.
-  - 원본 값은 이 PC 절대 경로(`F:/AI/ToolWithCS/Orchestration/Publish_Output`)입니다. 배치 없이 `dotnet run`할 때 다른 PC면 고칩니다.
+  - HB Chat 데스크톱 앱도 같은 폴더를 넘깁니다.
+  - `appsettings.json`의 값은 비어 있습니다. 배치 없이 `dotnet run`할 때는 git 제외 `appsettings.local.json`에 그 PC의 publish 폴더를 적습니다.
 - 편집할 modes.json을 직접 지정하려면 `Dashboard:ModesPath`.
 - 직접 지정이 없으면 서버와 같은 찾는 순서로 정합니다:
   1. MCP appsettings `Orchestration:ModesPath`
