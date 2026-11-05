@@ -99,6 +99,8 @@ public sealed partial class RoomModel(
     /// <summary>등록된 Unity 프로젝트 (연결 탭 select).</summary>
     public IReadOnlyList<WorkspaceEntry> UnityProjects => options.Value.AllUnityProjects;
 
+    public bool IsMeasureUnity(string name) => options.Value.IsMeasureUnity(name);
+
     public IReadOnlyList<Connection> Connections
     {
         get

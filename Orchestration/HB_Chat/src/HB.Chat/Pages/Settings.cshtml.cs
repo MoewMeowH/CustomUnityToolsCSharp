@@ -153,7 +153,7 @@ public sealed class SettingsModel(
     public static string? TabFor(string? done, string? handler) => (handler ?? done)?.ToLowerInvariant() switch
     {
         "theme" or "notify" or "profile" or "image-size" => "general",
-        "addworkspace" or "removeworkspace" or "addunity" or "removeunity" or "rename" or "added" or "removed" or "renamed"
+        "addworkspace" or "removeworkspace" or "addunity" or "removeunity" or "measureunity" or "measure" or "rename" or "added" or "removed" or "renamed"
             or "appwrites" or "addappwritefolder" or "removeappwritefolder" or "appwrites-added" or "appwrites-removed" => "work",
         "cliselftest" or "cli" or "codexworkspaces" or "codex" or "addmcpfields" or "addmcpjson" or "importmcp" or "removemcp"
             or "mcp-added" or "mcp-secret" or "mcp-removed" => "connect",
@@ -178,6 +178,7 @@ public sealed class SettingsModel(
         "added" => "작업 폴더를 더했습니다.",
         "removed" => "작업 폴더를 목록에서 뺐습니다 (폴더 · 파일은 그대로).",
         "renamed" => "방 이름을 바꿨습니다.",
+        "measure" => "실측 전용 표시를 바꿨습니다 — 연결된 방은 다음 말부터 바뀐 안내를 받습니다.",
         "profile" => "프로필을 저장했습니다.",
         "faces" => "지휘자 표정을 저장했습니다.",
         "pack" => "스티커 팩을 바꿨습니다.",
@@ -290,7 +291,7 @@ public sealed class SettingsModel(
 
     // ---- Unity 프로젝트 ----
 
-    public sealed record UnityRow(WorkspaceEntry Entry, bool Exists, int Rooms, string? Unusable);
+    public sealed record UnityRow(WorkspaceEntry Entry, bool Exists, int Rooms, string? Unusable, bool Measure);
 
     public IReadOnlyList<UnityRow> UnityRows { get; private set; } = [];
     public string? UnityLoadError => options.Value.AppUnityProjects?.LoadError;
@@ -299,11 +300,11 @@ public sealed class SettingsModel(
     public string? NewUnityName { get; private set; }
     public string? NewUnityPath { get; private set; }
 
-    public IActionResult OnPostAddUnity(string? name, string? path, bool confirm)
+    public IActionResult OnPostAddUnity(string? name, string? path, bool confirm, bool measure)
     {
         if (!confirm) Error = "연결한 방이 에디터를 묻지 않고 조작한다는 확인에 체크해 주세요.";
         else if (options.Value.AppUnityProjects is not { } added) Error = "Unity 프로젝트 저장소가 준비되지 않았습니다.";
-        else Error = added.Add(name, path, store.All());
+        else Error = added.Add(name, path, store.All(), measure);
         if (Error is null) return RedirectToPage(new { done = "added" });
         (NewUnityName, NewUnityPath) = (name, path);
         Fill();
@@ -407,6 +408,15 @@ public sealed class SettingsModel(
                 }
         if (Error is null)
             return RedirectToPage(new { done = items.Any(i => AppMcpStore.SecretWarnings(i.Entry).Count > 0) ? "mcp-secret" : "mcp-added" });
+        Fill();
+        return Page();
+    }
+
+    /// <summary>실측 전용 표시 켜기 · 끄기 — 연결된 방은 다음 말부터 바뀐 방 규칙을 받는다.</summary>
+    public IActionResult OnPostMeasureUnity(string? name, bool on)
+    {
+        Error = options.Value.AppUnityProjects is { } added ? added.SetMeasure(name, on) : "Unity 프로젝트 저장소가 준비되지 않았습니다.";
+        if (Error is null) return RedirectToPage(new { done = "measure" });
         Fill();
         return Page();
     }
@@ -523,7 +533,8 @@ public sealed class SettingsModel(
         [
             .. options.Value.AllUnityProjects.Select(u => new UnityRow(u, Directory.Exists(u.Path),
                 all.Count(r => string.Equals(r.UnityProject, u.Name, StringComparison.OrdinalIgnoreCase)),
-                u.FromConfig || !Directory.Exists(u.Path) ? null : options.Value.AppUnityProjects?.WhyUnusable(u.Path))),
+                u.FromConfig || !Directory.Exists(u.Path) ? null : options.Value.AppUnityProjects?.WhyUnusable(u.Path),
+                options.Value.IsMeasureUnity(u.Name))),
         ];
         Rooms = [.. all.Where(r => r.DeletedAt is null).OrderByDescending(r => r.LastRunAt ?? r.CreatedAt)
             .Select(r => (r, RoomList.TitleOf(r, transcripts.Read(r.SessionId))))];

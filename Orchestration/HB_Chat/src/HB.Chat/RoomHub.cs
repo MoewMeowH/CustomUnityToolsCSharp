@@ -2290,12 +2290,13 @@ public static class RoomRules
 {
     /// <summary>방 규칙. terminal = 이 실행에 앱 MCP(터미널 도구)를 붙였는지 — 못 붙였으면 안내를 넣지 않는다(없는 도구를 찾지 않게, 지휘자 검토 K3).</summary>
     /// <param name="unity">이 실행에 붙인 Unity 프로젝트 이름 (명령 방에서 연결했을 때). null이면 안내 없음.</param>
+    /// <param name="unityMeasure">그 Unity 프로젝트가 설정에서 실측 전용으로 표시됐는지 — 아니면 작업용 (위험 실측에 쓰지 않는다).</param>
     /// <param name="extras">이 실행에 더 붙인 작업 폴더 MCP 서버 (unity 빼고) — 단계와 상관없이 묻지 않는다는 안내.</param>
     /// <param name="modeCard">모델 선택창 안내(+ 요청 창 머리 줄 · run_mode 카드)를 넣을지 — 기본 서버가 붙은 보통 방.</param>
     /// <param name="askWrites">앱 단계: 작업 폴더 밖 Write · Edit를 카드로 묻는지 (설정 — <see cref="ChatOptions.AskAppWrites"/>).</param>
     /// <param name="rest">쉬는 실행 방(단톡방 구성원이 아님) — 백그라운드 작업이 답 뒤에도 돌고 끝나면 이어 답한다. 아니면 예전(그 턴에서만 · 10분).</param>
     public static string For(PermissionLevel level, bool terminal = false, string? unity = null, IReadOnlyList<string>? extras = null, bool modeCard = false,
-        bool askWrites = true, bool rest = false) =>
+        bool askWrites = true, bool rest = false, bool unityMeasure = false) =>
         "이 대화는 HB_Chat 채팅 앱의 방이다. 사용자는 브라우저 채팅 화면으로 읽고 말한다. " +
         $"이 방의 권한: {Describe(level, askWrites)}. " +
         (extras is { Count: > 0 }
@@ -2331,7 +2332,10 @@ public static class RoomRules
                     "도구가 하나도 없으면 에디터가 꺼진 것이니 사용자에게 그 프로젝트 에디터를 켜 달라고 말한다. " +
                     "씬 · 프리팹 · 에셋은 YAML 파일을 직접 고치지 말고 Unity 도구로 바꾼다. 게임 화면을 볼 때는 capture_game_view를 쓴다 — 찍은 그림은 사용자 화면 기록에도 남는다. " +
                     "C# 코드 실행(eval · eval_file · run_script)은 사용자가 카드로 허용 · 거절하고, 그 밖의 Unity 도구는 묻지 않고 바로 돈다 — " +
-                    "지우기 · 빌드 · 패키지 변경처럼 되돌리기 어려운 것은 먼저 사용자에게 말로 확인한다.")
+                    "지우기 · 빌드 · 패키지 변경처럼 되돌리기 어려운 것은 먼저 사용자에게 말로 확인한다." +
+                    (unityMeasure
+                        ? " 이 프로젝트는 실측 전용이다 — 계획 단계 위험 실측에 쓰고, 끝나면 되돌린다."
+                        : " 이 프로젝트는 작업용이다 — 위험 실측에 쓰지 않는다 (실측은 설정에서 실측 전용으로 표시한 프로젝트에서만)."))
             // 읽기 방: 웹 가져오기만 사이트 카드로 묻는다 (방 웹 도구 — /cross-review 909a5c575e C3, 문장끼리 맞춤)
             : "웹 페이지 가져오기(WebFetch)는 사이트마다 사용자가 카드로 허용 · 거절한다. 그 밖에 허용되지 않은 도구 호출은 카드 없이 자동으로 거절된다 — " +
               "거절되면 다시 시도하지 말고, 무엇이 필요한지 사용자에게 말한다." +

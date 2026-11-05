@@ -255,7 +255,7 @@
                 <option value="" selected="@(room.UnityProject is null)">연결 안 함</option>
                 @foreach (var u in Model.UnityProjects)
                 {
-                    <option value="@u.Name" selected="@(string.Equals(u.Name, room.UnityProject, StringComparison.OrdinalIgnoreCase))" disabled="@(!ClaudeArgs.RunsCommands(room.Level))">@u.Name</option>
+                    <option value="@u.Name" selected="@(string.Equals(u.Name, room.UnityProject, StringComparison.OrdinalIgnoreCase))" disabled="@(!ClaudeArgs.RunsCommands(room.Level))">@u.Name@(Model.IsMeasureUnity(u.Name) ? " (실측 전용)" : "")</option>
                 }
                 @if (room.UnityProject is { } gone && Model.UnityProjects.All(u => !string.Equals(u.Name, gone, StringComparison.OrdinalIgnoreCase)))
                 {

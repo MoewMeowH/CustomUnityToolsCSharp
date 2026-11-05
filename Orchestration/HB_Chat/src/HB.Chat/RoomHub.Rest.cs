@@ -13,7 +13,7 @@ public sealed partial class RoomHub
     internal ClaudeSession.SessionTimings? SessionTimings { get; set; }
 
     /// <summary>이 방 실행 준비 중 규칙 글을 만드는 재료 — 이어 쓰는 턴이 같은 규칙을 다시 만든다.</summary>
-    private sealed record RunSetup(bool Terminal, string? Unity, IReadOnlyList<string> Extras, bool McpOn, bool AskWrites, string Workspace, bool AppAskWrites);
+    internal sealed record RunSetup(bool Terminal, string? Unity, IReadOnlyList<string> Extras, bool McpOn, bool AskWrites, string Workspace, bool AppAskWrites);
 
     /// <summary>실행 하나가 만든 자원 (터미널 토큰 · 설정 파일 · 방 MCP 설정 파일). 쉬는 실행이 가져가면(Adopted) 프로세스가 끝날 때 정리한다.</summary>
     private sealed class RunResources(Terminals? terminals)
@@ -626,8 +626,10 @@ public sealed partial class RoomHub
     }
 
     /// <summary>방 규칙 글 (실행 준비 값으로) — 처음 띄울 때와 이어 쓰는 턴이 같은 값을 만든다.</summary>
-    private string RulesFor(Room room, RunSetup s) =>
-        RoomRules.For(room.Level, terminal: s.Terminal, unity: s.Unity, askWrites: s.AppAskWrites, rest: room.GroupId is null,
+    // 실측 전용 표시는 스티커처럼 지금 값으로 읽는다 — 쉬는 실행이 띄울 때 값에 묶이면 작업용으로 돌린 것이 지휘자에게 안 간다 (/self-review 9078a0fc44 C1)
+    internal string RulesFor(Room room, RunSetup s) =>
+        RoomRules.For(room.Level, terminal: s.Terminal, unity: s.Unity, unityMeasure: s.Unity is { } u && options.Value.IsMeasureUnity(u),
+            askWrites: s.AppAskWrites, rest: room.GroupId is null,
             extras: [.. s.Extras.Where(x => x != McpConfigFile.UnityServer)],
             // 모델 선택창 안내는 기본 서버가 붙고 요청 창 · 스위치가 있는 방에만 (785ebb5e97 C7)
             modeCard: s.McpOn && !room.McpOff.Contains(options.Value.McpServer) && room.GroupId is null)

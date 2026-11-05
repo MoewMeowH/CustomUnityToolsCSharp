@@ -206,6 +206,9 @@ public sealed class ChatOptions
         : UnityProjects.TryGetValue(name, out var path) && !string.IsNullOrWhiteSpace(path) ? path.Trim()
         : AppUnityProjects?.PathOf(name);
 
+    /// <summary>실측 전용으로 표시한 Unity 프로젝트인지 (설정 파일 항목도 표시는 앱 저장소에 둔다).</summary>
+    public bool IsMeasureUnity(string name) => AppUnityProjects?.IsMeasure(name) ?? false;
+
     public IReadOnlyList<WorkspaceEntry> AllUnityProjects =>
         AppUnityProjects?.All() ?? [.. UnityProjects.Where(p => !string.IsNullOrWhiteSpace(p.Value)).Select(p => new WorkspaceEntry(p.Key, p.Value.Trim(), true))];
 

@@ -230,7 +230,7 @@
                         <p style="color:var(--warn);margin:0 0 6px">쓰지 않는 앱 항목 — @warning</p>
                     }
                     <table class="settings-table">
-                        <thead><tr><th>이름</th><th>경로</th><th>출처</th><th>방</th><th></th></tr></thead>
+                        <thead><tr><th>이름</th><th>경로</th><th>출처</th><th>방</th><th>실측 전용</th><th></th></tr></thead>
                         <tbody>
                             @foreach (var u in Model.UnityRows)
                             {
@@ -244,6 +244,16 @@
                                     </td>
                                     <td class="muted">@(u.Entry.FromConfig ? "설정 파일" : "앱")</td>
                                     <td>@u.Rooms</td>
+                                    <td>
+                                        @(u.Measure ? "실측 전용" : "작업용")
+                                        @* 켜는 쪽만 확인 — 실측 전용이면 지휘자가 그 프로젝트에서 실험 · 되돌리기를 한다 (/self-review 9078a0fc44 C3) *@
+                                        <form method="post" asp-page-handler="MeasureUnity"
+                                              onsubmit="@(u.Measure ? null : "return confirm('실측 전용으로 바꿀까요? 연결한 방의 지휘자가 이 프로젝트에서 위험 실측(실험 코드 실행 · 되돌리기)을 합니다. 작업 프로젝트는 켜지 마세요.')")">
+                                            <input type="hidden" name="name" value="@u.Entry.Name" />
+                                            <input type="hidden" name="on" value="@(u.Measure ? "false" : "true")" />
+                                            <button class="btn" type="submit">@(u.Measure ? "작업용으로 바꾸기" : "실측 전용으로 바꾸기")</button>
+                                        </form>
+                                    </td>
                                     <td>
                                         @if (!u.Entry.FromConfig)
                                         {
@@ -265,6 +275,7 @@
                     <form method="post" asp-page-handler="AddUnity" class="settings-add">
                         <input type="text" name="name" placeholder="이름 (예: ToolCreate)" maxlength="40" required value="@Model.NewUnityName" />
                         <input type="text" name="path" placeholder="프로젝트 폴더 (예: F:/AI/ToolCreate)" maxlength="400" required value="@Model.NewUnityPath" class="mono" />
+                        <label class="muted"><input type="checkbox" name="measure" value="true" /> 실측 전용</label>
                         <label class="muted"><input type="checkbox" name="confirm" value="true" /> 연결한 명령 방의 지휘자가 이 프로젝트 에디터를 묻지 않고 조작한다는 것을 압니다</label>
                         <button class="btn primary" type="submit">@Icons.Svg("plus") 더하기</button>
                     </form>

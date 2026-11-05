@@ -40,6 +40,12 @@ public sealed partial class WorkspaceStore
     /// <summary>쓰는 것: 파일 항목 중 설정 파일 이름과 겹치지 않고 검사를 통과한 것.</summary>
     private readonly Dictionary<string, string> _added = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// 실측 전용으로 표시한 이름 → 표시할 때의 최종 경로 (Unity 프로젝트 목록만 쓴다 — 계획 단계 위험 실측 자리). 파일 measure 칸, 비면 쓰지 않는다.
+    /// 경로까지 묶어 둬서 설정 파일 항목의 경로가 바뀌면 표시가 따라가지 않는다 — 남은 표시는 작업 프로젝트를 실측 전용으로 만드는 쪽이라 (/self-review 9078a0fc44 C2).
+    /// </summary>
+    private readonly Dictionary<string, string> _measure = new(StringComparer.OrdinalIgnoreCase);
+
     public string? LoadError { get; }
 
     /// <summary>파일에 있지만 쓰지 않는 항목과 이유 (설정 화면 경고).</summary>
@@ -67,7 +73,10 @@ public sealed partial class WorkspaceStore
         var warnings = new List<string>();
         try
         {
-            if (File.Exists(path) && JsonSerializer.Deserialize<WorkspaceFile>(File.ReadAllText(path), Json)?.Workspaces is { } saved)
+            var loaded = File.Exists(path) ? JsonSerializer.Deserialize<WorkspaceFile>(File.ReadAllText(path), Json) : null;
+            foreach (var (name, marked) in loaded?.Measure ?? [])
+                if (!string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(marked)) _measure[name.Trim()] = marked;
+            if (loaded?.Workspaces is { } saved)
                 foreach (var (name, folder) in saved)
                 {
                     if (string.IsNullOrWhiteSpace(name)) continue;
@@ -109,7 +118,8 @@ public sealed partial class WorkspaceStore
     /// rooms: 지금 방들 — 방(휴지통 포함)이 쓰는 이름은 받지 않는다. 방은 작업 폴더를 이름으로 가리켜, 주인 없는 이름을 다른 폴더로 다시 쓰면
     /// 예전 방(항상 허용 규칙 포함)이 새 폴더에서 돈다 (eee1adb777 C4).
     /// </summary>
-    public string? Add(string? name, string? path, IEnumerable<Room> rooms)
+    /// <param name="measure">실측 전용으로 더한다. 아니면 그 이름에 남은 표시를 지운다 (지운 이름을 다른 폴더로 다시 더할 때 표시가 따라오지 않게).</param>
+    public string? Add(string? name, string? path, IEnumerable<Room> rooms, bool measure = false)
     {
         var n = name?.Trim() ?? "";
         lock (_lock)
@@ -126,6 +136,8 @@ public sealed partial class WorkspaceStore
                 if ((Resolve(other) ?? Full(other)) is { } o && Same(final, o)) return "이미 다른 이름으로 있는 폴더입니다.";
             _saved[n] = final;
             _added[n] = final;
+            var hadMeasure = _measure.Remove(n, out var marked);
+            if (measure) _measure[n] = final;
             try
             {
                 Save();
@@ -134,6 +146,8 @@ public sealed partial class WorkspaceStore
             {
                 _saved.Remove(n);
                 _added.Remove(n);
+                _measure.Remove(n);
+                if (hadMeasure) _measure[n] = marked!;
                 return $"저장하지 못했습니다: {ex.Message}";
             }
         }
@@ -154,6 +168,9 @@ public sealed partial class WorkspaceStore
             if (used > 0) return $"이 항목을 쓰는 방이 {used}개 있습니다(휴지통 포함) — 그 방에서 먼저 빼세요.";
             var hadAdded = _added.Remove(n, out var added);
             _saved.Remove(n);
+            // 설정 파일에 같은 이름이 남으면 표시는 그쪽 것이라 둔다
+            string? marked = null;
+            var hadMeasure = !_configured.ContainsKey(n) && _measure.Remove(n, out marked);
             try
             {
                 Save();
@@ -162,10 +179,51 @@ public sealed partial class WorkspaceStore
             {
                 _saved[n] = before;
                 if (hadAdded) _added[n] = added!;
+                if (hadMeasure) _measure[n] = marked!;
                 return $"저장하지 못했습니다: {ex.Message}";
             }
         }
         return null;
+    }
+
+    /// <summary>실측 전용으로 표시했고, 지금 경로가 표시할 때의 경로와 같은지.</summary>
+    public bool IsMeasure(string name)
+    {
+        lock (_lock)
+            return _measure.TryGetValue(name, out var marked) && CurrentKey(name) is { } now && Same(now, marked);
+    }
+
+    /// <summary>실측 전용 표시 켜기 · 끄기 — 설정 파일 항목도 여기에 (이름 → 지금 최종 경로) 저장한다. 오류 문구(null이면 바꿈).</summary>
+    public string? SetMeasure(string? name, bool on)
+    {
+        var n = name?.Trim() ?? "";
+        lock (_lock)
+        {
+            if (LoadError is not null) return $"{FileName}을 읽지 못해 쓰지 않습니다: {LoadError}";
+            if (CurrentKey(n) is not { } now) return $"없는 {_noun}입니다.";
+            var had = _measure.Remove(n, out var marked);
+            if (on) _measure[n] = now;
+            if (had == on && (!on || Same(marked!, now))) return null;
+            try
+            {
+                Save();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _measure.Remove(n);
+                if (had) _measure[n] = marked!;
+                return $"저장하지 못했습니다: {ex.Message}";
+            }
+        }
+        return null;
+    }
+
+    /// <summary>그 이름의 지금 경로(설정 파일 먼저 — <see cref="ChatOptions.UnityProjectPath"/>와 같은 차례)를 비교용 최종 경로로. 없으면 null.</summary>
+    private string? CurrentKey(string name)
+    {
+        var now = _configured.TryGetValue(name, out var configured) && !string.IsNullOrWhiteSpace(configured) ? configured.Trim()
+            : _added.TryGetValue(name, out var added) ? added : null;
+        return now is null ? null : Resolve(now) ?? Full(now);
     }
 
     /// <summary>
@@ -511,7 +569,8 @@ public sealed partial class WorkspaceStore
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(_path))!);
         var tmp = _path + ".tmp";
         var workspaces = _saved.ToDictionary(p => p.Key, p => (string?)p.Value, StringComparer.OrdinalIgnoreCase);
-        File.WriteAllText(tmp, JsonSerializer.Serialize(new WorkspaceFile { Workspaces = workspaces }, Json), new UTF8Encoding(false));
+        var measure = _measure.Count > 0 ? new Dictionary<string, string>(_measure, StringComparer.OrdinalIgnoreCase) : null;
+        File.WriteAllText(tmp, JsonSerializer.Serialize(new WorkspaceFile { Workspaces = workspaces, Measure = measure }, Json), new UTF8Encoding(false));
         File.Move(tmp, _path, overwrite: true);
     }
 
@@ -519,6 +578,10 @@ public sealed partial class WorkspaceStore
     {
         public int Version { get; set; } = 1;
         public Dictionary<string, string?> Workspaces { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>실측 전용 이름 → 표시할 때의 최종 경로 (Unity 프로젝트). 옛 판은 이 칸을 모르고, 더하기 · 빼기로 저장하면 지운다 — 표시가 꺼질 뿐이라 둔다.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public Dictionary<string, string?>? Measure { get; set; }
     }
 
     [GeneratedRegex(@"^[\p{L}\p{N}][\p{L}\p{N} ._-]{0,39}$")]

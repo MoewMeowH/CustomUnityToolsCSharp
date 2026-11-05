@@ -20,6 +20,8 @@ public sealed class SettingsTabsTests(ChatApp app) : IClassFixture<ChatApp>
     [InlineData("faces", null, "decor")]
     [InlineData(null, "Backup", "data")]
     [InlineData(null, "AddUnity", "work")]
+    [InlineData("measure", null, "work")]
+    [InlineData(null, "MeasureUnity", "work")]
     [InlineData(null, "AddMcpJson", "connect")]
     [InlineData("theme", "StickerPack", "decor")] // 다시 그린 POST는 handler가 먼저
     [InlineData(null, null, null)]

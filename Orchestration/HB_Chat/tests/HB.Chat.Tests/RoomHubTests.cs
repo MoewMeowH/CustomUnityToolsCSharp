@@ -768,6 +768,26 @@ public sealed class RoomHubTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// 실측 전용 표시는 규칙을 만들 때마다 지금 값으로 읽는다 — 쉬는 실행은 띄울 때의 실행 준비값을 다시 쓰므로,
+    /// 같은 준비값으로 두 번 만들어 표시를 바꾼 것이 실리는지 본다 (/self-review 9078a0fc44 C1).
+    /// </summary>
+    [Fact]
+    public void Rules_ReadMeasureMarkNow_NotFromRunSetup()
+    {
+        var project = Path.Combine(_dir, "Measure");
+        Directory.CreateDirectory(project);
+        _options.UnityProjects["M"] = project;
+        _options.AppUnityProjects = new WorkspaceStore(Path.Combine(_dir, "data", "unity-projects.json"), _options.UnityProjects, [], usedBy: r => r.UnityProject);
+        var room = _store.Create("ws", PermissionLevel.Command, "opus", null);
+        var setup = new RoomHub.RunSetup(Terminal: false, Unity: "M", Extras: [], McpOn: false, AskWrites: false, Workspace: "ws", AppAskWrites: true);
+
+        Assert.Null(_options.AppUnityProjects.SetMeasure("M", true));
+        Assert.Contains("실측 전용이다", _hub.RulesFor(room, setup));
+        Assert.Null(_options.AppUnityProjects.SetMeasure("M", false));
+        Assert.Contains("작업용이다", _hub.RulesFor(room, setup));
+    }
+
     [Fact]
     public async Task ChangedRules_ArePrependedOnce_WhenResuming()
     {

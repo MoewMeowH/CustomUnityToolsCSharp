@@ -153,6 +153,50 @@ public sealed class RoomConnectionTests : IDisposable
     }
 
     [Fact]
+    public void UnityProjectStore_MeasureMark_SavedLoadedAndCleaned()
+    {
+        var a = Directory.CreateDirectory(Path.Combine(_dir, "A")).FullName;
+        var b = Directory.CreateDirectory(Path.Combine(_dir, "B")).FullName;
+        var file = Path.Combine(Data, "unity-projects.json");
+        WorkspaceStore New(string cfg = "Cfg") => new(file, new Dictionary<string, string> { ["Cfg"] = Path.Combine(_dir, cfg) }, [Data], usedBy: r => r.UnityProject);
+
+        // 칸이 없는 옛 파일도 읽는다
+        Directory.CreateDirectory(Data);
+        File.WriteAllText(file, """{"version":1,"workspaces":{"Old":""" + System.Text.Json.JsonSerializer.Serialize(b) + "}}");
+        var store = New();
+        Assert.Null(store.LoadError);
+        Assert.False(store.IsMeasure("Old"));
+        Assert.Null(store.Remove("Old", []));
+        Assert.DoesNotContain("measure", File.ReadAllText(file)); // 표시가 없으면 칸을 쓰지 않는다
+
+        // 더하기 줄 체크 → 저장 · 다시 읽기
+        Assert.Null(store.Add("A", a, [], measure: true));
+        Assert.True(New().IsMeasure("a"));
+        Assert.Null(store.SetMeasure("A", false));
+        Assert.False(New().IsMeasure("A"));
+        Assert.DoesNotContain("measure", File.ReadAllText(file));
+
+        // 설정 파일 항목도 이름으로 표시 · 없는 이름은 거절
+        Assert.Null(store.SetMeasure("Cfg", true));
+        Assert.True(New().IsMeasure("Cfg"));
+        Assert.Contains("없는", store.SetMeasure("Nope", true));
+        // 설정 파일에서 그 이름의 경로를 바꾸면 표시가 따라가지 않는다 (/self-review 9078a0fc44 C2)
+        Assert.False(New(cfg: "Work").IsMeasure("Cfg"));
+
+        // 빼면 표시도 지운다 — 같은 이름을 다른 폴더로 다시 더해도 실측 전용이 따라오지 않게
+        Assert.Null(store.SetMeasure("A", true));
+        Assert.Null(store.Remove("A", []));
+        Assert.Null(store.Add("A", b, []));
+        Assert.False(New().IsMeasure("A"));
+
+        // 파일에 남은 표시(앱 밖에서 고침)도 더하기 때 지운다
+        File.WriteAllText(file, """{"version":1,"workspaces":{},"measure":{"X":""" + System.Text.Json.JsonSerializer.Serialize(a) + "}}");
+        store = New();
+        Assert.Null(store.Add("X", a, []));
+        Assert.False(store.IsMeasure("X"));
+    }
+
+    [Fact]
     public void ChatOptions_UnityProjectPath_ConfigFirst_AndCliPath()
     {
         var cli = Path.Combine(_dir, "unity.exe");
@@ -302,5 +346,17 @@ public sealed class RoomConnectionTests : IDisposable
         Assert.Contains("notion", RoomRules.For(PermissionLevel.Read, extras: ["notion"]));
         Assert.Contains("단계와 상관없이", RoomRules.For(PermissionLevel.Read, extras: ["notion"]));
         Assert.DoesNotContain("단계와 상관없이", RoomRules.For(PermissionLevel.Read));
+    }
+
+    [Fact]
+    public void Rules_TellMeasureOrWorkUnity()
+    {
+        var work = RoomRules.For(PermissionLevel.Command, unity: "Game");
+        Assert.Contains("작업용이다 — 위험 실측에 쓰지 않는다", work);
+        Assert.DoesNotContain("실측 전용이다", work);
+        var measure = RoomRules.For(PermissionLevel.Command, unity: "6.3", unityMeasure: true);
+        Assert.Contains("실측 전용이다 — 계획 단계 위험 실측에 쓰고, 끝나면 되돌린다", measure);
+        Assert.DoesNotContain("작업용이다", measure);
+        Assert.DoesNotContain("실측", RoomRules.For(PermissionLevel.Command, unityMeasure: true)); // Unity 연결이 없으면 안내 없음
     }
 }
