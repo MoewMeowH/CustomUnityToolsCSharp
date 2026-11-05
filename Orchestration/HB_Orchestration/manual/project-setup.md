@@ -209,11 +209,11 @@ unity skill install --help
 
 그래서 지휘자는 사람이 여는 프로젝트가 아니라 **배치 전용 프로젝트**에서 돌립니다.
 
-- 프로젝트: `F:\AI\Unity_AITest\<버전>\ForAI` (6.3 · 7.0)
+- 프로젝트: HB Chat 설정 → 작업 → Unity 프로젝트에서 **실측 전용**으로 표시한 프로젝트 (버전마다 하나, git 저장소 안에 둡니다). 계획 단계 위험 실측도 같은 프로젝트를 씁니다.
 - 패키지는 `Packages/manifest.json`의 `file:` 경로로 넣습니다.
 - 끝나면 되돌립니다:
   ```powershell
-  git -C F:\AI\Unity_AITest checkout -- .
+  git -C <그 프로젝트가 든 저장소> checkout -- .
   ```
 - 절차는 `/unity-test` 명령 파일, 추가 루트는 `@unity_ai_test`.
 
