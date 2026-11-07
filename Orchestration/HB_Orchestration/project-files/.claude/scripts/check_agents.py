@@ -47,9 +47,10 @@ def check(path: str) -> list:
 
 
 REQUIRED_HOOKS = {  # matcher → 반드시 걸려 있어야 하는 스크립트
-    'Bash|PowerShell': ['cleanup_guard.py', 'push_guard.py', 'share_guard.py'],
+    'Bash|PowerShell': ['cleanup_guard.py', 'push_guard.py', 'share_guard.py', 'habit_guard.py'],
     'mcp__hb-orchestration__run_mode': ['run_mode_guard.py'],
     'Agent|Task|SendMessage': ['subagent_input_guard.py'],  # H6: 서브에이전트 입력의 CLAUDE.md 자동 로드 막기
+    'Write|Edit|MultiEdit|NotebookEdit': ['plan_ref_guard.py'],  # H8: 코드 · 문서에 계획서 경로 참조 막기
 }
 
 

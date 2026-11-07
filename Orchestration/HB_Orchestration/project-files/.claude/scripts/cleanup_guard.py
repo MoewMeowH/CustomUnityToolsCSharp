@@ -4,6 +4,8 @@
 - 재귀 삭제: rm(경로가 붙은 /usr/bin/rm · \\rm 포함) -r/-R/-rf/-fr/--recursive, Remove-Item(rm·del·erase·ri·rd·rmdir 별칭) -Recurse,
   rmdir /s · rd /s. `git rm -r`은 작업 트리 파일 삭제가 아니므로 대상이 아니다.
 - 막는 경우: 다른 명령과 묶임(&&, ||, ;, |, 줄바꿈) · cd류와 함께 · 명령 치환($( ) · 백틱) 안 ·
+  (묶음은 조각마다 다른 재귀 삭제 · 읽기 확인(CHECKS, 리다이렉트 없이) · 절대 경로 cd만 받는다 — 삭제 대상은 처음 셸 현재 폴더와
+  cd로 옮긴 모든 위치 기준으로 검사. 작성 · 복사 · 실행 · 빌드와 묶인 삭제는 막는다. 2026-11-07 오탐 완화)
   대상이 절대 경로가 아님(변수·~·드라이브 상대 \\x 포함) · 대상이 루트·드라이브 루트 ·
   **셸의 현재 폴더가 대상과 같거나 그 안** (Claude Code가 "Dangerous rm operation" 승인 창을 띄우는 실제 조건, 2026-10-19 사고).
 - 따옴표 안·heredoc·here-string 본문의 글자는 명령으로 보지 않는다. PowerShell은 PowerShell 따옴표 규칙(백틱 이스케이프)으로 읽는다.
@@ -20,9 +22,9 @@ import sys
 
 sys.dont_write_bytecode = True  # 훅 폴더에 __pycache__를 남기지 않는다 (저장소에 섞이지 않게)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # -I는 스크립트 폴더를 경로에 넣지 않는다
-from hook_common import BASH, CD, CHAIN, data_only, has_substitution, join_continuations, lex, native_path, read_input, same_or_inside, scan, shell_of, strip_bodies, tokenize  # noqa: E402
+from hook_common import BASH, CD, CHAIN, NESTED, chain_pieces, data_only, has_substitution, join_continuations, lex, native_path, read_input, same_or_inside, scan, shell_of, strip_bodies, tokenize  # noqa: E402
 
-RULE = 'CLAUDE.md "명령 실행": 폴더 삭제는 다른 명령에 이어 붙이지 말고, 별도 호출로 셸의 현재 폴더 밖에서 절대 경로로 실행한다.'
+RULE = 'CLAUDE.md "명령 실행": 폴더 삭제는 절대 경로로, 셸의 현재 폴더 밖에서 실행한다 (다른 명령과는 읽기 확인 · 절대 경로 cd만 묶는다).'
 
 
 def deny(reason: str) -> None:
@@ -39,6 +41,13 @@ ROUGH = re.compile(
     r'|(?:^|[\s;&|(])(?:Remove-Item|rm|del|erase|ri|rd|rmdir)\b[^\n;&|]*\s@[A-Za-z_]',
     re.IGNORECASE)
 
+# 재귀 삭제와 묶어도 되는 읽기 확인 (리다이렉트 없이) — 지난 기록에서 되풀이된 '삭제 뒤 확인' 모양 (2026-11-07 집계: 묶임 차단 28건 중 18건)
+CHECKS = {'test-path', 'ls', 'dir', 'get-childitem', 'gci', 'echo', 'printf', 'write-host', 'write-output', 'pwd', 'get-location', 'gl',
+          'grep', 'head', 'tail', 'wc', 'cat', 'type', 'get-content', 'gc', 'select-object', 'select', 'measure-object', 'true'}
+CD_NAMES = {'cd', 'chdir', 'set-location', 'sl', 'pushd', 'push-location'}
+NULL_REDIRECT = re.compile(r'2>(?:/dev/null|\$null|&1)')
+BUNDLED = ('재귀 삭제가 다른 명령과 묶여 있다 (&&·||·;·|·줄바꿈) — 함께 쓸 수 있는 것은 다른 재귀 삭제 · 읽기 확인(Test-Path · ls · '
+           'Get-ChildItem · echo 등, 리다이렉트 없이) · 절대 경로 cd뿐이다. 작성 · 복사 · 실행 · 빌드와는 따로 실행한다.')
 PS_DELETE = {'remove-item', 'rm', 'del', 'erase', 'ri', 'rd', 'rmdir'}
 DELETE_NAMES = PS_DELETE | {'rm', 'rmdir', 'rd'}
 # PowerShell은 매개변수 앞의 이 대시 글자도 '-'로 받는다 (–Recurse — 실측). 낱말 첫 글자만 바꾼다 — 경로 안의 대시까지 바꾸면
@@ -124,6 +133,69 @@ def path_problem(path: str, shell: str, cwd: str | None) -> str | None:
     return None
 
 
+def delete_in(toks: list[str], shell: str) -> list[str] | None:
+    """한 조각의 재귀 삭제 대상 (git rm -r처럼 작업 트리 삭제가 아니면 None). 해석하지 못하면 막는다.
+    거친 탐지에 걸렸는데 맨 앞이 삭제 명령이 아니면(cmd /c rmdir /s · env rm · timeout rm · -Command 따옴표 없음) 실행기를 거친 삭제라
+    해석하지 않고 막는다 (/self-review security ddb47044d1 C2)."""
+    if shell != BASH and toks and command_name(toks[0]) in PS_DELETE and any(t.startswith('@') for t in toks[1:]):
+        deny('삭제 명령의 splatting(@변수)은 훅이 해석하지 못한다 — 경로 · -Recurse를 직접 적어라.')
+    targets = delete_targets(toks, shell)
+    if targets is None:
+        if toks and command_name(toks[0]) not in DELETE_NAMES and command_name(toks[0]) != 'git':
+            deny('재귀 삭제를 해석하지 못했다 — 삭제 명령(rm · Remove-Item · rmdir)을 맨 앞에 두고 cmd /c · env · timeout 등을 거치지 말고 실행하라.')
+        return None
+    if not targets:
+        deny('삭제 대상 경로를 찾지 못했다.')
+    return targets
+
+
+def cd_arg(toks: list[str]) -> str | None:
+    """cd · Set-Location의 대상 (-Path · -LiteralPath 값 또는 첫 인자)."""
+    args = toks[1:]
+    for i, a in enumerate(args):
+        if a.lower() in PS_PATH_PARAMS:
+            return args[i + 1] if i + 1 < len(args) else None
+        if not a.startswith('-'):
+            return a
+    return None
+
+
+def check_chain(cmd: str, stripped: str, shell: str, cwd: str | None) -> None:
+    """재귀 삭제가 묶인 명령: 조각마다 재귀 삭제 · 읽기 확인 · 절대 경로 cd만 받는다.
+    삭제 대상은 처음 셸 현재 폴더와 cd로 옮긴 모든 위치 기준으로 검사한다 (; 묶음은 cd가 실패해도 삭제가 돈다).
+    조각 종류는 보이는 글로, 경로는 원문 조각에서 (hook_common.chain_pieces — 두 쪽이 어긋나면 묶음으로 막는다)."""
+    pieces = chain_pieces(cmd, stripped, shell)
+    if pieces is None:
+        deny(BUNDLED)
+    deletes = [(i, t) for i, (v, r) in enumerate(pieces) if ROUGH.search(' '.join(v)) and (t := delete_in(r, shell)) is not None]
+    if not deletes:
+        return  # git rm -r 등: 작업 트리 재귀 삭제가 없다
+    done = {i for i, _ in deletes}
+    locs = [cwd]
+    for i, (v, toks) in enumerate(pieces):
+        if i in done:
+            continue
+        # 경로가 붙은 실행 파일(./ls · tools/cat)은 이름만 같은 다른 프로그램일 수 있다. 괄호 · 중괄호(PowerShell 하위 식 · 스크립트 블록 ·
+        # 프로세스 치환)는 그 안에서 명령 · 숨은 Set-Location이 돈다. 리다이렉트는 붙여 쓴 꼴(echo ok>f)도 보이는 글로 본다
+        seen = ' '.join(v)
+        if re.search(r'[\\/]', toks[0]) or NESTED.search(seen) or '>' in NULL_REDIRECT.sub(' ', seen):
+            deny(BUNDLED)
+        name = command_name(toks[0])
+        if name in CD_NAMES:
+            target = cd_arg(toks)
+            problem = path_problem(target, shell, None) if target else '대상이 없다 (홈).'
+            if problem is not None:
+                deny(f'재귀 삭제와 함께 쓴 cd: {problem} 함께 쓸 수 있는 cd는 절대 경로로 가는 것뿐이다.')
+            locs.append(target)
+        elif name not in CHECKS:
+            deny(BUNDLED)
+    for _, targets in deletes:
+        for t in targets:
+            for loc in locs:
+                if (problem := path_problem(t, shell, loc)) is not None:
+                    deny(problem)
+
+
 def check(data: dict) -> None:
     tool = data.get('tool_name', '')
     if tool not in ('Bash', 'PowerShell'):
@@ -154,21 +226,13 @@ def check(data: dict) -> None:
     if not rough:
         return
     if CHAIN.search(stripped.strip()):
-        deny('재귀 삭제가 다른 명령과 묶여 있다 (&&·||·;·|·줄바꿈).')
+        check_chain(cmd, stripped, shell, data.get('cwd'))
+        return
     if CD.search(stripped):
         deny('재귀 삭제와 cd가 함께 있다.')
-    toks = tokenize(cmd.strip(), shell)
-    if shell != BASH and toks and command_name(toks[0]) in PS_DELETE and any(t.startswith('@') for t in toks[1:]):
-        deny('삭제 명령의 splatting(@변수)은 훅이 해석하지 못한다 — 경로 · -Recurse를 직접 적어라.')
-    targets = delete_targets(toks, shell)
+    targets = delete_in(tokenize(cmd.strip(), shell), shell)
     if targets is None:
-        if toks and command_name(toks[0]) not in DELETE_NAMES and command_name(toks[0]) != 'git':
-            # 거친 탐지에 걸렸는데 맨 앞이 삭제 명령이 아니다: cmd /c rmdir /s · env rm · timeout rm · -Command 따옴표 없음 —
-            # 실행기를 거친 삭제는 해석하지 않고 막는다 (/self-review security ddb47044d1 C2). git rm -r은 작업 트리 삭제가 아니다.
-            deny('재귀 삭제를 해석하지 못했다 — 삭제 명령(rm · Remove-Item · rmdir)을 맨 앞에 두고 cmd /c · env · timeout 등을 거치지 말고 실행하라.')
         return  # git rm -r · Remove-Item -Recurse:$false 등: 작업 트리 재귀 삭제가 아니다
-    if not targets:
-        deny('삭제 대상 경로를 찾지 못했다.')
     for t in targets:
         if (problem := path_problem(t, shell, data.get('cwd'))) is not None:
             deny(problem)

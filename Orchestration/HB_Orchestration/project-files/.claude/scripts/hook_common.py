@@ -403,6 +403,94 @@ CHAIN = re.compile(r'&&|\|\||;|\||\n|(?<![<>&|])&(?![&>])')
 CD = re.compile(r'(?:^|[\s;&|(])(?:cd|chdir|Set-Location|sl|pushd|Push-Location|popd|Pop-Location)(?:\s|$)', re.IGNORECASE)
 
 
+def segments(cmd: str, shell: str) -> list[tuple[str, int]]:
+    """따옴표 · 주석 밖의 묶음 기호(&& || ; | 줄바꿈, Bash &)로 나눈 (조각, 조각 시작의 Bash 괄호 깊이) 목록. 따옴표는 원문 그대로 남긴다."""
+    out: list[tuple[str, int]] = []
+    buf: list[str] = []
+    depth = start = 0
+    esc = '\\' if shell == BASH else '`'
+    sq, dq = ("'", '"') if shell == BASH else (PS_SQ, PS_DQ)
+    breaks = (' ', '\t', '(') if shell == BASH else (' ', '\t', '(', '{', ',')  # 이 뒤의 #가 주석 (Bash ${#x}는 글자)
+    i, n = 0, len(cmd)
+
+    def flush() -> None:
+        out.append((''.join(buf), start))
+        buf.clear()
+
+    while i < n:
+        c = cmd[i]
+        if c == esc and i + 1 < n:
+            buf.append(cmd[i:i + 2])
+            i += 2
+            continue
+        if c in sq:
+            j = i + 1
+            while j < n:
+                if cmd[j] in sq:
+                    if shell != BASH and j + 1 < n and cmd[j + 1] in sq:
+                        j += 2
+                        continue
+                    break
+                j += 1
+            buf.append(cmd[i:j + 1])
+            i = j + 1
+            continue
+        if c in dq:
+            j = i + 1
+            while j < n and cmd[j] not in dq:
+                j += 2 if cmd[j] == esc else 1
+            buf.append(cmd[i:j + 1])
+            i = j + 1
+            continue
+        word_start = not buf or buf[-1][-1:] in breaks or not ''.join(buf).strip()
+        if c == '#' and word_start:
+            end = cmd.find('\n', i)
+            i = n if end < 0 else end
+            continue
+        if shell != BASH and cmd.startswith('<#', i):
+            end = cmd.find('#>', i + 2)
+            i = n if end < 0 else end + 2
+            continue
+        two = cmd[i:i + 2]
+        if two in ('&&', '||'):
+            flush()
+            start = depth
+            i += 2
+            continue
+        if c in ';\n' or (c == '|' and not (i > 0 and cmd[i - 1] == '>')) or \
+                (shell == BASH and c == '&' and not (i > 0 and cmd[i - 1] in '<>') and cmd[i + 1:i + 2] != '>'):
+            flush()
+            start = depth
+            i += 1
+            continue
+        if shell == BASH and c == '(':
+            depth += 1
+            if not ''.join(buf).strip():
+                start = depth  # 조각 맨 앞의 ( 는 이 조각이 서브셸 안이라는 뜻
+        elif shell == BASH and c == ')':
+            depth = max(0, depth - 1)
+        buf.append(c)
+        i += 1
+    flush()
+    return out
+
+
+def chain_pieces(cmd: str, stripped: str, shell: str) -> list[tuple[list[str], list[str]]] | None:
+    """묶음(&& || ; | 줄바꿈)의 조각마다 (보이는 글 토큰, 원문 토큰). 조각의 종류는 보이는 글(scan — 따옴표를 셸과 같게 읽음)로 정하고
+    경로 같은 값은 원문 토큰에서 꺼낸다. 두 쪽의 조각 수 · 명령 이름이 다르면 따옴표를 다르게 읽은 것이라($'\'' 등으로 숨긴 명령) None."""
+    def trim(s: str) -> str:
+        return s.lstrip('({&. \t\r\n').rstrip(') \t\r\n')
+
+    def name(tok: str) -> str:
+        return re.sub(r'(?i)\.exe$', '', tok.replace('\\', '/').rsplit('/', 1)[-1]).lower()
+
+    vis = [tokenize(t, shell) for t in (trim(p) for p in CHAIN.split(stripped)) if t]
+    raw = [tokenize(t, shell) for t in (trim(seg) for seg, _ in segments(cmd, shell)) if t]
+    if len(vis) != len(raw) or any(not v or not r or name(v[0]) != name(r[0]) for v, r in zip(vis, raw)):
+        return None
+    return list(zip(vis, raw))
+
+
 def tokenize(cmd: str, shell: str) -> list[str]:
     """단독 명령 하나를 토큰으로 (따옴표를 벗긴 값). 묶음은 앞에서 막았다고 가정한다."""
     toks: list[str] = []
@@ -485,11 +573,14 @@ NESTED = re.compile(r'[(){}`]')
 READERS = {'grep', 'egrep', 'fgrep', 'rg', 'select-string', 'sls', 'echo', 'printf', 'write-output', 'write-host'}
 # git 읽기 명령도 설정(.git/config의 fsmonitor · diff.external · textconv 등)에 적힌 명령을 실행할 수 있다 — 같은 묶음에 쓰기가 있으면 막는다 (같은 C4)
 GIT_READERS = {'log', 'show', 'diff', 'status'}
+# 본문을 실행하지도 쓰지도 않는 조각 — 'cd 폴더 && cat >> 로그 <<EOF'가 데이터 전용에서 빠지던 오탐 (2026-11-07 집계).
+# 하위 폴더 cd 자체는 H7이 막는다.
+NEUTRAL = {'cd', 'chdir', 'set-location', 'sl', 'pushd', 'push-location', 'popd', 'pop-location', 'mkdir', 'md'}
 
 
 def data_only(stripped: str, inner: list[str], shell: str, readers: bool = False) -> bool:
     """묶음의 모든 조각(명령 치환 안 포함)이 본문을 실행하지 않는 명령이면 True: cat · tee · git commit ·
-    PowerShell Set-Content · Add-Content · Out-File · 변수 대입($m = @'…'@) · here-string 자리표만 있는 조각.
+    PowerShell Set-Content · Add-Content · Out-File · 변수 대입($m = @'…'@) · here-string 자리표만 있는 조각 (cd류 · mkdir 조각은 중립).
     readers면 읽기 명령(grep · rg · Select-String · echo · git log 등)도 받는다 — 따옴표 문자열 검사용.
     단 파일을 쓰는 조각(리다이렉트 · tee · Set-Content 등 · 대입 · git --output)과 git commit · git 읽기 명령이 한 묶음에 있으면 False.
     stripped · inner는 strip_bodies 뒤 scan 결과."""
@@ -516,6 +607,8 @@ def data_only(stripped: str, inner: list[str], shell: str, readers: bool = False
             name = re.sub(r'(?i)\.exe$', '', toks[0]).lower()
             while name == 'git' and len(toks) > 2 and toks[1] == '-C':  # git -C <경로> commit — 저장소 위치만 바꾼다 (-c 설정은 그대로 막힘)
                 toks = [toks[0]] + toks[3:]
+            if name in NEUTRAL:
+                continue
             if name == 'git' and len(toks) > 1 and toks[1] == 'commit':
                 commits = True
             elif name in DATA_RECEIVERS:

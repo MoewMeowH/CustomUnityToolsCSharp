@@ -93,6 +93,11 @@ ABS_PATHS = [
     (re.compile(r'(?:^|[\s"\'(\[`=])/[A-Za-z]/[^\s/]'), 'Git Bash 드라이브 경로'),
 ]
 
+# 펼친 사용자 폴더 경로 (C:\Users\<이름> · /c/Users/<이름> · /home/<이름>) — 계정 이름이 드러난다. %LOCALAPPDATA% · ~ 같은 변수 꼴은 아니다
+# WSL /mnt/c/Users/<이름> · UNC \\host\c$\Users\<이름>도 (/cross-review 2cb5d051ff)
+USER_DIRS = re.compile(r'(?i)(?<![A-Za-z0-9])[A-Z]:[\\/]+Users[\\/]+[^\\/\s"\'`<>|]+|(?<![\w.~-])/(?:[a-z]/|mnt/[a-z]/)?(?:Users|home)/[^/\s"\'`]+'
+                       r'|\\\\[^\\\s]+\\[A-Z]\$\\Users\\[^\\\s"\'`<>|]+')
+
 SIMPLE = '단독 명령으로 따로 실행하라: `dotnet run --no-build --project "$SLACKPLAN_ROOT/src/SlackPlanBot" -- <하위 명령> …`.'
 
 
@@ -271,6 +276,24 @@ def find_hits(texts: list[tuple[str, str]], project_dir: str) -> list[str]:
                     if any(a.search(token) for a in allows):
                         continue
                     hits.append(f'{label}:{no} {name} ({mask(token)})')
+    return hits
+
+
+def outbound_hits(text: str, project_dir: str) -> list[str]:
+    """외부 모델 · 웹 검색으로 나가는 글(run_mode input · web-searcher 위임 메시지)의 비밀 · 개인 값 · 프로젝트 패턴 · 펼친 사용자 폴더 경로.
+    Slack 글과 달리 작업 경로(드라이브 경로) · 무시 폴더 언급은 받는다 (사용자 결정 2026-11-07 "비밀 값 + 사용자 폴더 경로")."""
+    secret_pats, allows, _ = load_patterns(project_dir)
+    local_pats, local_allows, _ = load_local(project_dir)
+    allows += local_allows
+    rules = [(p, '비밀 · 개인 값') for p in secret_pats] + [(p, '프로젝트 패턴') for p in local_pats] + [(USER_DIRS, '사용자 폴더 경로')]
+    hits = []
+    for no, line in enumerate(text.splitlines() or [''], 1):
+        for pat, name in rules:
+            for found in pat.finditer(line):
+                token = re.match(r'\s*\S*', line[found.start():]).group(0).strip()
+                if any(a.search(token) for a in allows):
+                    continue
+                hits.append(f'{no}줄 {name} ({mask(token)})')
     return hits
 
 

@@ -86,6 +86,7 @@ disable-model-invocation: true
   * 읽기 차단 훅(`.claude/scripts/subagent_read_guard.py`)이 `subagent_in/` 밖을 막는다. 이전 리뷰·작업 로그·호출 기록을 넣지 않는다.
   * `CLAUDE.md`가 검토 대상이면 `CLAUDE.md.txt`처럼 이름을 바꿔 복사한다 (그대로 두면 지휘자 규칙이 서브에이전트에 자동으로 실린다 — H6이 막음). 링크가 아니라 내용을 복사한다. 부르기 전에 복사를 끝내고, 서브에이전트가 도는 동안에는 `subagent_in/`에 복사하지 않는다 (H6은 부르는 순간만 본다).
   * 그 서브에이전트의 `.claude/mistakes/<이름>.md`에 항목(주석 밖 `- ` 줄)이 있으면 `_SUBAGENT_MISTAKES.md`로 함께 복사한다 (검토 대상인 프로젝트 `MISTAKES.md`와 겹치지 않는 이름). web-searcher는 파일을 못 읽으므로 주석 밖 `- ` 줄만 위임 메시지 끝 `## 자주 하는 실수` 절로 붙인다 (`/record-rules` "실수 기록").
+  * 훅 H6이 부르는 순간 본다: 검토형(self · perf · security)은 위임 메시지에 실제 `subagent_in/<폴더>`와 그 안의 `REVIEW_GUIDELINES.md`, 실수 목록에 항목이 있는 서브에이전트는 `_SUBAGENT_MISTAKES.md`. web-searcher 위임 메시지와 SendMessage 글(받는 쪽을 몰라 늘)의 비밀 값 · 사용자 폴더 경로도 막는다.
   * 위임 메시지에는 대상·의도·제약만 쓴다. 너의 결론·의심 지점·검증 결과는 넣지 않는다 (CLAUDE.md "input — 독립성").
   * `subagent_in/`은 프로젝트마다 `.gitignore`에 등록한다. 끝나면 지운다.
 * 결과가 정해진 형식을 어겼거나, 중단됐거나, `## 읽은 파일`에 폴더 밖 경로가 있으면 그 단계에서 멈추고 사용자에게 알린다. 다시 부르거나 대신 쓸지는 사용자가 정한다.

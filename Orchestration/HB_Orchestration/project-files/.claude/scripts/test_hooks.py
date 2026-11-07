@@ -1,4 +1,4 @@
-"""cleanup_guard · push_guard · run_mode_guard · share_guard · subagent_input_guard · habit_guard 회귀 시험 (/cross-review 10bfc8de41 반영).
+"""cleanup_guard · push_guard · run_mode_guard · share_guard · subagent_input_guard · habit_guard · commit_notice · plan_ref_guard 회귀 시험 (/cross-review 10bfc8de41 반영).
 사용: python -I .claude/scripts/test_hooks.py  → 마지막 줄 'ALL True'면 통과 (exit 0), 아니면 exit 1.
 H2는 임시 폴더에 저장소와 bare 원격을 만들어 시험한다 (실제 원격·실제 저장소는 건드리지 않는다).
 입력은 UTF-8 바이트로 보낸다 (Claude Code가 보내는 것과 같게 — 한글 깨짐 회귀 시험).
@@ -46,12 +46,41 @@ expect('H1 PowerShell 쉼표 경로 중 상대', h1('Remove-Item -Recurse "F:\\A
 expect('H1 && 로 묶음', h1('dotnet test && rm -rf /f/AI/x'), 2, '묶여')
 expect('H1 cd 뒤', h1('cd /f/AI && rm -rf x'), 2)
 expect('H1 상대 경로', h1('rm -rf subagent_in/x'), 2, '절대 경로')
+# 2026-11-07 오탐 완화: 지난 기록에서 되풀이된 무해한 묶음은 통과, 작성 · 복사 · 실행과 섞인 삭제는 계속 막음
+expect('H1 완화 삭제 뒤 Test-Path', h1("Remove-Item -LiteralPath 'F:\\AI\\P\\subagent_in\\x' -Recurse -Force; Test-Path 'F:\\AI\\P\\subagent_in\\x'", 'PowerShell'), 0)
+expect('H1 완화 루트로 Set-Location 뒤 삭제', h1("Set-Location F:\\AI\\P; Remove-Item 'F:\\AI\\P\\subagent_in\\x' -Recurse -Force", 'PowerShell'), 0)
+expect('H1 완화 밖 cd 뒤 rm', h1('cd /f/AI && rm -rf "/f/AI/P/subagent_in/x"'), 0)
+expect('H1 완화 여러 삭제', h1('rm -rf /f/AI/P/a && rm -rf "/f/AI/P/b"'), 0)
+expect('H1 완화 삭제 뒤 ls | grep', h1('rm -rf /f/AI/P/a; ls /f/AI/P | grep a'), 0)
+expect('H1 완화 확인의 2>/dev/null', h1('rm -rf /f/AI/P/a; ls /f/AI/P/a 2>/dev/null'), 0)
+expect('H1 Git Bash /tmp는 계속 막음 (/tmp · /tmp/.. · 현재 폴더 비교 불가)', h1('rm -rf /tmp/hb-stats'), 2, '절대 경로')
+expect('H1 /tmp/.. 막음', h1('rm -rf /tmp/..'), 2, '절대 경로')
+# /cross-review 2cb5d051ff 반영: 읽기 확인 조각의 경로 · 괄호 · 붙여 쓴 리다이렉트
+expect('H1 묶음 경로 붙은 ls', h1('rm -rf /f/AI/P/x; ./ls'), 2, '묶여')
+expect('H1 묶음 tools/cat', h1('rm -rf /f/AI/P/x && tools/cat a'), 2, '묶여')
+expect('H1 묶음 PS 하위 식', h1("Write-Host (python -I run.py); Remove-Item 'F:\\AI\\P\\x' -Recurse", 'PowerShell'), 2, '묶여')
+expect('H1 묶음 PS 스크립트 블록 속 Set-Location', h1("gi . | Select-Object @{e={Set-Location 'F:\\AI\\P\\x\\s'}}; Remove-Item 'F:\\AI\\P\\x' -Recurse", 'PowerShell'), 2)
+expect('H1 묶음 프로세스 치환', h1('rm -rf /f/AI/P/x; cat <(python -I run.py)'), 2)
+expect('H1 묶음 붙여 쓴 리다이렉트', h1('rm -rf /f/AI/P/x; echo ok>/f/AI/P/out.txt'), 2, '묶여')
+expect('H1 묶음 따옴표 속 > 는 글자', h1('rm -rf /f/AI/P/x; echo "a > b"'), 0)
+expect('H1 완화 git rm -r와 commit', h1('git rm -r --cached GoldenSet && git commit -m "x"'), 0)
+expect('H1 완화 cd 뒤 작업 로그 heredoc 속 rmdir /s', h1("cd /f/AI/P && cat >> docs/log.md <<'EOF'\n- rmdir /s 로 지움\nEOF"), 0)
+expect('H1 따옴표 글 속 rm과 실제 삭제는 계속 막음 (따옴표 검사)', h1('echo "rm -rf 끝"; rm -rf /f/AI/P/a'), 2, '따옴표')
+expect('H1 묶음 mkdir · cp와 삭제', h1('mkdir -p /f/AI/P/x && cp a /f/AI/P/x && rm -rf /f/AI/P/y'), 2, '묶여')
+expect('H1 묶음 삭제 뒤 실행', h1('rm -rf /f/AI/P/x && python -I run.py'), 2, '묶여')
+expect('H1 묶음 확인에 리다이렉트', h1('rm -rf /f/AI/P/x; ls > /f/AI/P/out.txt'), 2, '묶여')
+expect('H1 묶음 cd 상대 경로', h1('cd sub && rm -rf /f/AI/P/x'), 2, '절대 경로')
+expect('H1 묶음 cd 변수', h1('cd $D; rm -rf /f/AI/P/x'), 2, '변수')
+expect('H1 묶음 cd로 대상 안에 들어감', h1('cd /f/AI/P/x/sub; rm -rf /f/AI/P/x'), 2, '현재 폴더')
+expect('H1 묶음 처음 현재 폴더도 봄 (cd 실패 대비)', h1('cd /f/AI; rm -rf /f/AI/P', cwd='F:\\AI\\P\\src'), 2, '현재 폴더')
+expect('H1 묶음 PS 삭제 뒤 Copy-Item', h1("Remove-Item 'F:\\AI\\x' -Recurse; Copy-Item a b", 'PowerShell'), 2, '묶여')
 expect('H1 변수', h1('rm -rf "$S/raw"'), 2, '변수')
 expect('H1 -fr', h1('rm -fr x'), 2)
 expect('H1 --recursive', h1('rm --recursive -f x'), 2)
 expect('H1 -- 뒤 경로', h1('rm -rf -- x'), 2, "'x'")
-expect('H1 PowerShell ; 로 묶음', h1('Remove-Item -Recurse -Force "F:\\x"; Test-Path "F:\\x"', 'PowerShell'), 2, '묶여')
-expect('H1 PowerShell 끝 \\ 경로 따옴표 (\\는 이스케이프 아님)', h1('Set-Location "F:\\AI\\x\\"; Remove-Item -Recurse -Force F:\\AI\\x\\sub', 'PowerShell'), 2)
+expect('H1 PowerShell 삭제 뒤 Test-Path는 통과 (2026-11-07 완화)', h1('Remove-Item -Recurse -Force "F:\\x"; Test-Path "F:\\x"', 'PowerShell'), 0)
+expect('H1 PowerShell ; 로 작성과 묶음', h1('Remove-Item -Recurse -Force "F:\\x"; Set-Content F:\\y.txt a', 'PowerShell'), 2, '묶여')
+expect('H1 PowerShell 끝 \\ 경로 따옴표 (\\는 이스케이프 아님)', h1('Set-Location "F:\\AI\\x\\"; Remove-Item -Recurse -Force F:\\AI\\x', 'PowerShell'), 2, '현재 폴더')
 expect('H1 rmdir /s', h1('rmdir /s /q build'), 2)
 expect('H1 rm 단일 파일은 통과', h1('rm -f a.txt && echo ok'), 0)
 expect('H1 git rm -r --cached 는 대상 아님', h1('git rm -r --cached GoldenSet'), 0)
@@ -81,8 +110,8 @@ expect("H1 $'…'로 숨긴 rm", h1("echo $'\\'' ; rm -rf build ; 'z'"), 2, '묶
 # 본문 검사가 먼저 막는다 (본문의 $( )는 실행되므로 data_only도 아님) — 이전에는 '명령 치환'으로 막힘
 expect('H1 따옴표 없는 heredoc 속 $()', h1('cat <<EOF\n$(rm -rf build)\nEOF'), 2, '[정리 명령 차단]')
 expect('H1 PowerShell 굽은 따옴표로 숨긴 삭제', h1("echo 'a’; Remove-Item -Recurse -Force x; ‘'", 'PowerShell'), 2)
-expect('H1 $#는 주석 아님', h1('echo $#; rm -rf x'), 2, '묶여')
-expect('H1 ${#a}는 주석 아님', h1('echo ${#a}; rm -rf x'), 2, '묶여')
+expect('H1 $#는 주석 아님', h1('echo $#; rm -rf x'), 2, '절대 경로')
+expect('H1 ${#a}는 주석 아님', h1('echo ${#a}; rm -rf x'), 2, '절대 경로')
 expect('H1 커밋 "$(cat heredoc)" 본문의 rm -rf 는 명령 아님', h1("git commit -m \"$(cat <<'EOF'\nrm -rf 정리 (don't)\nEOF\n)\""), 0)
 # /cross-review 8722c947f7 반영 (bash · PowerShell 실측과 같게)
 for name, cmd, tool in [
@@ -227,12 +256,34 @@ try:
     expect('H2 깨끗한 새 커밋', h2(), 0)
     g('push', '-q', 'origin', 'HEAD:main')
     expect('H2 푸시할 것 없음', h2(), 0)
+    # 2026-11-07 오탐 완화
+    expect('H2 완화 push | tail', h2('git push origin HEAD:main 2>&1 | tail -3'), 0)
+    expect('H2 완화 앞 git log', h2('git log --oneline origin/main..HEAD; git push origin HEAD:main | tail -3'), 0)
+    expect('H2 완화 PS Select-Object', h2('git push origin main 2>&1 | Select-Object -Last 3', 'PowerShell'), 0)
+    expect('H2 완화 git stash push', h2('git stash push src/a.cs && git stash list'), 0)
+    expect('H2 완화 커밋 메시지 속 git push', h2('git add -A && git commit -m "git push 전 비밀 값 검사 고침"'), 0)
+    expect('H2 완화 cd 뒤 작업 로그 heredoc 속 push', h2("cd /tmp && cat >> log.md <<'EOF'\ngit push origin main 끝\nEOF"), 0)
+    expect('H2 push 뒤 다른 명령', h2('git push origin HEAD:main && echo ok'), 2, '묶여')
+    expect('H2 push 앞 git fetch', h2('git fetch && git push origin HEAD:main'), 2, '묶여')
+    expect('H2 push 둘', h2('git push origin HEAD:main; git push origin HEAD:dev'), 2, '묶여')
+    expect('H2 push 뒤 파일로 리다이렉트', h2('git push origin HEAD:main | tail -3 > out.txt'), 2, '묶여')
+    expect('H2 bash -c 속 git push는 계속 막음', h2('git add -A && bash -c "git push origin main"'), 2, '따옴표')
+    # /cross-review 2cb5d051ff 반영
+    expect('H2 단독 git stash push', h2('git stash push -m "x" src/a.cs'), 0)
+    expect('H2 앞 git log --output은 막음 (브랜치 ref 바꾸기)', h2('git log -1 --format=%H --output=.git/refs/heads/main x; git push origin main'), 2, '묶여')
+    expect('H2 앞 git log --outp 줄임도 막음', h2('git log --outp=f -1; git push origin main'), 2, '묶여')
+    expect('H2 뒤 붙여 쓴 리다이렉트', h2('git push origin HEAD:main | tail -3>out.txt'), 2, '묶여')
+    expect('H2 경로 붙은 tail', h2('git push origin HEAD:main | ./tail -3'), 2, '묶여')
+    expect('H2 커밋 메시지 묶음의 붙여 쓴 리다이렉트', h2('git add -A && git commit -m "git push 고침">log.txt'), 2, '따옴표')
 
     commit('b.cs', f'var k = "{SECRET}";\n')
     expect('H2 API 키 모양', h2(), 2, 'sk-Q…')
     expect('H2 원격 생략 (origin 기본)', h2('git push'), 2, '비밀 값')
     expect('H2 PowerShell', h2('git push origin main', 'PowerShell'), 2, '비밀 값')
     expect('H2 commit 과 묶음 (실행 전이라 못 봄)', h2('git add -A && git commit -m x && git push'), 2, '묶여')
+    expect('H2 완화 묶음에서도 비밀 값 검사', h2('git log -1; git push origin HEAD:main 2>&1 | tail -3'), 2, '비밀 값')
+    expect('H2 값이 stash로 끝나도 push (빈틈 회귀)', h2('git -c user.name=stash push origin main'), 2, '전역 옵션')
+    expect('H2 묶음에서 값이 stash로 끝나도 push', h2('git log -1; git -c x=stash push origin main'), 2, '전역 옵션')
     expect('H2 cd 와 함께', h2(f'cd {repo} ; git push'), 2)
     expect('H2 전역 옵션', h2('git --no-pager push origin main'), 2, '전역 옵션')
     expect('H2 --all', h2('git push --all origin'), 2, '--all')
@@ -439,6 +490,36 @@ try:
     expect('H4 서브에이전트와 sub_* 섞음', h3('review_main', '[ownReview:self-reviewer+sub_security] 이유', good + '\n' + api), 2, '섞였다')
     expect('H4 sub_direction은 모름', h3('review_main', '[ownReview:sub_direction] 이유', api), 2, '모른다')
     expect('H4 서브에이전트 태그에 상대 경로는 계속 막음', h3('review_main', tag, api), 2, 'subagent_in/ 밖')
+
+    # 나가는 글 (모든 모드) · diff는 파일로 (review_* · sub_self/perf/security · perf_*)
+    def rm(mode: str, text: str, context=None) -> tuple[int, str]:
+        ti = {'mode': mode, 'input': text, 'reason': '이유'}
+        if context is not None:
+            ti['context'] = context
+        return run('run_mode_guard.py', {'tool_name': 'mcp__hb-orchestration__run_mode', 'tool_input': ti}, env)
+
+    expect('나가는 글 사용자 폴더 경로', rm('design_lite', '로그: C:\\Users\\kim\\AppData\\Local\\HB_Chat\\x.log'), 2, '사용자 폴더 경로')
+    expect('나가는 글 Git Bash 사용자 폴더', rm('crash_main', '스택: /c/Users/kim/proj/a.cs:12'), 2, '사용자 폴더 경로')
+    expect('나가는 글 비밀 값', rm('research_main', 'key=sk-' + 'Z' * 30), 2, '비밀')
+    expect('나가는 글 가짜 값 표식도 막음', rm('design_lite', 'sk-abcdefghijklmnopqrstu'), 2, '비밀')
+    expect('나가는 글 작업 경로는 통과', rm('design_lite', '대상 F:\\AI\\ToolWithCS\\Orchestration\\a.cs'), 0)
+    expect('나가는 글 환경 변수 꼴은 통과', rm('design_lite', '데이터 폴더 기본값은 %LOCALAPPDATA%\\HB_Chat'), 0)
+    expect('나가는 글 @추가 루트는 통과', rm('sub_self', '중심: @orch/src/Foo.cs', [{'path': '@orch/src/Foo.cs', 'startLine': 1, 'endLine': 9}]), 0)
+    os.makedirs(os.path.join(tmp, '.claude'), exist_ok=True)
+    open(os.path.join(tmp, '.claude', 'share_guard.local.txt'), 'w', encoding='utf-8').write('# 사내 이름\nAcmeInternal\n')
+    expect('나가는 글 프로젝트 패턴', rm('design_lite', 'AcmeInternal 서버 구조'), 2, '프로젝트 패턴')
+    os.remove(os.path.join(tmp, '.claude', 'share_guard.local.txt'))
+    hunk = 'diff --git a/x.cs b/x.cs\n--- a/x.cs\n+++ b/x.cs\n@@ -1,2 +1,3 @@\n+a\n'
+    expect('diff 본문 sub_self', rm('sub_self', '의도: x\n' + hunk), 2, 'diff 본문')
+    expect('diff 본문 perf_main', rm('perf_main', '@@ -10 +10,2 @@\n+b'), 2, 'diff 본문')
+    expect('diff 본문 design_lite는 대상 아님', rm('design_lite', hunk), 0)
+    expect('diff 글자를 설명한 줄은 통과', rm('sub_self', '변경은 `diff --git` 파일로 첨부'), 0)
+    first = {'path': 'review_tmp/2026-11-07_x.diff', 'startLine': 1, 'endLine': 40}
+    other = {'path': 'src/a.cs', 'startLine': 1, 'endLine': 9}
+    expect('.diff 첫 항목', rm('sub_self', '의도: x', [first, other]), 0)
+    expect('.diff 둘째 항목', rm('sub_self', '의도: x', [other, first]), 2, '첫 항목')
+    expect('.diff 없음', rm('sub_security', '의도: x', [other]), 0)
+    expect('context가 JSON 글', rm('sub_perf', '의도: x', json.dumps([other, first])), 2, '첫 항목')
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
@@ -663,6 +744,13 @@ try:
     # 읽기 예외를 좁혀 막히는 것 (단독 읽기 명령만, git commit 속 낱말도 막힘 — 사용자 "git 명령어는 크게 신경 안써도되")
     for cmd in ['cat notes.md | grep slackplan', 'echo slackplan list', 'ls bin/slackplan.exe', 'git commit -m "slackplan new 형식"']:
         expect(f'H5 좁힌 예외 {cmd}', h5raw(cmd), 2)
+    # 2026-11-07 오탐 완화: cd · mkdir 조각은 데이터 전용 판정에서 중립 (작업 로그 heredoc 속 SlackPlanBot · slackplan 글자)
+    expect('H5 완화 cd 뒤 작업 로그 heredoc', h5raw("cd /tmp && cat >> docs/log.md <<'EOF'\n- SlackPlanBot 고침, slackplan new 로 올림\nEOF"), 0)
+    expect('H5 완화 mkdir 뒤 heredoc', h5raw("mkdir -p /tmp/d && cat > /tmp/d/a.md <<'EOF'\nslackplan reply X 글\nEOF"), 0)
+    expect('H5 완화 PS Set-Location 뒤 here-string', h5raw("Set-Location C:\\t; @'\nslackplan new a.md\n'@ | Add-Content log.md", 'PowerShell'), 0)
+    expect('H5 cd 뒤 bash heredoc은 계속 막음', h5raw("cd /tmp && bash <<'EOF'\nslackplan new a.md\nEOF"), 2, '데이터 전용')
+    expect('H5 cd 뒤 heredoc + echo는 계속 막음', h5raw("cd /tmp && cat >> log.md <<'EOF'\nslackplan new a.md\nEOF\necho done"), 2, '데이터 전용')
+    expect('H5 셸 감싸개 속 SlackPlanBot은 계속 대상', h5raw('powershell -Command "foreach ($t in \'F:\\AI\\SlackPlanBot\') { Write-Host $t }"'), 2)
     subprocess.run(['git', 'init', '-q', proj], check=True, capture_output=True)
     subprocess.run(['git', '-C', proj, 'add', '-f', '.claude/share_guard.local.txt'], check=True, capture_output=True)
     expect('H5 share_guard.local.txt 추적됨', h5(f'new {clean}'), 2, '추적')
@@ -678,8 +766,9 @@ try:
     os.makedirs(os.path.join(run_dir, 'src', 'deep'))
     open(os.path.join(run_dir, 'src', 'a.cs'), 'w').close()
 
-    def h6(prompt, tool: str = 'Agent') -> tuple[int, str]:
-        return run('subagent_input_guard.py', {'tool_name': tool, 'tool_input': {'subagent_type': 'self-reviewer', 'prompt': prompt}}, env6)
+    # CLAUDE.md 검사는 서브에이전트 종류와 상관없다 — 입력 준비물 검사(검토형)는 아래 따로
+    def h6(prompt, tool: str = 'Agent', agent: str = 'general-purpose') -> tuple[int, str]:
+        return run('subagent_input_guard.py', {'tool_name': tool, 'tool_input': {'subagent_type': agent, 'prompt': prompt}}, env6)
 
     def put(rel: str, is_dir: bool = False) -> str:
         p = os.path.join(proj6, rel)
@@ -751,6 +840,36 @@ try:
     expect('H6 prompt가 문자열 아님 (언급 있음)', run('subagent_input_guard.py', {'tool_name': 'Agent', 'tool_input': {'prompt': {'folder': 'subagent_in/2026-10-27_x'}}}, env6), 2, '[입력 차단]')
     os.remove(p)
     expect('H6 깨진 입력은 막음', (lambda r: (r.returncode, r.stderr.decode('utf-8', 'replace')))(subprocess.run([sys.executable, '-I', os.path.join(HERE, 'subagent_input_guard.py')], input=b'{', capture_output=True, env=env6)), 2)
+    # 입력 준비물: 리뷰 지침 · 실수 목록 사본
+    expect('H6 self-reviewer 지침 없음', h6(rel, agent='self-reviewer'), 2, 'REVIEW_GUIDELINES.md')
+    expect('H6 perf-reviewer 지침 없음 (Windows 경로)', h6(win, agent='perf-reviewer'), 2, 'REVIEW_GUIDELINES.md')
+    expect('H6 self-reviewer 폴더 언급 없음', h6('대상: src/a.cs', agent='self-reviewer'), 2, '폴더가 없다')
+    expect('H6 self-reviewer 없는 폴더', h6('폴더: subagent_in/없는폴더/', agent='self-reviewer'), 2, '폴더가 없다')
+    put('subagent_in/2026-10-27_x/REVIEW_GUIDELINES.md')
+    expect('H6 self-reviewer 지침 있음', h6(rel, agent='self-reviewer'), 0)
+    expect('H6 SendMessage는 준비물 안 봄', run('subagent_input_guard.py', {'tool_name': 'SendMessage', 'tool_input': {'to': 'a1', 'message': '대상: x'}}, env6), 0)
+    os.makedirs(os.path.join(proj6, '.claude', 'mistakes'))
+    mk = os.path.join(proj6, '.claude', 'mistakes', 'self-reviewer.md')
+    open(mk, 'w', encoding='utf-8').write('# self-reviewer 실수\n<!--\n- 주석 안 예시\n-->\n')
+    expect('H6 실수 목록이 주석뿐', h6(rel, agent='self-reviewer'), 0)
+    open(mk, 'a', encoding='utf-8').write('- 하지 말 것 → 대신 할 것 (2026-11-07, 시험)\n')
+    expect('H6 실수 목록 사본 없음', h6(rel, agent='self-reviewer'), 2, '_SUBAGENT_MISTAKES.md')
+    put('subagent_in/2026-10-27_x/_SUBAGENT_MISTAKES.md')
+    expect('H6 실수 목록 사본 있음', h6(rel, agent='self-reviewer'), 0)
+    open(os.path.join(proj6, '.claude', 'mistakes', 'direction-reviewer.md'), 'w', encoding='utf-8').write('- 항목 (2026-11-07, 시험)\n')
+    os.makedirs(os.path.join(proj6, 'subagent_in', '2026-11-07_d'))
+    expect('H6 direction 실수 사본 없음 (지침은 안 봄)', h6('폴더: subagent_in/2026-11-07_d/', agent='direction-reviewer'), 2, '_SUBAGENT_MISTAKES.md')
+    expect('H6 direction 폴더 언급 없음은 통과', h6('요청 원문과 계획서', agent='direction-reviewer'), 0)
+    # web-searcher 위임 메시지: 비밀 · 사용자 폴더 경로
+    expect('H6 web-searcher 사용자 폴더 경로', h6('C:\\Users\\kim\\AppData\\x 크래시 원인 검색', agent='web-searcher'), 2, '사용자 폴더 경로')
+    expect('H6 web-searcher 비밀 값', h6('키 sk-' + 'Q' * 24 + ' 로 된 오류', agent='web-searcher'), 2, '비밀')
+    expect('H6 web-searcher 보통 검색', h6('Unity 6 IL2CPP NullReferenceException in Addressables 사례, 범위: 2025~', agent='web-searcher'), 0)
+    expect('H6 web-searcher 환경 변수 꼴 경로', h6('%LOCALAPPDATA%\\Unity 로그 위치 문서', agent='web-searcher'), 0)
+    expect('H6 web-searcher WSL 사용자 폴더', h6('/mnt/c/Users/kim/x.log 오류', agent='web-searcher'), 2, '사용자 폴더 경로')
+    expect('H6 web-searcher UNC 사용자 폴더', h6('\\\\localhost\\c$\\Users\\kim\\x.log 오류', agent='web-searcher'), 2, '사용자 폴더 경로')
+    expect('H6 SendMessage 사용자 폴더 경로', run('subagent_input_guard.py', {'tool_name': 'SendMessage', 'tool_input': {'to': 'a1', 'message': 'C:\\Users\\kim\\AppData\\x 로 다시 찾아봐'}}, env6), 2, 'SendMessage')
+    expect('H6 SendMessage 보통 글', run('subagent_input_guard.py', {'tool_name': 'SendMessage', 'tool_input': {'to': 'a1', 'message': 'Unity 6 사례를 더 찾아봐'}}, env6), 0)
+    expect('H6 general-purpose 첫 위임의 사용자 경로는 안 봄', h6('C:\\Users\\kim\\.claude\\projects 기록을 집계', agent='general-purpose'), 0)
 finally:
     shutil.rmtree(proj6, ignore_errors=True)
 
@@ -839,6 +958,177 @@ if os.name == 'nt':
     expect('H7 PS 공급자 경로', h7('Set-Location HKCU:\\Software', tool='PowerShell'), 0)
     expect('H7 PS 스크립트 블록 안 cd', h7('& { Set-Location src }', tool='PowerShell'), 2)
     expect('H7 PS 하위에서 루트로', h7('Set-Location F:\\AI\\Proj', tool='PowerShell', cwd=SUB7), 0)
+
+# (다) 사용자용 HB 앱 실행 · (라) Sync -Force — 명령 자리만
+CHAT = '/f/AI/X/HB_Chat/src/HB.Chat'
+DASH = 'F:\\AI\\X\\HB_Orchestration\\src\\HB.Orchestration.Dashboard'
+expect('H7 HB_Chat.bat', h7('/f/AI/X/HB_Chat/HB_Chat.bat'), 2, '사용자용')
+expect('H7 cmd /c HB_Chat_Desktop.bat', h7('cmd /c F:\\AI\\X\\HB_Chat\\HB_Chat_Desktop.bat'), 2, '사용자용')
+expect('H7 PS Start-Process 데스크톱 exe', h7("Start-Process -FilePath 'F:\\AI\\X\\bin\\HB.Chat.Desktop.exe'", tool='PowerShell'), 2, '사용자용')
+expect('H7 dotnet run 데스크톱', h7('dotnet run --project /f/AI/X/HB_Chat/src/HB.Chat.Desktop'), 2, '데스크톱')
+expect('H7 HB_Orchestration.bat dashboard', h7('/f/AI/X/HB_Orchestration/HB_Orchestration.bat dashboard'), 2, '대시보드')
+expect('H7 HB_Orchestration.bat 메뉴', h7('cmd /c F:\\AI\\X\\HB_Orchestration\\HB_Orchestration.bat'), 2, '메뉴')
+expect('H7 HB_Orchestration.bat all', h7('HB_Orchestration.bat all', tool='PowerShell'), 2)
+expect('H7 HB_Orchestration.bat publish', h7('echo Y| /f/AI/X/HB_Orchestration/HB_Orchestration.bat publish'), 0)
+expect('H7 대시보드 5290', h7(f'dotnet run --project {DASH} --no-build -- --urls http://localhost:5290', tool='PowerShell'), 2, '사용자 포트')
+expect('H7 대시보드 urls 없음', h7(f'dotnet run --project {DASH}', tool='PowerShell'), 2, '--urls 없이')
+expect('H7 대시보드 시험 포트', h7(f'dotnet run --project {DASH} -c Release --urls http://localhost:5299', tool='PowerShell'), 0)
+expect('H7 대시보드 exe 5280', h7('./HB.Orchestration.Dashboard.exe --Urls http://localhost:5280'), 2, '사용자 포트')
+expect('H7 대시보드 exe 시험 포트', h7('/f/AI/X/bin/HB.Orchestration.Dashboard.exe --Urls http://localhost:5299 --contentRoot /f/AI/X'), 0)
+expect('H7 HB.Chat 현재 폴더 run 포트 없음', h7(f'( cd {CHAT} && dotnet run -c Debug --no-build )'), 2, '--urls 없이')
+expect('H7 HB.Chat DataDir 없음', h7(f'dotnet run --project {CHAT} -- --Urls=http://localhost:5297'), 2, 'DataDir')
+expect('H7 HB.Chat 시험 서버', h7(f'( cd {CHAT} && S=/c/Users/x/AppData/Local/Temp/t && dotnet run -c Debug --no-build -- --Urls=http://localhost:5291 "--Chat:DataDir=$S/data" )'), 0)
+expect('H7 HB.Chat 환경 변수 DataDir', h7(f'Chat__DataDir=/tmp/d dotnet run --project {CHAT} -- --urls=http://localhost:5291'), 0)
+expect('H7 HB.Chat ASPNETCORE_URLS 5290', h7(f'ASPNETCORE_URLS=http://localhost:5290 Chat__DataDir=/tmp/d dotnet run --project {CHAT}'), 2, '사용자 포트')
+expect('H7 HB.Chat exe 시험 서버', h7('F:\\AI\\X\\bin\\HB.Chat.exe --urls http://localhost:5293 --Chat:DataDir=C:\\t', tool='PowerShell'), 0)
+expect('H7 cmd /c 안 dotnet run', h7(f'cmd /c "dotnet run --project {CHAT}"'), 2, '--urls 없이')
+expect('H7 dotnet build HB.Chat', h7(f'dotnet build {CHAT} -c Release'), 0)
+expect('H7 dotnet test HB.Chat', h7('dotnet test /f/AI/X/HB_Chat/tests/HB.Chat.Tests'), 0)
+expect('H7 dotnet run 다른 프로젝트', h7('dotnet run --project /f/AI/X/tools/Show -- a b'), 0)
+expect('H7 dotnet run 파일 앱', h7('dotnet run show.cs -- src/a.cs', cwd='C:\\Users\\x\\AppData\\Local\\Temp\\idx'), 0)
+expect('H7 bat 읽기', h7('cat /f/AI/X/HB_Chat/HB_Chat.bat; grep -n 5290 /f/AI/X/HB_Chat/HB_Chat.bat'), 0)
+expect('H7 작업 로그 heredoc 속 실행 글', h7(f"cat >> docs/a.md <<'EOF'\ndotnet run --project {CHAT} -- --urls http://localhost:5290\nHB_Chat.bat\nEOF"), 0)
+expect('H7 따옴표 속 실행 글', h7('git commit -m "HB_Chat.bat 고침 · dotnet run 5290"'), 0)
+SYNC = 'F:\\AI\\X\\tools\\Sync-ProjectFiles.ps1'
+expect('H7 Sync -Force', h7(f'powershell -ExecutionPolicy Bypass -File {SYNC} -UnityProject F:\\AI\\T -Apply -Force'), 2, '-Force')
+expect('H7 Sync & -force', h7(f"& '{SYNC}' -All -Apply -force", tool='PowerShell'), 2, '-Force')
+expect('H7 Sync 줄임 -Fo', h7(f'powershell -File {SYNC} -Apply -Fo'), 2)
+expect('H7 Sync -Force:$true', h7(f'& {SYNC} -Apply -Force:$true', tool='PowerShell'), 2)
+expect('H7 Sync 긴 대시 –Force', h7(f'& {SYNC} -Apply –Force', tool='PowerShell'), 2)
+expect('H7 Sync -Force:$false', h7(f'& {SYNC} -Apply -Force:$false', tool='PowerShell'), 0)
+expect('H7 Sync -All 비교', h7(f'powershell -ExecutionPolicy Bypass -File {SYNC} -All'), 0)
+expect('H7 Sync -Apply', h7(f'powershell -File {SYNC} -UnityProject F:\\AI\\T -Apply'), 0)
+expect('H7 Sync 글 grep -Force', h7(f"grep -n -- '-Force' {SYNC}"), 0)
+# /cross-review 2cb5d051ff 반영: 감싸개 · 본문 · 형식
+DESK = 'F:\\AI\\X\\HB_Chat\\src\\HB.Chat.Desktop'
+expect('H7 powershell.exe -File Sync -Force', h7(f"powershell.exe -ExecutionPolicy Bypass -File '{SYNC}' -UnityProject F:\\T -Apply -Force"), 2, '-Force')
+expect('H7 cmd.exe /c HB_Chat.bat', h7("cmd.exe /c 'F:\\AI\\X\\HB_Chat\\HB_Chat.bat'"), 2, '사용자용')
+expect('H7 powershell -Command 속 & Sync -Force', h7(f'powershell -Command "& \'{SYNC}\' -Apply -Force"'), 2, '-Force')
+expect('H7 bash -c 속 bat', h7("bash -c '/f/AI/X/HB_Chat/HB_Chat.bat'"), 2, '사용자용')
+expect('H7 iex 속 dotnet run', h7(f'iex "dotnet run --project {DESK}"', tool='PowerShell'), 2, '데스크톱')
+expect('H7 env 뒤 dotnet run', h7(f'env FOO=1 dotnet run --project {CHAT}'), 2, '--urls 없이')
+expect('H7 nohup dotnet run', h7(f'nohup dotnet run --project {CHAT} &'), 2, '--urls 없이')
+expect('H7 Start-Process -ArgumentList 한 덩어리', h7(f"Start-Process dotnet -ArgumentList 'run --project {DESK}'", tool='PowerShell'), 2, '데스크톱')
+expect('H7 Start-Process -ArgumentList 쉼표', h7(f"Start-Process dotnet -ArgumentList 'run','--project','{DESK}'", tool='PowerShell'), 2, '데스크톱')
+expect('H7 bash heredoc 본문 속 bat', h7("bash <<'EOF'\n/f/AI/X/HB_Chat/HB_Chat.bat\nEOF"), 2, '사용자용')
+expect('H7 here-string | powershell -Command -', h7("@'\ndotnet run --project F:/AI/X/HB_Chat/src/HB.Chat.Desktop\n'@ | powershell -Command -", tool='PowerShell'), 2, '데스크톱')
+expect('H7 확장자 없는 HB_Chat', h7('cmd /c F:\\AI\\X\\HB_Chat\\HB_Chat', tool='PowerShell'), 2, '사용자용')
+expect('H7 감싸개 폴더 인자는 대상 아님 (cmd dir)', h7('cmd /c dir F:\\AI\\X\\Orchestration\\HB_Orchestration', tool='PowerShell'), 0)
+expect('H7 감싸개 폴더 인자는 대상 아님 (-File 뒤 인자)', h7('powershell -File build.ps1 -Root F:\\AI\\X\\HB_Orchestration', tool='PowerShell'), 0)
+expect('H7 Start-Process explorer 폴더', h7(f"Start-Process explorer '{DESK}'", tool='PowerShell'), 0)
+expect('H7 powershell -EncodedCommand', h7('powershell -EncodedCommand ZABpAHIA'), 2, 'EncodedCommand')
+expect('H7 --urls 여러 번 (마지막 5290)', h7(f'dotnet run --project {DASH} --urls http://localhost:5299 --urls http://localhost:5290', tool='PowerShell'), 2, '사용자 포트')
+expect('H7 --urls :05290', h7(f'dotnet run --project {DASH} --urls http://localhost:05290', tool='PowerShell'), 2, '사용자 포트')
+expect('H7 ASPNETCORE_URLS만은 근거 아님', h7(f'ASPNETCORE_URLS=http://localhost:5299 dotnet run --project {DASH}'), 2, '--urls 없이')
+expect('H7 다른 조각의 ASPNETCORE_URLS', h7(f'ASPNETCORE_URLS=http://localhost:5299 true; dotnet run --project {DASH}'), 2, '--urls 없이')
+expect('H7 다른 조각의 Chat__DataDir', h7(f'export Chat__DataDir=/tmp/d; dotnet run --project {CHAT} -- --urls=http://localhost:5291'), 2, 'DataDir')
+expect('H7 빈 --Chat:DataDir=', h7(f'dotnet run --project {CHAT} -- --urls=http://localhost:5299 --Chat:DataDir='), 2, 'DataDir')
+expect('H7 --Chat:DataDir 값 따로', h7(f'dotnet run --project {CHAT} -- --urls=http://localhost:5299 --Chat:DataDir /tmp/d'), 0)
+expect('H7 --project . (데스크톱 폴더)', h7('( cd /f/AI/X/HB_Chat/src/HB.Chat.Desktop && dotnet run --project . )'), 2, '데스크톱')
+expect('H7 --project a/../HB.Chat.Desktop', h7('dotnet run --project /f/AI/X/HB_Chat/src/HB.Chat/../HB.Chat.Desktop'), 2, '데스크톱')
+expect('H7 dotnet watch만', h7(f'dotnet watch --project {CHAT}'), 2, '--urls 없이')
+expect('H7 dotnet 앱.dll', h7('dotnet /f/AI/X/bin/HB.Chat.dll'), 2, '--urls 없이')
+expect('H7 dotnet exec 대시보드 시험 포트', h7('dotnet exec /f/AI/X/bin/HB.Orchestration.Dashboard.dll --urls http://localhost:5299'), 0)
+expect('H7 dotnet run -p 프로젝트', h7(f'dotnet run -p {CHAT}'), 2, '--urls 없이')
+expect('H7 dotnet run -p:속성은 프로젝트 아님', h7('dotnet run -p:Configuration=Release', cwd='C:\\Users\\x\\AppData\\Local\\Temp\\idx'), 0)
+expect('H7 서브셸 변수 cd 뒤 dotnet run', h7('P=/f/AI/X/HB_Chat/src/HB.Chat; ( cd "$P" && dotnet run )'), 2, '풀 수 없어')
+# 보안 재리뷰 5c04b8aca1 반영
+expect('H7 bash -c 글 속 묶음 뒤 실행', h7("bash -c 'ls; /f/AI/X/HB_Chat/HB_Chat.bat'"), 2, '사용자용')
+expect('H7 powershell -Command 글 속 묶음 뒤 Sync -Force', h7(f'powershell -Command "Get-Date; & \'{SYNC}\' -Apply -Force"'), 2, '-Force')
+expect('H7 cmd /c 글 속 & 뒤 실행', h7('cmd /c "dir & F:\\AI\\X\\HB_Chat\\HB_Chat.bat"', tool='PowerShell'), 2, '사용자용')
+expect('H7 감싸개 너무 깊음', h7('nohup env nohup env nohup env dotnet --info'), 2, '너무 깊게')
+expect('H7 Start-Process -WorkingDirectory 데스크톱', h7(f"Start-Process dotnet -ArgumentList 'run' -WorkingDirectory '{DESK}'", tool='PowerShell'), 2, '데스크톱')
+expect('H7 env -C 데스크톱', h7('env -C /f/AI/X/HB_Chat/src/HB.Chat.Desktop dotnet run'), 2, '데스크톱')
+expect('H7 bash -c 글 속 cd 뒤 dotnet run', h7("bash -c 'cd /f/AI/X/HB_Chat/src/HB.Chat.Desktop && dotnet run'"), 2, '데스크톱')
+expect('H7 -p 드라이브 경로', h7(f'dotnet run -p {DESK}', tool='PowerShell'), 2, '데스크톱')
+expect('H7 -p 이름=값 속성은 프로젝트 아님', h7('dotnet run -p Configuration=Release', cwd='C:\\Users\\x\\AppData\\Local\\Temp\\idx'), 0)
+expect('H7 powershell -enco 줄임', h7('powershell -enco ZABpAHIA'), 2, 'EncodedCommand')
+expect('H7 powershell -ex Bypass는 EncodedCommand 아님', h7('powershell -ex Bypass -File build.ps1'), 0)
+
+# ── commit_notice (PostToolUse) ──
+repo9 = tempfile.mkdtemp(prefix='hb-notice-')
+try:
+    def g9(*args: str) -> None:
+        subprocess.run(['git', '-C', repo9, *args], check=True, capture_output=True)
+
+    def notice9(cmd: str, cwd: str = repo9, tool: str = 'Bash') -> tuple[int, str]:
+        payload = {'tool_name': tool, 'tool_input': {'command': cmd}, 'cwd': cwd}
+        r = subprocess.run([sys.executable, '-I', os.path.join(HERE, 'commit_notice.py')], input=json.dumps(payload, ensure_ascii=False).encode('utf-8'),
+                           capture_output=True)
+        return r.returncode, r.stdout.decode('utf-8', 'replace').strip()
+
+    def commit9(rel: str, msg: str = 'x') -> None:
+        p = os.path.join(repo9, rel)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        open(p, 'a', encoding='utf-8').write('x\n')
+        g9('add', '-A')
+        g9('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', msg)
+
+    g9('init', '-q')
+    commit9('Orch/tools/Sync-ProjectFiles.ps1')
+    commit9('Orch/tools/sync-targets.local.txt')
+    expect('알림 project-files 밖 커밋은 조용', (0, notice9('git commit -m x')[1] or 'empty'), 0, 'empty')
+    commit9('Orch/project-files/.claude/scripts/한글.py')
+    expect('알림 project-files 커밋 (따옴표 경로)', notice9('git add -A && git commit -q -F - <<\'EOF\'\nmsg\nEOF'), 0, "Sync-ProjectFiles.ps1' -All")
+    out9 = notice9('git commit -m x')[1]
+    expect('알림 파일 이름은 싣지 않고 개수만 · UTF-8', (0, 'ok' if '한글.py' not in out9 and '파일 1개' in out9 else out9), 0, 'ok')
+    expect('알림 git -C', notice9(f'git -C "{repo9}" commit -m x', cwd=tempfile.gettempdir()), 0, '[커밋 알림]')
+    expect('알림 PowerShell', notice9('git commit -m x', tool='PowerShell'), 0, '[커밋 알림]')
+    expect('알림 commit 없는 명령', (0, notice9('git log -1')[1] or 'empty'), 0, 'empty')
+    commit9('Other/project-files/a.md')  # 같은 폴더에 tools/Sync-ProjectFiles.ps1이 없음
+    expect('알림 Sync 없는 project-files는 조용', (0, notice9('git commit -m x')[1] or 'empty'), 0, 'empty')
+    commit9('NoList/tools/Sync-ProjectFiles.ps1')
+    commit9('NoList/project-files/a.md')  # 대상 목록(sync-targets.local.txt)이 없는 받은 저장소 모양
+    expect('알림 대상 목록 없는 Sync는 조용', (0, notice9('git commit -m x')[1] or 'empty'), 0, 'empty')
+    future_env = dict(os.environ, GIT_COMMITTER_DATE='2099-01-01T00:00:00')
+    open(os.path.join(repo9, 'Orch', 'project-files', 'f.md'), 'w').write('x')
+    subprocess.run(['git', '-C', repo9, 'add', '-A'], check=True, capture_output=True)
+    subprocess.run(['git', '-C', repo9, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'future'], check=True, capture_output=True, env=future_env)
+    expect('알림 미래 시각 HEAD는 조용', (0, notice9('git commit -m x')[1] or 'empty'), 0, 'empty')
+    commit9("Q'x/tools/Sync-ProjectFiles.ps1")
+    commit9("Q'x/tools/sync-targets.local.txt")
+    commit9("Q'x/project-files/a.md")
+    out9 = notice9('git commit -m x')[1]
+    expect('알림 경로에 작은따옴표면 명령을 적지 않음', (0, 'ok' if '셸 제어 글자' in out9 and '-File' not in out9 else out9), 0, 'ok')
+    old_env = dict(os.environ, GIT_COMMITTER_DATE='2020-01-01T00:00:00')
+    p = os.path.join(repo9, 'Orch', 'project-files', 'c.md')
+    open(p, 'w').write('x')
+    subprocess.run(['git', '-C', repo9, 'add', '-A'], check=True, capture_output=True)
+    subprocess.run(['git', '-C', repo9, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'old'], check=True, capture_output=True, env=old_env)
+    expect('알림 오래된 HEAD는 조용 (커밋 실패 등)', (0, notice9('git commit -m x')[1] or 'empty'), 0, 'empty')
+    expect('알림 저장소 아님은 조용', (0, notice9('git commit -m x', cwd=tempfile.gettempdir())[1] or 'empty'), 0, 'empty')
+    expect('알림 깨진 입력도 exit 0', (subprocess.run([sys.executable, '-I', os.path.join(HERE, 'commit_notice.py')], input=b'{', capture_output=True).returncode, ''), 0)
+finally:
+    shutil.rmtree(repo9, ignore_errors=True)
+
+# ── H8 plan_ref_guard ──
+ROOT8 = 'F:\\AI\\Proj' if os.name == 'nt' else '/proj'
+env8 = dict(os.environ, CLAUDE_PROJECT_DIR=ROOT8)
+
+
+def h8(tool: str, ti: dict, cwd: str = ROOT8) -> tuple[int, str]:
+    return run('plan_ref_guard.py', {'tool_name': tool, 'tool_input': ti, 'cwd': cwd}, env8)
+
+
+def at(*parts: str) -> str:
+    return os.path.join(ROOT8, *parts)
+
+
+REF8 = 'docs/plans/2026-11-07_훅-추가.md'
+expect('H8 코드 주석에 계획서 경로', h8('Write', {'file_path': at('src', 'a.py'), 'content': f'# 이유는 {REF8} 참고\n'}), 2, '[계획서 참조 차단]')
+expect('H8 역슬래시 작업 로그 경로', h8('Edit', {'file_path': at('README.md'), 'old_string': 'a', 'new_string': 'Orchestration\\docs\\worklog\\2026-11-05_x.md'}), 2)
+expect('H8 MultiEdit', h8('MultiEdit', {'file_path': at('.claude', 'commands', 'x.md'), 'edits': [{'old_string': 'a', 'new_string': 'b'}, {'old_string': 'c', 'new_string': REF8}]}), 2)
+expect('H8 NotebookEdit', h8('NotebookEdit', {'notebook_path': at('n.ipynb'), 'new_source': REF8}), 2)
+expect('H8 상대 경로 파일', h8('Write', {'file_path': 'src/b.cs', 'content': f'// {REF8}'}), 2)
+expect('H8 규칙 글 docs/plans/…', h8('Edit', {'file_path': at('CLAUDE.md'), 'old_string': 'a', 'new_string': '("계획서 …", `docs/plans/…`)'}), 0)
+expect('H8 규칙 글 YYYY-MM-DD 꼴', h8('Write', {'file_path': at('.claude', 'commands', 'record-rules.md'), 'content': '`docs/plans/YYYY-MM-DD_제목.md`'}), 0)
+expect('H8 docs 안 계획서 · 색인', h8('Write', {'file_path': at('Orchestration', 'X', 'docs', 'worklog.md'), 'content': f'[계획서]({REF8})'}), 0)
+expect('H8 review_tmp 안', h8('Write', {'file_path': at('review_tmp', 'p.py'), 'content': REF8}), 0)
+expect('H8 프로젝트 밖 (메모리)', h8('Write', {'file_path': 'C:\\Users\\x\\.claude\\memory\\m.md' if os.name == 'nt' else '/home/x/m.md', 'content': REF8}), 0)
+expect('H8 이미 있던 경로를 고침', h8('Edit', {'file_path': at('src', 'a.py'), 'old_string': f'# {REF8} 참고', 'new_string': f'# {REF8} 참고함'}), 0)
+expect('H8 경로 없는 글', h8('Write', {'file_path': at('src', 'a.py'), 'content': 'print(1)'}), 0)
+expect('H8 다른 도구는 무시', h8('Read', {'file_path': at('src', 'a.py')}), 0)
+expect('H8 깨진 입력은 막음', (lambda r: (r.returncode, r.stderr.decode('utf-8', 'replace')))(subprocess.run([sys.executable, '-I', os.path.join(HERE, 'plan_ref_guard.py')], input=b'{', capture_output=True, env=env8)), 2)
 
 print('ALL', ok)
 sys.exit(0 if ok else 1)

@@ -13,6 +13,12 @@
 - 경로 해석은 '이 프로젝트 subagent_in/ 밖' 검사에만 쓴다 (다른 프로젝트 · ..): 밖이면 막는다.
 - 실패하면 막는다: 통과 판정일 때만 exit 0, 그 밖(예외 포함)은 exit 2. python이 없거나 스크립트를 못 찾으면 훅 명령의 `|| exit 2`가 막는다.
 - 검사 뒤에 생긴 파일은 못 막는다 — 부르기 전에 복사를 끝내고, 도는 동안 subagent_in/에 복사하지 않는다 (CLAUDE.md 서브에이전트 입력 규칙).
+- 입력 준비물 (Agent · Task의 subagent_type, SendMessage는 보지 않음 — 폴더는 처음 부를 때 봤다):
+  - self · perf · security-reviewer: 위임 메시지에 실제로 있는 subagent_in/<폴더>가 있어야 하고, 그 폴더에 REVIEW_GUIDELINES.md가 있어야 한다.
+  - 위 셋 · direction-reviewer · evidence-collector · harness-editor: .claude/mistakes/<이름>.md에 항목(HTML 주석 밖 '- ' 줄)이
+    있으면 폴더에 _SUBAGENT_MISTAKES.md가 있어야 한다.
+- web-searcher 위임 메시지(밖으로 나가는 검색어의 원천)와 모든 SendMessage 글(받는 쪽 종류를 알 수 없음): 비밀 · 개인 값 · 프로젝트 패턴 ·
+  펼친 사용자 폴더 경로가 있으면 막는다 (share_guard.outbound_hits). 다른 서브에이전트의 첫 위임(로컬 작업)은 보지 않는다.
 
 입력: stdin JSON {"tool_name": "Agent" | "Task" | "SendMessage", "tool_input": {"prompt" | "message": "...", ...}}.
 exit 2 + stderr면 Claude Code가 이유를 지휘자에게 돌려준다.
@@ -23,6 +29,10 @@ import re
 import stat
 import sys
 
+sys.dont_write_bytecode = True  # 훅 폴더에 __pycache__를 남기지 않는다 (저장소에 섞이지 않게)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # -I는 스크립트 폴더를 경로에 넣지 않는다
+from share_guard import outbound_hits  # noqa: E402
+
 INPUT_DIR = 'subagent_in'
 BLOCKED_NAMES = {'claude.md', 'claude.local.md', '.claude'}
 MENTION = re.compile(r'subagent_in', re.IGNORECASE)
@@ -32,6 +42,11 @@ SEG = r'[^\s\\/`\'"()<>\[\]|:*?]+'
 PATH = re.compile(rf'(?P<pre>(?:[A-Za-z]:)?(?:{SEG})?(?:[\\/]{SEG})*[\\/])?(?<!\w)subagent_in(?!\w)(?P<rest>[\\/][^\s`\'"()<>\[\]|*?]*)?',
                   re.IGNORECASE)
 GIT_BASH_DRIVE = re.compile(r'^/([A-Za-z])/')
+# 리뷰 지침(REVIEW_GUIDELINES.md)을 받는 검토형 서브에이전트
+GUIDELINE_AGENTS = {'self-reviewer', 'perf-reviewer', 'security-reviewer'}
+# subagent_in/ 폴더에서 자료를 읽는 서브에이전트 — 실수 목록이 있으면 사본도 받는다 (web-searcher는 파일을 못 읽어 위임 메시지에 붙인다)
+PREPARED_AGENTS = GUIDELINE_AGENTS | {'direction-reviewer', 'evidence-collector', 'harness-editor'}
+MISTAKES_COPY = '_SUBAGENT_MISTAKES.md'
 
 
 def deny(reason: str) -> None:
@@ -98,20 +113,56 @@ def scan(base: str) -> None:
                     stack.append(entry.path)
 
 
+def has_mistakes(root: str, agent: str) -> bool:
+    """.claude/mistakes/<이름>.md에 항목(HTML 주석 밖 '- ' 줄)이 있는가."""
+    path = os.path.join(root, '.claude', 'mistakes', agent + '.md')
+    if not os.path.isfile(path):
+        return False
+    with open(path, encoding='utf-8-sig') as f:
+        body = re.sub(r'<!--.*?-->', '', f.read(), flags=re.DOTALL)
+    return any(line.startswith('- ') for line in body.splitlines())
+
+
+def check_prepared(agent: str, runs: list[str], root: str) -> None:
+    """서브에이전트 공통 규칙의 입력 준비물: 리뷰 지침 · 실수 목록 사본."""
+    if agent in GUIDELINE_AGENTS and not runs:
+        deny(f"{agent} 위임 메시지에 실제로 있는 {INPUT_DIR}/<날짜>_<주제>/ 폴더가 없다 — 입력을 그 폴더에 복사한 뒤 경로를 넘긴다 (/self-review 서브에이전트 공통 규칙).")
+    mistakes = has_mistakes(root, agent)
+    for run in runs:
+        if agent in GUIDELINE_AGENTS and not os.path.isfile(os.path.join(run, 'REVIEW_GUIDELINES.md')):
+            deny(f"'{run}'에 REVIEW_GUIDELINES.md가 없다 — 리뷰 지침을 명령으로 복사하고 SHA-256을 확인한다 (/self-review 2-2).")
+        if mistakes and not os.path.isfile(os.path.join(run, MISTAKES_COPY)):
+            deny(f"'{run}'에 {MISTAKES_COPY}가 없다 — .claude/mistakes/{agent}.md에 항목이 있으면 그 이름으로 함께 복사한다 (/self-review 2-2).")
+
+
 def check(data: dict) -> None:
-    found = [t for t in texts(data.get('tool_input') or {}) if MENTION.search(t)]
-    if not found:
-        return
+    ti = data.get('tool_input') or {}
+    agent = str(ti.get('subagent_type') or '').strip().lower() if data.get('tool_name') in ('Agent', 'Task') else ''
     root = project_root()
+    # SendMessage는 받는 쪽 종류를 알 수 없다 — 돌고 있는 web-searcher에 이어 보내는 검색 글일 수 있어 늘 본다 (/cross-review 2cb5d051ff)
+    outbound = agent == 'web-searcher' or data.get('tool_name') == 'SendMessage'
+    if outbound and (hits := outbound_hits('\n'.join(texts(ti)), root)):
+        deny(f"{'web-searcher 위임 메시지' if agent else 'SendMessage 글(받는 쪽이 웹 검색 서브에이전트일 수 있다)'}에 밖으로 내보내면 안 되는 값이 있다: "
+             + ', '.join(hits[:5]) + ' — 목적 · 검색 범위만 쓰고 경로 · 계정 · 키는 뺀다.')
+    found = [t for t in texts(ti) if MENTION.search(t)]
+    if not found:
+        if agent in GUIDELINE_AGENTS:
+            check_prepared(agent, [], root)
+        return
     base = norm(os.path.join(root, INPUT_DIR))
+    runs = []
     for text in found:
         for dir_text, run in mentioned_paths(text):
             dir_full = dir_text if os.path.isabs(dir_text) else os.path.join(root, dir_text)
             target = norm(os.path.join(dir_full, run) if run else dir_full)
             if not inside(target, base):
                 deny(f"'{os.path.join(dir_text, run)}'은(는) 이 프로젝트의 {INPUT_DIR}/ 밖이다. 서브에이전트 입력은 {base} 안에 둔다.")
+            if run and target != base and os.path.isdir(target) and target not in runs:
+                runs.append(target)
     if os.path.isdir(base):
         scan(base)
+    if agent in PREPARED_AGENTS:
+        check_prepared(agent, runs, root)
 
 
 def main() -> None:

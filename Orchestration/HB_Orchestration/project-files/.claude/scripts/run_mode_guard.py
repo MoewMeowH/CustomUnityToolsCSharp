@@ -17,9 +17,13 @@
   API 리뷰(run_mode sub_* — 서버 작업 폴더에서 읽음)는 태그에 모드 이름을 쓴다: [ownReview:sub_self] · [ownReview:sub_self+sub_security]
   · [ownReview:sub_perf]. 형식 검사는 같고, 읽은 파일은 subagent_in/ 대신 작업 폴더 기준 상대 경로(절대 경로 · 드라이브 · '~' · '..' 없음)인지 본다.
   서브에이전트 이름과 섞지 않는다 (2차 리뷰 9ea51e562a 뒤 결정).
+- 나가는 글 (모든 모드): input에 비밀 패턴 · push_guard.local.txt 개인 값 · share_guard.local.txt 프로젝트 패턴 · 펼친 사용자 폴더 경로가
+  있으면 막는다 (share_guard.outbound_hits). 작업 경로(F:\\AI\\…) · %LOCALAPPDATA% 같은 변수 꼴은 통과.
+- diff는 파일로 (review_* · sub_self · sub_perf · sub_security · perf_*): input에 diff 덩어리(줄 머리 'diff --git ' · '@@ -n +m')가 있거나,
+  context에 .diff 파일이 있는데 첫 항목이 아니면 막는다.
 - 실패하면 막는다: 통과 판정일 때만 exit 0.
 
-입력: stdin JSON {"tool_name": "mcp__hb-orchestration__run_mode", "tool_input": {"mode", "reason", "ownReview", ...}}.
+입력: stdin JSON {"tool_name": "mcp__hb-orchestration__run_mode", "tool_input": {"mode", "reason", "ownReview", "input", "context", ...}}.
 """
 import datetime
 import json
@@ -27,6 +31,10 @@ import os
 import re
 import sys
 import unicodedata
+
+sys.dont_write_bytecode = True  # 훅 폴더에 __pycache__를 남기지 않는다 (저장소에 섞이지 않게)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # -I는 스크립트 폴더를 경로에 넣지 않는다
+from share_guard import outbound_hits  # noqa: E402
 
 PLAN_MODES = {'review_main', 'review_high'}
 # ownReview를 쓸 수 있는 검토형 서브에이전트. 둘 이상이면 '+'로 잇고, 결과 원문도 이어 붙인다.
@@ -46,6 +54,8 @@ PLAN_DAYS = 7
 PLAN_TAG = re.compile(r'\[plan:([^\]\\/:\s][^\]\\/:]*?\.md)\]', re.IGNORECASE)
 # 형식이 틀린 태그(.md 빠짐 · 경로 · 공백)를 조용히 무시하면 날짜 검사로 통과해, 지정한 계획서가 확인된 줄 알게 된다 (40a070a849 C5)
 PLAN_TAG_START = re.compile(r'\[plan:', re.IGNORECASE)
+# input에 붙인 diff 덩어리 (줄 머리)
+DIFF_BODY = re.compile(r'(?m)^(?:diff --git |@@ -\d+(?:,\d+)? \+\d+)')
 
 
 def deny(reason: str) -> None:
@@ -219,8 +229,22 @@ def check(data: dict, today: datetime.date | None = None) -> None:
         deny("태그 없는 perf ownReview에 '## 지적' 절이 있다 — perf-reviewer 결과면 원문 그대로 넣고 reason 맨 앞에 [ownReview:perf-reviewer], "
              "설계안에 대한 지휘자 의견이면 '## 지휘자 의견' 제목으로 쓴다 (/mode 2단계).")
 
+    root = os.environ.get('CLAUDE_PROJECT_DIR') or data.get('cwd') or os.getcwd()
+    text = by_key.get('input') or ''
+    if hits := outbound_hits(text, root):
+        deny('input에 밖(외부 모델)으로 내보내면 안 되는 값이 있다: ' + ', '.join(hits[:5])
+             + ' — 비밀 값은 빼고, 경로는 프로젝트 루트 기준 상대 경로 · @이름/… 으로 쓴다 (crash 조사: 파일 경로 · 계정 · 키는 뺀다).')
+    if mode in PLAN_MODES or mode in API_REVIEWERS or mode.startswith('perf_'):
+        if DIFF_BODY.search(text):
+            deny('input에 diff 본문이 있다 — CLAUDE.md "diff는 파일로": review_tmp/<날짜>_<주제>.diff로 만들어 context 첫 항목(파일 전체 범위)으로 넘긴다.')
+        ctx = by_key.get('context') or []
+        if isinstance(ctx, str):
+            ctx = json.loads(ctx)
+        paths = [str(c.get('path') or '') for c in ctx if isinstance(c, dict)]
+        if any(p.lower().endswith('.diff') for p in paths) and not paths[0].lower().endswith('.diff'):
+            deny('context에 .diff 파일이 있는데 첫 항목이 아니다 — diff 파일을 context 첫 항목으로 둔다 (CLAUDE.md "diff는 파일로").')
+
     if mode in PLAN_MODES:
-        root = os.environ.get('CLAUDE_PROJECT_DIR') or data.get('cwd') or os.getcwd()
         plan = PLAN_TAG.search(reason)
         if plan is None and PLAN_TAG_START.search(reason):
             deny("reason의 [plan:…] 태그 형식이 틀렸다 — [plan:<계획서 파일 이름>.md] (docs/plans/ 안의 파일 이름만, 경로 · 앞뒤 공백 없이, .md 포함).")

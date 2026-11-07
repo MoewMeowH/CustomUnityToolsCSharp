@@ -5,6 +5,10 @@
   다른 명령과 묶음(훅은 실행 전에 돌아 같은 명령의 commit을 못 본다) · cd류 · 명령 치환 · git 전역 옵션 · --all·--tags·강제 푸시 등은
   해석하지 않고 막는다 → "단순 형식으로 따로" 다시 하게 한다. heredoc · here-string 본문에 git push가 있으면 받는 명령이
   데이터 전용(cat · tee · git commit 등, hook_common.data_only)일 때만 통과.
+  2026-11-07 오탐 완화: push 앞의 git log · status · diff · show, 뒤의 tail · head · Select-Object · grep(파이프 · 리다이렉트 없이),
+  push의 2>&1 · 2>/dev/null은 받는다 (조각 이름은 경로 없는 이름만, --output · 파일 리다이렉트 · 괄호 없이).
+  git stash push는 토큰의 하위 명령으로 가려 push가 아니다. 따옴표 속 'git push' 글자는 묶음이 git add · commit ·
+  읽기 · cd류뿐이면 받는다 (커밋 메시지).
 - 범위: 대상 원격에 없는 커밋 `<소스> --not --remotes=<원격>` (소스 기본 HEAD, 원격 기본 upstream → origin).
   merge 커밋은 첫 부모 기준 diff까지 본다. 경로는 -z(한글 경로가 인용·이스케이프되지 않게).
 - 비밀 패턴: BUILT_IN(맞은 값에 FAKE_MARKERS가 있으면 시험용 가짜로 건너뜀) + 개인 값 파일 `$CLAUDE_PROJECT_DIR/.claude/push_guard.local.txt`
@@ -22,7 +26,7 @@ import sys
 
 sys.dont_write_bytecode = True  # 훅 폴더에 __pycache__를 남기지 않는다 (저장소에 섞이지 않게)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # -I는 스크립트 폴더를 경로에 넣지 않는다
-from hook_common import CD, CHAIN, data_only, has_substitution, join_continuations, lex, native_path, read_input, scan, shell_of, strip_bodies, tokenize  # noqa: E402
+from hook_common import CD, CHAIN, NESTED, NEUTRAL, chain_pieces, data_only, has_substitution, join_continuations, lex, native_path, read_input, scan, shell_of, strip_bodies, tokenize  # noqa: E402
 
 BUILT_IN = [
     r'sk-[A-Za-z0-9_-]{16,}',                 # OpenAI 등
@@ -39,6 +43,14 @@ LOCAL_FILE = os.path.join('.claude', 'push_guard.local.txt')
 ALLOWED_PUSH_OPTIONS = {'--dry-run', '-n', '-u', '--set-upstream', '-v', '--verbose', '-q', '--quiet', '--porcelain'}
 
 ROUGH = re.compile(r'\bgit(?:\.exe)?\b[^\n;&|]*?\bpush\b', re.IGNORECASE)
+# push와 묶어도 되는 조각: 앞에는 저장소를 바꾸지 않는 git 읽기, 뒤에는 출력 줄이기 (2026-11-07 집계: 묶음 오탐 5건이 이 모양)
+GIT_LOOK = {'log', 'status', 'diff', 'show'}
+AFTER_PUSH = {'tail', 'head', 'select-object', 'select', 'grep', 'select-string', 'sls'}
+# 따옴표 속 'git push' 글자가 실행되지 않는 git 조각 (커밋 메시지)
+TEXT_GIT = GIT_LOOK | {'add', 'commit'}
+OUT_REDIRECT = re.compile(r'2>(?:&1|/dev/null|\$null)')
+BUNDLED = ('git push가 다른 명령과 묶여 있다 — 훅은 명령이 실행되기 전에 돌아서, 같은 명령 안의 commit은 검사하지 못한다 '
+           '(앞에 git log · status · diff · show, 뒤에 tail · head · Select-Object 같은 출력 줄이기만 받는다). ')
 
 
 def deny(reason: str) -> None:
@@ -185,6 +197,68 @@ def scan_lines(top: str, rng: list[str], pats: list[re.Pattern], allows: list[re
     return hits
 
 
+def git_sub(toks: list[str]) -> str:
+    """git [-C 경로] <하위 명령> — 하위 명령 이름 (git이 아니면 '')."""
+    if not toks or re.sub(r'\.exe$', '', toks[0].replace('\\', '/').rsplit('/', 1)[-1].lower()) != 'git':
+        return ''
+    rest = toks[1:]
+    while len(rest) > 1 and rest[0] == '-C':
+        rest = rest[2:]
+    return rest[0].lower() if rest else ''
+
+
+def redirected(visible_toks: list[str]) -> bool:
+    """파일로 쓰는 리다이렉트 (낱말에 붙여 쓴 echo ok>f 포함 · 2>&1 · 2>/dev/null · 2>$null 빼고). 보이는 글 토큰으로 본다 — 따옴표 속 '>'는 글자."""
+    return '>' in OUT_REDIRECT.sub(' ', ' '.join(visible_toks))
+
+
+def plain_name(toks: list[str]) -> str:
+    """조각의 명령 이름 — 경로가 붙은 실행 파일(./ls · tools/cat)은 이름만 같은 다른 프로그램일 수 있어 ''."""
+    return '' if not toks or re.search(r'[\\/]', toks[0]) else re.sub(r'\.exe$', '', toks[0].lower())
+
+
+def git_only(stripped: str, shell: str) -> bool:
+    """묶음의 모든 조각이 git add · commit · 읽기 명령 · cd류뿐인가 — 커밋 메시지 따옴표 속 'git push' 글자는 실행되지 않는다."""
+    for seg in CHAIN.split(stripped):
+        toks = tokenize(seg.strip(), shell)
+        if not toks:
+            continue
+        if toks[0].lower() in NEUTRAL:
+            continue
+        if plain_name(toks) != 'git' or git_sub(toks) not in TEXT_GIT or redirected(toks) or writes_file(toks):
+            return False
+    return True
+
+
+def writes_file(toks: list[str]) -> bool:
+    """git log · diff · show의 --output(줄임 --ou… 포함) — 검사 뒤 같은 명령 안에서 브랜치 ref 등 파일을 바꿀 수 있다 (/cross-review 2cb5d051ff 1-F1)."""
+    return any(t.lower().startswith('--ou') for t in toks[1:])
+
+
+def push_piece(cmd: str, stripped: str, shell: str) -> list[str] | None:
+    """git push가 묶인 명령: 앞에는 git 읽기 명령(log · status · diff · show)만, 뒤에는 출력 줄이기(tail · head · Select-Object 등)만 받고
+    push 조각의 원문 토큰을 돌려준다 (git stash push만 있으면 None). add · commit 등 저장소를 바꾸는 명령과 묶이면 막는다
+    (훅은 실행 전에 돌아 같은 명령의 commit을 못 본다). 조각 이름은 경로 없는 이름만, 파일 쓰기 · 괄호 · 중괄호가 있으면 막는다."""
+    pieces = chain_pieces(cmd, stripped, shell)
+    if pieces is None:
+        deny(BUNDLED + SIMPLE)
+    # git stash push는 push가 아니다 — 정규식이 아니라 토큰의 하위 명령으로 가린다 (경로 · 값이 stash로 끝나는 진짜 push를 놓치지 않게)
+    pushes = [i for i, (v, r) in enumerate(pieces) if ROUGH.search(' '.join(v)) and git_sub(r) != 'stash']
+    if not pushes:
+        return None
+    if len(pushes) != 1:
+        deny(BUNDLED + SIMPLE)
+    at = pushes[0]
+    for i, (v, toks) in enumerate(pieces):
+        if i == at:
+            continue
+        name = plain_name(toks)
+        ok = (name == 'git' and git_sub(toks) in GIT_LOOK and not writes_file(toks)) if i < at else name in AFTER_PUSH
+        if not ok or redirected(v) or NESTED.search(' '.join(v)):
+            deny(BUNDLED + SIMPLE)
+    return pieces[at][1]
+
+
 def check(data: dict) -> None:
     tool = data.get('tool_name', '')
     if tool not in ('Bash', 'PowerShell'):
@@ -204,17 +278,19 @@ def check(data: dict) -> None:
     # 따옴표 문자열 속 git push (bash -c "…" · iex "…" 등): 글을 실행하지 않는 명령만 받는다
     # 따옴표 · 백틱을 지운 글 전체도 본다 — 겹친 따옴표(bash -c "git -C "$R" push") · 쪼갠 이름(gi""t push) (/self-review security ddb47044d1 C1 · C5)
     joined = not rough and ROUGH.search(lx.unquoted(raw))
-    if (joined or any(ROUGH.search(re.sub(r'[\'"`]', ' ', q)) for q in lx.quoted)) and not data_only(stripped, inner, shell, readers=True):
+    if (joined or any(ROUGH.search(re.sub(r'[\'"`]', ' ', q)) for q in lx.quoted)) and not data_only(stripped, inner, shell, readers=True) \
+            and not git_only(stripped, shell):
         deny('따옴표 문자열 안에 git push가 있는데 받는 명령이 글을 실행하지 않는 명령(grep · echo · git commit 등)이 아니다 — '
              '셸에 명령 문자열을 넘기지 말고 직접 실행하라. ' + SIMPLE)
     if not rough:
         return
-    if CHAIN.search(stripped.strip()):
-        deny('git push가 다른 명령과 묶여 있다 — 훅은 명령이 실행되기 전에 돌아서, 같은 명령 안의 commit은 검사하지 못한다. ' + SIMPLE)
     if CD.search(stripped):
         deny('git push와 cd가 함께 있다 (검사할 저장소가 달라진다). -C로 저장소를 지정하라. ' + SIMPLE)
+    toks = push_piece(cmd, stripped, shell) if CHAIN.search(stripped.strip()) else tokenize(cmd.strip(), shell)
+    if toks is None or git_sub(toks) == 'stash':
+        return  # git stash push (로컬)
 
-    repo, remote, source = parse_push(tokenize(cmd.strip(), shell))
+    repo, remote, source = parse_push([t for t in toks if not OUT_REDIRECT.fullmatch(t)])
     cwd = data.get('cwd') or os.getcwd()
     repo = native_path(repo) if repo else cwd
     if not os.path.isabs(repo):
