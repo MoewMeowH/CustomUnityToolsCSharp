@@ -595,11 +595,165 @@
             bar.append(go);
         });
     }
+    // ---- Mermaid 도표 ----
+    // 지휘자 말풍선의 ```mermaid(Mermaid 문법 글)를 앱이 넣어 둔 Mermaid 12.3.0(wwwroot/lib)으로 그린다.
+    // Mermaid가 5.5MB라 도표마다 틀에 넣지 않는다: 페이지에 하나뿐인 그리기 틀(allow-scripts, 같은 문서 CSP)이 SVG를 만들고,
+    // 말풍선에는 스크립트 없는 틀(sandbox="")에 그 SVG만 넣는다. 그리기 틀은 display:none이면 글자 크기를 못 재 도표가 쪼그라든다 (실측)
+    // — 슬라이드 인쇄용 틀처럼 화면 안에 투명하게 둔다.
+    // 그리기 틀은 사용자 활성화 없이 focus를 가져갈 수 있다 (실측: inert · visibility:hidden으로도 못 막음) — Mermaid 정화가 뚫리면
+    // 입력칸 글을 받을 수 있으므로, 그릴 것이 없으면 틀을 치우고(MermaidIdleMs) 틀로 간 focus는 바로 되돌린다 (결정 "되찾기 + 쉬면 틀 치우기").
+    const MermaidMaxChars = 50000, MermaidReadyMs = 20000, MermaidTimeoutMs = 10000, MermaidIdleMs = 3000;
+    // 그리기 틀이 준비되지 않음(시간 초과 · 라이브러리 실행 실패) — 라이브러리를 못 받은 것과 문구를 가른다
+    const MermaidFrameFailed = new Error("mermaid frame");
+    let mermaidHost = null, mermaidSeq = 0;
+    function mermaidRendererDoc(lib) {
+        return "<!doctype html><html><head><meta charset=\"utf-8\">" +
+            "<meta http-equiv=\"Content-Security-Policy\" content=\"" + WidgetCsp + "\">" +
+            inlineScript(lib) +
+            "</head><body><script>(()=>{" + NoWebRtc + "let theme=null;" +
+            "addEventListener(\"message\",async e=>{const m=e.data;if(e.source!==parent||m===null||typeof m!==\"object\"||m.hbMermaid!==\"render\")return;" +
+            "try{if(m.theme!==theme){mermaid.initialize({startOnLoad:false,securityLevel:\"strict\",theme:m.theme});theme=m.theme;}" +
+            "const r=await mermaid.render(\"hb-m\"+m.id,m.code);parent.postMessage({hbMermaid:\"done\",id:m.id,svg:r.svg},\"*\");}" +
+            "catch(err){parent.postMessage({hbMermaid:\"error\",id:m.id,error:String(err&&err.message||err)},\"*\");}});" +
+            "parent.postMessage({hbMermaid:typeof mermaid===\"object\"?\"ready\":\"fail\"},\"*\");})()<\/script></body></html>";
+    }
+    // 그리기 틀의 답: 보낸 창이 지금 그리기 틀일 때만
+    window.addEventListener("message", (e) => {
+        const host = mermaidHost, m = e.data;
+        if (!host || !host.frame || e.source !== host.frame.contentWindow || m === null || typeof m !== "object") return;
+        if (m.hbMermaid === "ready") host.ok();
+        else if (m.hbMermaid === "fail") host.fail(MermaidFrameFailed);
+        else host.pending.get(m.id)?.(m);
+    });
+    let mermaidLastFocus = null;
+    document.addEventListener("focusin", (e) => { if (!e.target.classList?.contains("mermaid-renderer")) mermaidLastFocus = e.target; });
+    window.addEventListener("blur", () => setTimeout(() => {
+        const frame = mermaidHost?.frame;
+        if (frame && document.activeElement === frame) { frame.blur(); mermaidLastFocus?.focus(); }
+    }, 0));
+    function dropMermaidHost(host) {
+        host.dead = true;
+        clearTimeout(host.idle);
+        host.frame?.remove();
+        for (const done of host.pending.values()) done({ hbMermaid: "error", error: "그리기 틀이 멈췄습니다" });
+        host.pending.clear();
+        if (mermaidHost === host) mermaidHost = null;
+    }
+    function mermaidRenderer() {
+        if (mermaidHost) return mermaidHost;
+        const host = mermaidHost = { frame: null, pending: new Map(), dead: false, jobs: 0, idle: 0 };
+        host.ready = loadLib("mermaid.min.js").then(lib => new Promise((ok, fail) => {
+            host.ok = ok; host.fail = fail;
+            setTimeout(() => fail(MermaidFrameFailed), MermaidReadyMs);
+            const frame = host.frame = el("iframe", "mermaid-renderer");
+            frame.setAttribute("sandbox", "allow-scripts");
+            frame.setAttribute("referrerpolicy", "no-referrer");
+            frame.setAttribute("aria-hidden", "true");
+            frame.tabIndex = -1;
+            frame.srcdoc = mermaidRendererDoc(lib);
+            document.body.append(frame);
+        }));
+        host.ready.catch(() => dropMermaidHost(host));
+        host.queue = host.ready;
+        return host;
+    }
+    function mermaidTheme() {
+        const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(chartTheme().panel);
+        if (!m) return "dark";
+        const [r, g, b] = m.slice(1).map(h => parseInt(h, 16));
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b < 128 ? "dark" : "default";
+    }
+    // 그린 SVG를 theme + 글로 기억한다 — 턴 끝 말 다시 받기마다 페이지의 도표를 모두 다시 그려 줄을 서지 않게. 오래된 것부터 버린다
+    const MermaidCacheMax = 200, mermaidCache = new Map();
+    // 하나씩 차례로 그린다. 시간을 넘기면 그리기 틀을 버린다 — 다음 도표는 새 틀에서 (멈춘 틀에 줄 서지 않게)
+    // 결과: { svg } · { error } — 라이브러리를 못 받았거나 틀이 준비되지 않으면 거부
+    function renderMermaid(code) {
+        const theme = mermaidTheme(), key = theme + "\n" + code;
+        if (mermaidCache.has(key)) return Promise.resolve({ svg: mermaidCache.get(key) });
+        const host = mermaidRenderer();
+        host.jobs++;
+        clearTimeout(host.idle);
+        const run = host.queue.then(() => new Promise(ok => {
+            if (host.dead) { ok({ error: "그리기 틀이 멈췄습니다" }); return; }
+            const id = ++mermaidSeq;
+            const timer = setTimeout(() => dropMermaidHost(host), MermaidTimeoutMs);
+            host.pending.set(id, m => {
+                clearTimeout(timer);
+                host.pending.delete(id);
+                if (m.hbMermaid !== "done" || typeof m.svg !== "string") { ok({ error: String(m.error ?? "") }); return; }
+                mermaidCache.delete(key);
+                mermaidCache.set(key, m.svg);
+                if (mermaidCache.size > MermaidCacheMax) mermaidCache.delete(mermaidCache.keys().next().value);
+                ok({ svg: m.svg });
+            });
+            host.frame.contentWindow.postMessage({ hbMermaid: "render", id, code, theme }, "*");
+        }));
+        host.queue = run.catch(() => {});
+        // 줄이 비면 잠시 뒤 틀을 치운다 — 다음 도표는 새 틀에서 (라이브러리 글은 libCache에 남음)
+        host.queue.then(() => {
+            if (--host.jobs === 0 && !host.dead) host.idle = setTimeout(() => { if (host.jobs === 0) dropMermaidHost(host); }, MermaidIdleMs);
+        });
+        return run;
+    }
+    // 표시 틀: 스크립트 없이 SVG만. 높이를 알릴 수 없으니 viewBox 비율로 틀 모양을 정한다 (높이 상한은 CSS)
+    function mermaidFrame(svg) {
+        const frame = el("iframe", "widget-frame mermaid-frame");
+        frame.setAttribute("sandbox", "");
+        frame.setAttribute("referrerpolicy", "no-referrer");
+        frame.setAttribute("loading", "lazy");
+        frame.title = "도표";
+        const pad = 16, vb = /<svg\b[^>]*?\sviewBox="\s*[-\d.e]+[\s,]+[-\d.e]+[\s,]+([\d.e]+)[\s,]+([\d.e]+)\s*"/i.exec(svg);
+        if (vb) {
+            const w = Number(vb[1]) + pad, h = Number(vb[2]) + pad;
+            frame.style.aspectRatio = `${w} / ${h}`;
+            frame.style.maxWidth = w + "px";
+        }
+        const t = chartTheme();
+        frame.srcdoc = "<!doctype html><html><head><meta charset=\"utf-8\">" +
+            "<meta http-equiv=\"Content-Security-Policy\" content=\"" + WidgetCsp + "\">" +
+            "<style>html,body{margin:0;height:100%;overflow:hidden}body{box-sizing:border-box;padding:" + pad / 2 + "px}" +
+            "svg{display:block;width:100%!important;height:100%!important;max-width:none!important}</style></head>" +
+            "<body style=\"background:" + t.panel + ";color:" + t.text + "\">" + svg + "</body></html>";
+        return frame;
+    }
+    // 서버 Markdig(UseAdvancedExtensions의 diagrams)는 ```mermaid를 pre > code가 아니라 code 없는 <pre class="mermaid">(이스케이프된 글)로 낸다
+    // — 그 글을 읽고, 코드 보기 · 오류 때 보일 코드 블록은 여기서 만든다 (다른 코드 블록처럼 복사 단추가 붙는다)
+    function mermaids(container) {
+        container.querySelectorAll(".msg.conductor .body pre.mermaid").forEach(raw => {
+            if (raw.closest(".widget")) return;
+            const source = raw.textContent;
+            const pre = el("pre"), code = el("code", "language-mermaid");
+            code.textContent = source;
+            pre.append(code);
+            const box = el("div", "widget mermaid");
+            raw.replaceWith(box);
+            const note = text => { const n = el("div", "muted widget-note"); n.dataset.note = text; return n; };
+            if (source.length > MermaidMaxChars) { box.append(note(`도표 글이 너무 길어서(${source.length.toLocaleString()}자) 코드로만 보입니다.`), pre); return; }
+            const details = el("details", "widget-code");
+            details.append(el("summary"), pre);
+            const bar = el("div", "widget-bar");
+            box.append(bar, details);
+            // 그리지 못하면 위젯 오류처럼 이유 한 줄 + 코드
+            const failed = text => { bar.remove(); details.replaceWith(note(text), pre); };
+            const draw = () => renderMermaid(source).then(
+                r => r.svg !== undefined ? details.before(mermaidFrame(r.svg))
+                    : failed("도표를 그리지 못해 코드로만 보입니다: " + r.error.split("\n")[0]),
+                e => failed(e === MermaidFrameFailed ? "도표 그리기 틀이 준비되지 않아 코드로만 보입니다."
+                    : "도표 라이브러리를 불러오지 못해 코드로만 보입니다."));
+            if (autoDrawSlot(box)) { draw(); return; }
+            const go = el("button", "widget-run chart-draw");
+            go.type = "button";
+            go.setAttribute("aria-label", "도표 그리기");
+            go.addEventListener("click", () => { go.remove(); draw(); });
+            bar.append(go);
+        });
+    }
     // 코드 블록 복사 단추 (2-2 b). 글자는 CSS ::after로 넣는다 — 인용 답장이 innerText로 본문을 읽을 때 섞이지 않게.
     function decorate(container) {
         widgets(container);
         charts(container);
         slides(container);
+        mermaids(container);
         container.querySelectorAll(".body pre").forEach(pre => {
             if (pre.querySelector(":scope > .copy")) return;
             const b = el("button", "copy");

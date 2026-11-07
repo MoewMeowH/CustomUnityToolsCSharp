@@ -556,6 +556,47 @@ public sealed class ChatScriptTests(ChatApp app, ChatBrowser browser) : IClassFi
         page.AssertNoErrors();
     }
 
+    /// <summary>Mermaid 도표 (2026-11-07): 지휘자 말풍선만, 그리기 틀은 페이지에 하나, 표시 틀은 스크립트 없이 SVG만, 문법 오류는 이유 한 줄 + 코드.</summary>
+    [Fact]
+    public async Task Mermaid_DrawsSvgInScriptlessFrame_ErrorStaysCode()
+    {
+        if (!browser.Available) return;
+        var room = app.Room("mermaid",
+            ChatApp.User("```mermaid\nflowchart LR\n  U --> V\n```", 0),
+            ChatApp.Conductor("```mermaid\nmindmap\n  root((중심))\n    가지 A\n    가지 B\n```\n\n```mermaid\nflowchart LR\n  A[시작] --> B[끝]\n```", 1),
+            ChatApp.Conductor("```mermaid\nflowchart LR\n  A -->\n```", 2),
+            // 도표 글의 init으로 securityLevel을 풀어도 strict 그대로 — 링크 · 클릭이 SVG에 남지 않는다
+            ChatApp.Conductor("```mermaid\n%%{init: {\"securityLevel\": \"loose\"}}%%\nflowchart LR\n  A[누르기] --> B\n  click A \"javascript:alert(1)\"\n  click B call alert(2)\n```", 3));
+        await using var page = await browser.OpenAsync(app.RoomUrl(room));
+        await page.WaitForAsync("document.querySelectorAll('#chat iframe.mermaid-frame').length === 3 && !!document.querySelector('#chat .widget.mermaid .widget-note')",
+            "도표 틀 셋 · 오류 한 줄");
+        var loose = await page.EvalAsync<string>("document.querySelectorAll('#chat .msg.conductor')[2].querySelector('iframe.mermaid-frame').srcdoc");
+        Assert.Contains("누르기", loose);
+        Assert.DoesNotContain("javascript:", loose);
+        Assert.DoesNotContain("alert", loose);
+
+        Assert.False(await page.EvalAsync<bool>("!!document.querySelector('#chat .msg.user .widget, #chat .msg.user iframe')"));
+        // 그리기 틀로 간 focus는 입력칸으로 돌아온다 (뚫린 틀이 입력을 가로채지 않게)
+        Assert.True(await page.EvalAsync<bool>("(() => { const f = document.querySelector('iframe.mermaid-renderer'); document.getElementById('text').focus(); f?.focus(); return !!f; })()"),
+            "그리기 틀이 벌써 치워짐");
+        await page.WaitForAsync("document.activeElement?.id === 'text'", "focus 되찾음");
+        // 그릴 것이 없으면 틀을 치운다
+        await page.WaitForAsync("!document.querySelector('iframe.mermaid-renderer')", "그리기 틀 치움");
+        const string First = "document.querySelector('#chat iframe.mermaid-frame')";
+        Assert.Equal("", await page.EvalAsync<string>($"{First}.getAttribute('sandbox')"));
+        var srcdoc = await page.EvalAsync<string>($"{First}.srcdoc");
+        Assert.Contains("<svg", srcdoc);
+        Assert.Contains("중심", srcdoc);
+        Assert.DoesNotContain("<script", srcdoc);
+        Assert.NotEqual("", await page.EvalAsync<string>($"{First}.style.aspectRatio")); // 틀 모양은 도표 비율
+
+        const string Failed = "document.querySelectorAll('#chat .msg.conductor')[1]";
+        Assert.Contains("Parse error", await page.EvalAsync<string>($"{Failed}.querySelector('.widget-note').dataset.note"));
+        Assert.True(await page.EvalAsync<bool>($"!!{Failed}.querySelector('.widget.mermaid > pre > code.language-mermaid')"));
+        Assert.False(await page.EvalAsync<bool>($"!!{Failed}.querySelector('iframe, .widget-bar')"));
+        page.AssertNoErrors();
+    }
+
     [Fact]
     public async Task Widget_OnlyConductorBubbles_OversizeStaysCode()
     {

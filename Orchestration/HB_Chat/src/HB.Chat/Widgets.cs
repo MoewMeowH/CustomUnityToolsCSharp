@@ -6,6 +6,7 @@ namespace HB.Chat;
 /// 서버는 말풍선 HTML을 그대로 두고 아래만 정한다.
 /// ```chart(차트 시안, 2026-10-29)는 Chart.js 설정 JSON — 화면(chat.js charts)이 앱에 넣어 둔 wwwroot/lib/chart.umd.min.js와 같은 격리 틀에 그린다.
 /// ```slides(슬라이드 시안)는 앱 형식 JSON — 화면(chat.js slides)이 wwwroot/lib의 reveal.js · marked · DOMPurify(+ Chart.js)로 같은 격리 틀에 그린다.
+/// ```mermaid(2026-11-07)는 Mermaid 문법 글 — 화면(chat.js mermaids)이 wwwroot/lib/mermaid.min.js를 올린 그리기 틀 하나에서 SVG를 만들어 스크립트 없는 틀에 넣는다.
 /// </summary>
 public static class Widgets
 {
@@ -31,5 +32,6 @@ public static class Widgets
         "함수 · 스크립트 없이 순수 JSON, 앱이 Chart.js로 바로 그린다. " +
         "발표 자료(슬라이드)는 ```slides 코드 블록에 JSON 하나 — {\"title\": 덱 제목, \"slides\": [{\"title\": 장 제목, \"body\": Markdown 본문(목록 · 굵게 · 코드 · 표, 링크 · 그림 · HTML은 빠짐), " +
         "\"chart\": Chart.js 설정(선택), \"notes\": 발표자 메모(선택)}]} (60장까지), 앱이 그린다. " +
+        "마인드맵 · 흐름도 · 시퀀스 · 간트 같은 도표는 위젯 대신 ```mermaid 코드 블록에 Mermaid 문법으로 쓴다 — 앱이 그린다 (클릭 · 링크 · 외부 그림은 빠짐). " +
         "Markdown 표 · 목록으로 되는 것은 Markdown으로 쓰고, 코드로 보여 줄 HTML은 ```html로 쓴다. 위젯으로 승인 카드 · 입력칸 · 이 앱 화면을 흉내 내지 않는다.";
 }

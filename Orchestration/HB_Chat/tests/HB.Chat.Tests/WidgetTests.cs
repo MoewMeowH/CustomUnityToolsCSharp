@@ -54,6 +54,10 @@ public sealed class WidgetTests
     [InlineData("앞\n```charts\n{}\n```", "앞 {}")]                                 // 다른 언어 이름은 접지 않음
     [InlineData("앞\n```slides\n{\"slides\":[]}\n```\n뒤", "앞 [슬라이드] 뒤")]    // 슬라이드 시안 (2026-10-29)
     [InlineData("앞\n~~~slides\n{}\n~~~\n뒤", "앞 [슬라이드] 뒤")]
+    [InlineData("앞\n```mermaid\nmindmap\n  root\n```\n뒤", "앞 [도표] 뒤")]          // Mermaid 도표 (2026-11-07)
+    [InlineData("앞\n~~~mermaid\nflowchart LR\n~~~\n뒤", "앞 [도표] 뒤")]
+    [InlineData("앞\n```mermaid\nmindmap 끝나지 않음", "앞 [도표]")]
+    [InlineData("앞\n```mermaids\nx\n```", "앞 x")]                                // 다른 언어 이름은 접지 않음
     public void Preview_WidgetBlockShapesMatchRenderer(string text, string preview) =>
         Assert.Equal(preview, RoomList.Preview(text)); // (803e5f13eb C6)
 
@@ -86,6 +90,20 @@ public sealed class WidgetTests
         Assert.DoesNotContain("<img", html);
     }
 
+    [Fact]
+    public void MermaidFence_RendersAsEscapedDiagramDiv()
+    {
+        // Markdig diagrams 확장은 ```mermaid를 code 없는 pre.mermaid로 낸다(< · &만 이스케이프). 화면(chat.js mermaids)은 그 textContent를 그리기 틀로 보낸다
+        // — 부모 페이지에는 글자로만 들어와야 한다
+        var html = SafeMarkdown.ToHtml("```mermaid\nflowchart LR\n  A[\"</script><img src=x>\"] --> B\n```\n", SafeMarkdown.Default);
+        Assert.Contains("<pre class=\"mermaid\">", html);
+        Assert.Contains("&lt;/script>&lt;img src=x>", html);
+        Assert.DoesNotContain("<img", html);
+    }
+
+    [Fact]
+    public void RoomRules_TellMermaidFormat() => Assert.Contains("```mermaid", RoomRules.For(PermissionLevel.Read));
+
     // 앱이 내주는 라이브러리 (npm 배포 파일 그대로, 슬라이드-시안) — 바뀌면 SHA를 같이 갱신
     [Theory]
     [InlineData("chart.umd.min.js", "87364cc2b2a76a6684929e7d6b80b18a897794db38400caff1fcf1791c6925d2", "chart.js.LICENSE.md", "MIT License")]
@@ -93,6 +111,7 @@ public sealed class WidgetTests
     [InlineData("reveal.css", "615ee850cbbb98a0f688b60ed37b21819a3f54c9f3e6f20e33e63693ab74a0c0", "reveal.js.LICENSE", "Permission is hereby granted")]
     [InlineData("marked.umd.js", "9eb730d2362ae1a8c6201698f17009e16671be6946d3d06503ddc0575283db7c", "marked.LICENSE", "Permission is hereby granted")]
     [InlineData("purify.min.js", "cd37898f9782adf54820c413191b5691803f0f137c799d6edcfd38523b4c2c31", "dompurify.LICENSE", "Apache License")]
+    [InlineData("mermaid.min.js", "336df803d87a38b70a01e736e666c8f7601d2ce42f5e47c8fafe5d721074b9a3", "mermaid.LICENSE", "The MIT License")]
     public void Library_IsBundledWithLicense(string file, string sha256, string license, string licenseText)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "HB.Chat", "wwwroot", "lib"));
