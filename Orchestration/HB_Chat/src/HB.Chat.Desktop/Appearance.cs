@@ -96,7 +96,7 @@ public static class Appearance
 
     /// <summary>
     /// 지난번에 읽은 테마 (데이터 폴더 desktop-theme.json, `/api/appearance`와 같은 모양) — 켤 때 서버를 읽기 전 처음 값.
-    /// 밝게를 고른 사용자가 켤 때마다 어두웠다 밝아지지 않게 (/self-review 993ef3b338 C5). 없거나 못 읽으면 null.
+    /// 밝게를 고른 사용자가 켤 때마다 어두웠다 밝아지지 않게. 없거나 못 읽으면 null.
     /// </summary>
     public static AppTheme? LoadLast(string path)
     {

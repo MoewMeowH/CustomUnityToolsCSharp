@@ -14,7 +14,6 @@ public sealed record ModeRowPick(string Agent, string? Effort);
 
 /// <summary>
 /// + 요청 창에서 고른 값: 줄은 원래 에이전트 이름 → 고른 값. 그 말(큐 항목)에 붙어 가고, 그 말의 실행에서 같은 모드의 첫 run_mode 카드에 미리 채운다
-/// (/self-review 785ebb5e97 C1 · C6).
 /// </summary>
 public sealed record ModePick(string Mode, IReadOnlyDictionary<string, ModeRowPick> Rows);
 
@@ -105,7 +104,7 @@ public sealed record ModeCard(string Mode, string? Description, string? Reason, 
     /// <summary>
     /// 고른 값의 오류 문구 (null이면 괜찮음): 카드에 있는 줄만, 바꾼 줄은 켜진 에이전트 · 정해진 강도만.
     /// 처음 값 그대로인 줄은 목록을 보지 않는다 — 꺼진 에이전트를 쓰는 모드 · 지휘자가 넣은 이름도 "그대로 허가"는 되게 (서버가 다시 검사, 785ebb5e97 C2).
-    /// 두 줄이 같은 에이전트로 가는데 강도가 다르면 거절 — 서버는 이름마다 강도 하나만 받는다 (785ebb5e97 C4).
+    /// 두 줄이 같은 에이전트로 가는데 강도가 다르면 거절 — 서버는 이름마다 강도 하나만 받는다.
     /// </summary>
     public string? Check(IReadOnlyDictionary<string, ModeRowPick>? picks)
     {
@@ -130,7 +129,7 @@ public sealed record ModeCard(string Mode, string? Description, string? Reason, 
     }
 
     /// <summary>
-    /// 허가 때 돌려줄 입력. 모든 줄이 처음 값 그대로면 원래 입력 그대로 (785ebb5e97 C3).
+    /// 허가 때 돌려줄 입력. 모든 줄이 처음 값 그대로면 원래 입력 그대로.
     /// 바꾼 줄이 있으면 agents · reasoning만 다시 쓴다: 교체는 '원래=새것', 강도는 '새것=강도'(같은 이름은 한 번 — Check가 다른 강도를 막는다).
     /// 지휘자가 넣은 값 중 카드 줄이 아닌 이름(대신 에이전트 등)은 남기고, '*'는 줄마다 풀어 쓴 값으로 바뀐다.
     /// 줄이 없는 카드(목록 없음 · followUp)는 입력 그대로.

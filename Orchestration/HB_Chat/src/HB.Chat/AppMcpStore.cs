@@ -44,7 +44,6 @@ public sealed partial class AppMcpStore
             if (File.Exists(path))
             {
                 // JSON이어도 모양이 다르면(객체가 아님 · servers가 객체가 아님) 깨진 것으로 — 빈 목록으로 읽으면 다음 저장이 원래 파일을 덮었다
-                // (/self-review 779716239c C1)
                 if (JsonNode.Parse(File.ReadAllText(path)) is not JsonObject root || root["servers"] is { } s && s is not JsonObject)
                     LoadError = "mcp-servers.json 모양이 아닙니다 ({\"servers\": {…}} 객체여야 함)";
                 else if (root["servers"] is JsonObject saved)
@@ -79,7 +78,7 @@ public sealed partial class AppMcpStore
         lock (_lock) return _servers.ContainsKey(name);
     }
 
-    /// <summary>저장된 정식 이름 (대소문자 무시로 찾음). 없으면 null — 방에 넣을 이름을 맞출 때 (/self-review 779716239c C4).</summary>
+    /// <summary>저장된 정식 이름 (대소문자 무시로 찾음). 없으면 null — 방에 넣을 이름을 맞출 때.</summary>
     public string? NameOf(string name)
     {
         lock (_lock) return _servers.Keys.FirstOrDefault(k => string.Equals(k, name, StringComparison.OrdinalIgnoreCase));
@@ -181,8 +180,8 @@ public sealed partial class AppMcpStore
     /// 알려진 머리(sk- · ghp_ · github_pat_ · xox · ntn_ · secret_ · Bearer 뒤 긴 값) 또는 공백 없는 20자 이상 영숫자 섞인 값.
     /// </summary>
     /// <remarks>
-    /// args 낱말(--key=값이면 값) · url 쿼리 값도 본다 (/self-review security ae543471a8 C3 · 779716239c C3). 그리고 비밀이 아니어도 알릴 것:
-    /// 원격 url이 헤더 · url에 ${VAR}를 쓰면 앱 환경 변수 값이 그 호스트로 나간다(ae543471a8 C1), 원격 http://는 암호화 없이 나간다(C2).
+    /// args 낱말(--key=값이면 값) · url 쿼리 값도 본다. 그리고 비밀이 아니어도 알릴 것:
+    /// 원격 url이 헤더 · url에 ${VAR}를 쓰면 앱 환경 변수 값이 그 호스트로 나간다, 원격 http://는 암호화 없이 나간다(C2).
     /// </remarks>
     public static IReadOnlyList<string> SecretWarnings(JsonObject entry)
     {
@@ -326,7 +325,7 @@ public sealed partial class AppMcpStore
             }
             Take("user", root["mcpServers"]);
             if (root["projects"] is JsonObject projects)
-                foreach (var (folder, project) in projects) Take("local: " + folder, project is JsonObject p ? p["mcpServers"] : null); // 객체가 아니면 건너뜀 (779716239c C1)
+                foreach (var (folder, project) in projects) Take("local: " + folder, project is JsonObject p ? p["mcpServers"] : null); // 객체가 아니면 건너뜀
             lock (ImportCacheLock) _importCache = (key, list);
             return Copy(list);
         }
@@ -341,7 +340,7 @@ public sealed partial class AppMcpStore
 
     /// <summary>
     /// 화면에 보일 짧은 명령 (command + args 또는 url, 200자). 토큰처럼 보이는 args 값 · url 쿼리 값은 ••• 로 가리고
-    /// (/self-review security ae543471a8 C3 · 779716239c C3), env · headers는 값 없이 이름과 그 안 ${VAR} 이름만 붙인다(ae543471a8 C1).
+    ///, env · headers는 값 없이 이름과 그 안 ${VAR} 이름만 붙인다.
     /// </summary>
     public static string Describe(JsonObject entry)
     {

@@ -274,7 +274,7 @@ select, input[type=text], textarea { background: var(--panel); border: 1px solid
    글자는 ::before · ::after로 — 인용 답장(innerText)에 섞이지 않게 */
 .widget { margin: 6px 0; width: 560px; max-width: 100%; }
 .widget-bar { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-/* 틀 밖(앱 쪽) 표시: 위젯 안 단추 · 입력칸이 앱 기능처럼 보이지 않게 (abc6cec3a6 C2) */
+/* 틀 밖(앱 쪽) 표시: 위젯 안 단추 · 입력칸이 앱 기능처럼 보이지 않게 */
 .widget-bar::before { content: "지휘자가 만든 위젯 · 안의 단추 · 입력칸은 앱 기능이 아닙니다"; }
 .widget.running .widget-bar::before { content: "지휘자가 만든 위젯 (실행 중) · 안의 단추 · 입력칸은 앱 기능이 아닙니다"; }
 .widget-run { font-size: 12px; padding: 1px 10px; border-radius: 6px; }
@@ -323,7 +323,7 @@ details.long > .body { margin-top: 6px; }
 
 /* 보내기 제어 · 첨부 (2-2 d) */
 .queue, .attach-chips { max-width: 920px; margin: 0 auto 6px; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; font-size: 12px; }
-/* 칩 글은 span에서 줄임표, ×는 줄지 않게 — 긴 한글에서 ×가 잘렸다 (/self-review 5b26cff7df C1) */
+/* 칩 글은 span에서 줄임표, ×는 줄지 않게 — 긴 한글에서 ×가 잘렸다 */
 .chip.queued, .chip.attach-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 320px; white-space: nowrap; }
 .chip .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .chip.attach-chip img { width: 22px; height: 22px; object-fit: cover; border-radius: 4px; flex: none; }

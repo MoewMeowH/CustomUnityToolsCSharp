@@ -27,7 +27,7 @@ public sealed record AnswerPlacement(IReadOnlyDictionary<ChatEntry, IReadOnlyLis
     }
 
     /// <summary>
-    /// 답하지 않은 질문의 짧은 라벨 (/self-review e8091295fe C8): 기록의 글은 앱이 지휘자에게 보낸 거절 문구
+    /// 답하지 않은 질문의 짧은 라벨: 기록의 글은 앱이 지휘자에게 보낸 거절 문구
     /// ("사용자가 질문 카드에 답하지 않았습니다 (시간 초과). 필요하면 …")라 괄호 안 라벨만, 없으면 첫 문장 (80자까지).
     /// </summary>
     public static string DeclinedLabel(string note)

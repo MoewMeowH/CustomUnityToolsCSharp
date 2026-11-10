@@ -45,7 +45,7 @@ public sealed record Room
     /// </summary>
     public string? ForkOf { get; init; }
 
-    /// <summary>갈래를 만들 때 원래 세션 기록의 크기. 첫 말 전에 원래 방이 더 진행됐는지 방 칸에 알리는 기준 (/self-review 95e8b1c242 C2).</summary>
+    /// <summary>갈래를 만들 때 원래 세션 기록의 크기. 첫 말 전에 원래 방이 더 진행됐는지 방 칸에 알리는 기준.</summary>
     public long? ForkSourceSize { get; init; }
 
     /// <summary>마지막 실행이 끝날 때의 컨텍스트 크기 · 창 (토큰, 컨텍스트 표시). 첫 턴 전에는 없다.</summary>
@@ -191,7 +191,6 @@ public sealed class RoomStore
 
     /// <summary>
     /// 파일의 목록 칸이 null이면(손으로 고침 · 다른 판이 씀) 빈 목록으로 — JSON의 null이 기본값 []를 덮으면 그 칸을 쓰는 곳마다 NullReference가 났다
-    /// (/self-review security 4c300badae C2).
     /// </summary>
     private static Room Clean(Room r) => r with
     {
@@ -241,7 +240,7 @@ public sealed class RoomStore
             }
             catch
             {
-                _rooms.RemoveAt(_rooms.Count - 1); // 저장하지 못한 방은 목록에도 남기지 않는다 (0a3b1d5155 C6).
+                _rooms.RemoveAt(_rooms.Count - 1); // 저장하지 못한 방은 목록에도 남기지 않는다.
                 throw;
             }
         }
@@ -264,7 +263,7 @@ public sealed class RoomStore
             }
             catch
             {
-                _rooms[i] = before; // 메모리와 디스크가 어긋나지 않게 (0a3b1d5155 C6).
+                _rooms[i] = before; // 메모리와 디스크가 어긋나지 않게.
                 throw;
             }
             return _rooms[i];
@@ -273,7 +272,7 @@ public sealed class RoomStore
 
     /// <summary>
     /// 조건에 맞는 방을 색인에서 뺀다 (휴지통 30일 지남 · 휴지통 즉시 비우기 — Trash). 뺀 방 ID 목록. 조건은 잠금 안에서 본다 — 같은 순간의 되살리기와 겹쳐도
-    /// 되살린 방은 지우지 않는다 (/self-review 95e8b1c242 C7). 저장에 실패하면 메모리도 되돌린다.
+    /// 되살린 방은 지우지 않는다. 저장에 실패하면 메모리도 되돌린다.
     /// </summary>
     public IReadOnlyList<string> RemoveWhere(Func<Room, bool> remove)
     {

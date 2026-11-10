@@ -129,7 +129,7 @@ public static class ClaudeRunner
         foreach (var a in spec.Args) psi.ArgumentList.Add(a);
         // 이 앱을 Claude Code 세션 안에서 띄웠을 때 물려받는 표시. 띄운 claude가 자기를 하위 세션으로 보지 않게 뺀다.
         psi.Environment.Remove("CLAUDECODE");
-        // 서브에이전트 강도는 앱 설정만 — 이 앱을 띄운 환경의 값이 설정을 비운 방 · 명령 방에 새지 않게 (sub_self 47b774c535 C6)
+        // 서브에이전트 강도는 앱 설정만 — 이 앱을 띄운 환경의 값이 설정을 비운 방 · 명령 방에 새지 않게
         psi.Environment.Remove(ClaudeArgs.SubagentEffortVariable);
         foreach (var (name, value) in spec.Environment) psi.Environment[name] = value;
         return psi;
@@ -143,7 +143,7 @@ public static class ClaudeRunner
         // stdin 쓰기는 하나씩 (승인 답은 다른 스레드에서 온다). 닫은 뒤의 쓰기 · 끝난 프로세스에 쓰기는 조용히 버린다.
         // 이 잠금은 Dispose하지 않는다 — 실행이 끝난 뒤에 늦게 끝나는 승인 답이 들어올 수 있다.
         var input = new StdinWriter(proc.StandardInput);
-        // 답을 기다리는 승인 요청마다 취소 토큰 — CLI가 control_cancel_request로 거두면 그 요청만 끊는다 (/self-review 7d839f4aa5 C1)
+        // 답을 기다리는 승인 요청마다 취소 토큰 — CLI가 control_cancel_request로 거두면 그 요청만 끊는다
         var asks = new ConcurrentDictionary<string, CancellationTokenSource>();
         using (ct.Register(() => Kill(proc)))
         {
@@ -159,7 +159,7 @@ public static class ClaudeRunner
             var other = 0;
             // 도는 서브에이전트 (Claude 앱 기능 D): 백그라운드 서브에이전트가 있으면 CLI는 메인 턴의 result를 먼저 내고 서브에이전트가 끝난 뒤 다시 result를 낸다
             // (2.1.312 실제 확인). 그 사이 stdin을 닫으면 서브에이전트의 승인 요청이 "Stream closed"로 실패했다 — 모두 끝난 뒤의 result에서 닫는다.
-            // 서브에이전트(subagent_type 있는) task만 센다 · 끝난 ID는 다시 넣지 않는다 · 메인 result 뒤 기다림은 상한까지 (/self-review security 42f9d47dc4 C2)
+            // 서브에이전트(subagent_type 있는) task만 센다 · 끝난 ID는 다시 넣지 않는다 · 메인 result 뒤 기다림은 상한까지
             // 백그라운드 명령(task_type local_bash)도 센다 — 끝나면 CLI가 끝 알림 뒤 지휘자가 이어서 두 번째 답을 쓴다 (실측). 안 세면 그 답을 놓치고,
             // 서버처럼 안 끝나는 명령이면 stdin을 닫아도 CLI가 끝나지 않아 방이 멈췄다
             var runningTasks = new HashSet<string>(StringComparer.Ordinal);
@@ -169,14 +169,14 @@ public static class ClaudeRunner
             // 이어 가는 세션에 지난 실행에서 죽은 백그라운드 작업이 있으면, CLI는 사용자 말보다 먼저 그 끝 알림(status stopped)과 빈 result를 낸다 (실측).
             // 그 result에서 stdin을 닫으면 이번 턴의 승인 요청이 "Stream closed"로 실패했다 (실제 확인). 그래서 "시작을 못 본 작업의 끝 알림 뒤, 답(assistant 줄) 전의
             // 빈 result"만 턴 끝으로 치지 않는다 — 답 없이 끝나는 진짜 실패(result만 옴)까지 무시하면 stdin을 안 닫아 실행이 멈춘다 (시험으로 확인).
-            // 성공(Ok)이고 글이 빈 result만, 시작을 못 본 끝 알림 수만큼만 거른다 — 글 없는 실패 result는 턴을 끝낸다 (/self-review 6f64f4b039 C1)
+            // 성공(Ok)이고 글이 빈 result만, 시작을 못 본 끝 알림 수만큼만 거른다 — 글 없는 실패 result는 턴을 끝낸다
             var answered = false;
             var ghosts = 0;
             var seenTasks = new HashSet<string>(StringComparer.Ordinal);
             using var waitCap = new CancellationTokenSource();
-            var capArmed = false; // 상한은 처음 기다림에서 한 번만 — result마다 다시 걸면 계속 밀렸다 (6f64f4b039 C4)
+            var capArmed = false; // 상한은 처음 기다림에서 한 번만 — result마다 다시 걸면 계속 밀렸다
             // 백그라운드 작업이 남은 채 stdin을 닫으면(상한 · 지금 끝내기) CLI가 안 끝날 수 있다(안 끝나는 서버) — 유예 뒤 프로세스 트리를 정리한다.
-            // 답은 이미 받았으므로 정상 끝. 작업 없이 끝나는 보통 턴은 예전처럼 CLI가 스스로 끝나기를 기다린다 (6f64f4b039 C2)
+            // 답은 이미 받았으므로 정상 끝. 작업 없이 끝나는 보통 턴은 예전처럼 CLI가 스스로 끝나기를 기다린다
             using var killAfterClose = new CancellationTokenSource();
             using var killOnGrace = killAfterClose.Token.Register(() => Kill(proc));
             async Task FinishAsync(bool killLater)
@@ -265,7 +265,7 @@ public static class ClaudeRunner
                         // 끝 알림이 끝내 오지 않아도 상한 뒤에는 닫는다 (승인 통로가 계속 열려 있지 않게). 서브에이전트가 남았으면 30분, 백그라운드 명령만이면 10분
                         if (runningTasks.Count == 0)
                         {
-                            // 기다림 끝의 두 번째 답 — 정리할 것이 없다. CLI가 닫히는 동안 온 지금 끝내기 · 중지는 정리 줄을 남기지 않는다 (/self-review e464ec29ba C2)
+                            // 기다림 끝의 두 번째 답 — 정리할 것이 없다. CLI가 닫히는 동안 온 지금 끝내기 · 중지는 정리 줄을 남기지 않는다
                             if (capArmed) Interlocked.CompareExchange(ref closedBy, Answered, null);
                             await FinishAsync(killLater: capArmed); // 기다림 중 띄운 것이 남았을 수 있다
                         }
@@ -284,12 +284,12 @@ public static class ClaudeRunner
                 }
                 try { onEvent(ev); } catch { /* 화면 쪽 실패가 실행을 멈추지 않게 */ }
             }
-            // result 없이 끝났어도(중지 · 끼어들기 · 결과 없음 · 한 줄 초과) 닫는다 — 늦은 승인 답은 닫힌 쓰기로 버려진다 (7d839f4aa5 C2)
+            // result 없이 끝났어도(중지 · 끼어들기 · 결과 없음 · 한 줄 초과) 닫는다 — 늦은 승인 답은 닫힌 쓰기로 버려진다
             await input.CloseAsync();
 
             await proc.WaitForExitAsync(CancellationToken.None);
             var stderr = await stderrTask;
-            // 답을 받은 뒤 기다리는 중에 중지 · 끼어들기가 오면 그 답으로 끝낸다 — 턴은 이미 끝났으므로 "중지됨"으로 남기지 않는다 (6f64f4b039 C4)
+            // 답을 받은 뒤 기다리는 중에 중지 · 끼어들기가 오면 그 답으로 끝낸다 — 턴은 이미 끝났으므로 "중지됨"으로 남기지 않는다
             if (ct.IsCancellationRequested && !(result is { Ok: true } && capArmed))
                 return new RunResult(false, true, "중지됨", null, result?.CostUsd, sessionId, result?.Denials ?? 0, other, stderr)
                     { ContextTokens = context, ContextWindow = result?.WindowFor(contextModel), Status = status };

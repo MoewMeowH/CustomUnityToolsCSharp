@@ -67,7 +67,7 @@ public sealed class PetForm : Form
         StopWalk();
         _look = null;
         _sprite = sprite;
-        // 시트마다 한 번 — 33ms 틱에서 다시 세거나 델리게이트를 만들지 않게 (088647d699 C5)
+        // 시트마다 한 번 — 33ms 틱에서 다시 세거나 델리게이트를 만들지 않게
         _hasRunRows = sprite is not null && sprite.Has(PetAction.RunRight) && sprite.Has(PetAction.RunLeft);
         _occupied = sprite is null ? null : sprite.Occupied;
         _frame = 0;
@@ -140,13 +140,13 @@ public sealed class PetForm : Form
     // ---- 걷기 · 바라보기 (결정 "쉼 때 바닥 걸기" · "쉼 때 마우스 쫓기") ----
 
     /// <summary>
-    /// 쉼 · 한 번 동작 없음 · 누르지 않음 · 오른쪽 메뉴 닫힘 · 보임 · 연결됨 (걷기 · 바라보기 공통 조건). 메뉴가 떠 있는 동안 걸으면 메뉴에서 멀어진다 (088647d699 C1).
+    /// 쉼 · 한 번 동작 없음 · 누르지 않음 · 오른쪽 메뉴 닫힘 · 보임 · 연결됨 (걷기 · 바라보기 공통 조건). 메뉴가 떠 있는 동안 걸으면 메뉴에서 멀어진다.
     /// </summary>
     private bool Resting => _sprite is not null && Visible && !_dim && !_pressed && _once is null && _steady == PetAction.Idle && ContextMenuStrip is not { Visible: true };
 
     private bool CanWalk => _moveEnabled && _hasRunRows && Resting;
 
-    /// <summary>바깥(크기 바꾸기 · 펫 바꾸기)에서 자리를 다시 잡기 전에 — 걷던 자리를 저장하고 멈춘다 (088647d699 C1).</summary>
+    /// <summary>바깥(크기 바꾸기 · 펫 바꾸기)에서 자리를 다시 잡기 전에 — 걷던 자리를 저장하고 멈춘다.</summary>
     public void StopWalking() => StopWalk();
 
     private void MotionTick()
@@ -268,7 +268,7 @@ public sealed class PetForm : Form
         if (_dim) Fade(canvas, 0.45f);
         Push(canvas);
         _canvas?.Dispose();
-        _canvas = canvas; // 위치만 바뀔 때(걷기 · 끌기) 다시 그리지 않고 이것을 올린다 (088647d699 C4)
+        _canvas = canvas; // 위치만 바뀔 때(걷기 · 끌기) 다시 그리지 않고 이것을 올린다
     }
 
     private Bitmap? _canvas;
@@ -356,7 +356,7 @@ public sealed class PetForm : Form
         _dragging = false;
     }
 
-    /// <summary>끄는 중 캡처를 잃으면(Alt+Tab · 다른 창) 누름을 풀고, 끌던 중이면 그 자리를 저장한다 (/self-review b280752387 C4).</summary>
+    /// <summary>끄는 중 캡처를 잃으면(Alt+Tab · 다른 창) 누름을 풀고, 끌던 중이면 그 자리를 저장한다.</summary>
     protected override void OnMouseCaptureChanged(EventArgs e)
     {
         base.OnMouseCaptureChanged(e);

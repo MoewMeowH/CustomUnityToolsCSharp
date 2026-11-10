@@ -16,7 +16,7 @@ public sealed record RoomOpenSpec(string Workspace, PermissionLevel Level, strin
 public sealed record RoomOpenCard(string Workspace, string Level, string Model, string? Title, string Prompt,
     IReadOnlyList<string> Workspaces, IReadOnlyList<string> Models, IReadOnlyList<string> Levels, string FromLevel, string? Note)
 {
-    /// <summary>여는 방 작업 폴더 — 화면이 다른 폴더를 고르면(또는 지휘자가 냈으면) 경고 줄 (/self-review 3eda32c3fb C2).</summary>
+    /// <summary>여는 방 작업 폴더 — 화면이 다른 폴더를 고르면(또는 지휘자가 냈으면) 경고 줄.</summary>
     public string? FromWorkspace { get; init; }
 }
 
@@ -71,7 +71,7 @@ public static class RoomOpen
         ["workspace"] = s.Workspace,
         ["level"] = LevelName(s.Level),
         ["model"] = s.Model,
-        ["title"] = s.Title ?? "", // 도구 인자는 글자 — null을 넣지 않는다 (/self-review 4f5fd81b8e C2)
+        ["title"] = s.Title ?? "", // 도구 인자는 글자 — null을 넣지 않는다
         ["prompt"] = s.Prompt,
     }.ToJsonString();
 

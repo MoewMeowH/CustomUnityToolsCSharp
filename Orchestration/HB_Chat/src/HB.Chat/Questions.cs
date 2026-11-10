@@ -19,7 +19,7 @@ public sealed record QuestionRequest(IReadOnlyList<QuestionItem> Items, string I
 
     /// <summary>
     /// 질문 하나의 답 상한 (글자, 크기 보호용): 선택지를 다 고르고 기타 글까지 붙여도 넘지 않게 label 상한 × (선택지 수 + 1).
-    /// 직접 쓰는 글의 1,000자 상한은 화면 입력칸이 건다 (/self-review 7d839f4aa5 C4).
+    /// 직접 쓰는 글의 1,000자 상한은 화면 입력칸이 건다.
     /// </summary>
     public const int MaxAnswerChars = MaxTextChars * (MaxOptions + 1);
 

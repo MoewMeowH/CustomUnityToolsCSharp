@@ -26,7 +26,7 @@ public sealed partial class RoomHub
     /// <summary>시간 상한 (결정 "10분 + [중지]"). 넘으면 프로세스 트리째 끈다.</summary>
     public TimeSpan ShellLimit { get; set; } = TimeSpan.FromMinutes(10);
 
-    /// <summary>출력을 화면에 묶어 보내는 간격 — 출력이 멈춰도 이 간격으로 남은 것을 보낸다 (/self-review 48e0bd8455 C1).</summary>
+    /// <summary>출력을 화면에 묶어 보내는 간격 — 출력이 멈춰도 이 간격으로 남은 것을 보낸다.</summary>
     private static readonly TimeSpan ShellFlushEvery = TimeSpan.FromMilliseconds(200);
 
     /// <summary>
@@ -48,7 +48,7 @@ public sealed partial class RoomHub
 
         /// <summary>
         /// 새 조각을 받아 끝난 줄까지의 글(VT 코드를 걷고 줄 끝을 \n으로)을 돌려준다. 남은 줄 조각 · 끝의 \r은 다음으로 넘긴다 —
-        /// 조각 경계에서 공백 · CRLF · ESC 열이 갈려 글이 바뀌던 것 (/self-review 48e0bd8455 C2).
+        /// 조각 경계에서 공백 · CRLF · ESC 열이 갈려 글이 바뀌던 것.
         /// </summary>
         public string Feed(byte[] chunk)
         {
@@ -303,7 +303,7 @@ public sealed partial class RoomHub
 
     /// <summary>
     /// 지휘자에게 보내는 말 (CLI bash 모드 기록과 같은 태그). 출력 · 명령 속 묶음 닫는 태그와 규칙 알림 태그는 대소문자와 상관없이 깨 둔다 —
-    /// 출력에 섞인 남의 글(README · 커밋 메시지)이 묶음을 일찍 끝내거나 하네스 알림처럼 보이지 않게 (/self-review bd240df0ac C2).
+    /// 출력에 섞인 남의 글(README · 커밋 메시지)이 묶음을 일찍 끝내거나 하네스 알림처럼 보이지 않게.
     /// 전체가 보낼 수 있는 길이(<see cref="MaxPromptChars"/>)를 넘지 않는다 — 출력은 앞 · 뒤 <see cref="ShellKeepChars"/>자까지.
     /// </summary>
     internal static string ShellPrompt(string command, string output, string? ending)

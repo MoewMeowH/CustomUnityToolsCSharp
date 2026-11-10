@@ -337,7 +337,7 @@ public sealed class ClaudeSession
         catch (OperationCanceledException) { } // 그 전에 끝남
     }
 
-    // 판정과 닫기 결정은 한 잠금 안에서 — 잠금을 놓은 사이 말 · 자동 턴이 응답 중으로 바꾸면 상한이 사라졌다 (/cross-review 52ac1810e1 1-F2)
+    // 판정과 닫기 결정은 한 잠금 안에서 — 잠금을 놓은 사이 말 · 자동 턴이 응답 중으로 바꾸면 상한이 사라졌다
     private void CapReached()
     {
         int left;

@@ -21,7 +21,7 @@ public static class RoomApi
 {
     /// <summary>
     /// 이 끝점 전용 형식 (camelCase — 데스크톱 RoomStates가 "activity" 등으로 읽는다). SSE 형식과 묶지 않는다:
-    /// 그쪽을 바꾸면 끌 때 확인이 조용히 사라진다 (/self-review 26d478170f C11).
+    /// 그쪽을 바꾸면 끌 때 확인이 조용히 사라진다.
     /// </summary>
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 

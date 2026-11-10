@@ -90,7 +90,7 @@ public sealed record LiveEvent(string Kind)
 /// <summary>
 /// 화면의 승인 카드 하나.
 /// Truncated면 명령이 너무 길어 잘린 것 — 거절만 보인다 (서버도 허용을 받지 않는다).
-/// Extra는 명령 밖의 입력(허용하면 같이 실행됨), Risky면 위험한 이름의 입력이 있어 거절만 (/self-review 5e747ff851 C1).
+/// Extra는 명령 밖의 입력(허용하면 같이 실행됨), Risky면 위험한 이름의 입력이 있어 거절만.
 /// </summary>
 public sealed record ApprovalView(string Id, string Tool, string Summary, string? Description, DateTimeOffset ExpiresAt, bool Truncated)
 {
@@ -204,7 +204,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
         public RoomRun? Session;
 
         /// <summary>
-        /// 화면 턴으로 열기 전에 끝난 자동 턴 — LoopAsync가 차례로 열어 기록한다 (/cross-review 52ac1810e1 1-F1). 방에 둔다: 그 직후 프로세스가 끝나
+        /// 화면 턴으로 열기 전에 끝난 자동 턴 — LoopAsync가 차례로 열어 기록한다. 방에 둔다: 그 직후 프로세스가 끝나
         /// 쉬는 실행이 방에서 떨어져도 그 답은 남는다. 잠금 안에서.
         /// </summary>
         public readonly Queue<(RoomRun Run, TurnWait Wait)> Unshown = new();
@@ -233,7 +233,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
         /// <summary>쉬는 실행 방이면 백그라운드가 사는 최대 분(상한) — 카드에 보인다 (self C3). 단톡방 구성원은 null(예전 10 · 30분).</summary>
         public int? RestMinutes;
 
-        /// <summary>결정을 기록하고 approval-done을 알린 뒤 끝난다 — 실행 끝 알림(end)이 그 뒤에 나가게 기다린다 (/self-review e464ec29ba C3).</summary>
+        /// <summary>결정을 기록하고 approval-done을 알린 뒤 끝난다 — 실행 끝 알림(end)이 그 뒤에 나가게 기다린다.</summary>
         public readonly TaskCompletionSource Settled = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public ApprovalView View => new(Id, Request.Tool, Request.Summary, Request.Description, ExpiresAt, Request.Truncated)
@@ -247,7 +247,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
             FromAgent = Request.FromAgent,
             TurnAllow = Request.TurnAllowable && InTurn,
             AlwaysFolder = Request.DenyOnly ? null : Request.AlwaysFolder,
-            // 서브에이전트가 낸 요청이면 그 서브에이전트를 기다리는 상한(30분)까지 돈다 (/self-review 6f64f4b039 C5)
+            // 서브에이전트가 낸 요청이면 그 서브에이전트를 기다리는 상한(30분)까지 돈다
             BackgroundMinutes = !Request.Background ? null
                 : RestMinutes ?? (Request.FromAgent ? ClaudeRunner.BackgroundAgentMinutes : ClaudeRunner.BackgroundBashMinutes),
         };
@@ -291,11 +291,11 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
     /// <summary>그 방 마지막 실행이 알려 준 명령 목록. 이 앱을 켠 뒤 그 방이 아직 돌지 않았으면 null.</summary>
     public InitEvent? Commands(string roomId) => _commandSets.TryGetValue(roomId, out var init) ? init : null;
 
-    /// <summary>기억한 명령 목록을 버린다 — 방을 휴지통 · 지우기 · 설정(단계)을 바꿀 때 (/self-review db1b130ff2 C7). 다음 실행이 다시 알려 준다.</summary>
+    /// <summary>기억한 명령 목록을 버린다 — 방을 휴지통 · 지우기 · 설정(단계)을 바꿀 때. 다음 실행이 다시 알려 준다.</summary>
     public void ForgetCommands(string roomId)
     {
         _commandSets.TryRemove(roomId, out _);
-        _webSites.Forget(roomId); // 방을 지우면 웹 가져오기 허용 사이트도 (/cross-review 909a5c575e C12)
+        _webSites.Forget(roomId); // 방을 지우면 웹 가져오기 허용 사이트도
     }
 
     private bool _disposed;
@@ -314,7 +314,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
     private readonly List<Channel<LiveEvent>> _roomListeners = [];
 
     /// <summary>방 목록 줄을 바꾸는 알림 (바쁨 · 승인 · 끝). 흘림 글(delta) 같은 잦은 알림은 넣지 않는다.</summary>
-    // background: 쉬는 방의 "백그라운드 N"이 작업 하나 끝내기 · 정리에도 따라가게 (af6ffa3da5 C4)
+    // background: 쉬는 방의 "백그라운드 N"이 작업 하나 끝내기 · 정리에도 따라가게
     private static readonly HashSet<string> ListKinds = ["start", "end", "idle", "approval", "approval-done", "question", "question-done", "queued", "steps", "background"];
 
     /// <summary>
@@ -627,7 +627,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
         {
             // 쉬는 실행: 쉬는 중이면 작업을 모두 끝낸다 (응답 중이면 받지 않는다 — 그 턴은 중지로)
             if (live.Session is { } run && run.Proc.WrapUp()) return;
-            // 기다림이 시작된 뒤(정리 시각이 있음)면 — 작업이 다 끝나 지휘자가 이어 답하는 중이어도 받는다 (/self-review 6f64f4b039 C3)
+            // 기다림이 시작된 뒤(정리 시각이 있음)면 — 작업이 다 끝나 지휘자가 이어 답하는 중이어도 받는다
             if (live.BackgroundUntil is not null) live.WrapUpCts?.Cancel();
         }
     }
@@ -656,7 +656,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
     /// <summary>
     /// 끼어들기 · 지금 보내기 (잠금 안에서): 지금 실행만 멈춘다 — 루프는 같은 세대로 큐 맨 앞(새 말)을 이어 돈다. 쉬는 실행이 이 턴을 답하는 중이면
     /// interrupt로 답만 멈춰 백그라운드 작업을 살리고(결정 "끼어들기만 살림"), 그때는 서브에이전트가 낸 카드는 남긴다 — 그 서브에이전트도 산다
-    /// (42c732f7d3 C4). 아니면 예전처럼 카드를 모두 끝내고 실행을 취소한다 (끝나는 실행의 토큰도 비운다).
+    ///. 아니면 예전처럼 카드를 모두 끝내고 실행을 취소한다 (끝나는 실행의 토큰도 비운다).
     /// </summary>
     private void InterruptTurn(Live live)
     {
@@ -688,7 +688,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
         lock (live.Gate)
         {
             if (live.Steps is null && disk is not null) live.Steps = disk;
-            // 표정도 Busy · Partial과 같은 잠금에서 정한다 (/self-review 83b453653b C4)
+            // 표정도 Busy · Partial과 같은 잠금에서 정한다
             var face = LiveFace(live, transient: true) ?? (room is null ? Face.Idle : RestFace(room));
             ch.Writer.TryWrite(QueueEvent("snapshot", live) with
             {
@@ -779,7 +779,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
                 live.Current = text;
                 ClearPartial(live);
                 live.Tool = null;
-                // 지난 턴의 "앱 밖에서 바뀜" 경고는 지운다 — 이번 턴에도 그렇다면 RunRoomAsync가 다시 낸다 (0a3b1d5155 C7). 화면은 start에서 숨긴다.
+                // 지난 턴의 "앱 밖에서 바뀜" 경고는 지운다 — 이번 턴에도 그렇다면 RunRoomAsync가 다시 낸다. 화면은 start에서 숨긴다.
                 live.Notice = null;
                 cts = live.Cts = new CancellationTokenSource();
                 wrapUp = live.WrapUpCts = new CancellationTokenSource();
@@ -808,11 +808,11 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
                 result = new RunResult(false, false, $"내부 오류: {ex.Message}", null, null, null, 0, 0, null);
             }
 
-            // 창을 모르는 턴(중지 · result 없음)은 방 색인에 남은 창으로 — 화면 막대가 0%로 떨어지지 않게 (/self-review 83b453653b C5)
+            // 창을 모르는 턴(중지 · result 없음)은 방 색인에 남은 창으로 — 화면 막대가 0%로 떨어지지 않게
             var window = result.ContextWindow ?? store.Get(roomId)?.ContextWindow;
 
             // 남은 승인 카드를 끝내고 그 기록 · approval-done이 끝나기를 잠깐 기다린다 — 답은 다른 스레드에서 이어지므로(RunContinuationsAsynchronously)
-            // 기다리지 않으면 end가 먼저 나가 화면이 그 줄 없는 기록을 받고, 결과 줄은 진행 칸에 다음 턴까지 남는다 (/self-review e464ec29ba C3)
+            // 기다리지 않으면 end가 먼저 나가 화면이 그 줄 없는 기록을 받고, 결과 줄은 진행 칸에 다음 턴까지 남는다
             auto = null;
             Task[] settling = [];
             lock (live.Gate)
@@ -827,7 +827,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
             if (settling.Length > 0)
                 try { await Task.WhenAll(settling).WaitAsync(ApprovalSettleWait); } catch (TimeoutException) { }
 
-            // live.Cts를 잠금 안에서 먼저 비운 뒤 Dispose한다: Stop · Dispose가 해제된 CTS에 Cancel하지 않게 (0a3b1d5155 C4).
+            // live.Cts를 잠금 안에서 먼저 비운 뒤 Dispose한다: Stop · Dispose가 해제된 CTS에 Cancel하지 않게.
             lock (live.Gate)
             {
                 live.Cts = null;
@@ -912,7 +912,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
             }
             catch (Exception ex)
             {
-                // 예상 밖 실패(IO 등)도 방에 남긴다 — 안 남기면 KnownSize가 낡아 다음 말에 잘못된 "앱 밖에서 바뀜" 경고가 뜬다 (0a3b1d5155 C6).
+                // 예상 밖 실패(IO 등)도 방에 남긴다 — 안 남기면 KnownSize가 낡아 다음 말에 잘못된 "앱 밖에서 바뀜" 경고가 뜬다.
                 result = Record(room, new RunResult(false, false, $"내부 오류: {ex.GetType().Name}: {ex.Message}", null, null, null, 0, 0, null));
             }
             finally
@@ -970,7 +970,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
         // 규칙을 받은 때: 새 스레드가 시작됐거나(developer_instructions) 안내를 붙인 턴이 성공
         var delivered = thread is null && outcome.Thread is not null || noted && outcome.Result.Ok;
         // 이어 가던 스레드를 Codex가 찾지 못함(세션 기록이 지워짐 · 계정 바뀜 — 실측: 이벤트 없이 "no rollout found", 종료 코드 1):
-        // 스레드를 잊고 다음 말부터 새로 시작한다 — 안 그러면 이 구성원은 계속 실패했다 (59063d4106 C3).
+        // 스레드를 잊고 다음 말부터 새로 시작한다 — 안 그러면 이 구성원은 계속 실패했다.
         // 그 문구이거나, 문구가 없어도(판이 바뀜) 이어 가기가 thread.started 없이 실패했고 그 스레드의 세션 기록이 Codex 홈에 정말 없을 때만 —
         // 시작 실패 · 설정 오류 · 시간 초과까지 잊으면 멀쩡한 대화를 버렸다 (sol 리뷰 ②-P2 · 9c54e0c54a C1).
         // 새 대화의 첫 말에는 단톡방 대화를 처음부터 다시 붙인다 (GroupChat.SendLocked — 스레드 없는 Codex 구성원)
@@ -1010,7 +1010,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
 
         var size = transcripts.Size(room.SessionId);
         var resume = size is not null;
-        // 갈래 첫 실행: 원래 방이 턴 도중이면(기록을 쓰는 중) 갈라지지 않게 기다리게 한다 (/self-review 95e8b1c242 C2). 갈래 표시는 남는다.
+        // 갈래 첫 실행: 원래 방이 턴 도중이면(기록을 쓰는 중) 갈라지지 않게 기다리게 한다. 갈래 표시는 남는다.
         if (!resume && room.ForkOf is { } source
             && store.All().FirstOrDefault(r => string.Equals(r.SessionId, source, StringComparison.OrdinalIgnoreCase)) is { } sourceRoom
             && (IsBusy(sourceRoom.Id) || HasRestingTasks(sourceRoom.Id)))
@@ -1103,7 +1103,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
     /// <summary>
     /// 외부 말풍선을 새로 받을 때인가: 기다리던 run_mode 호출의 결과가 왔을 때(받은 id는 지운다).
     /// 결과 대신 "백그라운드로 넘어감" 안내가 왔으면 그 작업 id만 기억했다가, 그 작업이 끝날 때 알린다 —
-    /// 다른 백그라운드 작업(Bash · 서브에이전트) 끝에는 알리지 않는다 (/self-review 6b6443f26e C2).
+    /// 다른 백그라운드 작업(Bash · 서브에이전트) 끝에는 알리지 않는다.
     /// </summary>
     internal static bool RunResultArrived(StreamEvent ev, HashSet<string> runUses, HashSet<string> runTasks)
     {
@@ -1141,7 +1141,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
             return;
         }
         if (ev is not ToolImagesEvent images) return;
-        // 결과 하나에 그림이 여러 장이어도 다 남긴다 — id는 이 줄을 다 본 뒤 지운다 (/self-review 0bcf01451b C7)
+        // 결과 하나에 그림이 여러 장이어도 다 남긴다 — id는 이 줄을 다 본 뒤 지운다
         var matched = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var image in images.Images)
             if (captures.Remove(image.ToolUseId, out var tool)) matched[image.ToolUseId] = tool;
@@ -1176,7 +1176,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
         // 그 방 첨부 폴더: 열어도 되는 폴더일 때만 (링크 · .claude가 있으면 열지 않고 알림 — /self-review 0c3b7e3514 C2 · C3)
         string? attachDir = null;
         var folder = Attachments.Folder(o.DataFolder, room.Id);
-        // 쉬는 실행: 첨부 폴더를 미리 만든다 — 쉬는 동안 첫 첨부로 폴더가 생기면 인자(--add-dir)가 달라져 작업을 끝내야 했다 (af6ffa3da5 C3)
+        // 쉬는 실행: 첨부 폴더를 미리 만든다 — 쉬는 동안 첫 첨부로 폴더가 생기면 인자(--add-dir)가 달라져 작업을 끝내야 했다
         if (rest && !Directory.Exists(folder))
             try { Directory.CreateDirectory(folder); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
@@ -1190,7 +1190,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
         // 갈래 방: 이어받은 방들의 첨부 폴더도 읽기로 (편집 금지는 ClaudeArgs가 같이 단다). 열 수 없는 · 없는 폴더는 조용히 뺀다 (원래 방이 지워졌을 수 있음)
         IReadOnlyList<string> inheritedDirs = [.. room.AttachFrom.Where(RoomStore.IsRoomId).Select(id => Attachments.Folder(o.DataFolder, id)).Where(f => Attachments.WhyNotOpen(f) is null)];
         // 명령 방: 편집 금지 규칙에 쓸 수 없는 글자가 든 경로면 그 첨부 폴더는 열지 않는다 — 금지가 안 걸린 채 열리는 것보다 닫는 쪽
-        // (/self-review security 4c300badae C3). 데이터 폴더 경로에서 오므로 다 같이 걸린다
+        //. 데이터 폴더 경로에서 오므로 다 같이 걸린다
         if (ClaudeArgs.RunsCommands(room.Level)
             && (attachDir is not null && !ClaudeArgs.IsRuleSafePath(attachDir) || inheritedDirs.Any(d => !ClaudeArgs.IsRuleSafePath(d))))
         {
@@ -1207,17 +1207,15 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
         var rules = RulesFor(room, setup);
         // 이어 쓰는 세션은 CLI가 압축 전까지 처음 시스템 프롬프트를 쓴다 (단계 실측: resume에 넣은 새 규칙은 안 보임).
         // 지휘자가 마지막으로 받은 규칙과 다르면 이번 말 앞에 새 규칙을 붙인다 — 갈래 첫 실행 · 이 칸 전에 만든 방도 한 번 받는다.
-        // '/명령'은 앞에 글이 붙으면 CLI가 명령으로 알아보지 못한다 — 그 말에는 붙이지 않고 다음 말로 미룬다 (/self-review 70170a8801 C2).
+        // '/명령'은 앞에 글이 붙으면 CLI가 명령으로 알아보지 못한다 — 그 말에는 붙이지 않고 다음 말로 미룬다.
         // 지문은 규칙을 실은 실행(새 세션 = 시스템 프롬프트, 또는 안내를 붙임)이 세션 기록을 늘렸을 때만 저장한다 — init 뒤 기록 전에 실패하면 다시 붙게
-        // (/self-review security 4c300badae C4 · 70170a8801 C3).
         var rulesHash = RoomRules.Hash(rules);
         var continued = resume || room.ForkOf is not null;
         var noted = continued && room.RulesHash != rulesHash && !text.TrimStart().StartsWith('/');
         var rulesDelivered = !continued || noted;
         var prompt = noted ? RoomRules.ChangedNote(rules) + text : text;
         // stdin 한 줄 상한: 한 번에 써도 약 300KB 줄에서는 CLI가 시작조차 하지 않았다(131KB 정상, 2026-10-29 실측) — 띄우기 전에 막고 말은 입력칸으로
-        // (/self-review 70170a8801 C4)
-        // 쉬는 실행은 uuid가 붙은 줄을 쓴다 — 그 모양으로 잰다 (/cross-review 52ac1810e1 self C12)
+        // 쉬는 실행은 uuid가 붙은 줄을 쓴다 — 그 모양으로 잰다
         if (System.Text.Encoding.UTF8.GetByteCount(ClaudeRunner.UserLine(prompt, Guid.Empty.ToString("D"))) is var lineBytes && lineBytes > ClaudeRunner.MaxStdinLineBytes)
             return Record(room, new RunResult(false, false,
                 $"말이 너무 깁니다 ({lineBytes / 1024:N0}KB, {ClaudeRunner.MaxStdinLineBytes / 1024}KB까지) — 긴 글은 파일로 첨부해 주세요.", null, null, null, 0, 0, null)
@@ -1271,7 +1269,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
                 stopOnMismatch.Token)
             : await ClaudeRunner.RunAsync(process, prompt, view, decide, stopOnMismatch.Token, wrapUp);
 
-        // 턴 끝에 한 번 더 — 마지막 변경이 출력 뒤에 써졌거나 중지된 경우 (실제 확인). 중지는 세대를 올리므로 세대 · 간격 검사 없이 (ea28ba9185 C2).
+        // 턴 끝에 한 번 더 — 마지막 변경이 출력 뒤에 써졌거나 중지된 경우 (실제 확인). 중지는 세대를 올리므로 세대 · 간격 검사 없이.
         if (RefreshSteps(room, live, generation, turnEnd: true) is { } last)
             lock (live.Gate) Broadcast(live, new LiveEvent("steps") { Steps = last });
         lock (live.Gate) live.StepsWatch = false;
@@ -1344,7 +1342,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
         var runArrived = RunResultArrived(ev, view.RunUses, view.RunTasks);
         if (ev is DeniedEvent denied) CliDenied(room, live, generation, denied, view.ToolTargets);
         // 할 일 도구를 쓴 뒤의 출력이면 그 사이 도구가 돌아 파일이 바뀌었을 수 있다 — 잠금 밖에서 읽는다 (3차 b).
-        // 잦은 stream_event(글 · 도구 입력 · 생각 조각)에서는 읽지 않고, 300ms 안에 다시 읽지 않는다 — 마지막 상태는 턴 끝 읽기가 맞춘다 (/self-review ea28ba9185 C1).
+        // 잦은 stream_event(글 · 도구 입력 · 생각 조각)에서는 읽지 않고, 300ms 안에 다시 읽지 않는다 — 마지막 상태는 턴 끝 읽기가 맞춘다.
         var fragment = ev is DeltaEvent or TextBlockStartEvent || (ev is OtherEvent other && other.Type.StartsWith("stream_event", StringComparison.Ordinal));
         var steps = fragment ? null : RefreshSteps(room, live, generation);
         lock (live.Gate)
@@ -1354,7 +1352,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
             // 외부 에이전트 말풍선은 세션 기록 · 호출 기록에서 그린다 — 결과가 온 순간 화면이 새 말풍선만 받아 가게 알린다
             if (runArrived) Broadcast(live, new LiveEvent("runs"));
             if (ev is DeltaEvent) SetFace(live, Face.Writing);
-            else if (ev is ToolEvent te) SetFace(live, Face.Tool, te.Name); // 화면은 표정을 face 알림으로만 바꾼다 (83b453653b C1)
+            else if (ev is ToolEvent te) SetFace(live, Face.Tool, te.Name); // 화면은 표정을 face 알림으로만 바꾼다
             // 칩은 tool_use 입력이 다 온 assistant 줄에서 — 대상(파일 이름 · 명령 첫 줄)까지 보인다 (3차 b, 0번 실측 C)
             if (ev is UsageEvent)
             {
@@ -1398,7 +1396,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
 
     /// <summary>
     /// 정리 표시 글 (방 기록 줄). 정리하지 않았으면 null. 남은 작업이 0개면 작업이 다 끝나고 지휘자가 이어 답하던 중이다.
-    /// "stop"은 중지 · 끼어들기 둘 다라 "멈춰"로 (/self-review e464ec29ba C1).
+    /// "stop"은 중지 · 끼어들기 둘 다라 "멈춰"로.
     /// </summary>
     public static string? BackgroundNote(RunResult r) => (r.BackgroundClosedBy, r.BackgroundLeft > 0) switch
     {
@@ -1414,7 +1412,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
 
     /// <summary>
     /// 기다림 상태를 기억하고(snapshot) 알림을 만든다. 정리 시각은 처음 알린 값을 실행 끝까지 지킨다 — 작업 수만 바뀐 알림은 Until이 없고,
-    /// 수가 0이어도 두 번째 답을 기다리는 동안은 기다림 상태다 (/self-review 6f64f4b039 C3). 실행이 끝나면 LoopAsync가 지운다. 잠금 안에서 부른다.
+    /// 수가 0이어도 두 번째 답을 기다리는 동안은 기다림 상태다. 실행이 끝나면 LoopAsync가 지운다. 잠금 안에서 부른다.
     /// </summary>
     private static LiveEvent Background(Live live, BackgroundWaitEvent b)
     {
@@ -1440,7 +1438,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
                 LastRunAt = DateTimeOffset.Now,
                 // 갈래는 한 번만: 성공했거나 이 방의 세션 기록이 생겼으면(중지돼도 CLI가 이미 갈라 썼다) 다음부터는 resume이다
                 ForkOf = forked || size is not null ? null : r.ForkOf,
-                // 갈래가 끝나면 이어받은 말은 읽은 것으로 — 이번 턴의 답만 안 읽음에 세진다 (/self-review 95e8b1c242 C1)
+                // 갈래가 끝나면 이어받은 말은 읽은 것으로 — 이번 턴의 답만 안 읽음에 세진다
                 ReadUpTo = forkRead is { } f && r.ReadUpTo is null ? f : r.ReadUpTo,
                 // 사용자가 멈춘 실행은 실패가 아니다 — 목록의 "실패" 표시 · 방의 "마지막 실행 실패" 줄에 남기지 않는다 (2-2 a 실제 확인에서 발견).
                 LastError = result.Ok || result.Cancelled ? null : result.Error,
@@ -1503,7 +1501,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
         return new LiveEvent("tool") { Text = tool.Name, Detail = tool.Detail };
     }
 
-    /// <summary>할 일 폴더를 실행 중 다시 읽는 최소 간격 (ea28ba9185 C1).</summary>
+    /// <summary>할 일 폴더를 실행 중 다시 읽는 최소 간격.</summary>
     private static readonly TimeSpan StepsReadGap = TimeSpan.FromMilliseconds(300);
 
     /// <summary>
@@ -1528,7 +1526,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
     }
 
     /// <summary>
-    /// 목록에 보일 진행 글 ("2/5") — 실행 중이고 이번 턴에 할 일 도구를 썼을 때만 (3차 b). 지난 턴의 끝난 목록이 진행처럼 보이지 않게 (ea28ba9185 C3).
+    /// 목록에 보일 진행 글 ("2/5") — 실행 중이고 이번 턴에 할 일 도구를 썼을 때만 (3차 b). 지난 턴의 끝난 목록이 진행처럼 보이지 않게.
     /// </summary>
     public string? StepProgress(string roomId)
     {
@@ -1596,7 +1594,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
     }
 
     /// <summary>
-    /// 앱을 끌 때: 모든 실행을 끝내고(프로세스 트리가 남지 않게) SSE 구독을 닫는다 — 열린 방 탭이 정상 종료를 붙잡지 않게 (0a3b1d5155 C8).
+    /// 앱을 끌 때: 모든 실행을 끝내고(프로세스 트리가 남지 않게) SSE 구독을 닫는다 — 열린 방 탭이 정상 종료를 붙잡지 않게.
     /// </summary>
     public void Dispose()
     {

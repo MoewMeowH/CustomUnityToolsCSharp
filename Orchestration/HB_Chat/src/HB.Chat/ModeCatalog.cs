@@ -75,7 +75,7 @@ public static class ModeCatalog
         if (!doc.RootElement.TryGetProperty("mcpServers", out var servers) || servers.ValueKind != JsonValueKind.Object
             || !servers.TryGetProperty(server, out var entry) || entry.ValueKind != JsonValueKind.Object)
             return (null, null, $"{source}에 mcpServers.{server} 항목이 없습니다.");
-        // 서버는 CLI가 물려준 이 앱의 환경 + 항목 env로 돈다 — 항목 값이 없거나 ${…} 틀이면 이 앱의 환경 값 (/self-review 785ebb5e97 C5).
+        // 서버는 CLI가 물려준 이 앱의 환경 + 항목 env로 돈다 — 항목 값이 없거나 ${…} 틀이면 이 앱의 환경 값.
         // 상대 경로는 서버 현재 폴더(= CLI 작업 폴더) 기준이라 작업 폴더로 푼다.
         var env = entry.TryGetProperty("env", out var envs) && envs.ValueKind == JsonValueKind.Object && Str(envs, EnvVar) is { Length: > 0 } e && !e.Contains("${")
             ? e

@@ -94,7 +94,7 @@ public sealed class RoomNotes(Func<string> dataFolder)
         byte[] tail;
         using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
         {
-            // 길이를 본 뒤 여는 사이에 파일이 줄었으면 처음부터 (/self-review e464ec29ba C7)
+            // 길이를 본 뒤 여는 사이에 파일이 줄었으면 처음부터
             if (stream.Length < _end)
             {
                 _end = 0;

@@ -61,7 +61,7 @@ public sealed class MiniForm : Form
             _held = null; // 직접 고르면 펫으로 연 방 붙잡기도 푼다
             if ((item.Id ?? MiniRoom.Next(_last, null, null)) is { } id && id != Current) ShowRoom(id);
         };
-        // 쓰는 중이라 미룬 자동 전환은 미니 창에서 나갈 때 다시 본다 (bde22e2224 C4)
+        // 쓰는 중이라 미룬 자동 전환은 미니 창에서 나갈 때 다시 본다
         Deactivate += (_, _) => Follow();
         Controls.Add(View);
         Controls.Add(top);
@@ -77,7 +77,7 @@ public sealed class MiniForm : Form
 
     /// <summary>
     /// 미니 화면 주소가 바뀜: 방 주소면 그 방을 지금 방으로, ?view=mini가 빠졌으면(오류 때 다시 열기 등) 붙여 다시 연다.
-    /// 방이 아닌 채팅 주소(목록 등)로 갔으면 지금 방으로 되돌린다 (bde22e2224 C1).
+    /// 방이 아닌 채팅 주소(목록 등)로 갔으면 지금 방으로 되돌린다.
     /// </summary>
     private void OnSource(string? source)
     {
@@ -98,7 +98,7 @@ public sealed class MiniForm : Form
         var items = new List<RoomItem> { new(null, "자동 (승인 · 답 기다림 · 최근 방)") };
         items.AddRange(rooms.Select(r => new RoomItem(r.Id, Label(r))));
         var key = string.Join("\n", items.Select(i => i.Id + "\t" + i.Label)) + "\n" + Pinned;
-        // 펼쳐 둔 동안은 다시 채우지 않는다 — 닫힌 뒤 다음 목록 갱신에 맞춘다 (/self-review 175acbd35a C4)
+        // 펼쳐 둔 동안은 다시 채우지 않는다 — 닫힌 뒤 다음 목록 갱신에 맞춘다
         if (key != _itemsKey && !_rooms.DroppedDown)
         {
             _itemsKey = key;
@@ -115,7 +115,7 @@ public sealed class MiniForm : Form
     private void Follow()
     {
         if (Current is not null && ActiveForm == this) return;
-        if (_held is not null && Visible) return; // 펫을 눌러 연 방은 숨길 때까지 그대로 (/self-review b280752387 C5)
+        if (_held is not null && Visible) return; // 펫을 눌러 연 방은 숨길 때까지 그대로
         if (MiniRoom.Next(_last, Pinned, Current) is { } next) ShowRoom(next);
     }
 
@@ -144,7 +144,7 @@ public sealed class MiniForm : Form
         if (IsHandleCreated)
         {
             WindowFrame.SetDark(Handle, dark);
-            WindowFrame.Refresh(Handle); // 떠 있는 동안 바꾸면 제목 줄이 다음 활성화까지 옛 색일 수 있다 — 틀을 다시 그리게 (993ef3b338 C3)
+            WindowFrame.Refresh(Handle); // 떠 있는 동안 바꾸면 제목 줄이 다음 활성화까지 옛 색일 수 있다 — 틀을 다시 그리게
         }
         BackColor = View.DefaultBackgroundColor = colors.Page;
         _top.BackColor = colors.Back;

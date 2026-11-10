@@ -212,7 +212,7 @@ public static class CodexRunner
         try { await proc.WaitForExitAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10)); }
         catch (TimeoutException) { KillAll(); }
 
-        // 자손이 stderr 파이프를 물고 남아도 방이 바쁨으로 굳지 않게 — 상한 뒤에는 기다리지 않는다 (59063d4106 C6)
+        // 자손이 stderr 파이프를 물고 남아도 방이 바쁨으로 굳지 않게 — 상한 뒤에는 기다리지 않는다
         string tail;
         try { tail = await stderr.WaitAsync(TimeSpan.FromSeconds(5)); }
         catch (TimeoutException) { tail = ""; KillAll(); }
@@ -289,7 +289,7 @@ public static class CodexRunner
 /// </summary>
 public sealed class CodexLog(Func<string> dataFolder)
 {
-    /// <summary>모든 인스턴스가 같은 잠금 — 실행 · 과정 보기 · 휴지통이 따로 만들어 써도 같은 파일을 막아 준다 (59063d4106 C4).</summary>
+    /// <summary>모든 인스턴스가 같은 잠금 — 실행 · 과정 보기 · 휴지통이 따로 만들어 써도 같은 파일을 막아 준다.</summary>
     private static readonly Lock _gate = new();
 
     /// <summary>과정 보기가 읽는 끝부분 (파일이 커져도 화면이 느려지지 않게 — 59063d4106 C7 · Codex 리뷰).</summary>
@@ -297,7 +297,7 @@ public sealed class CodexLog(Func<string> dataFolder)
 
     /// <summary>
     /// 남길 줄로 줄이기: 명령 출력 전문(aggregated_output)은 빼고 긴 글은 자른다 — 화면은 명령 · 종료 코드만 보이고,
-    /// Codex가 디스크 어디든 읽을 수 있어 출력에 비밀이 섞일 수 있다 (59063d4106 C7).
+    /// Codex가 디스크 어디든 읽을 수 있어 출력에 비밀이 섞일 수 있다.
     /// </summary>
     public static string Slim(string line)
     {

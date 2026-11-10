@@ -190,7 +190,7 @@ public sealed partial class Terminals : IDisposable
 
     /// <summary>
     /// 명령 모양 검사 — 줄바꿈 · NUL이 있으면 cmd가 앞부분만 돌린다. 보이지 않는 서식 문자(양방향 재배열 · 폭 0)와 그 밖의 제어 문자는
-    /// 카드에 보인 글과 실행되는 글을 다르게 만들 수 있어 받지 않는다 (/self-review security a3a9dd85c1 C3). 문제가 없으면 null.
+    /// 카드에 보인 글과 실행되는 글을 다르게 만들 수 있어 받지 않는다. 문제가 없으면 null.
     /// </summary>
     public static string? WhyBadCommand(string? command)
     {
@@ -213,7 +213,7 @@ public sealed partial class Terminals : IDisposable
         return token;
     }
 
-    /// <summary>토큰을 거두고, 그 방에 쓰지 않은 승인 표도 버린다 — 카드를 허용한 뒤 실행이 끝나면 다음 실행이 카드 없이 띄우지 못하게 (/self-review 57b59ef134 C10).</summary>
+    /// <summary>토큰을 거두고, 그 방에 쓰지 않은 승인 표도 버린다 — 카드를 허용한 뒤 실행이 끝나면 다음 실행이 카드 없이 띄우지 못하게.</summary>
     public void Revoke(string token)
     {
         string? revoked;
@@ -353,7 +353,7 @@ public sealed partial class Terminals : IDisposable
         return null;
     }
 
-    /// <summary>처리기(화면 알림 · 기록 줄)의 실패가 터미널 관리를 멈추지 않게 (/self-review 57b59ef134 C3).</summary>
+    /// <summary>처리기(화면 알림 · 기록 줄)의 실패가 터미널 관리를 멈추지 않게.</summary>
     private static void Raise(Action raise)
     {
         try { raise(); } catch { /* 처리기 쪽 실패 */ }
@@ -419,7 +419,7 @@ public sealed partial class Terminals : IDisposable
             if (s.MarkStopping(by)) s.Process?.Kill();
     }
 
-    /// <summary>휴지통 30일 정리로 지운 방: 그 방 터미널을 끝내고 목록(끝난 것의 버퍼 포함)을 버린다 (/self-review 57b59ef134 C12).</summary>
+    /// <summary>휴지통 30일 정리로 지운 방: 그 방 터미널을 끝내고 목록(끝난 것의 버퍼 포함)을 버린다.</summary>
     public void Forget(string roomId)
     {
         StopRoom(roomId, "방 삭제");

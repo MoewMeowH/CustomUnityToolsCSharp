@@ -15,7 +15,7 @@ public static partial class Attachments
     public const long MaxBytes = 20L * 1024 * 1024;
     public const int MaxPerMessage = 10;
 
-    /// <summary>저장 이름에 남기는 원래 이름 길이 — 이름이 프롬프트에 실리므로 짧게 (0c3b7e3514 C1).</summary>
+    /// <summary>저장 이름에 남기는 원래 이름 길이 — 이름이 프롬프트에 실리므로 짧게.</summary>
     public const int NameChars = 40;
 
     /// <summary>본문의 첨부 줄 머리.</summary>
@@ -54,8 +54,8 @@ public static partial class Attachments
 
     /// <summary>
     /// 방 첨부 폴더에 저장한다. 이름은 시각_걸러 낸 이름, 같은 이름이 있으면 -2, -3 ….
-    /// 임시 파일(.part, 요청마다 다른 이름)에 쓰고 옮기며, 옮길 때 이름이 겹치면 다음 번호로. 실패 · 취소면 임시 파일을 지운다 (5b26cff7df C4).
-    /// 폴더가 재분석 지점(링크 · 정션)이면 쓰지 않는다 (0c3b7e3514 C3). 저장한 절대 경로.
+    /// 임시 파일(.part, 요청마다 다른 이름)에 쓰고 옮기며, 옮길 때 이름이 겹치면 다음 번호로. 실패 · 취소면 임시 파일을 지운다.
+    /// 폴더가 재분석 지점(링크 · 정션)이면 쓰지 않는다. 저장한 절대 경로.
     /// </summary>
     public static async Task<string> SaveAsync(string folder, string originalName, Stream content, DateTimeOffset now, CancellationToken ct)
     {
@@ -173,7 +173,7 @@ public static partial class Attachments
     /// <summary>
     /// 그 방 첨부 파일 목록 (곁칸 "첨부" 탭, 3차 c): 최근 것부터 <see cref="MaxListed"/>개 + 넘쳤는지 볼 하나 더 (화면은 MaxListed개만 그린다).
     /// 쓰는 중인 임시 파일(.part) · 숨김(. 시작) · 하위 폴더는 빼고, 보기 요청 <see cref="Resolve"/>가 거절하는 이름(가운데 .. 등 · 재분석 지점)도 뺀다 —
-    /// 목록에 보이는데 열면 404였다 (/self-review c216951e79 C4). 읽지 못하면 빈 목록.
+    /// 목록에 보이는데 열면 404였다. 읽지 못하면 빈 목록.
     /// </summary>
     public static IReadOnlyList<(string Name, long Bytes, DateTimeOffset At)> List(string folder)
     {
@@ -212,7 +212,7 @@ public static partial class Attachments
 
     /// <summary>
     /// 본문 끝에 이어진 첨부 줄만 떼어 낸다 (빈 줄은 건너뜀): (첨부 줄을 뺀 본문, 첨부 경로들 — 줄 차례).
-    /// 본문 가운데(코드 블록 등)의 같은 모양 줄은 그대로 둔다 (5b26cff7df C9).
+    /// 본문 가운데(코드 블록 등)의 같은 모양 줄은 그대로 둔다.
     /// </summary>
     public static (string Body, IReadOnlyList<string> Paths) Split(string text)
     {
@@ -231,7 +231,7 @@ public static partial class Attachments
         return (string.Join('\n', lines[..end]).TrimEnd(), paths);
     }
 
-    /// <summary>목록 미리보기 · 제목용 글: 첨부 줄을 뺀 본문, 본문이 없으면 "첨부 n개" (5b26cff7df C7).</summary>
+    /// <summary>목록 미리보기 · 제목용 글: 첨부 줄을 뺀 본문, 본문이 없으면 "첨부 n개".</summary>
     public static string WithoutLines(string text)
     {
         var (body, paths) = Split(text);

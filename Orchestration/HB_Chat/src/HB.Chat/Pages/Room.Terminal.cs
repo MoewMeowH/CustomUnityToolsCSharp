@@ -24,7 +24,7 @@ public sealed partial class RoomModel
     {
         if (!RoomStore.IsRoomId(id)) return NotFound();
         Response.Headers.CacheControl = "no-store";
-        Response.Headers.XContentTypeOptions = "nosniff"; // 스크린샷 그림과 같게 (/self-review security 8b11177bd5 C7)
+        Response.Headers.XContentTypeOptions = "nosniff"; // 스크린샷 그림과 같게
         Response.Headers["Cross-Origin-Resource-Policy"] = "same-origin";
         return browser.LastFrame(id) is { } jpeg ? File(jpeg, "image/jpeg") : new NoContentResult();
     }

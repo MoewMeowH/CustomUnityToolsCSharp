@@ -120,7 +120,7 @@ public static class Notices
         return ($"알림 {notices.Count}개", string.Join("\n", lines) + (notices.Count > 5 ? "\n…" : ""));
     }
 
-    /// <summary>풍선을 눌렀을 때 열 방: 승인 요청이 있으면 그 방, 아니면 첫 알림 (0f0b6007a4 C7).</summary>
+    /// <summary>풍선을 눌렀을 때 열 방: 승인 요청이 있으면 그 방, 아니면 첫 알림.</summary>
     public static string? RoomToOpen(IReadOnlyList<Notice> notices) =>
         (notices.FirstOrDefault(n => n.Kind == NoticeKind.Approval) ?? notices.FirstOrDefault())?.RoomId;
 
@@ -129,7 +129,6 @@ public static class Notices
 
 /// <summary>
 /// 아직 안 본 실패 (트레이 빨강): 실패 알림으로 더하고, 그 방을 보거나 · 그 방이 다시 성공(Failed가 아님)하거나 · 방이 없어지면 뺀다
-/// (/self-review 0f0b6007a4 C3).
 /// </summary>
 public sealed class FailureMarks
 {

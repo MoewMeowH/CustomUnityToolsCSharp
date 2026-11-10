@@ -6,11 +6,11 @@
     const { el } = hb;
     // ---- 위젯 (2-2 f): 지휘자 말풍선의 ```widget 코드 블록을 격리된 iframe에 그린다 ----
     // 처음에는 sandbox=""(스크립트 없음, HTML · CSS만). 틀 위 "실행"을 누르면 sandbox="allow-scripts"로 다시 그린다 — WebRTC(STUN · TURN)는
-    // CSP · sandbox로 막을 수 없어, 오염된 위젯이 사용자 모르게 글을 밖으로 보내지 못하게 (/self-review security 803e5f13eb C3 · abc6cec3a6 C1).
+    // CSP · sandbox로 막을 수 없어, 오염된 위젯이 사용자 모르게 글을 밖으로 보내지 못하게.
     // 어느 쪽이든 allow-same-origin 없음 → 불투명 출처: 앱 쿠키 · antiforgery · 같은 출처 요청 · 부모 DOM 접근 없음, 폼 전송 · 새 창 ·
     // 맨 위 이동 · 모달 · 내려받기도 없음. 문서 CSP는 네트워크를 다 막고 인라인 스크립트 · 스타일 · data: 그림만.
     // 위젯이 스스로 다른 주소로 이동하는 것은 페이지 CSP frame-src 'none'(Widgets.cs)이 막는다. 소스는 서버가 이스케이프한 글의 textContent.
-    // 틀 위 표시 · 단추 · "코드 보기" 글은 CSS로 넣는다 — 인용 답장이 innerText로 본문을 읽을 때 섞이지 않게 (803e5f13eb C4).
+    // 틀 위 표시 · 단추 · "코드 보기" 글은 CSS로 넣는다 — 인용 답장이 innerText로 본문을 읽을 때 섞이지 않게.
     const WidgetMaxChars = 200000, WidgetMinHeight = 40, WidgetMaxHeight = 1200;
     const WidgetCsp = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; " +
         "font-src data:; media-src data: blob:; form-action 'none'; base-uri 'none'";
@@ -18,7 +18,7 @@
         return "<!doctype html><html><head><meta charset=\"utf-8\">" +
             "<meta http-equiv=\"Content-Security-Policy\" content=\"" + WidgetCsp + "\">" +
             "<meta name=\"color-scheme\" content=\"light dark\">" +
-            // 위젯 CSS의 100vh 높이는 풀어 둔다 — 틀을 키우면 창 높이도 커져 상한까지 계속 자라는 되먹임 (803e5f13eb C2)
+            // 위젯 CSS의 100vh 높이는 풀어 둔다 — 틀을 키우면 창 높이도 커져 상한까지 계속 자라는 되먹임
             "<style>html,body{margin:0}html{height:auto!important}body{height:auto!important;min-height:0!important;" +
             "padding:8px;font:14px/1.5 system-ui,\"Malgun Gothic\",sans-serif}</style>" +
             // 높이 알림(실행한 위젯만): body 높이 + 위아래 여백. documentElement는 창 높이 아래로 줄지 않아, 한 번 커진 틀이 다시 줄지 않았다 (실제 확인).
@@ -38,7 +38,7 @@
         if (typeof h !== "number" || !Number.isFinite(h)) return;
         for (const frame of document.querySelectorAll("iframe.widget-frame")) {
             if (frame.contentWindow !== e.source) continue;
-            // 맨 아래를 보던 중이면 틀이 커진 뒤에도 맨 아래로 — 늦게 오는 높이에 마지막 위젯이 잘려 있었다 (803e5f13eb C1)
+            // 맨 아래를 보던 중이면 틀이 커진 뒤에도 맨 아래로 — 늦게 오는 높이에 마지막 위젯이 잘려 있었다
             const scroller = frame.closest(".scroll");
             const follow = scroller && scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 120;
             frame.style.height = Math.min(Math.max(Math.ceil(h), WidgetMinHeight), WidgetMaxHeight) + "px";
@@ -88,7 +88,7 @@
     // 지휘자 말풍선의 ```chart 코드 블록(Chart.js 설정 JSON)을 앱에 넣어 둔 Chart.js(wwwroot/lib, 4.6.1)로 그린다.
     // 지휘자 스크립트는 없다: 틀은 앱이 만들고, 데이터는 JSON 블록으로만 들어간다 (< > & 를 \u 이스케이프 — 글이 태그를 닫지 못하게).
     // 격리는 위젯과 같다 — srcdoc, allow-same-origin 없음, 같은 문서 CSP(네트워크 막음). 결정 "바로 그림"이라 처음부터 allow-scripts.
-    // 바로 그리는 차트는 말풍선 하나에 ChartAutoMax개까지, 넘으면 "그리기"를 눌러야 — 차트마다 210KB 틀이라 수백 개로 화면이 멈추지 않게 (f8602c9ccd C1)
+    // 바로 그리는 차트는 말풍선 하나에 ChartAutoMax개까지, 넘으면 "그리기"를 눌러야 — 차트마다 210KB 틀이라 수백 개로 화면이 멈추지 않게
     const ChartMaxChars = 50000, ChartHeight = 320, ChartAutoMax = 6;
     // 설정 JSON에서 버릴 키: 틀 스크립트의 Object.assign이 __proto__를 setter로 타지 않게 (Chart.js 4.6.1 병합은 이미 거름, f8602c9ccd C2)
     const ChartDropKeys = new Set(["__proto__", "constructor", "prototype"]);
@@ -148,7 +148,7 @@
             "document.documentElement.style.background=t.panel;document.body.style.color=t.text;" +
             NoWebRtc +
             "try{Chart.defaults.color=t.text;Chart.defaults.borderColor=t.line;Chart.defaults.animation=false;" +
-            // devicePixelRatio는 앱이 정한다 — 큰 값으로 캔버스 메모리를 키우지 못하게 (f8602c9ccd C1)
+            // devicePixelRatio는 앱이 정한다 — 큰 값으로 캔버스 메모리를 키우지 못하게
             "c.options=Object.assign({},c.options,{responsive:true,maintainAspectRatio:false,devicePixelRatio:Math.min(window.devicePixelRatio||1,2)});" +
             "new Chart(document.querySelector(\"canvas\"),c);}" +
             "catch(e){const p=document.createElement(\"div\");p.className=\"err\";p.textContent=\"차트를 그리지 못했습니다: \"+e.message;" +
@@ -270,10 +270,10 @@
             "r.style.setProperty(\"--hb-bg\",t.panel);r.style.setProperty(\"--hb-fg\",t.text);r.style.setProperty(\"--hb-line\",t.line);" +
             // 틀 안의 링크는 모두 따라가지 않는다 — 틀 밖으로 나가는 이동은 어차피 막히고(차단 화면), 넘김은 화살표 · 키보드로 (겹친 방어)
             "document.addEventListener(\"click\",e=>{if(e.target instanceof Element&&e.target.closest(\"a\"))e.preventDefault();},true);" +
-            // 그리기 실패: 인쇄용 틀이면 끝났다고 알려 부모가 지우게 한다 — 보이지 않는 틀이 allow-modals를 가진 채 남지 않게 (607bd5ec77 C3)
+            // 그리기 실패: 인쇄용 틀이면 끝났다고 알려 부모가 지우게 한다 — 보이지 않는 틀이 allow-modals를 가진 채 남지 않게
             "const fail=e=>{const p=document.createElement(\"div\");p.className=\"err\";p.style.color=t.text;p.textContent=\"슬라이드를 그리지 못했습니다: \"+e.message;document.body.replaceChildren(p);" +
             "if(d.print)parent.postMessage({hbPrintDone:true},\"*\");};" +
-            // data-* · aria-*도 버린다 — DOMPurify 기본은 남기고, reveal은 data-preview-link가 붙은 요소를 누르면 그 주소를 틀 안에 연다 (607bd5ec77 C1)
+            // data-* · aria-*도 버린다 — DOMPurify 기본은 남기고, reveal은 data-preview-link가 붙은 요소를 누르면 그 주소를 틀 안에 연다
             "try{const md=s=>DOMPurify.sanitize(marked.parse(s,{async:false,gfm:true,breaks:true}),{ALLOWED_TAGS:d.tags,ALLOWED_ATTR:[],ALLOW_DATA_ATTR:false,ALLOW_ARIA_ATTR:false});" +
             "const box=document.querySelector(\".slides\"),charts=[];" +
             "const add=(s,cover)=>{const sec=document.createElement(\"section\");if(cover)sec.className=\"hb-cover\";" +
@@ -284,7 +284,7 @@
             "box.append(sec);};" +
             "if(k.title)add({title:k.title},true);k.slides.forEach(s=>add(s,false));" +
             "const o={embedded:true,width:960,height:540,margin:.06,controls:true,progress:true,slideNumber:\"c/t\",hash:false,history:false," +
-            // postMessage API를 끈다 — 기본은 켜져 있고 보낸 창을 확인하지 않아, 실행 중인 위젯이 옆 슬라이드의 Reveal을 부를 수 있다 (607bd5ec77 C2)
+            // postMessage API를 끈다 — 기본은 켜져 있고 보낸 창을 확인하지 않아, 실행 중인 위젯이 옆 슬라이드의 Reveal을 부를 수 있다
             "respondToHashChanges:false,keyboard:true,transition:\"none\",backgroundTransition:\"none\",center:false,help:false,postMessage:false,postMessageEvents:false,previewLinks:false," +
             // 좁은 틀(약 462px 이하 — 미니 창 · 좁은 창)에서도 스크롤 보기로 바꾸지 않는다 — 바뀌면 화살표 · 쪽 번호 없는 세로 보기가 되고,
             // sandbox 틀이라 sessionStorage에서 예외가 나 로딩 클래스가 남았다 (실측, /self-review 832f22f583 C1)
@@ -335,7 +335,7 @@
                     document.querySelectorAll("iframe.slides-print-frame").forEach(f => f.remove());
                     const frame = slidesFrame(slidesDoc(l, c, parsed.deck, SlidesPrintTheme, true), "slides-print-frame", "allow-scripts allow-modals");
                     document.body.append(frame);
-                    setTimeout(() => frame.remove(), SlidesPrintTimeoutMs); // 끝 알림이 끝내 안 와도 지운다 (607bd5ec77 C3)
+                    setTimeout(() => frame.remove(), SlidesPrintTimeoutMs); // 끝 알림이 끝내 안 와도 지운다
                 });
                 bar.append(print);
             }, () => details.before(note("슬라이드 라이브러리를 불러오지 못해 데이터로만 보입니다.")));

@@ -26,7 +26,7 @@ public static class MiniRoom
         return now.IsIdle && rooms.FirstOrDefault() is { IsIdle: false } recent ? To(recent.Id) : null;
     }
 
-    /// <summary>고정한 방 정리: 목록에 없으면 풀지만, 빈 목록(서버를 다시 켜는 중 등)이면 그대로 둔다 (/self-review bde22e2224 C7).</summary>
+    /// <summary>고정한 방 정리: 목록에 없으면 풀지만, 빈 목록(서버를 다시 켜는 중 등)이면 그대로 둔다.</summary>
     public static string? KeepPin(IReadOnlyList<RoomState> rooms, string? pinned) =>
         pinned is null || rooms.Count == 0 || rooms.Any(r => r.Id == pinned) ? pinned : null;
 }

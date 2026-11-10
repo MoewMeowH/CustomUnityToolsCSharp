@@ -19,7 +19,7 @@ public static class Steps
 
     /// <summary>
     /// 번호 순 할 일 목록. 폴더 위치를 모르거나(null) 폴더가 없거나 세션 ID가 uuid 모양이 아니면 빈 목록. 던지지 않는다 — 단계 표시는 보조 기능이라
-    /// 읽기 실패가 턴 결과를 바꾸지 않게 (/self-review ea28ba9185 C4).
+    /// 읽기 실패가 턴 결과를 바꾸지 않게.
     /// </summary>
     public static IReadOnlyList<StepItem> Read(string? tasksRoot, string sessionId)
     {
@@ -29,7 +29,7 @@ public static class Steps
         {
             var dir = Path.Combine(tasksRoot, sessionId);
             if (!Directory.Exists(dir)) return [];
-            // 이름(번호) 순으로 정렬한 뒤 자른다 — 자른 뒤 정렬하면 100개가 넘을 때 앞 번호가 빠졌다 (ea28ba9185 C5)
+            // 이름(번호) 순으로 정렬한 뒤 자른다 — 자른 뒤 정렬하면 100개가 넘을 때 앞 번호가 빠졌다
             var files = Directory.EnumerateFiles(dir, "*.json").Take(MaxListed)
                 .OrderBy(f => int.TryParse(Path.GetFileNameWithoutExtension(f), out var n) ? n : int.MaxValue).ThenBy(f => f, StringComparer.Ordinal)
                 .Take(MaxFiles);

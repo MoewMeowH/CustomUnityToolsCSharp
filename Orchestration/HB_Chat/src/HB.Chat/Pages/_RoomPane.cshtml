@@ -76,7 +76,7 @@
         }
         @if (room.ForkOf is { } forkOf)
         {
-            @* 갈라지는 때는 첫 말을 보낼 때다 — 그 사이 원래 방이 더 진행됐으면 알린다 (/self-review 95e8b1c242 C2) *@
+            @* 갈라지는 때는 첫 말을 보낼 때다 — 그 사이 원래 방이 더 진행됐으면 알린다 *@
             <div class="panel banner muted">
                 갈래 방 — 첫 말을 보낼 때 원래 방(세션 <span class="mono">@forkOf</span>)의 <b>그때까지</b> 대화를 이어받습니다.
                 @if (Model.ForkSourceGrew)
@@ -200,7 +200,7 @@
     </div>
     @* 오른쪽 곁칸 (3차 c, Claude 앱처럼): 단계는 화면이 steps 알림으로 그리고, 나머지 탭은 열 때 · 턴이 끝날 때 ?handler=Side로 받는다 *@
     <aside class="side" id="side" hidden aria-label="곁칸">
-        @* 탭 ↔ 칸은 aria-controls · aria-labelledby로 잇고, 닫기는 tablist 밖 (/self-review c216951e79 C8) *@
+        @* 탭 ↔ 칸은 aria-controls · aria-labelledby로 잇고, 닫기는 tablist 밖 *@
         <div class="side-tabs">
             <div class="side-tablist" role="tablist" aria-label="곁칸 탭">
                 <button type="button" role="tab" data-tab="steps" id="side-tab-steps" aria-controls="side-sec-steps">단계</button>

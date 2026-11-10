@@ -217,7 +217,7 @@ public sealed partial class RoomModel(
     public IActionResult OnPostMarkRead(string id, int line)
     {
         if (!RoomStore.IsRoomId(id) || line < 0 || store.Get(id) is not { } current) return NotFound();
-        // 아직 갈라지지 않은 갈래 방은 읽음을 적지 않는다 — 빈 방의 0이 남으면 이어받은 말이 전부 안 읽음이 된다 (95e8b1c242 C1)
+        // 아직 갈라지지 않은 갈래 방은 읽음을 적지 않는다 — 빈 방의 0이 남으면 이어받은 말이 전부 안 읽음이 된다
         if (current.ForkOf is not null) return new JsonResult(new { ok = true });
         if (RoomList.NextReadUpTo(current.ReadUpTo, line, RoomList.LastLine(transcripts.Read(current.SessionId))) is not { } next)
             return new JsonResult(new { ok = true });
@@ -304,7 +304,7 @@ public sealed partial class RoomModel(
         var (cleanEffort, effortError) = RoomEffort.Clean(effort);
         if (effortError is not null) return BadRequest(effortError);
         if (level is not { } lv || !Enum.IsDefined(lv)) return BadRequest("알 수 없는 권한 단계입니다.");
-        // 폼을 그릴 때의 단계와 지금 단계가 다르면 거절 — 다른 탭 · 옛 곁칸이 방금 내린 단계를 다시 올리지 않게 (/self-review security 8ccecae84d C2).
+        // 폼을 그릴 때의 단계와 지금 단계가 다르면 거절 — 다른 탭 · 옛 곁칸이 방금 내린 단계를 다시 올리지 않게.
         // 비교는 잠금 안(Update)에서 한다
         var stale = false;
         IActionResult result;
@@ -327,12 +327,12 @@ public sealed partial class RoomModel(
         }
         if (stale) return new ConflictObjectResult("다른 곳에서 이 방 권한이 바뀌었습니다 — 곁칸을 닫았다 다시 열어 지금 값을 본 뒤 바꾸세요.");
         hub.Touch(id);
-        hub.ForgetCommands(id); // 단계 · 모델이 바뀌면 다음 실행의 init이 새 목록 (db1b130ff2 C7)
-        // 명령 아래로 내리면 지휘자가 띄운 프로세스도 끝낸다 — "명령 실행 없음" 단계에서 돌던 서버가 남지 않게 (/self-review 57b59ef134 C1 · a3a9dd85c1 C1). 내 셸은 그대로
+        hub.ForgetCommands(id); // 단계 · 모델이 바뀌면 다음 실행의 init이 새 목록
+        // 명령 아래로 내리면 지휘자가 띄운 프로세스도 끝낸다 — "명령 실행 없음" 단계에서 돌던 서버가 남지 않게. 내 셸은 그대로
         // 앱 단계는 CLI가 묻지 않고 판단해 앱이 막을 자리가 없다 — 내리면 지금 턴을 멈춘다
         if (expectedLevel == PermissionLevel.App && lv != PermissionLevel.App) hub.StopTurn(id);
-        // 쉬는 실행(답 뒤 백그라운드 작업)은 띄울 때의 단계 인자로 산다 — 단계를 내리면 작업째 끝낸다 (/cross-review 52ac1810e1 security C1)
-        else if (lv < expectedLevel) hub.EndRest(id, "settings", afterTurn: true); // 쓰던 답은 자르지 않고 그 턴 끝에 (af6ffa3da5 C1)
+        // 쉬는 실행(답 뒤 백그라운드 작업)은 띄울 때의 단계 인자로 산다 — 단계를 내리면 작업째 끝낸다
+        else if (lv < expectedLevel) hub.EndRest(id, "settings", afterTurn: true); // 쓰던 답은 자르지 않고 그 턴 끝에
         if (lv == PermissionLevel.Read && expectedLevel != PermissionLevel.Read)
         {
             hub.EndTurnTrust(id);
@@ -382,7 +382,7 @@ public sealed partial class RoomModel(
 
     /// <summary>
     /// + 요청 창 보내기: 머리 줄을 붙인 말을 지휘자에게 보내고, 고른 값은 그 말에 붙인다 — 그 말의 실행만 run_mode를 카드로 묻고 미리 채운다
-    /// (/self-review 785ebb5e97 C1). interrupt면 끼어들기로.
+    ///. interrupt면 끼어들기로.
     /// </summary>
     public IActionResult OnPostModeRequest(string id, string? mode, string? picks, string? text, bool interrupt)
     {
@@ -408,7 +408,7 @@ public sealed partial class RoomModel(
             return groups.SetDeleted(id, DateTimeOffset.Now) is { } groupError ? BadRequest(groupError) : ChangedGroup(id);
         if (store.Get(id) is { GroupId: not null }) return BadRequest("단톡방 구성원 방은 단톡방과 함께 휴지통에 넣습니다.");
         if (hub.IsBusy(id)) return BadRequest("실행 중인 방입니다 — 중지한 뒤 휴지통에 넣으세요.");
-        hub.EndRest(id); // 답 뒤 쉬던 백그라운드 작업도 끝낸다 — 휴지통 방에서 프로세스 · 자동 답이 남지 않게 (/cross-review 52ac1810e1 1-F4)
+        hub.EndRest(id); // 답 뒤 쉬던 백그라운드 작업도 끝낸다 — 휴지통 방에서 프로세스 · 자동 답이 남지 않게
         hub.ForgetCommands(id);
         terminals.StopRoom(id, "방 삭제"); // 그 방 터미널도 끝낸다
         hub.StopShell(id); // 도는 '!' 명령도 (결과는 휴지통 방이라 지휘자에게 가지 않는다)
@@ -449,7 +449,7 @@ public sealed partial class RoomModel(
             var fork = store.Create(Room.Workspace, Room.Level, Room.Model, title, forkOf: Room.SessionId,
                 forkSourceSize: transcripts.Size(Room.SessionId));
             // 이 방에 고른 스티커 팩 · 추론 강도도 따라간다 (4차 D2 — ef2c83416c C6)
-            // 연결(더한 서버 · 끈 기본 연결 · Unity)도 따라간다 — 갈래가 원래 방과 다른 도구로 시작하지 않게 (/self-review 0bcf01451b C5)
+            // 연결(더한 서버 · 끈 기본 연결 · Unity)도 따라간다 — 갈래가 원래 방과 다른 도구로 시작하지 않게
             // 원래 방(과 그 조상)의 첨부 폴더도 읽게 — 이어받은 대화의 [첨부] 줄이 그 폴더를 가리킨다
             store.Update(fork.Id, r => r with
             {
@@ -477,7 +477,7 @@ public sealed partial class RoomModel(
         if (hub.IsBusy(id)) return BadRequest("실행 중인 방입니다 — 턴이 끝난 뒤 다시 하세요.");
         try
         {
-            // 이어받기는 만들 때 한 번에 저장한다 — 따로 저장하다 실패하면 기본 연결로 된 방이 남는다 (/self-review c11df0ad3c C2)
+            // 이어받기는 만들 때 한 번에 저장한다 — 따로 저장하다 실패하면 기본 연결로 된 방이 남는다
             var fresh = store.Create(room.Workspace, room.Level, room.Model, null, effort: room.Effort, shape: r => SlashCommands.CarryOver(r, room));
             hub.Touch(fresh.Id);
             return new JsonResult(new { ok = true, id = fresh.Id });
@@ -628,7 +628,7 @@ public sealed partial class RoomModel(
     public IActionResult OnPostEndRest(string id)
     {
         if (!RoomStore.IsRoomId(id)) return NotFound();
-        hub.EndRest(id, "settings", afterTurn: true); // 응답 중이면 쓰던 답은 끝까지 (af6ffa3da5 C1)
+        hub.EndRest(id, "settings", afterTurn: true); // 응답 중이면 쓰던 답은 끝까지
         return new JsonResult(new { ok = true });
     }
 

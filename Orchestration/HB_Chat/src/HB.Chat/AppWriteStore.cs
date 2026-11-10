@@ -40,7 +40,7 @@ public sealed class AppWriteStore
             if (File.Exists(path) && JsonSerializer.Deserialize<WriteFile>(File.ReadAllText(path), Json) is { } file)
             {
                 _ask = file.Ask;
-                // "folders": null도 빈 목록으로 — 손으로 고친 파일 때문에 앱이 켜지지 않게 (/cross-review 53a0e1871c 1-F1)
+                // "folders": null도 빈 목록으로 — 손으로 고친 파일 때문에 앱이 켜지지 않게
                 foreach (var folder in (file.Folders ?? []).Where(f => !string.IsNullOrWhiteSpace(f)))
                 {
                     _saved.Add(folder);
@@ -104,7 +104,7 @@ public sealed class AppWriteStore
         {
             if (Check(folder, out var final) is { } why) return why;
             if (_folders.Contains(final, StringComparer.OrdinalIgnoreCase)) return null;
-            // 켤 때 경고로 빠진 같은 줄이 있으면 그 줄을 살린다 — 두 줄로 보이지 않게 (sub_self 47b774c535 C7)
+            // 켤 때 경고로 빠진 같은 줄이 있으면 그 줄을 살린다 — 두 줄로 보이지 않게
             var stale = _saved.FindIndex(f => string.Equals(f, final, StringComparison.OrdinalIgnoreCase));
             if (stale < 0) _saved.Add(final);
             _folders.Add(final);
@@ -119,19 +119,19 @@ public sealed class AppWriteStore
     }
 
     /// <summary>
-    /// 이 폴더를 늘 허용할 수 없는 까닭 (null이면 됨) — 카드가 "이 폴더 늘 허용" 단추를 보이기 전에 같은 검사로 본다 (sub_self 47b774c535 C3).
+    /// 이 폴더를 늘 허용할 수 없는 까닭 (null이면 됨) — 카드가 "이 폴더 늘 허용" 단추를 보이기 전에 같은 검사로 본다.
     /// </summary>
     public string? WhyNotFolder(string? folder)
     {
         lock (_lock) return Check(folder, out _);
     }
 
-    /// <summary>늘 허용 폴더의 최종 경로 (링크 · subst · 짧은 이름이 풀린 것). 카드에 이 값을 보이고 그대로 저장한다 (sub_security 16f49d6897 C2).</summary>
+    /// <summary>늘 허용 폴더의 최종 경로 (링크 · subst · 짧은 이름이 풀린 것). 카드에 이 값을 보이고 그대로 저장한다.</summary>
     public static string? FinalOf(string folder) => WorkspaceStore.FinalFolder(folder);
 
     /// <summary>
     /// 너무 넓은 폴더 — 사용자 홈 바로 아래(Documents · AppData …)와 AppData 바로 아래(Roaming · Local · LocalLow).
-    /// 그 안에는 실행으로 이어지는 사용자 설정(파이썬 site-packages · 편집기 설정 …)이 흩어져 있어 통째로 묻지 않게 두지 않는다 (sub_security 16f49d6897 C1).
+    /// 그 안에는 실행으로 이어지는 사용자 설정(파이썬 site-packages · 편집기 설정 …)이 흩어져 있어 통째로 묻지 않게 두지 않는다.
     /// </summary>
     public static string? WhyTooBroad(string final)
     {

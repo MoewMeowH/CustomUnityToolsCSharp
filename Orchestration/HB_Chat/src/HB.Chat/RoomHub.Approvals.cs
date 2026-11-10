@@ -26,8 +26,8 @@ public sealed partial class RoomHub
             var answer = await RequestApprovalAsync(room.Id, live, generation, plan, aborted);
             if (answer is { Allow: true })
             {
-                // 허용 직전에 지금 단계를 다시 본다 — 카드에 답한 뒤 단계를 내렸으면 거절, 돌아갈 모드도 지금 단계 기준 (/self-review security d3dd55b237 C2)
-                // 단계를 바꿨으면 거절 — 명령 인자로 띄운 실행을 앱 단계로 올리면 ask 규칙 없이 auto가 된다 (/self-review security dfd2bed027 C1)
+                // 허용 직전에 지금 단계를 다시 본다 — 카드에 답한 뒤 단계를 내렸으면 거절, 돌아갈 모드도 지금 단계 기준
+                // 단계를 바꿨으면 거절 — 명령 인자로 띄운 실행을 앱 단계로 올리면 ask 규칙 없이 auto가 된다
                 if (store.Get(room.Id) is not { } now || now.Level != room.Level || ClaudeArgs.PlanMode(now.Level) is not { } mode)
                     return PermissionDecision.Deny("사용자가 이 방 권한을 바꿨습니다 — 계획대로 진행하지 않습니다.");
                 try
@@ -42,10 +42,10 @@ public sealed partial class RoomHub
                 lock (live.Gate)
                 {
                     live.PlanApprovedGeneration = generation;
-                    // 쉬는 실행도 이제 계획 모드가 아니다 — "계획 먼저"를 다시 켜면 새로 띄운다 (af6ffa3da5 C6)
+                    // 쉬는 실행도 이제 계획 모드가 아니다 — "계획 먼저"를 다시 켜면 새로 띄운다
                     if (live.Session is { } planRun) planRun.Plan = false;
                 }
-                // 입력은 계획 글 · 파일 경로만 다시 담아 돌려준다 — 카드에 보이지 않는 키는 승인하지 않는다 (d3dd55b237 C1)
+                // 입력은 계획 글 · 파일 경로만 다시 담아 돌려준다 — 카드에 보이지 않는 키는 승인하지 않는다
                 return PermissionDecision.AllowPlan(ApprovalRequest.PlanInput(ask.InputJson), mode);
             }
             var why = answer?.Message ?? "실행이 이미 끝나 거절했습니다.";
@@ -68,7 +68,7 @@ public sealed partial class RoomHub
             // 허용 답은 url만 다시 담는다(보이지 않는 키는 승인하지 않는다). 도구 쪽도 허용된 사이트인지 다시 본다.
             var urlText = TerminalMcp.ParseString(ask.InputJson, "url");
             if (AgentBrowser.ParseUrl(urlText) is not { } url) return PermissionDecision.Deny("browser_open은 http · https 주소만 받습니다.");
-            // 이 앱 · 대시보드는 카드로도 열지 않는다 — 열면 자기 승인 카드를 누를 수 있다 (/self-review security 8b11177bd5 C1)
+            // 이 앱 · 대시보드는 카드로도 열지 않는다 — 열면 자기 승인 카드를 누를 수 있다
             if (_browser.IsForbidden(url)) return PermissionDecision.Deny("이 앱 · 대시보드 주소는 지휘자 브라우저로 열 수 없습니다.");
             var input = TerminalMcp.UrlInput(url.AbsoluteUri);
             if (_browser.IsAllowed(room.Id, url)) return PermissionDecision.Allow(input);
@@ -94,7 +94,7 @@ public sealed partial class RoomHub
                 HostDenied(room, live, generation, TerminalTool, command, "권한을 명령 아래로 내림", $"터미널 {name}: 이 방 권한을 명령 아래로 내려 거절");
                 return PermissionDecision.Deny("사용자가 이 방 권한을 명령 단계 아래로 내렸습니다 — 터미널을 띄우지 않습니다.");
             }
-            // 감시형 명령(dev 서버 · watch)이면 이후 지휘자가 묻지 않고 고친 파일을 그대로 다시 실행한다 — 카드에 적는다 (/self-review security a3a9dd85c1 C1)
+            // 감시형 명령(dev 서버 · watch)이면 이후 지휘자가 묻지 않고 고친 파일을 그대로 다시 실행한다 — 카드에 적는다
             var card = new ApprovalRequest(TerminalTool, command,
                 $"터미널 '{name}' — 턴이 끝나도 계속 돌고, 곁칸 터미널 탭에서 보고 중지합니다. 파일을 감시해 다시 실행하는 명령이면 " +
                 "이후 지휘자가 고친 파일(명령 방은 작업 폴더 편집을 묻지 않음)이 카드 없이 다시 실행됩니다.");
@@ -106,7 +106,7 @@ public sealed partial class RoomHub
         if (ClaudeArgs.RunsCommands(room.Level) && ClaudeArgs.CommandTools.Contains(ask.Tool))
         {
             // 실행 중에 곁칸에서 단계를 내렸으면(명령 → 그 아래) 이 턴의 명령도 카드 없이 거절한다 — 내리기는 바로 막힌다
-            // (/self-review security 8ccecae84d C1). 올리기는 다음 실행부터.
+            //. 올리기는 다음 실행부터.
             if (store.Get(room.Id) is not { Level: PermissionLevel.Command or PermissionLevel.App })
             {
                 HostDenied(room, live, generation, ask.Tool, ApprovalRequest.Parse(ask.RequestJson)?.Summary ?? "", "권한을 명령 아래로 내림",
@@ -145,7 +145,7 @@ public sealed partial class RoomHub
             {
                 var o = options.Value;
                 var path = ApprovalRequest.WritePath(ask.Tool, ask.InputJson);
-                // 앱 보호 목록이 없을 때(시험)도 Program과 같은 보호 폴더로 (sub_self dfe83d0bb5 C5)
+                // 앱 보호 목록이 없을 때(시험)도 Program과 같은 보호 폴더로
                 string? Why() => path is null ? "쓸 파일 경로를 읽지 못했습니다 (경로 키가 없거나 둘 이상)."
                     : o.AppWorkspaces is { } guard ? guard.WhyNoWrite(path, workspace)
                     : WorkspaceStore.WhyNoWrite(path, WorkspaceStore.GuardedFolders(o, AppContext.BaseDirectory), workspace);
@@ -153,7 +153,7 @@ public sealed partial class RoomHub
                 if (why is null && ApprovalRequest.ForWrite(ask.Tool, ask.InputJson, path!) is { } card)
                 {
                     var answer = await RequestApprovalAsync(room.Id, live, generation, card, aborted);
-                    // 카드를 기다리는 사이 경로가 바뀌었으면(정션 · 링크로 바꿈) 허용하지 않는다 (/cross-review a43e6f3e7b 1-F2). 쓰는 순간의 경쟁은 CLI 쪽이라 남는다
+                    // 카드를 기다리는 사이 경로가 바뀌었으면(정션 · 링크로 바꿈) 허용하지 않는다. 쓰는 순간의 경쟁은 CLI 쪽이라 남는다
                     if (answer is { Allow: true } && Why() is { } changed)
                     {
                         HostDenied(room, live, generation, ask.Tool, summary, "허용 뒤 경로 바뀜", $"{ask.Tool}{target}: 허용 뒤 다시 보니 {changed} — 거절");
@@ -190,7 +190,7 @@ public sealed partial class RoomHub
         var o = options.Value;
         var path = ApprovalRequest.WritePath(ask.Tool, ask.InputJson);
         // CLI가 자동 메모리를 두는 곳: <세션 기록 폴더>/<작업 폴더 인코딩>/memory (비공식 규칙). 인코딩은 claude의 작업 디렉터리 모양 — 전체 경로 · 끝 구분자 없음.
-        // 어긋나면 메모리 폴더는 Claude 설정 폴더(보호) 안이라 카드 없이 거절된다 (sub_self 47b774c535 C2)
+        // 어긋나면 메모리 폴더는 Claude 설정 폴더(보호) 안이라 카드 없이 거절된다
         var memory = Path.Combine(o.ProjectsRoot,
             HB.Orchestration.Shared.ClaudeTranscriptReader.EncodeProjectDir(Path.TrimEndingDirectorySeparator(Path.GetFullPath(workspace))), "memory");
         (WorkspaceStore.AppWriteRoute Route, string? Why) Route() =>
@@ -252,7 +252,7 @@ public sealed partial class RoomHub
         var prompt = TerminalMcp.ParseString(ask.InputJson, "prompt");
         var input = System.Text.Json.JsonSerializer.Serialize(new { url = url!.AbsoluteUri, prompt = prompt ?? "" });
         if (_webSites.IsApproved(room.Id, url)) return PermissionDecision.Allow(input);
-        // 사이트 이름은 퓨니코드(IdnHost)로도 — 비슷한 글자로 속이는 국제 도메인을 알아보게 (/cross-review 909a5c575e C7)
+        // 사이트 이름은 퓨니코드(IdnHost)로도 — 비슷한 글자로 속이는 국제 도메인을 알아보게
         var shownHost = url.IdnHost != url.Host ? $"{url.Host} ({url.IdnHost})" : url.Host;
         var card = new ApprovalRequest(WebFetchCardTool, url.AbsoluteUri,
             $"지휘자가 {shownHost}{(url.IsDefaultPort ? "" : ":" + url.Port)}에 요청을 보내 페이지를 가져옵니다 — 주소에 든 글도 함께 나갑니다. " +
@@ -271,7 +271,7 @@ public sealed partial class RoomHub
 
     /// <summary>
     /// run_mode 모델 선택 카드: 외부 요청 전에 묻기를 켰거나 + 요청 창 값을 싣고 시작한 실행에서만 온다 (그 밖은 미리 허용).
-    /// 허가하면 고른 교체 · 강도를 agents · reasoning에 다시 써서 돌려준다. + 요청 창 값은 같은 모드의 첫 카드 한 번만 미리 채운다 (785ebb5e97 C6).
+    /// 허가하면 고른 교체 · 강도를 agents · reasoning에 다시 써서 돌려준다. + 요청 창 값은 같은 모드의 첫 카드 한 번만 미리 채운다.
     /// </summary>
     private async Task<string> DecideRunModeAsync(Room room, Live live, int generation, ToolPermission ask, CancellationToken aborted, string workspace)
     {
@@ -331,7 +331,7 @@ public sealed partial class RoomHub
 
     /// <summary>
     /// 카드 없이 거절: 승인 기록에도 남기고(방 기록 줄 — 기록 화면 제자리 · 새로고침 뒤에도) 진행 칸에 "거절됨" 줄을 알린다.
-    /// Logged면 화면이 턴 끝에 그 줄을 지운다 (/self-review e464ec29ba C6). 기록이 먼저 — 턴 끝에 다시 받을 때 이미 있게.
+    /// Logged면 화면이 턴 끝에 그 줄을 지운다. 기록이 먼저 — 턴 끝에 다시 받을 때 이미 있게.
     /// </summary>
     private void HostDenied(Room room, Live live, int generation, string tool, string summary, string why, string line)
     {
@@ -362,8 +362,8 @@ public sealed partial class RoomHub
         lock (live.Gate)
         {
             if (!RunAlive(live, generation)) return null;
-            // "이 턴 동안 묻지 않기": 켜기와 같은 잠금에서 보아 일괄 허용을 비껴간 요청이 카드로 남지 않게 (/cross-review 240769947f F1).
-            // 단계도 Decide처럼 잠금 안에서 다시 본다 — 그사이 내렸으면 카드로 간다 (109f21e330 C3)
+            // "이 턴 동안 묻지 않기": 켜기와 같은 잠금에서 보아 일괄 허용을 비껴간 요청이 카드로 남지 않게.
+            // 단계도 Decide처럼 잠금 안에서 다시 본다 — 그사이 내렸으면 카드로 간다
             if (!(live.TrustCommands && request.TurnAllowable && store.Get(roomId)?.Level is PermissionLevel.Command or PermissionLevel.App))
             {
                 waiting = new PendingApproval(request, DateTimeOffset.Now + timeout)
@@ -404,7 +404,7 @@ public sealed partial class RoomHub
         // 답을 정한 쪽(EndApprovals 등)은 TrySetResult 뒤 잠금 안에서 Label을 적는다 — 잠금으로 기다려 읽는다
         string decision;
         lock (live.Gate) decision = pending.Label ?? (answer.Allow ? "허용" : "거절");
-        // 기록을 approval-done보다 먼저 — 화면이 턴 끝에 기록을 다시 받을 때 방 기록 줄이 이미 있게 (/self-review e464ec29ba C3)
+        // 기록을 approval-done보다 먼저 — 화면이 턴 끝에 기록을 다시 받을 때 방 기록 줄이 이미 있게
         // 계획 글은 앞 2,000자만 기록한다 — 승인 기록이 계획 전문으로 커지지 않게 (지휘자 검토 S4)
         var logged = request.IsPlan && request.Summary.Length > PlanLogChars ? request with { Summary = request.Summary[..PlanLogChars] + "…" } : request;
         Log?.Write(roomId, logged, decision);
@@ -413,7 +413,7 @@ public sealed partial class RoomHub
             live.Approvals.Remove(pending.Id);
             Broadcast(live, new LiveEvent("approval-done") { Approval = pending.View, Text = pending.Label });
             // 다른 카드가 남았으면 그대로 승인 기다림, 아니면 도구 단계로 (허용이면 명령이 돈다, 거절이면 곧 다음 글).
-            // Busy가 아니라 Cts로 본다: 실행이 끝나는 잠금에서 Cts를 먼저 비우므로 end 뒤에 face가 나가지 않는다 (/self-review 83b453653b C3).
+            // Busy가 아니라 Cts로 본다: 실행이 끝나는 잠금에서 Cts를 먼저 비우므로 end 뒤에 face가 나가지 않는다.
             if (live.Cts is not null && live.Approvals.Count == 0) SetFace(live, live.Questions.Count > 0 ? Face.Question : Face.Tool);
         }
         pending.Settled.TrySetResult();
@@ -472,7 +472,7 @@ public sealed partial class RoomHub
         return (answers, label);
     }
 
-    /// <summary>이미 끝난 카드에 답했을 때의 문구 — 처리기가 이 값이면 409로 답해 화면이 오류 창 없이 카드를 닫는다 (9c54e0c54a C8).</summary>
+    /// <summary>이미 끝난 카드에 답했을 때의 문구 — 처리기가 이 값이면 409로 답해 화면이 오류 창 없이 카드를 닫는다.</summary>
     public const string QuestionDone = "이미 끝난 질문입니다.";
     public const string ApprovalDone = "이미 끝난 승인 요청입니다.";
 
@@ -551,8 +551,8 @@ public sealed partial class RoomHub
         {
             if (!live.Approvals.TryGetValue(approvalId, out var pending) || pending.Answer.Task.IsCompleted)
                 return ApprovalDone;
-            // 카드가 뜬 뒤 곁칸에서 권한을 내렸으면 허용을 받지 않는다 (/self-review security 8ccecae84d C1) —
-            // 명령 · 계획 카드는 명령 단계가 아니면. 단계는 이 잠금 안에서 읽는다 (d3dd55b237 C2)
+            // 카드가 뜬 뒤 곁칸에서 권한을 내렸으면 허용을 받지 않는다 —
+            // 명령 · 계획 카드는 명령 단계가 아니면. 단계는 이 잠금 안에서 읽는다
             var level = store.Get(roomId)?.Level;
             if (pending.Request.Mode is { } card)
                 return DecideModeCard(pending, card, level, choice, reason, picks);

@@ -26,7 +26,7 @@ public static partial class RoomShots
         Directory.CreateDirectory(dir);
         var stem = $"{DateTime.Now:yyyyMMdd-HHmmss-fff}";
         var name = $"{stem}.{ext}";
-        // 새 파일로만 연다 — 브라우저 · Unity 그림이 같은 밀리초에 써도 서로 덮지 않게 (/self-review 0bcf01451b C4)
+        // 새 파일로만 연다 — 브라우저 · Unity 그림이 같은 밀리초에 써도 서로 덮지 않게
         for (var i = 1; ; i++)
         {
             try

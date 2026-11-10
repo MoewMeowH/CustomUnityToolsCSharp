@@ -168,7 +168,7 @@ public sealed class SettingsModel(
     public string? Error { get; private set; }
 
     /// <summary>
-    /// 방금 한 일 (리다이렉트 뒤 한 줄). 주소의 코드만 받고 문구는 여기서 고른다 — 아무 글이나 성공 문구처럼 띄우지 못하게 (/self-review security eee1adb777 C6).
+    /// 방금 한 일 (리다이렉트 뒤 한 줄). 주소의 코드만 받고 문구는 여기서 고른다 — 아무 글이나 성공 문구처럼 띄우지 못하게.
     /// </summary>
     [BindProperty(SupportsGet = true)]
     public string? Done { get; set; }
@@ -254,7 +254,7 @@ public sealed class SettingsModel(
             Fill();
             return Page();
         }
-        // 화면을 떠나 취소된 시험은 실패가 아니다 — 기록하지 않는다 (/self-review 5ccb0f709a C2)
+        // 화면을 떠나 취소된 시험은 실패가 아니다 — 기록하지 않는다
         if (result.Error == CliSelfTest.AbortedError) return new EmptyResult();
         cliVersions.Save(result);
         hub.TouchAll(); // 사이드바 띠
@@ -365,7 +365,7 @@ public sealed class SettingsModel(
 
     /// <summary>
     /// 빼기 — 그 이름을 켜 둔 방에서도 끈다(작업 폴더 .mcp.json에 같은 이름이 있는 방은 그 서버를 쓰고 있으니 그대로). 안 끄면 같은 이름으로 다른 서버를
-    /// 다시 더할 때 그 방들이 확인 없이 새 서버를 쓴다 (/self-review 779716239c C5).
+    /// 다시 더할 때 그 방들이 확인 없이 새 서버를 쓴다.
     /// </summary>
     public IActionResult OnPostRemoveMcp(string? name)
     {
@@ -523,7 +523,7 @@ public sealed class SettingsModel(
         ];
         McpRows =
         [
-            // 켠 방: 휴지통 밖, 작업 폴더에 같은 이름이 없어 이 앱 서버를 실제로 쓰는 방만 (779716239c C6)
+            // 켠 방: 휴지통 밖, 작업 폴더에 같은 이름이 없어 이 앱 서버를 실제로 쓰는 방만
             .. (options.Value.AppMcp?.All() ?? []).Select(s => new McpRow(s.Name, AppMcpStore.TransportOf(s.Entry), AppMcpStore.Describe(s.Entry),
                 all.Count(r => r.DeletedAt is null && r.McpExtra.Contains(s.Name, StringComparer.OrdinalIgnoreCase) && !InWorkspace(r, s.Name)),
                 AppMcpStore.SecretWarnings(s.Entry))),
@@ -540,7 +540,7 @@ public sealed class SettingsModel(
             .Select(r => (r, RoomList.TitleOf(r, transcripts.Read(r.SessionId))))];
         // 프로필을 둔 이름이 먼저 자리를 잡고(상한에 밀려 고칠 수 없게 되지 않게), 남은 자리를 호출 기록 이름으로 (3차 e /self-review security)
         // 서브에이전트 종류 (sub:종류)도 같은 상한(외부 · 서브 합쳐 MaxAgents)을 쓴다: 남은 자리를 기본 종류 · .claude/agents가 먼저(몇 개뿐),
-        // 그다음 호출 기록의 외부 에이전트 이름 — 줄이 보이는데 저장하면 상한 오류가 나지 않게 (/self-review 60ef26a7bf H-C5)
+        // 그다음 호출 기록의 외부 에이전트 이름 — 줄이 보이는데 저장하면 상한 오류가 나지 않게
         var saved = profiles.Store.Agents();
         var savedSubs = profiles.Store.Subagents();
         var left = Math.Max(0, ProfileStore.MaxAgents - saved.Count - savedSubs.Count);

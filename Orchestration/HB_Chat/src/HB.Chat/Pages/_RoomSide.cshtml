@@ -96,7 +96,7 @@
         }
         else if (room.Level == PermissionLevel.Command)
         {
-            @* 명령 방은 서브에이전트를 쓰지 않는다 (/self-review security 42f9d47dc4 C1) *@
+            @* 명령 방은 서브에이전트를 쓰지 않는다 *@
             <dt>서브에이전트</dt>
             <dd class="muted">명령 방에서는 쓰지 않습니다 — 에이전트 정의가 명령 승인을 건너뛸 수 있어서 (읽기 방에서 쓰세요)</dd>
         }
@@ -135,7 +135,7 @@
 </section>
 @* 연결 (Claude 앱 커넥터처럼): 종류 · 켬 · 상태 · 도구 · 확인. 다음 실행부터 반영 *@
 <section class="side-sec" data-tab="mcp" id="side-sec-mcp" role="tabpanel" aria-labelledby="side-tab-mcp">
-    @* 결정 4: 더한 서버는 단계와 상관없이 묻지 않는다 — 단계 설명과 다른 점을 적는다 (/self-review security 00d712e2c7 C2) *@
+    @* 결정 4: 더한 서버는 단계와 상관없이 묻지 않는다 — 단계 설명과 다른 점을 적는다 *@
     <p class="muted side-settings-note">다음 말부터 적용됩니다. 켠 연결의 도구는 지휘자가 <b>묻지 않고</b> 씁니다 — 방 권한 단계와 상관없이 (읽기 방이어도 그 서버의 쓰기 도구는 돕니다). 끄거나 권한을 내리면 실행 중인 턴에서도 바로 막힙니다. 상태는 이 방 마지막 실행 · '확인' 결과입니다.</p>
     <ul class="mcp-list">
         @foreach (var c in Model.Connections)

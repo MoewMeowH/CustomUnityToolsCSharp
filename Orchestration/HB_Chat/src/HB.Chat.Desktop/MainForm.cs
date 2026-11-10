@@ -28,7 +28,7 @@ public sealed class MainForm : Form
 
     /// <summary>
     /// 이 창의 WebView2는 localhost만 쓴다 (밖 주소는 기본 브라우저로). 그 밖의 이름 조회를 모두 실패시켜 dns-prefetch · preconnect ·
-    /// STUN 이름처럼 CSP가 다루지 않는 DNS 길을 막는다 (/self-review security d459e3af9b C2).
+    /// STUN 이름처럼 CSP가 다루지 않는 DNS 길을 막는다.
     /// </summary>
     internal const string BrowserArguments = "--host-resolver-rules=\"MAP * ~NOTFOUND , EXCLUDE localhost\"";
 
@@ -140,7 +140,7 @@ public sealed class MainForm : Form
         _tray = new NotifyIcon { Icon = _trayIcons[TrayLevel.Idle], Text = "HB Chat", ContextMenuStrip = _trayMenu, Visible = true };
         _tray.DoubleClick += (_, _) => BringUp();
         _tray.BalloonTipClicked += (_, _) => OpenRoom(_balloonRoom);
-        // 작업 표시줄 · Alt-Tab으로 앞에 오면 보고 있는 방의 안 본 실패를 지운다 (0f0b6007a4 C3)
+        // 작업 표시줄 · Alt-Tab으로 앞에 오면 보고 있는 방의 안 본 실패를 지운다
         Activated += (_, _) => UpdateTray();
 
         // 바탕화면 펫 (결정 "기본 켬"): 누르면 그 방 미니 창을 펫 옆에, 오른쪽 메뉴 "미니 창"은 미니 창 토글
@@ -209,7 +209,7 @@ public sealed class MainForm : Form
         // 테마는 설정 화면에서 저장(폼 POST → 다시 열기)할 때 바뀐다 — 채팅 화면이 새로 열릴 때마다 다시 읽는다 (5차 b)
         _chatView.CoreWebView2.NavigationCompleted += (_, _) => RefreshAppearance();
 
-        // 서버마다 따로 기다린다 — 한쪽이 늦거나 실패해도 다른 탭은 준비되는 대로 연다 (26d478170f C3 · C4)
+        // 서버마다 따로 기다린다 — 한쪽이 늦거나 실패해도 다른 탭은 준비되는 대로 연다
         var progress = new Progress<string>(SetStatus);
         await Task.WhenAll(BringUpAsync(_chatServer, progress), BringUpAsync(_dashServer, progress));
         if (!_closing) SetStatus(string.Join(" · ", Describe(_chatServer, _chatError), Describe(_dashServer, _dashError)));
@@ -266,7 +266,7 @@ public sealed class MainForm : Form
         await core.AddScriptToExecuteOnDocumentCreatedAsync(WebRtcBlock);
 
         // 큰 틀: 이 탭 출처는 그대로. 다른 탭 · 기본 브라우저로 보내는 것은 사용자가 시작한 이동만 — 스크립트 · meta refresh · 리다이렉트로
-        // 브라우저를 열거나 탭을 바꿔치지 못하게 (26d478170f C5 · d459e3af9b C1)
+        // 브라우저를 열거나 탭을 바꿔치지 못하게
         core.NavigationStarting += (_, e) =>
         {
             var d = _policy.Main(e.Uri, tab);
@@ -297,7 +297,7 @@ public sealed class MainForm : Form
             var d = _policy.Main(e.Uri, tab);
             BeginInvoke(() => Route(d.Action == NavAction.Allow ? d with { Action = NavAction.Switch } : d));
         };
-        // 사용자 프로토콜(ms-settings: 등) 실행은 이동 규칙과 별도로 한 번 더 막는다 (d459e3af9b C7)
+        // 사용자 프로토콜(ms-settings: 등) 실행은 이동 규칙과 별도로 한 번 더 막는다
         core.LaunchingExternalUriScheme += (_, e) =>
         {
             e.Cancel = true;
@@ -308,7 +308,7 @@ public sealed class MainForm : Form
         // 설정 화면에 들어가고 나오면 탭 줄의 눌린 단추도 바꾼다 (4차 B1)
         if (tab == AppTab.Chat) core.SourceChanged += (_, _) => { UpdateTray(); UpdateTabs(); };
         core.ProcessFailed += (_, e) => BeginInvoke(() => SetStatus(e.ProcessFailedKind == CoreWebView2ProcessFailedKind.BrowserProcessExited
-            ? "화면 엔진이 끝났습니다 — 앱을 다시 켜세요" // 브라우저 프로세스는 새로 고침으로 돌아오지 않는다 (26d478170f C6)
+            ? "화면 엔진이 끝났습니다 — 앱을 다시 켜세요" // 브라우저 프로세스는 새로 고침으로 돌아오지 않는다
             : $"화면 프로세스 오류({e.ProcessFailedKind}) — F5로 새로 고침"));
     }
 
@@ -346,7 +346,7 @@ public sealed class MainForm : Form
             else _chatPending = url; // 채팅 서버가 뜨면 그 방으로 (토스트를 눌러 앱이 켜진 경우)
         }
         UpdateTabs();
-        UpdateTray(); // 채팅 탭으로 돌아오면 보고 있는 방의 안 본 실패를 지운다 (0f0b6007a4 C3)
+        UpdateTray(); // 채팅 탭으로 돌아오면 보고 있는 방의 안 본 실패를 지운다
     }
 
     /// <summary>채팅 탭이 설정 화면(/Settings)을 보고 있는지 — 그때는 '채팅' 대신 '설정'이 눌린 모양 (4차 B1).</summary>
@@ -359,7 +359,7 @@ public sealed class MainForm : Form
     private void UpdateTabs()
     {
         _titleBar.CheckedTab = OnSettingsPage ? SettingsTabIndex : _tab == AppTab.Chat ? ChatTabIndex : DashTabIndex;
-        _titleBar.SetTabEnabled(SettingsTabIndex, _chatError is null); // 채팅 화면이 준비되기 전에는 주소를 받을 곳이 없다 (/self-review 460430d647 C8)
+        _titleBar.SetTabEnabled(SettingsTabIndex, _chatError is null); // 채팅 화면이 준비되기 전에는 주소를 받을 곳이 없다
         var error = _tab == AppTab.Chat ? _chatError : _dashError;
         _message.Text = error ?? "";
         _message.Visible = error is not null;
@@ -367,11 +367,11 @@ public sealed class MainForm : Form
         _dashView.Visible = _tab == AppTab.Dashboard && error is null;
     }
 
-    /// <summary>상태 줄: 이번 글 + 계속 남는 경고(시작 설정 · 단축키). 다른 글이 경고를 덮지 않게 한 곳에서 붙인다 (bde22e2224 C6).</summary>
+    /// <summary>상태 줄: 이번 글 + 계속 남는 경고(시작 설정 · 단축키). 다른 글이 경고를 덮지 않게 한 곳에서 붙인다.</summary>
     private void SetStatus(string text) =>
         _titleBar.Status = string.Join(" · ", new[] { text }.Concat(_warnings).Where(s => !string.IsNullOrEmpty(s)));
 
-    /// <summary>두 번째 실행 신호(앞으로 · --exit) (스레드 풀). 창이 닫히는 중이거나 핸들이 없으면 버린다 (26d478170f C7).</summary>
+    /// <summary>두 번째 실행 신호(앞으로 · --exit) (스레드 풀). 창이 닫히는 중이거나 핸들이 없으면 버린다.</summary>
     private void OnShowSignal(Action action)
     {
         if (_closing || !IsHandleCreated) return;
@@ -502,7 +502,7 @@ public sealed class MainForm : Form
 
     /// <summary>
     /// 연결이 끊기면(서버 종료 · 다시 켜는 중) 앞 목록을 버리고 트레이를 "연결 끊김"으로. 다시 붙은 뒤 첫 목록은 조용히 받는다 —
-    /// 서버를 다시 켜서 끊긴 턴을 "답 끝"으로 알리지 않게 (0f0b6007a4 C4).
+    /// 서버를 다시 켜서 끊긴 턴을 "답 끝"으로 알리지 않게.
     /// </summary>
     private void OnConnection(bool connected)
     {
@@ -574,7 +574,7 @@ public sealed class MainForm : Form
             SetStatus("채팅 서버가 준비되면 미니 창을 열 수 있습니다");
             return;
         }
-        // 만드는 중에 또 부르면(트레이 · 단축키가 겹침) 무시 — 둘 다 Toggle하면 보였다 바로 숨는다 (/self-review bde22e2224 C5)
+        // 만드는 중에 또 부르면(트레이 · 단축키가 겹침) 무시 — 둘 다 Toggle하면 보였다 바로 숨는다
         if (_miniReady is { IsCompleted: false }) return;
         try
         {
@@ -689,7 +689,7 @@ public sealed class MainForm : Form
     private AppTheme _theme;
     private int _appearanceRead;
 
-    /// <summary>창 최소 폭: 기본 최소 크기와 맨 위 줄이 겹치지 않는 폭(+ 좌우 테두리) 중 큰 쪽. 배율이 바뀌면 다시 (993ef3b338 C1).</summary>
+    /// <summary>창 최소 폭: 기본 최소 크기와 맨 위 줄이 겹치지 않는 폭(+ 좌우 테두리) 중 큰 쪽. 배율이 바뀌면 다시.</summary>
     private void UpdateMinimumSize()
     {
         var frame = IsHandleCreated ? Width - ClientSize.Width : 0;
@@ -775,7 +775,7 @@ public sealed class MainForm : Form
     /// <summary>트레이 메뉴 끝내기 — 진짜로 끈다 (도는 턴이 있으면 OnFormClosing이 묻는다).</summary>
     private void Exit()
     {
-        if (_confirming) return; // 이미 묻는 중 (0f0b6007a4 C2)
+        if (_confirming) return; // 이미 묻는 중
         _exiting = true;
         Close();
     }
@@ -809,7 +809,7 @@ public sealed class MainForm : Form
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
-        // 묻는 창이 떠 있는 동안 또 닫기가 오면(트레이 끝내기 · --exit · 닫기) 무시한다 — 확인 창이 겹치지 않게 (0f0b6007a4 C2)
+        // 묻는 창이 떠 있는 동안 또 닫기가 오면(트레이 끝내기 · --exit · 닫기) 무시한다 — 확인 창이 겹치지 않게
         if (_confirming && e.CloseReason != CloseReason.WindowsShutDown)
         {
             e.Cancel = true;
@@ -888,7 +888,7 @@ public sealed class MainForm : Form
             _watcher?.Dispose();
             _tray.Visible = false; // 안 지우면 트레이에 빈 아이콘이 남는다
             _tray.Dispose();
-            _trayMenu.Dispose(); // NotifyIcon.Dispose가 메뉴는 해제하지 않는다 (0f0b6007a4 C10)
+            _trayMenu.Dispose(); // NotifyIcon.Dispose가 메뉴는 해제하지 않는다
             _trayIcons.Dispose();
             _chatView.Dispose();
             _dashView.Dispose();

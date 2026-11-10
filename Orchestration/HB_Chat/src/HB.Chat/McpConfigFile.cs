@@ -33,7 +33,7 @@ public static class McpConfigFile
         var path = Path.Combine(dataDir, $"mcp-{server}-{hash}.json");
         var json = config.ToJsonString(new() { WriteIndented = true });
         Directory.CreateDirectory(dataDir);
-        // 같은 작업 폴더의 방들이 같은 파일을 쓴다 (0a3b1d5155 C5): 내용이 같으면 쓰지 않고, 쓸 때는 임시 파일 이름을 실행마다 다르게.
+        // 같은 작업 폴더의 방들이 같은 파일을 쓴다: 내용이 같으면 쓰지 않고, 쓸 때는 임시 파일 이름을 실행마다 다르게.
         if (SameContent(path, json)) return path;
         var tmp = $"{path}.{Guid.NewGuid():N}.tmp";
         File.WriteAllText(tmp, json, new UTF8Encoding(false));

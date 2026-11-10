@@ -50,7 +50,7 @@ public sealed class PetMotion(Func<DateTime> now, Random random)
             _shown = pet.Left;
             _last = t;
         }
-        // 마지막으로 낸 자리와 다르면 바깥에서 옮겨졌다(크기 바꾸기 · 화면 구성 변경) — 걷던 _x로 되돌아가지 않고 멈춘다 (088647d699 C1)
+        // 마지막으로 낸 자리와 다르면 바깥에서 옮겨졌다(크기 바꾸기 · 화면 구성 변경) — 걷던 _x로 되돌아가지 않고 멈춘다
         if (pet.Left != _shown) return new(null, Stop());
         var target = Math.Clamp(_target.Value, work.Left, Math.Max(work.Left, work.Right - pet.Width)); // 화면이 바뀌었으면 그 안으로
         _target = target;

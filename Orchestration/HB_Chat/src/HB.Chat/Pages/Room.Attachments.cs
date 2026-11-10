@@ -38,7 +38,7 @@ public sealed partial class RoomModel
         }
         catch (OperationCanceledException)
         {
-            return new EmptyResult(); // 화면이 요청을 끊었다 — 임시 파일은 SaveAsync가 지웠다 (5b26cff7df C4)
+            return new EmptyResult(); // 화면이 요청을 끊었다 — 임시 파일은 SaveAsync가 지웠다
         }
     }
 
@@ -50,7 +50,7 @@ public sealed partial class RoomModel
         if (!RoomStore.IsRoomId(id) || store.Get(id) is null) return NotFound();
         if (Attachments.Resolve(Attachments.Folder(options.Value.DataFolder, id), name) is not { } path) return NotFound();
         Response.Headers.XContentTypeOptions = "nosniff";
-        Response.Headers["Cross-Origin-Resource-Policy"] = "same-origin"; // 다른 사이트의 <img>로 있는지 떠보지 못하게 (0c3b7e3514 C4)
+        Response.Headers["Cross-Origin-Resource-Policy"] = "same-origin"; // 다른 사이트의 <img>로 있는지 떠보지 못하게
         Response.Headers.CacheControl = "private, max-age=3600";
         return Attachments.Images.TryGetValue(Path.GetExtension(path), out var type)
             ? PhysicalFile(path, type)

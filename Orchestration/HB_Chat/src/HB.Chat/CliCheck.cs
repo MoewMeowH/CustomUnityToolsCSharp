@@ -100,7 +100,7 @@ public sealed partial class CliVersions(Func<string> dataFolder)
         Process? p = null;
         try
         {
-            // 표준 오류는 받지 않는다 — 읽지 않는 파이프가 차면 자식이 막힌다 (/self-review 5ccb0f709a C6)
+            // 표준 오류는 받지 않는다 — 읽지 않는 파이프가 차면 자식이 막힌다
             p = Process.Start(new ProcessStartInfo(claudePath, "--version")
             {
                 RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true, StandardOutputEncoding = Encoding.UTF8,
@@ -130,7 +130,7 @@ public sealed partial class CliVersions(Func<string> dataFolder)
 public static class CliSelfTest
 {
     /// <summary>
-    /// 단계 이름. 웹 단계는 "내장 문서 사이트 목록 밖 사이트를 앱에 묻는지"만 본다 — 목록이 늘거나 줄어든 것 자체는 잡지 못한다 (/cross-review 909a5c575e C9).
+    /// 단계 이름. 웹 단계는 "내장 문서 사이트 목록 밖 사이트를 앱에 묻는지"만 본다 — 목록이 늘거나 줄어든 것 자체는 잡지 못한다.
     /// </summary>
     public const string BashStep = "명령 승인 카드", AskStep = "질문 카드", WebStep = "웹 가져오기 요청 (목록 밖 사이트)", StreamStep = "글 조각 · 결과";
 
@@ -167,13 +167,13 @@ public static class CliSelfTest
         $"3. WebFetch 도구로 {WebUrl(nonce)} 을 가져온다 (prompt는 \"제목\"). 거절되는 것이 정상이니 다시 시도하지 않는다.\n" +
         "4. 마지막으로 \"자가 시험 끝\"이라고만 답한다.";
 
-    /// <summary>부른 쪽이 취소해(설정 화면을 떠남) 끝까지 못 돈 결과의 Error — 실패가 아니라 기록하지 않는다 (/self-review 5ccb0f709a C2).</summary>
+    /// <summary>부른 쪽이 취소해(설정 화면을 떠남) 끝까지 못 돈 결과의 Error — 실패가 아니라 기록하지 않는다.</summary>
     public const string AbortedError = "자가 시험을 끝까지 돌리지 못했습니다 (화면을 떠남).";
 
     /// <summary>
     /// 한 번 돈다. <paramref name="process"/>: (RunSpec, 작업 폴더) → 실행할 프로세스 (시험은 가짜 claude). 이미 도는 중이면 <see cref="BusyError"/>,
     /// 부른 쪽이 취소하면 <see cref="AbortedError"/>만 든 결과 — 둘 다 기록하지 않는다.
-    /// 통과는 요청 모양만이 아니라 왕복으로 본다 (/self-review 5ccb0f709a C1): 명령은 허용한 mkdir 폴더가 실제로 생겼는지, 질문은 CLI가 허용 답을
+    /// 통과는 요청 모양만이 아니라 왕복으로 본다: 명령은 허용한 mkdir 폴더가 실제로 생겼는지, 질문은 CLI가 허용 답을
     /// 거절로 세지 않았는지(우리가 거절한 수보다 거절이 많으면 실패).
     /// </summary>
     public static async Task<CliVersions.TestResult> RunAsync(string dataFolder, string model, string mcpServer,

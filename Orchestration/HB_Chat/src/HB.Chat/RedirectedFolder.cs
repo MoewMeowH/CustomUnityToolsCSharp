@@ -9,7 +9,7 @@ namespace HB.Chat;
 /// %LOCALAPPDATA%\Packages\&lt;패키지&gt;\LocalCache\Local\… 로 옮겨져, 밖에서 띄운 앱과 데이터가 두 벌로 갈린다 (2026-10-28 실사용에서 발견).
 /// 그 프로세스는 패키지 ID가 없어(GetCurrentPackageFullName = 패키지 없음) 알 수 없으므로, 시험 파일을 만들어 실제로 쓰인 곳(최종 경로)을 본다.
 /// 서버(HB.Chat)와 데스크톱 앱(HB.Chat.Desktop — 이 파일을 링크로 함께 컴파일)이 같이 쓴다. 두 어셈블리에 같은 이름이 생기므로
-/// internal (/self-review dc27a724bf C7).
+/// internal.
 /// </summary>
 internal static class RedirectedFolder
 {

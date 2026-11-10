@@ -39,7 +39,7 @@ public sealed record RoomSummary(
 /// <summary>말풍선 한 쪽: 보일 말들과 그 앞에 더 있는지 (50개씩 위로 불러오기).</summary>
 public sealed record MessagePage(IReadOnlyList<ChatEntry> Items, bool HasMore)
 {
-    /// <summary>새 말 받기(after)인데 너무 많아 맨 끝 쪽으로 바꿨다 — 화면은 붙이지 않고 쪽 전체를 바꾼다 (/self-review 95e8b1c242 C3).</summary>
+    /// <summary>새 말 받기(after)인데 너무 많아 맨 끝 쪽으로 바꿨다 — 화면은 붙이지 않고 쪽 전체를 바꾼다.</summary>
     public bool Reset { get; init; }
 }
 
@@ -94,7 +94,7 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
         {
             var hits = group.Members.Where(m => m.RoomId.Length > 0 && hub.ActivityOf(m.RoomId) == activity).ToList();
             var face = Face.Idle;
-            // 따로 읽는 사이 카드가 끝나 hits가 비면 빈 All이 참이 된다 — 그때는 Approval (/self-review 175acbd35a C5)
+            // 따로 읽는 사이 카드가 끝나 hits가 비면 빈 All이 참이 된다 — 그때는 Approval
             if (activity == RoomActivity.Approval)
                 face = hits.Count > 0 && hits.All(m => store.Get(m.RoomId) is { } child && hub.FaceOf(child, transient: false) == Face.Question)
                     ? Face.Question : Face.Approval;
@@ -224,14 +224,14 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
         var end = Math.Min(text.Length, at + length + around);
         if (start > 0 && char.IsLowSurrogate(text[start])) start--;
         if (end < text.Length && char.IsLowSurrogate(text[end])) end++;
-        // 스티커 태그는 걷는다 — 회사 모드에서도 글자로 보이지 않게 (95e8b1c242 C8)
+        // 스티커 태그는 걷는다 — 회사 모드에서도 글자로 보이지 않게
         var piece = Space().Replace(StickerTag().Replace(text[start..end], " "), " ").Trim();
         return (start > 0 ? "…" : "") + piece + (end < text.Length ? "…" : "");
     }
 
     /// <summary>
     /// 갈래 첫 턴 뒤의 읽음 위치: 이번 턴 사용자 말(기록의 마지막 사용자 말) 바로 앞 줄 — 이어받은 말은 읽음, 이번 턴부터 안 읽음
-    /// (/self-review 95e8b1c242 C1). 사용자 말이 없으면 마지막 줄, 기록을 못 읽으면 null.
+    ///. 사용자 말이 없으면 마지막 줄, 기록을 못 읽으면 null.
     /// </summary>
     public static int? ReadUpToBeforeLastUser(ChatTranscript? transcript)
     {
@@ -240,7 +240,7 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
         return lastUser is null ? LastLine(t) : lastUser.Line - 1;
     }
 
-    /// <summary>max자에서 자르되 서로게이트 쌍(이모지 등) 가운데를 가르지 않는다 (95e8b1c242 C10).</summary>
+    /// <summary>max자에서 자르되 서로게이트 쌍(이모지 등) 가운데를 가르지 않는다.</summary>
     public static string Cut(string s, int max)
     {
         if (s.Length <= max) return s;
@@ -269,7 +269,7 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
         if (after is { } a)
         {
             var fresh = entries.Where(e => e.Line > a).ToList();
-            // 갈래 첫 턴처럼 새 말이 한 쪽보다 많으면 다 붙이지 않고 맨 끝 쪽으로 바꾼다 (95e8b1c242 C3)
+            // 갈래 첫 턴처럼 새 말이 한 쪽보다 많으면 다 붙이지 않고 맨 끝 쪽으로 바꾼다
             if (fresh.Count <= size) return new MessagePage(fresh, false);
             return Page(entries, null, null, size) with { Reset = true };
         }
@@ -311,7 +311,7 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
 
     /// <summary>
     /// 칩으로 묶기: 바로 이어진 같은 도구만 한 칩에 횟수 ("Read ×3"), 차례 그대로 — 진행 중 칩(chat.js addChip)과 같은 규칙이라
-    /// 턴이 끝나 기록으로 바뀌어도 모양이 같다 (/self-review 83b453653b C9).
+    /// 턴이 끝나 기록으로 바뀌어도 모양이 같다.
     /// </summary>
     /// <summary>칩을 몇 개까지 보일지 — 넘으면 앞을 "앞 N개"로 접는다 (화면 chat.js MaxChips와 같음).</summary>
     public const int MaxChips = 20;
@@ -351,7 +351,7 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
 
     /// <summary>
     /// 읽음 표시로 받은 줄 번호로 새 ReadUpTo를 정한다: 세션 기록 마지막 줄을 넘지 않게 자르고(지휘자 검토 R3), 앞으로만 간다.
-    /// 바뀌지 않으면 null — 저장 · 목록 알림을 건너뛴다 (/self-review 5225b1ffaf C8).
+    /// 바뀌지 않으면 null — 저장 · 목록 알림을 건너뛴다.
     /// </summary>
     public static int? NextReadUpTo(int? current, int line, int lastLine)
     {
@@ -367,7 +367,7 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
     {
         if (store.LoadError is not null) return 0;
         var moved = 0;
-        // 아직 갈라지지 않은 갈래 방은 건너뛴다 — 첫 턴이 끝날 때 읽음 위치를 정한다 (95e8b1c242 C1)
+        // 아직 갈라지지 않은 갈래 방은 건너뛴다 — 첫 턴이 끝날 때 읽음 위치를 정한다
         foreach (var room in store.All().Where(r => r.ReadUpTo is null && r.ForkOf is null))
         {
             var last = LastLine(transcripts.Read(room.SessionId));
@@ -383,7 +383,7 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
         if (room.Title is { } title) return title;
         if (transcript?.Title is { } sessionTitle) return sessionTitle;
         var first = transcript?.Entries.FirstOrDefault(e => e.Speaker == ChatSpeaker.User)?.Text;
-        var text = first is null ? null : Attachments.WithoutLines(first); // 첨부만 보낸 첫 말이면 "첨부 n개" (5b26cff7df C7)
+        var text = first is null ? null : Attachments.WithoutLines(first); // 첨부만 보낸 첫 말이면 "첨부 n개"
         if (string.IsNullOrWhiteSpace(text)) return "새 방";
         var line = text.Trim().Split('\n')[0].Trim();
         return line.Length > 60 ? line[..60] + "…" : line;
@@ -410,7 +410,7 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
         s = LineMark().Replace(s, "");
         s = s.Replace("**", "").Replace("__", "").Replace("`", "");
         s = Space().Replace(s, " ").Trim();
-        // 서로게이트 쌍(이모지 등) 가운데를 자르지 않는다 (/self-review 5225b1ffaf C9).
+        // 서로게이트 쌍(이모지 등) 가운데를 자르지 않는다.
         return s.Length <= PreviewChars ? s : Cut(s, PreviewChars) + "…";
     }
 
@@ -421,7 +421,7 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
     private static partial Regex Fence();
 
     // 화면(Markdig)이 위젯 · 차트 · 슬라이드 · 도표로 그리는 모양과 맞춘다: ``` · ~~~ 세 개 이상, 언어 이름이 정확히 widget · chart · slides · mermaid, 닫는 울타리는 같은 글자로 그 길이 이상,
-    // 닫히지 않았으면 글 끝까지(중지된 턴), CRLF (803e5f13eb C6)
+    // 닫히지 않았으면 글 끝까지(중지된 턴), CRLF
     [GeneratedRegex(@"^[ \t]*(?<f>(?<c>[`~])\k<c>{2,})[ \t]*(?<lang>widget|chart|slides|mermaid)(?:[ \t][^\n]*)?\r?$.*?(?:^[ \t]*\k<f>\k<c>*[ \t]*\r?$|\z)",
         RegexOptions.Multiline | RegexOptions.Singleline)]
     private static partial Regex WidgetBlock();

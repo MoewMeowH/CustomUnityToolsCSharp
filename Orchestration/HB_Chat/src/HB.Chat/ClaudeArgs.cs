@@ -113,7 +113,7 @@ public static partial class ClaudeArgs
     /// MCP 서버 이름: 영숫자로 시작, 영숫자 _ - 만 64자까지. 파일 이름 · <c>mcp__서버__도구</c> 도구 이름에 그대로 들어가므로 . : / 를 받지 않는다
     /// (/self-review security 00d712e2c7 C4 · 0bcf01451b C2 — CLI가 도구 이름에서 그 글자를 바꾸면 규칙과 어긋난다).
     /// </summary>
-    /// <remarks>`__`도 받지 않는다 — 도구 이름 <c>mcp__서버__도구</c>에서 서버 이름을 첫 `__`로 자르므로 (/self-review security ae543471a8 C6).</remarks>
+    /// <remarks>`__`도 받지 않는다 — 도구 이름 <c>mcp__서버__도구</c>에서 서버 이름을 첫 `__`로 자르므로.</remarks>
     public static bool IsServerName(string? value) => value is not null && ServerName().IsMatch(value) && !value.Contains("__", StringComparison.Ordinal);
 
     public static IReadOnlyList<string> Build(RunSpec spec, IReadOnlyCollection<string> allowedModels)
@@ -168,7 +168,7 @@ public static partial class ClaudeArgs
         }
         else args.AddRange(["--session-id", spec.SessionId]);
         // 시스템 프롬프트는 첫 요청 때 세션에 기록되고 압축 전까지는 resume해도 기록된 값이 쓰인다. 그 뒤로는 그 실행에 준 값이 쓰인다 (문서)
-        // → 방 규칙은 매 말 같은 값을 넣는다. 안 넣으면 압축 뒤 규칙이 빠진다 (/self-review 0a3b1d5155 C2).
+        // → 방 규칙은 매 말 같은 값을 넣는다. 안 넣으면 압축 뒤 규칙이 빠진다.
         if (!string.IsNullOrWhiteSpace(spec.AppendSystemPrompt))
             args.AddRange(["--append-system-prompt", spec.AppendSystemPrompt]);
 
@@ -191,7 +191,7 @@ public static partial class ClaudeArgs
             case PermissionLevel.Command:
                 // 읽기 도구 + 편집 · 명령 도구. 명령은 stdio 호스트(앱)의 승인 카드로 묻는다 (3차 a — 그 전에는 PermissionRequest HTTP 훅).
                 // acceptEdits는 쓰지 않는다: 그 모드는 작업 폴더 안 cp · mv 같은 파일 명령을 묻지 않고 허용해, 편집 금지 규칙(Edit 도구에만 걸림)과
-                // 카드를 둘 다 지나치게 한다 (/self-review 36e4e20e04 C1). 대신 작업 폴더 안 편집만 `Edit(**)`로 미리 허용한다 —
+                // 카드를 둘 다 지나치게 한다. 대신 작업 폴더 안 편집만 `Edit(**)`로 미리 허용한다 —
                 // 실측(2026-10-28): 작업 폴더 안 Write는 묻지 않음, 밖 Write는 거절, Bash cp는 승인 요청으로 옴.
                 args.AddRange(["--tools", "Read,Grep,Glob,Edit,Write,Bash,PowerShell," + HostTools + "," + WebTools + planTool]);
                 if (spec.Plan) args.AddRange(["--permission-mode", "plan"]);
@@ -278,7 +278,7 @@ public static partial class ClaudeArgs
     /// <summary>명령 단계에서 작업 폴더 안 편집을 묻지 않게 하는 규칙 (Edit 규칙은 Write 도구에도 걸린다 — 2026-10-28 실측).</summary>
     public const string CommandEditAllow = "Edit(**)";
 
-    /// <summary>명령 방에서 승인 카드로 받는 도구. 그 밖의 승인 요청(작업 폴더 밖 쓰기 등)은 카드 없이 거절한다 (/self-review 36e4e20e04 C2 · ab79e61df5 C4).</summary>
+    /// <summary>명령 방에서 승인 카드로 받는 도구. 그 밖의 승인 요청(작업 폴더 밖 쓰기 등)은 카드 없이 거절한다.</summary>
     public static readonly IReadOnlySet<string> CommandTools = new HashSet<string>(StringComparer.Ordinal) { "Bash", "PowerShell" };
 
     /// <summary>지휘자의 객관식 질문 도구 (3차 a). SDK식 실행(stdio 호스트)에서만 도구 목록에 들어온다 (3차 0번 실측 A).</summary>
@@ -295,7 +295,7 @@ public static partial class ClaudeArgs
     /// 승인 요청은 앱이 답한다 (RoomHub.DecideToolAsync).
     /// claude에 내장된 공식 문서 사이트(2.1.312 기준 약 95개 — learn.microsoft.com · docs.python.org …)는 CLI가 묻지 않고 가져와 앱 카드 · 기록을 거치지 않는다
     /// (사용자 실측 2026-10-30, 목록은 판마다 바뀔 수 있음 — 카드 자가 시험의 웹 가져오기 단계가 목록 밖 사이트를 묻는지 본다).
-    /// 사용자 · 작업 폴더 설정의 WebFetch(domain:…) 허용 규칙에 든 사이트도 묻지 않아 앱의 주소 검사(로컬 · 사설망)를 거치지 않는다 (/cross-review 909a5c575e C6).
+    /// 사용자 · 작업 폴더 설정의 WebFetch(domain:…) 허용 규칙에 든 사이트도 묻지 않아 앱의 주소 검사(로컬 · 사설망)를 거치지 않는다.
     /// </summary>
     public const string WebSearchTool = "WebSearch", WebFetchTool = "WebFetch", WebTools = WebSearchTool + "," + WebFetchTool;
 

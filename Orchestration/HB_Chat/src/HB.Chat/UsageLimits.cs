@@ -164,7 +164,7 @@ public sealed class UsageLimits(Func<string> dataFolder, Func<string?>? codexHom
 
     /// <summary>
     /// 최근 rollout의 끝부분에서 rate_limits가 든 마지막 token_count 줄. 값이 든 파일 <see cref="CodexFiles"/>개를 찾을 때까지(최대 <see cref="ScanFiles"/>개) 본다.
-    /// 날짜 폴더(YYYY/MM/DD)를 새것부터 봐서 기록이 쌓여도 전체를 훑지 않는다 (지휘자 K1). 파일 · 줄 하나가 깨져도 그것만 건너뛴다 (/self-review b40d9efb00 C2 · C7).
+    /// 날짜 폴더(YYYY/MM/DD)를 새것부터 봐서 기록이 쌓여도 전체를 훑지 않는다 (지휘자 K1). 파일 · 줄 하나가 깨져도 그것만 건너뛴다.
     /// </summary>
     public static LimitSnapshot? ReadCodex(string sessionsDir) => ReadCodex(sessionsDir, null);
 
@@ -248,7 +248,7 @@ public sealed class UsageLimits(Func<string> dataFolder, Func<string?>? codexHom
         return null;
     }
 
-    /// <summary>token_count 줄 하나 → 한도. 다른 묶음(limit_id가 codex가 아님)이면 null (b40d9efb00 C5).</summary>
+    /// <summary>token_count 줄 하나 → 한도. 다른 묶음(limit_id가 codex가 아님)이면 null.</summary>
     private static LimitSnapshot? ParseLimits(string line, string path)
     {
         if (JsonNode.Parse(line) is not JsonObject ev || ev["payload"] is not JsonObject payload || payload["rate_limits"] is not JsonObject limits) return null;

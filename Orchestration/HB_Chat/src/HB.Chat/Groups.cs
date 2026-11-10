@@ -138,7 +138,7 @@ public sealed class GroupLog(Func<string> dataFolder)
         fs.Seek(c.Offset, SeekOrigin.Begin);
         var bytes = new byte[fs.Length - c.Offset];
         fs.ReadExactly(bytes);
-        // 손으로 고쳐 BOM 있는 UTF-8로 저장한 파일 — 예전 ReadAllLines처럼 걷는다 (0c7704170c C4). Offset에는 그대로 센다
+        // 손으로 고쳐 BOM 있는 UTF-8로 저장한 파일 — 예전 ReadAllLines처럼 걷는다. Offset에는 그대로 센다
         var start = c.Offset == 0 && bytes.AsSpan().StartsWith((ReadOnlySpan<byte>)[0xEF, 0xBB, 0xBF]) ? 3 : 0;
         for (var i = 0; i < bytes.Length; i++)
         {
@@ -192,7 +192,7 @@ public sealed class GroupLog(Func<string> dataFolder)
         lock (_gate)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            // 앱이 줄 중간에 죽어 끝에 줄바꿈이 없으면 먼저 줄을 닫는다 — 안 그러면 새 줄이 깨진 줄 뒤에 붙어 둘 다 잃는다 (b8697252eb C6)
+            // 앱이 줄 중간에 죽어 끝에 줄바꿈이 없으면 먼저 줄을 닫는다 — 안 그러면 새 줄이 깨진 줄 뒤에 붙어 둘 다 잃는다
             if (File.Exists(path) && new FileInfo(path).Length > 0)
             {
                 using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
@@ -279,7 +279,7 @@ public static partial class Mentions
     }
 
     /// <summary>
-    /// "@A야" · "@검토님" · "@A의"처럼 이름 뒤에 한글 조사 · 호칭이 붙은 호출 (b8697252eb C5): 이름으로 시작하고 남은 글자가 한글로 시작할 때만 —
+    /// "@A야" · "@검토님" · "@A의"처럼 이름 뒤에 한글 조사 · 호칭이 붙은 호출: 이름으로 시작하고 남은 글자가 한글로 시작할 때만 —
     /// 이름 뒤가 영문 · 숫자면 다른 이름일 수 있어 받지 않는다(정확히 같은 이름이 먼저).
     /// </summary>
     private static bool WithParticle(string word, string name) =>
@@ -318,7 +318,7 @@ public static class GroupRules
                // ⑤ 결정 "모두 차례로, 뒤는 앞 답을 받음" — 쓰는 구성원이 없는 단톡방은 규칙이 그대로(규칙 바뀜 안내가 가지 않게)
                (writers.Count == 0 ? "" :
                    " 작업 폴더에 쓰는 구성원(명령)이 낀 말은 구성원이 차례로 하나씩 답하고, 같은 말에 너보다 먼저 답한 구성원의 답은 단톡방 안내 블록 끝에 따로 온다." +
-                   // 폴더가 섞여도 좁히지 않는다 — 이름이 다른 같은 경로 · 안에 든 폴더 · 명령 구성원의 폴더 밖 수정이 있을 수 있다 (/self-review 128de5a971 C2)
+                   // 폴더가 섞여도 좁히지 않는다 — 이름이 다른 같은 경로 · 안에 든 폴더 · 명령 구성원의 폴더 밖 수정이 있을 수 있다
                    " 다른 구성원이 파일을 바꿨을 수 있으니 답하기 전에 필요한 파일을 다시 읽는다.");
     }
 
@@ -420,7 +420,7 @@ public sealed partial class GroupChat
                 && (o.Value.WorkspacePath(m.Workspace) is not { } wsPath || McpConfigFile.Entry(wsPath, server) is null))
             : null;
         var codexModels = codex.Any(m => m.Model is not null) ? (CodexModelList?.Invoke() ?? CodexModels.Available()) : [];
-        // 강도는 고른 모델이 받는 것만 — 모르는 강도로 만들면 그 구성원이 매 턴 실패하고 만든 뒤에는 바꿀 수 없다 (59063d4106 C2)
+        // 강도는 고른 모델이 받는 것만 — 모르는 강도로 만들면 그 구성원이 매 턴 실패하고 만든 뒤에는 바꿀 수 없다
         bool EffortOk(GroupMemberSpec m) => m.Effort is not { } e
             || (m.Model is { } slug && codexModels.FirstOrDefault(x => x.Slug == slug) is { Efforts.Count: > 0 } known
                 ? known.Efforts.Contains(e, StringComparer.Ordinal)
@@ -497,7 +497,7 @@ public sealed partial class GroupChat
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
             {
-                // 대화 줄 · 색인을 쓰지 못함 — 500 대신 문구로 (b8697252eb C8). 기다림 표시는 실행이 시작되지 않았을 때만 푼다
+                // 대화 줄 · 색인을 쓰지 못함 — 500 대신 문구로. 기다림 표시는 실행이 시작되지 않았을 때만 푼다
                 foreach (var m in group.Members.Where(m => !_hub.IsBusy(m.RoomId))) _pending.TryRemove(m.RoomId, out _);
                 return $"보내지 못했습니다: {ex.Message}";
             }
@@ -534,13 +534,13 @@ public sealed partial class GroupChat
         foreach (var member in serial ? targets.Take(1) : targets)
         {
             var prompt = PromptFor(current, member, log, text);
-            // 붙인 대화까지 합친 길이로 미리 막는다 — 사용자 줄을 남긴 뒤 자식 방이 거절하면 같은 말이 계속 실패했다 (b8697252eb C2)
+            // 붙인 대화까지 합친 길이로 미리 막는다 — 사용자 줄을 남긴 뒤 자식 방이 거절하면 같은 말이 계속 실패했다
             if (prompt.Length > RoomHub.MaxPromptChars)
                 return $"{member.Name}에게 앞 대화를 붙이면 너무 깁니다 ({prompt.Length:N0}자, 상한 {RoomHub.MaxPromptChars:N0}자) — 말을 줄여 주세요.";
             prompts.Add((member, prompt));
         }
 
-        // 기다림 표시를 줄을 쓰기 전에 — 그 사이 다른 탭이 새 말을 받아도 "답이 없음" 줄을 그리지 않게 (b8697252eb C10)
+        // 기다림 표시를 줄을 쓰기 전에 — 그 사이 다른 탭이 새 말을 받아도 "답이 없음" 줄을 그리지 않게
         var waiting = targets.Skip(prompts.Count).ToList();
         foreach (var (member, _) in prompts) _pending[member.RoomId] = new Pending(-1, DateTimeOffset.UtcNow, member.SeenUpTo);
         foreach (var member in waiting) _pending[member.RoomId] = new Pending(-1, DateTimeOffset.UtcNow, member.SeenUpTo, Queued: true);
@@ -832,7 +832,7 @@ public sealed partial class GroupChat
     /// 구성원에게 보낼 "마지막으로 본 뒤의 대화" (system-reminder — 자식 방 화면 · 검색에는 걷혀 보이지 않음). 길면 앞쪽을 줄인다.
     /// 대화 글 속 system-reminder 표식은 바꿔 블록이 일찍 닫히지 않게 한다.
     /// </summary>
-    /// <param name="fresh">새 대화(스레드 없는 Codex 구성원)에 처음부터 붙일 때 — 머리말을 "지금까지 오간 말"로 (sub_self 3cc5ce85df C4).</param>
+    /// <param name="fresh">새 대화(스레드 없는 Codex 구성원)에 처음부터 붙일 때 — 머리말을 "지금까지 오간 말"로.</param>
     /// <param name="keep">줄이지 않을 대화 줄 번호 (이어 부르기의 부른 답 — 4단계 리뷰 1-F3). 그 줄은 남기고 다른 앞 줄부터 줄인다.</param>
     /// <param name="turn">차례로 도는 말(⑤)의 사용자 말 줄 — 그 뒤 줄 앞에 "같은 말에 먼저 답한 구성원" 머리를 넣는다.</param>
     /// <param name="calledBy">그 머리에 "A가 답에서 너를 불렀다"를 붙일 구성원 이름들.</param>
@@ -872,7 +872,7 @@ public sealed partial class GroupChat
                (skipped > 0 ? $" (앞 말 {skipped}개 생략)" : "") + ". 사용자의 이번 말은 이 안내 뒤에 있다.\n" + body + "\n</system-reminder>\n";
     }
 
-    /// <summary>글 속 system-reminder 표식(대소문자 · 공백 · 속성 변형 포함)을 바꿔 블록이 일찍 닫히지 않게 (b8697252eb C9).</summary>
+    /// <summary>글 속 system-reminder 표식(대소문자 · 공백 · 속성 변형 포함)을 바꿔 블록이 일찍 닫히지 않게.</summary>
     private static string Neutralize(string text) => ReminderTag().Replace(text, m => m.Value.Replace('<', '‹').Replace('>', '›'));
 
     [GeneratedRegex(@"<\s*/?\s*system-reminder[^>]*>", RegexOptions.IgnoreCase)]
@@ -1044,7 +1044,7 @@ public sealed partial class GroupChat
                 continue;
             }
             // 이 판에서 이미 이어 불린 구성원은 다시 부르지 않는다 — 말없이 사라지지 않게 안내 줄 (⑤ K9, 결정 "안내 줄 남기기")
-            // 갈음으로 자기 차례에 답한 구성원은 이어 불린 적이 없다 — 문구를 가른다 (/self-review 175acbd35a C3)
+            // 갈음으로 자기 차례에 답한 구성원은 이어 불린 적이 없다 — 문구를 가른다
             if (!round.Chained.Add(target.Id))
             {
                 (round.CalledBy.ContainsKey(target.Id) ? turned : already).Add(name);
@@ -1121,7 +1121,7 @@ public sealed partial class GroupChat
             // 단톡방마다 차례로, 보낼 때 지금 상태를 다시 읽는다 — 늦게 돈 작업이 옛 "생각 중"을 마지막에 덮지 않게 (b8697252eb C4 · 지휘자 K1)
             lock (_gates.GetOrAdd(groupId, _ => new Lock()))
             {
-                // 턴 없이 쉼으로 돌아감(실행 전 중지 · 루프가 죽음): 기다림을 풀고 한 줄 남긴다 — 안 그러면 단톡방이 계속 "답하는 중"으로 막혔다 (b8697252eb C3)
+                // 턴 없이 쉼으로 돌아감(실행 전 중지 · 루프가 죽음): 기다림을 풀고 한 줄 남긴다 — 안 그러면 단톡방이 계속 "답하는 중"으로 막혔다
                 // 차례를 기다리는 구성원(⑤ — 아직 보내지 않음)은 쉬는 게 맞다
                 if (kind == "idle" && !_hub.IsBusy(roomId) && _pending.TryGetValue(roomId, out var pending) && !pending.Posting && !pending.Queued && pending.At < at)
                 {
@@ -1189,7 +1189,7 @@ public sealed partial class GroupChat
 
     /// <summary>
     /// 단톡방 화면이 SSE를 붙이면(처음 · 다시 붙음) 실행 중인 구성원의 쌓인 글 · 마지막 도구를 member-reset · member-tool로 그 채널에 넣는다 —
-    /// 구성원 자식 방 잠금 안에서 써서 그 뒤 글 조각과 겹치지 않는다 (/self-review 7e68bf5791 C1).
+    /// 구성원 자식 방 잠금 안에서 써서 그 뒤 글 조각과 겹치지 않는다.
     /// </summary>
     private void OnSubscribed(string roomId, System.Threading.Channels.ChannelWriter<LiveEvent> to)
     {

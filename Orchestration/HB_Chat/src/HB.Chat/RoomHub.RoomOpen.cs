@@ -12,7 +12,7 @@ public sealed partial class RoomHub
     /// <summary>
     /// 방마다 카드에서 허용한 새 방 값 (한 번 쓰면 지운다). 터미널 표처럼 실행 수명이다: 실행 토큰을 거두면(실행 끝 · 중지) 그 방 표를 버리고,
     /// 허용 뒤 <see cref="RoomOpenTicketLife"/>가 지나도 버린다 — 남으면 사용자가 중지로 취소한 열기를 다음 실행이 토큰으로 직접 불러 카드 없이 열 수 있었다
-    /// (/self-review 4f5fd81b8e C1 · 3eda32c3fb C1). 방마다 상한도 둔다.
+    ///. 방마다 상한도 둔다.
     /// </summary>
     private readonly Dictionary<string, List<(RoomOpenSpec Spec, DateTimeOffset At)>> _roomOpenTickets = new(StringComparer.Ordinal);
     private readonly Lock _roomOpenGate = new();
@@ -55,7 +55,6 @@ public sealed partial class RoomHub
 
     /// <summary>
     /// 여는 방 기록에 "새 방" 줄 (화면이 [열기] 링크로 그린다). 진행 칸에도 바로 링크 줄을 보낸다 — 기록 줄은 그 방 턴이 끝나 다시 그릴 때에야 보인다
-    /// (/self-review 4f5fd81b8e C3).
     /// </summary>
     public void NoteRoomOpened(string fromRoomId, string openedRoomId, string name)
     {

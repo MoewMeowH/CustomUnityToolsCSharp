@@ -69,7 +69,7 @@ else
             </div>
         }
     }
-    @* 방 목록이 실제로 있을 때만 접는다 — 읽기 실패 · 다룬 문서 없음이면 이 목록이 볼 것의 전부 (abc6476218 C3) *@
+    @* 방 목록이 실제로 있을 때만 접는다 — 읽기 실패 · 다룬 문서 없음이면 이 목록이 볼 것의 전부 *@
     <details class="docs-folder" open="@(Model.RoomDocs.Count == 0)">
         <summary class="side-h">작업 폴더 최근</summary>
         @foreach (var p in Model.DocProjects)

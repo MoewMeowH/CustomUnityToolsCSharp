@@ -44,7 +44,7 @@
     let listTimer = null, listSeq = 0, limitsBusy = false, limitsAgain = false;
     async function refreshList() {
         const seq = ++listSeq;
-        refreshLimits(); // 목록 요청이 실패해도 한도 줄은 따로 (/self-review b40d9efb00 C6)
+        refreshLimits(); // 목록 요청이 실패해도 한도 줄은 따로
         try {
             const res = await fetch("/?handler=RoomList&current=" + encodeURIComponent(room?.id || ""), { cache: "no-store" });
             if (!res.ok || seq !== listSeq) return;
@@ -59,7 +59,7 @@
                 fresh.scrollTop = top;
                 const trash = document.getElementById("trash-count");
                 if (trash && fresh.dataset.trash != null) trash.textContent = fresh.dataset.trash;
-                // 요청을 보낸 뒤 방을 바꿨을 수 있다 — 서버가 그린 강조 대신 지금 방으로 (/self-review 5225b1ffaf C3)
+                // 요청을 보낸 뒤 방을 바꿨을 수 있다 — 서버가 그린 강조 대신 지금 방으로
                 markActive(room?.id ?? null);
             }
         } catch { /* 다음 알림 때 다시 */ }
@@ -153,7 +153,7 @@
         if (!level) return;
         const codex = engine.value === "codex";
         if (codex && level.dataset.before == null) { level.dataset.before = level.value; level.value = "Read"; }
-        else if (!codex && level.dataset.before != null) { level.value = level.dataset.before; delete level.dataset.before; } // Claude로 돌리면 고르던 값으로 (9c54e0c54a C6)
+        else if (!codex && level.dataset.before != null) { level.value = level.dataset.before; delete level.dataset.before; } // Claude로 돌리면 고르던 값으로
         for (const o of level.options) o.disabled = codex && o.value !== "Read";
         // 숨겨도 고른 값은 둔다 — 서버는 Claude 구성원의 Codex 값을 쓰지 않는다
         row.querySelectorAll("select[name=codexModels], select[name=codexEfforts]").forEach(s => { s.hidden = !codex; });
@@ -187,7 +187,7 @@
         if (m) openRoom(m[1], false); else location.reload();
     });
 
-    // 마지막으로 누른 방만 붙인다: 먼저 보낸 요청이 늦게 와도 버린다 (/self-review 5225b1ffaf C2).
+    // 마지막으로 누른 방만 붙인다: 먼저 보낸 요청이 늦게 와도 버린다.
     // line이 있으면 그 말까지 앞 쪽을 받아 보이고 강조한다 (검색 결과, 2-2 c).
     let openSeq = 0;
     async function openRoom(id, push, line) {
@@ -330,7 +330,7 @@
                 done = true;
                 if (save && input.value.trim() !== h2.textContent) {
                     const data = new FormData(); data.append("title", input.value);
-                    // 제목(비우면 첫 말)은 새 말 받기의 data-title로 바뀐다. 새 말 받기는 알림 줄(chain)에 세운다 — end · snapshot의 받기와 겹치면 말이 두 번 붙었다 (/self-review c216951e79 C2)
+                    // 제목(비우면 첫 말)은 새 말 받기의 data-title로 바뀐다. 새 말 받기는 알림 줄(chain)에 세운다 — end · snapshot의 받기와 겹치면 말이 두 번 붙었다
                     if (await post("Rename", data)) { chain = chain.then(() => disposed ? null : refreshMessages()).catch(() => { }); loadSide(); }
                 }
                 input.remove();
@@ -343,7 +343,7 @@
             input.addEventListener("blur", () => finish(true));
         }
 
-        // 메뉴 밖을 누르거나 내보내기를 누르면 닫는다 (95e8b1c242 C9)
+        // 메뉴 밖을 누르거나 내보내기를 누르면 닫는다
         const closeMenu = (e) => { if (menu?.open && !e.target.closest("details.menu")) menu.open = false; };
         document.addEventListener("click", closeMenu);
         menu?.querySelector("a[download]")?.addEventListener("click", () => setTimeout(() => { menu.open = false; }, 0));
@@ -353,7 +353,7 @@
             if (e.target.closest("#room-title, .menu-rename")) { startRename(); return; }
             if (e.target.closest(".menu-fork")) {
                 if (menu) menu.open = false;
-                // 갈라지는 때는 새 방에 첫 말을 보낼 때다 (95e8b1c242 C2) — 문구도 그대로
+                // 갈라지는 때는 새 방에 첫 말을 보낼 때다 — 문구도 그대로
                 if (!confirm("이 방 대화를 이어받는 새 방을 만들까요?\n새 방에 첫 말을 보낼 때 그때까지의 이 방 대화가 복사됩니다 (그 전에 이 방에서 더 나눈 대화도 포함).")) return;
                 const res = await post("Fork", new FormData(), false, true);
                 if (res?.id) openRoom(res.id, true);
@@ -408,7 +408,7 @@
         const preloadFaces = () => [...new Set(Object.values(faces).map(f => f && f.url).filter(Boolean))]
             .forEach(url => { if (!disposed) new Image().src = url; });
         if (window.requestIdleCallback) requestIdleCallback(preloadFaces, { timeout: 5000 }); else setTimeout(preloadFaces, 2000);
-        // 끝난 턴의 표정을 보이는 시간은 서버(RoomHub.EndFaceFor)가 준다. 처음 그린 끝 표정은 남은 시간만 (83b453653b C11).
+        // 끝난 턴의 표정을 보이는 시간은 서버(RoomHub.EndFaceFor)가 준다. 처음 그린 끝 표정은 남은 시간만.
         const endFaceMs = Number(root.dataset.endFaceMs || 10000);
         let faceTimer = null;
         function setFace(name, extra, leftMs) {
@@ -424,7 +424,7 @@
         }
         if (root.dataset.face === "Done" || root.dataset.face === "Stopped") setFace(root.dataset.face, null, Number(root.dataset.faceLeft || 0));
 
-        // ---- 컨텍스트 (2-2 b): 턴이 끝날 때의 크기 / 창. 창을 모르는 턴이면 앞 창을 그대로 (83b453653b C5) ----
+        // ---- 컨텍스트 (2-2 b): 턴이 끝날 때의 크기 / 창. 창을 모르는 턴이면 앞 창을 그대로 ----
         let ctxWindow = Number($("#ctx").dataset.window || 0) || null;
         function showContext(t, w) {
             if (t == null) return;
@@ -443,7 +443,7 @@
             const before = sentRead;
             sentRead = last;
             const data = new FormData(); data.append("line", String(last));
-            // 저장하지 못했으면 다음 기회에 다시 보낸다 (/self-review 5225b1ffaf C7)
+            // 저장하지 못했으면 다음 기회에 다시 보낸다
             post("MarkRead", data, true).then(ok => { if (!ok && sentRead === last) sentRead = before; });
         }
 
@@ -477,7 +477,7 @@
                 return true;
             } catch { return false; /* 다음 스크롤 · 안내 누르기 때 다시 */ }
         }
-        // 칸이 다 차지 않으면 스크롤이 생기지 않아 위로 올릴 수 없다 — 찰 때까지 앞 쪽을 이어 받는다 (83b453653b C8).
+        // 칸이 다 차지 않으면 스크롤이 생기지 않아 위로 올릴 수 없다 — 찰 때까지 앞 쪽을 이어 받는다.
         function fillUp() {
             if (!disposed && !revealing && scroller.scrollHeight <= scroller.clientHeight + 300) loadOlder();
         }
@@ -566,7 +566,7 @@
             const c = el("span", "chip", name);
             c.dataset.name = name; c.dataset.count = "1";
             chips.append(c);
-            // 대상이 붙어 칩이 잘 묶이지 않는다 — 최근 MaxChips개만 두고 앞은 "앞 N개"로 접는다 (/self-review ea28ba9185 C6)
+            // 대상이 붙어 칩이 잘 묶이지 않는다 — 최근 MaxChips개만 두고 앞은 "앞 N개"로 접는다
             const items = chips.querySelectorAll(":scope > .chip:not(.older-chips)");
             if (items.length > MaxChips) {
                 let older = chips.querySelector(":scope > .older-chips");
@@ -589,7 +589,7 @@
             queueBox.append(el("span", "muted", "기다리는 말 " + items.length));
             for (const item of items) {
                 const oneLine = displayText(item.text).replace(/\s+/g, " ").trim();
-                // 글은 span에서 줄임표 — ×가 잘리지 않게 (/self-review 5b26cff7df C1)
+                // 글은 span에서 줄임표 — ×가 잘리지 않게
                 const chip = el("span", "chip queued");
                 chip.append(el("span", "t", oneLine.length > 40 ? oneLine.slice(0, 40) + "…" : oneLine));
                 chip.title = displayText(item.text).slice(0, 500);
@@ -633,7 +633,7 @@
                 const panel = $("#codex-log");
                 if (seq !== codexSeq || disposed || !panel) return;
                 const fresh = new DOMParser().parseFromString(html, "text/html").getElementById("codex-log");
-                // 펼쳐 둔 안내 블록은 펼친 채로 (D11) — 끝 300단계만 오므로 차례 대신 서버가 단 키로 맞춘다 (9c54e0c54a C3)
+                // 펼쳐 둔 안내 블록은 펼친 채로 (D11) — 끝 300단계만 오므로 차례 대신 서버가 단 키로 맞춘다
                 const opened = new Set([...panel.querySelectorAll("details.codex-guide[open]")].map(d => d.dataset.key));
                 fresh?.querySelectorAll("details.codex-guide").forEach(d => { if (opened.has(d.dataset.key)) d.open = true; });
                 // 같은 내용이면 두어 선택 · 말풍선 자리가 흔들리지 않게 (지휘자 K5)
@@ -739,10 +739,10 @@
         }
         // 턴이 끝난 뒤: 마지막으로 본 줄 뒤의 새 말만 받아 붙인다. 기록이 다시 쓰였으면(줄이 줄었으면) 쪽 전체를 다시 받는다.
         async function refreshMessages() {
-            // 검색 결과로 옛 말을 보이는 중이면 맨 아래로 따라가지 않는다 (95e8b1c242 C4)
+            // 검색 결과로 옛 말을 보이는 중이면 맨 아래로 따라가지 않는다
             const follow = atBottom() && !revealing;
             const chat = chatEl();
-            // 읽기 실패로 그린 쪽은 기준 줄을 모른다 — 쪽 전체를 다시 받는다 (83b453653b C6)
+            // 읽기 실패로 그린 쪽은 기준 줄을 모른다 — 쪽 전체를 다시 받는다
             if (chat.dataset.error) return await reloadMessages(follow);
             try {
                 const res = await fetch(self + "?handler=Messages&after=" + encodeURIComponent(chat.dataset.lastLine), { cache: "no-store" });
@@ -750,11 +750,11 @@
                 const fresh = parseChat(await res.text());
                 if (!fresh || disposed || chatEl() !== chat) return false;
                 if (Number(fresh.dataset.lastLine) < Number(chat.dataset.lastLine)) return await reloadMessages(follow);
-                // 기록의 질문 답 말풍선이 오면 진행 중 칸의 실시간 답은 지운다 — 턴 도중 새 말 받기에 같은 답이 두 번 보이지 않게 (e8091295fe C3)
+                // 기록의 질문 답 말풍선이 오면 진행 중 칸의 실시간 답은 지운다 — 턴 도중 새 말 받기에 같은 답이 두 번 보이지 않게
                 if (fresh.querySelector(":scope > .msg.answer")) live.querySelectorAll(":scope > .msg.answer").forEach(m => m.remove());
                 // 서버 요약 중간 글도 같다 — 턴 도중 새 말 받기(방 이름 바꾸기)로 기록에 나타나면 진행 중 칸의 것을 지운다
                 if (fresh.querySelector(":scope > .msg.narration")) live.querySelectorAll(":scope > .msg.narration").forEach(m => m.remove());
-                // 새 말이 한 쪽보다 많으면(갈래 첫 턴 등) 서버가 맨 끝 쪽을 준다 — 붙이지 않고 쪽을 바꾼다 (95e8b1c242 C3)
+                // 새 말이 한 쪽보다 많으면(갈래 첫 턴 등) 서버가 맨 끝 쪽을 준다 — 붙이지 않고 쪽을 바꾼다
                 if (fresh.dataset.reset) {
                     decorate(fresh);
                     chat.replaceWith(fresh);
@@ -766,7 +766,7 @@
                 }
                 if (fresh.firstElementChild) {
                     chat.querySelector(".empty")?.remove();
-                    // 맨 뒤 실행 말풍선은 조각이 다시 보낸다 (다음 말이 생겼으면 그 앞으로) — 앞서 그린 것은 지운다 (/self-review a9e6066519 C1)
+                    // 맨 뒤 실행 말풍선은 조각이 다시 보낸다 (다음 말이 생겼으면 그 앞으로) — 앞서 그린 것은 지운다
                     chat.querySelectorAll(":scope > .run-trailing").forEach(n => n.remove());
                     decorate(fresh);
                     if (chat.dataset.firstLine === "-1") chat.dataset.firstLine = fresh.dataset.firstLine;
@@ -795,7 +795,7 @@
                 return true;
             } catch { return false; }
         }
-        // 턴 도중 새 말 받기(방 이름 바꾸기 등)가 외부 말풍선을 대화 쪽에 다시 그렸으면 진행 칸의 같은 말풍선은 지운다 — 두 번 보이지 않게 (6b6443f26e C1)
+        // 턴 도중 새 말 받기(방 이름 바꾸기 등)가 외부 말풍선을 대화 쪽에 다시 그렸으면 진행 칸의 같은 말풍선은 지운다 — 두 번 보이지 않게
         function dropShownLiveRuns() {
             live.querySelectorAll(":scope > .live-run").forEach(n => { if (runInChat(n.dataset.runKey)) n.remove(); });
         }
@@ -822,7 +822,7 @@
                     if (turn !== liveRunTurn) {
                         const keys = [...box.children].map(n => n.dataset.runKey).filter(unseen);
                         // 알림 차례 뒤에서 다시 본다 — 턴 끝 새 말 받기가 그사이 제자리에 넣었으면 다시 받지 않는다.
-                        // 다음 턴이 도는 중이면 쪽을 바꾸지 않는다 — 그 턴의 보낸 말 · 외부 말풍선이 기록 쪽에 먼저 그려진다 (8f79e1752f C2). 다음 턴 끝에 받는다
+                        // 다음 턴이 도는 중이면 쪽을 바꾸지 않는다 — 그 턴의 보낸 말 · 외부 말풍선이 기록 쪽에 먼저 그려진다. 다음 턴 끝에 받는다
                         if (!keys.length) continue;
                         chain = chain.then(async () => {
                             if (disposed || !keys.some(unseen)) return;
@@ -856,7 +856,7 @@
 
         // ---- 터미널 곁칸: 내 셸("+" PowerShell · ▾ 고르기, 입력 받음)과 지휘자 프로세스(읽기 전용).
         // 목록은 terminals 알림, 출력은 term-out 알림(base64 바이트). 탭을 처음 보일 때 xterm을 만들고 버퍼 전체를 받는다 — 그 끝 오프셋보다 앞선
-        // 실시간 조각은 버리고, 틈이 보이거나 다시 붙으면 버퍼를 다시 받는다 (/self-review 57b59ef134 C4). 키 입력은 차례대로 보낸다(내 셸만). ----
+        // 실시간 조각은 버리고, 틈이 보이거나 다시 붙으면 버퍼를 다시 받는다. 키 입력은 차례대로 보낸다(내 셸만). ----
         const termTabs = $("#term-tabs"), termHost = $("#term-host"), termBar = $("#term-bar");
         let termList = [], termActive = null, termSend = Promise.resolve(), termResizeTimer = 0;
         const termViews = new Map(); // id → { term, fit, box, end, pending, cols, rows }
@@ -954,7 +954,7 @@
             term.open(box);
             const v = { id, term, fit, box, end: 0, pending: [], cols: 0, rows: 0 };
             termViews.set(id, v);
-            // 키 입력(내 셸만): 앞 요청이 끝난 뒤 보낸다 (순서가 바뀌면 명령이 섞인다). 붙여넣기는 한 번에 1,000자씩 — 서버 상한 4KB (/self-review 57b59ef134 C2)
+            // 키 입력(내 셸만): 앞 요청이 끝난 뒤 보낸다 (순서가 바뀌면 명령이 섞인다). 붙여넣기는 한 번에 1,000자씩 — 서버 상한 4KB
             if (shell) term.onData(d => {
                 for (let i = 0; i < d.length; i += 1000) {
                     const part = d.slice(i, i + 1000);
@@ -1072,7 +1072,7 @@
         const side = $("#side"), sideToggle = $("#side-toggle");
         const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch { } } };
         const sideTabs = ["steps", "info", "runs", "files", "docs", "mcp", "term", "browser"];
-        // 저장값이 모르는 탭이면 단계 탭 — 모든 칸이 숨던 문제 (c216951e79 C7)
+        // 저장값이 모르는 탭이면 단계 탭 — 모든 칸이 숨던 문제
         let sideTab = sideTabs.includes(store.get("hbchat.sideTab")) ? store.get("hbchat.sideTab") : "steps";
         if (sideTab === "term" && !$("#side-tab-term")) sideTab = "steps"; // 터미널 탭이 없는 칸(옛 화면)이면
         if (sideTab === "browser" && !$("#side-tab-browser")) sideTab = "steps"; // 브라우저 탭은 명령 방만
@@ -1086,7 +1086,7 @@
             side.querySelectorAll(".side-sec").forEach(s => { s.hidden = s.dataset.tab !== tab; });
             if (tab === "term" && !side.hidden) showTerm(termActive); // xterm은 탭이 보일 때 만든다 (안 보이면 크기를 못 잰다)
             if (tab === "browser" && !side.hidden) loadBrowserFrame(); // 마지막 화면 (실시간 프레임은 바뀔 때만 온다)
-            if (tab === "docs" && !side.hidden && !docsLoaded) loadDocs(); // 턴 끝 loadSide도 이 함수를 부른다 — 목록은 한 번만 (256b92a166 C5)
+            if (tab === "docs" && !side.hidden && !docsLoaded) loadDocs(); // 턴 끝 loadSide도 이 함수를 부른다 — 목록은 한 번만
         }
         function sidePlaceholder(text) {
             // 받는 중 · 실패 글은 탭과 상관없이 보인다 (c216951e79 C6 · 지휘자 K3) — 단계 탭은 화면이 그리므로 그 탭에만 가린다
@@ -1114,7 +1114,7 @@
                     if (await post("Rename", data)) { chain = chain.then(() => disposed ? null : refreshMessages()).catch(() => { }); loadSide(); }
                 });
                 // 이 방 스티커 팩 (4차 D2): 바꾸면 서버가 profiles 알림을 보내 방을 다시 연다 (스티커 · 표정 주소가 바뀜)
-                // 실패하면 앞 값으로 되돌리고, 성공하면 알림을 기다리지 않고 직접 다시 연다 — 다시 붙는 중 알림을 놓쳐도 (ef2c83416c C5)
+                // 실패하면 앞 값으로 되돌리고, 성공하면 알림을 기다리지 않고 직접 다시 연다 — 다시 붙는 중 알림을 놓쳐도
                 const packSel = $("#side-pack");
                 const packWas = packSel?.value;
                 packSel?.addEventListener("change", async () => {
@@ -1206,7 +1206,7 @@
             docsLoaded = false;
             loadDocs();
         }
-        // 마지막에 누른 문서만 그린다 — 늦게 온 앞 응답이 덮지 않게 (256b92a166 C4)
+        // 마지막에 누른 문서만 그린다 — 늦게 온 앞 응답이 덮지 않게
         async function openDoc(path) {
             const seq = ++docSeq;
             const res = await fetch(self + "?handler=Doc&path=" + encodeURIComponent(path), { cache: "no-store" }).catch(() => null);
@@ -1221,7 +1221,7 @@
             docsSec.scrollTop = 0;
         }
         docsSec?.addEventListener("click", (e) => {
-            // 사용자가 머리를 눌렀을 때만 기억한다 — toggle은 서버 HTML의 open 속성으로도 와서 구별되지 않는다 (abc6476218 C2).
+            // 사용자가 머리를 눌렀을 때만 기억한다 — toggle은 서버 HTML의 open 속성으로도 와서 구별되지 않는다.
             // click은 접고 펴기 전에 오므로 바뀔 값은 지금의 반대 (키보드 Enter · Space도 click으로 온다)
             const head = e.target.closest("details.docs-folder > summary");
             if (head) { folderOpen = !head.parentElement.open; return; }
@@ -1233,7 +1233,7 @@
             const a = e.target.closest("a");
             if (!a) return;
             if (a.dataset.doc) { e.preventDefault(); openDoc(a.dataset.doc); return; }
-            // 본문 속 링크: http · https · mailto는 새 창(데스크톱 앱은 기본 브라우저) — 앱 탭이 넘어가지 않게 (256b92a166 C2),
+            // 본문 속 링크: http · https · mailto는 새 창(데스크톱 앱은 기본 브라우저) — 앱 탭이 넘어가지 않게,
             // #앵커는 본문 안에서 이동, 상대 .md(로그 첫 줄의 ../plans/…md 등)는 같은 칸에서, 그 밖은 막는다
             const href = a.getAttribute("href") || "";
             e.preventDefault();
@@ -1265,7 +1265,7 @@
             // Esc로 닫기 — 좁은 폭에서는 곁칸이 "정보" 단추를 덮는다 (지휘자 K2)
             // 터미널 안의 Esc는 그 프로세스 입력이다 — 곁칸을 닫지 않는다
             side.addEventListener("keydown", (e) => { if (e.key === "Escape" && !e.target.closest?.(".term-host")) { setSide(false); sideToggle.focus(); } });
-            // 저장된 "열림"은 넓은 폭에서만 되살린다 — 좁으면 방을 열 때마다 대화를 덮었다 (c216951e79 C5). 미니 창은 숨김.
+            // 저장된 "열림"은 넓은 폭에서만 되살린다 — 좁으면 방을 열 때마다 대화를 덮었다. 미니 창은 숨김.
             if (store.get("hbchat.side") === "1" && wide() && !root.closest(".mini")) setSide(true);
         }
 
@@ -1340,7 +1340,7 @@
             if (summary) s.body.replaceChildren(el("div", "sub-final", summary));
         }
         // 서버 목록으로 도는 말풍선을 갈아 끼운다. 끝난 말풍선은 두고 간다 — 턴 끝에 기록을 다시 받지 못했을 때 그 답이 사라지지 않게
-        // (/self-review ad101bcdb6 R-C7). 끝난 것은 기록을 받은 턴 끝 · 턴 시작(진행 칸 비우기)에서 지워진다.
+        //. 끝난 것은 기록을 받은 턴 끝 · 턴 시작(진행 칸 비우기)에서 지워진다.
         function renderSubagents(list) {
             live.querySelectorAll(":scope > .live-sub:not(.sub-done)").forEach(n => n.remove());
             for (const [id, s] of subBubbles) if (!s.msg.isConnected || !s.done) subBubbles.delete(id);
@@ -1388,12 +1388,12 @@
         }
 
         // 메인 답 뒤 백그라운드 작업 기다림 줄: 몇 개 · 언제 정리 · "지금 끝내기".
-        // 기다림은 정리 시각(until)이 있는 동안 — 작업 수가 0이어도 지휘자가 이어 답하는 중이라 줄과 단추를 둔다 (/self-review 6f64f4b039 C3). 끝 · 중지에서 지운다.
+        // 기다림은 정리 시각(until)이 있는 동안 — 작업 수가 0이어도 지휘자가 이어 답하는 중이라 줄과 단추를 둔다. 끝 · 중지에서 지운다.
         let bgLine = null;
         function clearBackground() { bgLine?.remove(); bgLine = null; }
         // 쉬는 실행의 인자가 바뀌는 설정(권한 · 연결 · Unity · 외부 요청 전에 묻기 · 계획 먼저 켜기): 남은 백그라운드 작업을 끝내야 적용된다 —
         // 묻고(결정 "확인 뒤 작업 끝내고 적용"), 취소면 null (설정을 보내지 않는다). 허용이면 "저장된 뒤 작업 끝내기" 함수를 돌려준다 —
-        // 저장이 실패하면 작업을 끝내지 않는다 (af6ffa3da5 C5). 응답 중이면 쓰던 답은 끝까지 (서버가 그 턴 끝에). 모델 · 강도는 살린 채 바뀌어 묻지 않는다.
+        // 저장이 실패하면 작업을 끝내지 않는다. 응답 중이면 쓰던 답은 끝까지 (서버가 그 턴 끝에). 모델 · 강도는 살린 채 바뀌어 묻지 않는다.
         function confirmRestChange() {
             const n = bgLine?.isConnected ? (bgLine.list?.childElementCount || 0) : 0;
             if (n === 0) return async () => { };
@@ -1408,7 +1408,7 @@
                 bgLine.append(el("span"));
                 const go = el("button", "btn", "지금 끝내기");
                 go.type = "button";
-                // 서버가 못 받았으면(요청 실패) 다시 누를 수 있게 (6f64f4b039 C7)
+                // 서버가 못 받았으면(요청 실패) 다시 누를 수 있게
                 go.addEventListener("click", async () => { go.disabled = true; if (!await post("WrapUp", new FormData(), true)) go.disabled = false; });
                 bgLine.append(go);
                 bgLine.button = go;
@@ -1462,7 +1462,7 @@
         }
 
         // 알림은 온 차례대로 하나씩 처리한다. EventSource는 onmessage가 끝나기를 기다리지 않아,
-        // end의 말풍선 다시 받기(fetch) 중에 다음 턴의 start가 먼저 그려졌다가 지워지는 일이 있었다 (/self-review 0a3b1d5155 C1).
+        // end의 말풍선 다시 받기(fetch) 중에 다음 턴의 start가 먼저 그려졌다가 지워지는 일이 있었다.
         let chain = Promise.resolve();
         const es = new EventSource("/events/" + roomId);
         es.onopen = () => { conn.textContent = ""; };
@@ -1481,7 +1481,7 @@
                     reopenRoom(roomId);
                     break;
                 case "snapshot":
-                    // 처음 붙거나 다시 붙을 때: 그사이 끝난 턴이 있을 수 있으니 새 말부터 받는다 (0a3b1d5155 C3).
+                    // 처음 붙거나 다시 붙을 때: 그사이 끝난 턴이 있을 수 있으니 새 말부터 받는다.
                     // 끊긴 사이 다른 방이 바뀌었을 수도 있어 목록도 다시 받는다.
                     scheduleList();
                     liveRunTurn++;
@@ -1598,7 +1598,7 @@
                     break;
                 case "tool":
                     // 칩만 — 표정은 서버 face 알림 · snapshot만 따른다. snapshot 뒤 다시 보내는 tool이 승인 기다림 · 답 쓰는 중을
-                    // "도구 실행 중"으로 덮던 문제 (/self-review 83b453653b C1). 대상(파일 이름 · 명령 첫 줄)이 있으면 같이 (3차 b).
+                    // "도구 실행 중"으로 덮던 문제. 대상(파일 이름 · 명령 첫 줄)이 있으면 같이 (3차 b).
                     {
                         const follow = atBottom();
                         followStream();
@@ -1617,7 +1617,7 @@
                     break;
                 case "denied":
                 case "retry":
-                    // 카드 없는 호스트 거절(logged)은 기록에도 남아 턴 끝에 제자리 방 기록 줄로 바뀐다 — 승인 결과 줄처럼 지운다 (/self-review e464ec29ba C6)
+                    // 카드 없는 호스트 거절(logged)은 기록에도 남아 턴 끝에 제자리 방 기록 줄로 바뀐다 — 승인 결과 줄처럼 지운다
                     live.append(el("div", "live-line " + ev.kind + (ev.logged ? " approval-line" : ""), (ev.kind === "denied" ? "거절됨 — " : "") + ev.text));
                     break;
                 case "queued":
@@ -1634,13 +1634,13 @@
                     let refreshed = await refreshMessages();
                     if (refreshed) live.querySelectorAll(":scope > .shell-run.done").forEach(n => n.remove());
                     // 진행 칸 외부 말풍선이 기록 쪽에 다시 그려지지 않았으면(턴 도중 새 말 받기가 그 자리를 지나침 · 늦은 받기가 미뤄 둠) 쪽을 다시 받는다 —
-                    // 그대로 지우면 새로고침 전까지 사라진다 (8f79e1752f C1). 검색 보이기 중이면 다음 턴 끝으로 미루고 그 말풍선은 남긴다 (C3)
+                    // 그대로 지우면 새로고침 전까지 사라진다. 검색 보이기 중이면 다음 턴 끝으로 미루고 그 말풍선은 남긴다 (C3)
                     if (refreshed && (runsReloadPending || [...live.querySelectorAll(":scope > .live-run")].some(n => !runInChat(n.dataset.runKey)))) {
                         if (revealing) runsReloadPending = true;
                         else { runsReloadPending = false; refreshed = await reloadMessages(atBottom()); if (!refreshed) runsReloadPending = true; }
                     }
                     // 보내지 못한 말은 남김 (C2). 질문 답 말풍선은 세션 기록의 것으로 바뀌므로 지운다 (4차 D1).
-                    // 답하지 않은 질문 줄(q-done)은 성공으로 끝난 턴에서만 — 중지 · 실패면 기록에 결과 줄이 없을 수 있어 남긴다 (e8091295fe C4)
+                    // 답하지 않은 질문 줄(q-done)은 성공으로 끝난 턴에서만 — 중지 · 실패면 기록에 결과 줄이 없을 수 있어 남긴다
                     // 승인 결과 줄 · 백그라운드 명령 진행 줄도 지운다 — 기록 속 제자리에 방 기록 줄 · 백그라운드 알림 줄로 다시 그려졌다.
                     // 서브에이전트는 말풍선(.live-sub, .msg)이라 위에서 같이 지워지고, 쉬는 실행에서 도는 것은 곧 오는 subagents 목록으로 다시 그려진다.
                     // 종류를 모르는 작업 진행 줄은 기록에 같은 줄이 없어 다음 턴까지 둔다 (/self-review e464ec29ba 자료 부족)
@@ -1697,7 +1697,7 @@
         }
 
         // 검색 결과의 말까지 앞 쪽을 받아 가운데에 보이고 잠깐 강조한다 (2-2 c)
-        // 앞 쪽을 받지 못했거나(실패) 더 나아가지 않으면 멈춘다 (95e8b1c242 C5).
+        // 앞 쪽을 받지 못했거나(실패) 더 나아가지 않으면 멈춘다.
         let revealing = false;
         async function reveal(line) {
             revealing = true;
@@ -1723,7 +1723,7 @@
         const attachMax = Number(composer.dataset.attachMax || 10), attachBytes = Number(composer.dataset.attachBytes || 0);
         const attachBox = $("#attach-chips");
         let attached = []; // { name, path, url, image }
-        let uploading = 0; // 올리는 중인 파일 수 — 그동안은 보내지 않는다 (/self-review 5b26cff7df C2)
+        let uploading = 0; // 올리는 중인 파일 수 — 그동안은 보내지 않는다
         function renderAttached() {
             attachBox.replaceChildren();
             attachBox.hidden = attached.length === 0 && uploading === 0;
@@ -1891,7 +1891,7 @@
             //   /clear · /reset · /new → 같은 설정의 새 방으로 옮긴다 (인자는 쓰지 않음), /model · /effort → 방 설정을 바꾼다 (값은 서버가 검사)
             const slash = /^\/(clear|reset|new|model|effort)(?=\s|$)([\s\S]*)$/.exec(text.trim());
             if (slash && !modeReq) {
-                // 인용 · 첨부는 명령과 같이 보낼 수 없다 — 초안은 그대로 두고 알린다 (/self-review c11df0ad3c C3)
+                // 인용 · 첨부는 명령과 같이 보낼 수 없다 — 초안은 그대로 두고 알린다
                 if (quote || attached.length > 0) { alert(`/${slash[1]}에는 인용 · 첨부를 붙일 수 없습니다 — 빼고 다시 보내세요.`); return; }
                 textBox.value = "";
                 if (/^(clear|reset|new)$/.test(slash[1])) {
@@ -1925,7 +1925,7 @@
                 if (req && modeReq === req && !disposed) setModeReq(null);
                 attached = attached.filter(a => !files.includes(a));
                 if (!disposed) renderAttached();
-                // 보내는 사이 방을 바꿨으면 dispose가 이 인용 · 첨부를 초안에 넣었다 — 이미 보냈으니 뺀다 (83b453653b C7)
+                // 보내는 사이 방을 바꿨으면 dispose가 이 인용 · 첨부를 초안에 넣었다 — 이미 보냈으니 뺀다
                 const d = drafts.get(roomId);
                 if (disposed && d) {
                     if (d.quote === q) d.quote = null;
@@ -2064,7 +2064,7 @@
             } catch (e) { alert("요청 실패: " + e); return false; }
         }
         // 새 줄만 받아 붙인다 (대화 줄은 덧붙이기만 — 마지막 줄 번호가 줄었으면 전체를 다시 받는다)
-        let revealUntil = 0; // 검색 결과로 연 말을 보는 동안은 새 말 받기가 맨 아래로 끌어내리지 않는다 (0c7704170c C2)
+        let revealUntil = 0; // 검색 결과로 연 말을 보는 동안은 새 말 받기가 맨 아래로 끌어내리지 않는다
         async function refresh() {
             const chat = $("#chat");
             const follow = atBottom() && Date.now() > revealUntil;
@@ -2167,7 +2167,7 @@
             if (follow) toBottom();
         }
         // SSE를 붙일 때 서버가 같은 채널로 주는 쌓인 글 (member-reset) — 본문을 통째로 바꾸고 칩을 비운다(마지막 도구는 뒤따르는 member-tool로).
-        // 그 앞에 온 조각은 이 글에 들어 있고 뒤에 오는 조각은 이어 붙는다 (7e68bf5791 C1)
+        // 그 앞에 온 조각은 이 글에 들어 있고 뒤에 오는 조각은 이어 붙는다
         function resetStream(id, text) {
             const s = streamOf(id);
             if (!s) return;

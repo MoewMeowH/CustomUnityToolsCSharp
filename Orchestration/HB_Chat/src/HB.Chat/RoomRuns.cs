@@ -6,7 +6,7 @@ namespace HB.Chat;
 
 /// <summary>
 /// 방에 보일 실행 말풍선의 자리: 말(ChatEntry) → 그 말 앞에 보일 말풍선들, 그리고 마지막 말 뒤의 말풍선(Trailing).
-/// 말은 참조로 찾는다 — 지휘자 글 한 줄에서 말이 여럿 나와 줄 번호가 같아도 Place가 고른 그 말에만 붙는다 (/self-review a9e6066519 C2).
+/// 말은 참조로 찾는다 — 지휘자 글 한 줄에서 말이 여럿 나와 줄 번호가 같아도 Place가 고른 그 말에만 붙는다.
 /// </summary>
 public sealed record RunPlacement(IReadOnlyDictionary<ChatEntry, IReadOnlyList<RunBubble>> Before, IReadOnlyList<RunBubble> Trailing)
 {
@@ -19,7 +19,7 @@ public sealed record RunPlacement(IReadOnlyDictionary<ChatEntry, IReadOnlyList<R
 }
 
 /// <summary>
-/// 시각으로 끼우기 — 실행 말풍선 · 방 기록 줄이 같은 규칙을 쓴다 (/self-review e464ec29ba C8):
+/// 시각으로 끼우기 — 실행 말풍선 · 방 기록 줄이 같은 규칙을 쓴다:
 /// 항목 시각보다 늦은 첫 말 앞, 그런 말이 없으면 맨 뒤(Trailing). 말은 참조로 찾는다.
 /// </summary>
 public static class TimePlacement
@@ -71,7 +71,7 @@ public sealed class RoomRuns(IOptions<ChatOptions> options)
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
-            return RunPlacement.Empty; // 잘못된 CallLogPath 등 — 방은 말풍선 없이 그린다 (a9e6066519 C4)
+            return RunPlacement.Empty; // 잘못된 CallLogPath 등 — 방은 말풍선 없이 그린다
         }
     }
 

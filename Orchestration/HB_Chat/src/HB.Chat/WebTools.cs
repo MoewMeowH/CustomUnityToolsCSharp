@@ -6,7 +6,7 @@ namespace HB.Chat;
 
 /// <summary>
 /// 방의 웹 가져오기(WebFetch) 사이트 허용 — 사이트마다 한 번 카드, 앱을 다시 켤 때까지 그 방에서 기억 (사용자 결정, 지휘자 브라우저 카드와 같은 결).
-/// 기억 단위는 사이트 origin(스킴 · 퓨니코드 이름 · 포트) — 같은 이름의 다른 포트 · http는 다시 묻는다 (/cross-review 909a5c575e C5 · C7).
+/// 기억 단위는 사이트 origin(스킴 · 퓨니코드 이름 · 포트) — 같은 이름의 다른 포트 · http는 다시 묻는다.
 /// 로컬 · 사설망 주소는 카드로 묻지 않고 거절한다 — 이 앱(5290) · 대시보드 · 사내 서버를 부르지 않게.
 /// 앱이 보지 못하는 것: claude에 내장된 공식 문서 사이트와, 사용자 · 작업 폴더 설정의 WebFetch 허용 규칙에 든 사이트는 CLI가 묻지 않고 가져와
 /// 여기 · 카드 · 승인 기록을 거치지 않는다 (ClaudeArgs.WebTools 주석, C6). 이름이 사설 주소로 풀리는 것(DNS) · 리다이렉트도 보지 않는다.
@@ -59,7 +59,7 @@ public sealed class WebFetchSites
                 if (!IPAddress.TryParse(u.DnsSafeHost, out var ip) || Private(ip)) return "로컬 · 사설망 주소는 가져오지 않습니다.";
                 break;
             default:
-                // 밑줄 든 이름 등 일반 도메인도 IP도 아닌 모양 — 사내 이름일 수 있다 (/cross-review 909a5c575e C4)
+                // 밑줄 든 이름 등 일반 도메인도 IP도 아닌 모양 — 사내 이름일 수 있다
                 return "일반 도메인 이름이 아닌 주소는 가져오지 않습니다.";
         }
         url = u;

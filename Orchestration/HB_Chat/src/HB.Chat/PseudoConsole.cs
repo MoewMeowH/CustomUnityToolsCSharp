@@ -16,7 +16,7 @@ public sealed class PseudoConsole : ITerminalProcess
     private readonly IntPtr _console;
     private readonly IntPtr _process;
     private readonly IntPtr _job;
-    // 콘솔 · Job 핸들을 쓰는 호출(크기 · 끝내기 · 닫기 · 해제)은 한 잠금으로 — 닫힌 핸들에 부르면 다른 터미널의 핸들일 수 있다 (/self-review 57b59ef134 C5 · a3a9dd85c1 C4)
+    // 콘솔 · Job 핸들을 쓰는 호출(크기 · 끝내기 · 닫기 · 해제)은 한 잠금으로 — 닫힌 핸들에 부르면 다른 터미널의 핸들일 수 있다
     private readonly Lock _gate = new();
     private bool _consoleClosed;
     private bool _disposed;
@@ -153,7 +153,7 @@ public sealed class PseudoConsole : ITerminalProcess
     }
 
     /// <summary>
-    /// 셸이 끝난 뒤: 남은 자손을 Job째 먼저 끝내고 콘솔을 닫는다 — 콘솔에 붙은 자손이 있으면 닫기가 기다릴 수 있다 (/self-review 57b59ef134 C8).
+    /// 셸이 끝난 뒤: 남은 자손을 Job째 먼저 끝내고 콘솔을 닫는다 — 콘솔에 붙은 자손이 있으면 닫기가 기다릴 수 있다.
     /// 닫아야 남은 출력이 흘러나오고 읽기가 끝난다 (ConPTY).
     /// </summary>
     public void Finish()

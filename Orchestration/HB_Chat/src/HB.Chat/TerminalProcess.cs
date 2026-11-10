@@ -24,7 +24,7 @@ public interface ITerminalProcess : IDisposable
     void Finish();
 }
 
-/// <summary>터미널 프로세스 환경: 앱 환경에서 이 앱의 주소 설정만 뺀다 — 터미널로 띄운 다른 ASP.NET 서버가 같은 포트에 붙지 않게 (/self-review 57b59ef134 C7).</summary>
+/// <summary>터미널 프로세스 환경: 앱 환경에서 이 앱의 주소 설정만 뺀다 — 터미널로 띄운 다른 ASP.NET 서버가 같은 포트에 붙지 않게.</summary>
 public static class TerminalEnvironment
 {
     public static readonly IReadOnlyList<string> Removed = ["ASPNETCORE_URLS", "ASPNETCORE_HTTP_PORTS", "ASPNETCORE_HTTPS_PORTS", "DOTNET_URLS"];

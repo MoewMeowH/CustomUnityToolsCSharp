@@ -65,7 +65,7 @@ public static partial class CommandCatalog
         if (init is null)
             return Sorted(files.Found.Values);
 
-        // 플러그인 접두어 이름은 그 플러그인 파일에서만 설명을 찾는다 — 끝부분 일치로 남의 설명이 붙지 않게 (/self-review db1b130ff2 C2)
+        // 플러그인 접두어 이름은 그 플러그인 파일에서만 설명을 찾는다 — 끝부분 일치로 남의 설명이 붙지 않게
         var plugins = new HashSet<string>((init.Plugins ?? []).Select(p => p.Name), StringComparer.Ordinal);
         var list = new List<CommandInfo>();
         foreach (var name in init.SlashCommands.Distinct(StringComparer.Ordinal))

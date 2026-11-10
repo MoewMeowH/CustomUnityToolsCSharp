@@ -22,7 +22,7 @@
     }
     document.querySelectorAll("form.settings-profile").forEach(form => {
         const input = form.querySelector("input[type=file][name=image]");
-        // 그림을 새로 고르면 다시 줄인다 — 뒤로 가기(bfcache)로 돌아온 화면에 앞 표시가 남아 원본이 올라가지 않게 (dc27a724bf C5)
+        // 그림을 새로 고르면 다시 줄인다 — 뒤로 가기(bfcache)로 돌아온 화면에 앞 표시가 남아 원본이 올라가지 않게
         input?.addEventListener("change", () => { delete form.dataset.shrunk; });
         form.addEventListener("submit", async (e) => {
             const file = input?.files?.[0];
@@ -58,7 +58,7 @@
             }
             try { localStorage.setItem(TabKey, id); } catch { }
         }
-        // 깨진 퍼센트 인코딩(#%)이면 decodeURIComponent가 던진다 — 이 스크립트가 멈추면 사이드바 실시간 갱신도 안 붙는다 (088647d699 C2)
+        // 깨진 퍼센트 인코딩(#%)이면 decodeURIComponent가 던진다 — 이 스크립트가 멈추면 사이드바 실시간 갱신도 안 붙는다
         function hashId() { try { return decodeURIComponent(location.hash.slice(1)); } catch { return ""; } }
         function fromHash() {
             const hash = hashId();
@@ -92,7 +92,7 @@
             showTab(buttons[next].dataset.tab, true);
             history.replaceState(null, "", location.pathname + location.search + "#tab-" + buttons[next].dataset.tab);
         });
-        // 같은 쪽에서 사이드바 #cli 띠를 누르면 다시 불러오지 않고 hashchange만 온다 — 탭을 열고 그 섹션으로 (088647d699 C3)
+        // 같은 쪽에서 사이드바 #cli 띠를 누르면 다시 불러오지 않고 hashchange만 온다 — 탭을 열고 그 섹션으로
         window.addEventListener("hashchange", () => { const id = fromHash(); if (id) { showTab(id, false); scrollToSection(); } });
     }
 })();

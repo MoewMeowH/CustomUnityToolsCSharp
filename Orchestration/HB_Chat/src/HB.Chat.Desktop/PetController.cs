@@ -195,7 +195,7 @@ public sealed class PetController : IDisposable
     /// <summary>표정 그림 모드: 따라가는 방 줄의 faceUrl을 받아 그린다 (주소마다 한 번 받아 둔다). 없으면 표정 이름 판.</summary>
     /// <remarks>
     /// 같은 주소는 한 번만 받고(받는 중이면 기다리지 않고 판 글자), 실패한 주소는 1분 뒤에 다시 받는다. 캐시가 차면 지금 그림만 남기고 Dispose한다.
-    /// 컨트롤러가 정리된 뒤 끝난 받기는 버린다 (/self-review b280752387 C3 · 지휘자 리뷰 K2 · K5).
+    /// 컨트롤러가 정리된 뒤 끝난 받기는 버린다.
     /// </remarks>
     private async void ShowFace(RoomState? room)
     {
@@ -277,7 +277,7 @@ public sealed class PetController : IDisposable
 
     private void SetPet(string key)
     {
-        _form.StopWalking(); // 걷던 자리를 먼저 저장 — Place가 옛 자리로 돌리지 않게 (088647d699 C1)
+        _form.StopWalking(); // 걷던 자리를 먼저 저장 — Place가 옛 자리로 돌리지 않게
         Save(_settings with { Pet = key });
         _faceUrl = null;
         LoadPet();

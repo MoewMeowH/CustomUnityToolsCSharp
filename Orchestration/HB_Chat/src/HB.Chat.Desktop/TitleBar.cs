@@ -46,7 +46,7 @@ public static class TitleLayout
 
     /// <summary>
     /// 이름 · 탭 · 창 단추가 겹치지 않는 가장 좁은 폭 (상태 글 칸 0). 창 최소 폭을 이것 이상으로 둔다 —
-    /// 고배율 모니터에서 창 단추가 탭 위에 그려지고 탭을 누를 수 없던 것 (/self-review 993ef3b338 C1).
+    /// 고배율 모니터에서 창 단추가 탭 위에 그려지고 탭을 누를 수 없던 것.
     /// </summary>
     public static int RequiredWidth(float scale, int nameWidth, IReadOnlyList<int> tabTextWidths)
     {
@@ -166,7 +166,7 @@ public sealed class TitleBar : Control
     private readonly bool[] _tabEnabled;
     private readonly string?[] _tabTips;
     private readonly ToolTip _tip = new();
-    private Font _font = null!, _bold = null!; // 생성자의 ApplyDpi가 만든다 (993ef3b338 C7)
+    private Font _font = null!, _bold = null!; // 생성자의 ApplyDpi가 만든다
     private int _nameWidth, _statusWidth = -1;
     private int[] _tabWidths = [];
     private TitleParts? _parts;
@@ -414,7 +414,7 @@ public sealed class TitleBar : Control
         };
         if (tip == _tipText) return;
         _tipText = tip;
-        // 붙은 단추 사이로 옮기면 MouseLeave가 없어 이미 사라진 도움말이 다시 안 뜬다 — 닫고 새 글로 (993ef3b338 C6)
+        // 붙은 단추 사이로 옮기면 MouseLeave가 없어 이미 사라진 도움말이 다시 안 뜬다 — 닫고 새 글로
         _tip.Hide(this);
         _tip.SetToolTip(this, tip);
     }

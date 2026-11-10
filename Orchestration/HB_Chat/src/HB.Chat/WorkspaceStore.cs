@@ -16,7 +16,7 @@ public sealed record WorkspaceEntry(string Name, string Path, bool FromConfig);
 /// 원자적으로 쓰고(RoomStore와 같은 규칙), 깨졌으면 덮지 않고 모든 쓰기를 거절한다. 켤 때 한 번 읽는다 — 앱 밖에서 파일을 고쳐도 다시 켜기 전에는
 /// 반영되지 않는다 (설정 파일과 같은 원칙, Program.cs "설정은 켤 때 한 번만").
 /// 작업 폴더는 Claude가 편집 · (명령 방이면) 명령을 실행하고, 그 폴더 .mcp.json의 MCP 서버 · 프로젝트 훅이 도는 범위라 위험한 폴더를 거절한다
-/// (<see cref="WhyUnsafe"/>) — 더할 때, 켤 때 읽을 때, 방을 실행하기 전에 같은 검사 (/self-review security eee1adb777 C1 · C5).
+/// (<see cref="WhyUnsafe"/>) — 더할 때, 켤 때 읽을 때, 방을 실행하기 전에 같은 검사.
 /// appsettings의 Chat:Workspaces가 먼저이고 같은 이름은 더할 수 없다.
 /// </summary>
 public sealed partial class WorkspaceStore
@@ -42,7 +42,7 @@ public sealed partial class WorkspaceStore
 
     /// <summary>
     /// 실측 전용으로 표시한 이름 → 표시할 때의 최종 경로 (Unity 프로젝트 목록만 쓴다 — 계획 단계 위험 실측 자리). 파일 measure 칸, 비면 쓰지 않는다.
-    /// 경로까지 묶어 둬서 설정 파일 항목의 경로가 바뀌면 표시가 따라가지 않는다 — 남은 표시는 작업 프로젝트를 실측 전용으로 만드는 쪽이라 (/self-review 9078a0fc44 C2).
+    /// 경로까지 묶어 둬서 설정 파일 항목의 경로가 바뀌면 표시가 따라가지 않는다 — 남은 표시는 작업 프로젝트를 실측 전용으로 만드는 쪽이라.
     /// </summary>
     private readonly Dictionary<string, string> _measure = new(StringComparer.OrdinalIgnoreCase);
 
@@ -81,7 +81,7 @@ public sealed partial class WorkspaceStore
                 {
                     if (string.IsNullOrWhiteSpace(name)) continue;
                     _saved[name] = folder ?? "";
-                    // 읽을 때도 같은 검사 — 파일을 앱 밖에서 고쳤어도(명령 방 등) 위험한 폴더가 들어오지 않게 (eee1adb777 C5 · 460430d647 C4)
+                    // 읽을 때도 같은 검사 — 파일을 앱 밖에서 고쳤어도(명령 방 등) 위험한 폴더가 들어오지 않게
                     var why = _configured.ContainsKey(name) ? "설정 파일에 같은 이름이 있어 그쪽을 씁니다"
                         : !NameShape().IsMatch(name) ? "이름 모양이 맞지 않습니다"
                         : WhyUnsafe(folder) ?? _extraCheck?.Invoke(Resolve(folder!)!);
@@ -116,7 +116,7 @@ public sealed partial class WorkspaceStore
     /// <summary>
     /// 더하기. 오류 문구(null이면 더함). 경로는 최종 경로(링크 · subst · 짧은 이름이 풀린 것)로 저장한다.
     /// rooms: 지금 방들 — 방(휴지통 포함)이 쓰는 이름은 받지 않는다. 방은 작업 폴더를 이름으로 가리켜, 주인 없는 이름을 다른 폴더로 다시 쓰면
-    /// 예전 방(항상 허용 규칙 포함)이 새 폴더에서 돈다 (eee1adb777 C4).
+    /// 예전 방(항상 허용 규칙 포함)이 새 폴더에서 돈다.
     /// </summary>
     /// <param name="measure">실측 전용으로 더한다. 아니면 그 이름에 남은 표시를 지운다 (지운 이름을 다른 폴더로 다시 더할 때 표시가 따라오지 않게).</param>
     public string? Add(string? name, string? path, IEnumerable<Room> rooms, bool measure = false)
@@ -230,7 +230,7 @@ public sealed partial class WorkspaceStore
     /// 그 경로를 작업 폴더로 쓰면 안 되는 이유 (null이면 됨). 더할 때 · 켤 때 읽을 때 · 방 실행 전(앱에서 더한 것)에 쓴다:
     /// 드라이브 문자로 시작하는 절대 경로만(\\?\ · \\.\ · UNC 거절), 네트워크 드라이브 거절, 있는 폴더, 경로의 어느 폴더도 링크(재분석 지점)가 아님,
     /// 최종 경로(subst · 8.3 짧은 이름이 풀린 것)가 드라이브 루트 · Windows · Program Files · System 그 자체나 그 안 · 사용자 홈 그 자체가 아니고,
-    /// 보호 폴더를 품거나 그 안이 아님 (eee1adb777 C1 · C2).
+    /// 보호 폴더를 품거나 그 안이 아님.
     /// </summary>
     public string? WhyUnsafe(string? path)
     {
@@ -304,10 +304,10 @@ public sealed partial class WorkspaceStore
     /// <summary>
     /// <see cref="WhyNoWrite(string?, string?)"/>의 본체: 드라이브 문자 절대 경로만 · 이름을 다르게 읽히게 하는 표기(드라이브 뒤 <c>:</c> 스트림 · <c>~숫자</c> 짧은 이름 ·
     /// 끝 점/공백) 아님 · 네트워크 드라이브 아님 · 있는 조상 폴더와 파일 자신이 링크 · 정션 아님 · 쓰지 않는 이름(<see cref="WriteBlockedName"/>)이 아님 —
-    /// 입력 경로와, 짧은 이름 · 링크를 푼 최종 경로 둘 다 (/cross-review a43e6f3e7b 1-F1) · 작업 폴더(<paramref name="workspace"/>) · 시스템 폴더 ·
+    /// 입력 경로와, 짧은 이름 · 링크를 푼 최종 경로 둘 다 · 작업 폴더(<paramref name="workspace"/>) · 시스템 폴더 ·
     /// <paramref name="guarded"/> · 시작프로그램 폴더 밖. 편집 금지 규칙(EditDenied)은 작업 폴더 기준이라 그 밖에는 걸리지 않아 같은 것을 여기서 본다.
     /// </summary>
-    /// <param name="workspace">방 작업 폴더 경로 — 그 안 쓰기가 호스트에 왔으면(계획 모드 · CLI 보호 파일) 이 카드로 묻지 않는다 (sub_self dfe83d0bb5 C4).</param>
+    /// <param name="workspace">방 작업 폴더 경로 — 그 안 쓰기가 호스트에 왔으면(계획 모드 · CLI 보호 파일) 이 카드로 묻지 않는다.</param>
     public static string? WhyNoWrite(string? filePath, IEnumerable<string> guarded, string? workspace = null)
     {
         if (Locate(filePath, checkNames: true, out var target) is { } why) return why;
@@ -359,7 +359,7 @@ public sealed partial class WorkspaceStore
         if (WhyNoWrite(filePath, guarded, workspace) is { } why) return (AppWriteRoute.Deny, why);
         // WhyNoWrite를 통과했으면 최종 경로가 있다
         Locate(filePath, checkNames: true, out target);
-        // 저장해 둔 최종 경로 그대로 비교한다 — 다시 풀면 그 폴더를 정션으로 바꿨을 때 정션 대상이 허용된다 (/cross-review 53a0e1871c 1-F2).
+        // 저장해 둔 최종 경로 그대로 비교한다 — 다시 풀면 그 폴더를 정션으로 바꿨을 때 정션 대상이 허용된다.
         // 그 폴더 안을 거치는 쓰기는 위 Locate가 링크로 거절한다
         foreach (var folder in allowedFolders.Select(f => Full(f)).OfType<string>())
             if (Same(target, folder) || Inside(target, folder)) return (AppWriteRoute.AllowFolder, null);
@@ -468,7 +468,7 @@ public sealed partial class WorkspaceStore
 
     /// <summary>
     /// 이 앱이 작업 폴더 · 쓰기 대상으로 막는 보호 폴더 — 이 앱(콘텐츠 · 실행 폴더) · 그 git 저장소 · 데이터 폴더 · Claude 설정 폴더(세션 기록 폴더의 부모 · ~/.claude) ·
-    /// 설정 작업 폴더 기준 편집 금지 폴더. Program과 RoomHub(앱 목록이 없을 때)가 같이 쓴다 (sub_self dfe83d0bb5 C5).
+    /// 설정 작업 폴더 기준 편집 금지 폴더. Program과 RoomHub(앱 목록이 없을 때)가 같이 쓴다.
     /// </summary>
     public static IReadOnlyList<string> GuardedFolders(ChatOptions chat, string contentRoot)
     {

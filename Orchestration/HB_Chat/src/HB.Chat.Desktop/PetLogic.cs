@@ -83,7 +83,7 @@ public static class PetLook
     /// <summary>그 방향 칸이 비었으면 둘레로 가장 가까운 그려진 방향 (같은 거리면 시계 방향 먼저). 다 비었으면 null.</summary>
     public static int? Playable(int direction, Func<int, int, bool> occupied)
     {
-        // 33ms 틱에서 불리므로 할당 없이 (088647d699 C5)
+        // 33ms 틱에서 불리므로 할당 없이
         for (var step = 0; step <= Directions / 2; step++)
         {
             if (Drawn(direction + step, occupied) is { } clockwise) return clockwise;

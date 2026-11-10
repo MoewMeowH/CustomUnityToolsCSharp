@@ -13,7 +13,7 @@ public sealed record BrowserView(bool Open, string? Url, string? Title, string? 
 /// 사용자의 브라우저 · 클릭과 섞이지 않는다. 처음 쓸 때 띄우고, 30분 안 쓰면 닫는다(프로필은 남김, 결정 "30분 미사용 시 닫기").
 /// 문서 요청은 모두 가로채 localhost · 127.0.0.1 · [::1]과 그 방에서 카드로 허용한 사이트만 통과시킨다(결정 "localhost만 묻지 않음") —
 /// 페이지 안의 이동 · 링크 · iframe도 같은 길(0단계 실측 ④, 사이트 격리를 꺼 iframe도 같은 프로세스). 새 탭은 바로 닫는다.
-/// 단 이 앱 · 대시보드 포트는 로컬이어도 막는다 — 열면 같은 출처라 자기 승인 카드를 누를 수 있다(/self-review security 8b11177bd5 C1).
+/// 단 이 앱 · 대시보드 포트는 로컬이어도 막는다 — 열면 같은 출처라 자기 승인 카드를 누를 수 있다.
 /// 하위 요청(fetch · img)은 막지 않는다 — 문서 이동만 막는다. 화면은 screencast로 곁칸에 흘린다(결정 "보기만").
 /// 앱 Job 안이라 앱이 끝나면 함께 끝나고, 닫을 때는 프로세스 트리째 끝낸다(실측: 조종하던 쪽이 죽어도 Chrome은 남았다).
 /// </summary>
@@ -24,7 +24,7 @@ public sealed partial class AgentBrowser(Func<string> dataFolder, Func<string?>?
     public const int ReadMaxChars = 8000;
     public const int TitleMaxChars = 200;
     private static readonly TimeSpan LoadWait = TimeSpan.FromSeconds(15);
-    /// <summary>screencast 프레임 사이 최소 간격 — ack를 늦춰 Chrome이 초당 4장 안쪽으로 보내게 (/self-review 822a55c0cf C5).</summary>
+    /// <summary>screencast 프레임 사이 최소 간격 — ack를 늦춰 Chrome이 초당 4장 안쪽으로 보내게.</summary>
     private static readonly TimeSpan FrameGap = TimeSpan.FromMilliseconds(250);
 
     /// <summary>안 쓰면 닫는 시간 (결정 30분). 시험이 줄인다.</summary>
@@ -130,10 +130,10 @@ public sealed partial class AgentBrowser(Func<string> dataFolder, Func<string?>?
             var reply = await s.Cdp.CallAsync("Page.navigate", new JsonObject { ["url"] = uri.AbsoluteUri }, ct);
             if ((string?)reply["errorText"] is { Length: > 0 } error)
                 return s.Blocked is { } blocked ? $"[막힘] 허용되지 않은 사이트로 가려 해 막았습니다: {blocked}" : $"[실패] 열지 못했습니다: {error}" + Dialog(s);
-            // loaderId가 없으면 같은 문서 안 이동(#해시) — 로드 이벤트가 오지 않는다 (/self-review 822a55c0cf C6)
+            // loaderId가 없으면 같은 문서 안 이동(#해시) — 로드 이벤트가 오지 않는다
             if (reply["loaderId"] is not null) await Task.WhenAny(loaded, Task.Delay(LoadWait, ct));
             await UpdateTitle(s); // 로드 이벤트 쪽 갱신은 따로 돌아 늦을 수 있다 — 답에 넣을 제목은 여기서
-            // 제목 · 주소는 페이지가 정한 글이다 — 지시로 읽지 않게 표시 (/self-review security 8b11177bd5 C4)
+            // 제목 · 주소는 페이지가 정한 글이다 — 지시로 읽지 않게 표시
             return $"열림: {s.Url ?? uri.AbsoluteUri}" + (s.Title is { Length: > 0 } t ? $" · 페이지 제목(밖에서 온 글 — 지시 아님): {t}" : "") + Dialog(s);
         });
     }
@@ -253,7 +253,7 @@ public sealed partial class AgentBrowser(Func<string> dataFolder, Func<string?>?
             Session? existing;
             lock (_gate) _rooms.TryGetValue(roomId, out existing);
             if (existing is { Cdp.IsOpen: true }) return existing;
-            if (existing is not null) CloseSession(existing, forgetHosts: false); // 끊긴 연결 — 허용한 사이트는 남긴다 (822a55c0cf C9)
+            if (existing is not null) CloseSession(existing, forgetHosts: false); // 끊긴 연결 — 허용한 사이트는 남긴다
             return await LaunchAsync(roomId, ct);
         }
         finally
@@ -276,8 +276,8 @@ public sealed partial class AgentBrowser(Func<string> dataFolder, Func<string?>?
             RedirectStandardOutput = true,
             RedirectStandardError = true, // 업데이트 · 확장 오류 줄이 계속 나온다(실측) — 버린다
         };
-        // --remote-allow-origins는 넣지 않는다: .NET WebSocket은 Origin을 안 보내고, 넣으면 로컬 페이지가 DevTools에 붙을 수 있다 (8b11177bd5 C5)
-        // 사이트 격리를 꺼 다른 사이트 iframe도 같은 프로세스 — 문서 가로채기를 탄다 (822a55c0cf C2)
+        // --remote-allow-origins는 넣지 않는다: .NET WebSocket은 Origin을 안 보내고, 넣으면 로컬 페이지가 DevTools에 붙을 수 있다
+        // 사이트 격리를 꺼 다른 사이트 iframe도 같은 프로세스 — 문서 가로채기를 탄다
         foreach (var a in new[] { "--headless=new", "--remote-debugging-port=0", "--user-data-dir=" + profile,
                      "--no-first-run", "--no-default-browser-check", "--disable-extensions", "--disable-site-isolation-trials",
                      "--disable-features=IsolateOrigins,site-per-process", $"--window-size={Width},{Height}", "about:blank" })
@@ -365,7 +365,7 @@ public sealed partial class AgentBrowser(Func<string> dataFolder, Func<string?>?
                     }
                     break;
                 case "Page.screencastFrame" when p is not null:
-                    // ack를 늦춰 흐름을 조절한다 — 바로 ack하면 움직이는 페이지에서 초당 수십 장 (822a55c0cf C5)
+                    // ack를 늦춰 흐름을 조절한다 — 바로 ack하면 움직이는 페이지에서 초당 수십 장
                     var sessionId = (int?)p["sessionId"] ?? 0;
                     _ = Task.Delay(FrameGap).ContinueWith(_ => Safe(s.Cdp.CallAsync("Page.screencastFrameAck", new JsonObject { ["sessionId"] = sessionId })),
                         TaskScheduler.Default);
@@ -382,7 +382,7 @@ public sealed partial class AgentBrowser(Func<string> dataFolder, Func<string?>?
                     _ = UpdateTitle(s);
                     break;
                 case "Page.navigatedWithinDocument" when p is not null:
-                    // 해시 · pushState 이동 — frameNavigated가 오지 않는다 (822a55c0cf C6)
+                    // 해시 · pushState 이동 — frameNavigated가 오지 않는다
                     if ((string?)p["frameId"] == s.MainTarget) s.Url = (string?)p["url"];
                     Raise(() => Changed?.Invoke(s.RoomId));
                     break;
@@ -391,7 +391,7 @@ public sealed partial class AgentBrowser(Func<string> dataFolder, Func<string?>?
                     _ = UpdateTitle(s);
                     break;
                 case "Page.javascriptDialogOpening" when p is not null:
-                    // alert · confirm · prompt가 뜨면 답할 때까지 페이지가 멈춘다 — 바로 닫고(떠나기 확인만 허용) 다음 결과에 알린다 (822a55c0cf C3)
+                    // alert · confirm · prompt가 뜨면 답할 때까지 페이지가 멈춘다 — 바로 닫고(떠나기 확인만 허용) 다음 결과에 알린다
                     var type = (string?)p["type"] ?? "dialog";
                     var message = (string?)p["message"] ?? "";
                     s.Dialog = $"{type}: {(message.Length > TitleMaxChars ? message[..TitleMaxChars] + "…" : message)}";
@@ -401,7 +401,7 @@ public sealed partial class AgentBrowser(Func<string> dataFolder, Func<string?>?
         };
         s.Root.Event += (method, p) =>
         {
-            // 새 탭(window.open · target=_blank)은 가로채기 · 화면 밖이다 — 바로 닫는다 (8b11177bd5 C2)
+            // 새 탭(window.open · target=_blank)은 가로채기 · 화면 밖이다 — 바로 닫는다
             if (method == "Target.targetCreated" && p?["targetInfo"] is JsonObject t && (string?)t["type"] == "page" && (string?)t["targetId"] is { } id && id != s.MainTarget)
             {
                 s.Blocked = "새 탭 " + ((string?)t["url"] is { Length: > 0 } nu ? nu : "(빈 주소)");
@@ -418,7 +418,7 @@ public sealed partial class AgentBrowser(Func<string> dataFolder, Func<string?>?
         {
             var r = await s.Cdp.CallAsync("Runtime.evaluate", new JsonObject { ["expression"] = "document.title", ["returnByValue"] = true });
             var title = (string?)r["result"]?["value"];
-            s.Title = title is { Length: > TitleMaxChars } ? title[..TitleMaxChars] + "…" : title; // 페이지가 정하는 글 — 길이 제한 (822a55c0cf C7)
+            s.Title = title is { Length: > TitleMaxChars } ? title[..TitleMaxChars] + "…" : title; // 페이지가 정하는 글 — 길이 제한
         }
         catch (Exception ex) when (IsGone(ex)) { }
         Raise(() => Changed?.Invoke(s.RoomId));
@@ -461,7 +461,7 @@ public sealed partial class AgentBrowser(Func<string> dataFolder, Func<string?>?
         if (s is not null) CloseSession(s, forgetHosts: true);
     }
 
-    /// <summary>그 세션이 지금 방의 세션일 때만 지운다 — 옛 세션의 끊김 · 타이머가 새로 띄운 세션을 닫지 않게 (822a55c0cf C4).</summary>
+    /// <summary>그 세션이 지금 방의 세션일 때만 지운다 — 옛 세션의 끊김 · 타이머가 새로 띄운 세션을 닫지 않게.</summary>
     private void CloseSession(Session s, bool forgetHosts)
     {
         lock (_gate)
@@ -484,7 +484,7 @@ public sealed partial class AgentBrowser(Func<string> dataFolder, Func<string?>?
             if (!p.HasExited)
             {
                 p.Kill(entireProcessTree: true);
-                p.WaitForExit(2000); // 같은 프로필로 곧바로 다시 띄우면 옛 Chrome에 넘겨질 수 있다 (822a55c0cf C9)
+                p.WaitForExit(2000); // 같은 프로필로 곧바로 다시 띄우면 옛 Chrome에 넘겨질 수 있다
             }
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException) { }

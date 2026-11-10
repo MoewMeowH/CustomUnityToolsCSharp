@@ -64,7 +64,7 @@ public sealed record DesktopSettings
             else warnings.Add($"--debug-port 값이 맞지 않아 무시합니다: {port}");
         }
 
-        // 주소는 이 PC 안(http · localhost · 127.0.0.1 · [::1])만 — 서버를 --urls로 띄우므로 LAN 주소면 다른 PC에 열린다 (d459e3af9b C3)
+        // 주소는 이 PC 안(http · localhost · 127.0.0.1 · [::1])만 — 서버를 --urls로 띄우므로 LAN 주소면 다른 PC에 열린다
         if (!IsLoopbackHttp(settings.ChatUrl))
         {
             warnings.Add($"채팅 주소는 이 PC 안 http 주소만 씁니다 — {settings.ChatUrl} 대신 {DefaultChatUrl}");

@@ -169,7 +169,7 @@ public sealed record ControlRequestEvent(string RequestId, string Subtype, strin
 
 /// <summary>
 /// control_cancel_request: CLI가 앞서 낸 제어 요청을 거둔다 (<c>{"type":"control_cancel_request","request_id":…}</c> — SDK 규약의 모양, 3차 0번 실측에서는 못 봄 · 추정).
-/// 그 요청의 카드를 "끊김"으로 닫는다 (/self-review 7d839f4aa5 C1).
+/// 그 요청의 카드를 "끊김"으로 닫는다.
 /// </summary>
 public sealed record ControlCancelEvent(string RequestId) : StreamEvent;
 
@@ -307,7 +307,7 @@ public static class StreamParser
             info.TryGetProperty("isUsingOverage", out var o) && o.ValueKind is JsonValueKind.True or JsonValueKind.False ? o.GetBoolean() : null);
     }
 
-    /// <summary>유닉스 초 → 시각. 0 이하 · 범위 밖(밀리초로 온 값 등)이면 null — Parse는 예외를 던지지 않는다 (/self-review b40d9efb00 C1).</summary>
+    /// <summary>유닉스 초 → 시각. 0 이하 · 범위 밖(밀리초로 온 값 등)이면 null — Parse는 예외를 던지지 않는다.</summary>
     private static DateTimeOffset? UnixSeconds(long seconds) =>
         seconds > 0 && seconds <= DateTimeOffset.MaxValue.ToUnixTimeSeconds() ? DateTimeOffset.FromUnixTimeSeconds(seconds) : null;
 

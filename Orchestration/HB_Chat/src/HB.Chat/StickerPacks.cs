@@ -64,7 +64,7 @@ public sealed partial class StickerPacks(StickerCatalog stickers, ProfileStore p
     public string DefaultName() =>
         stickers.Options.DefaultPack?.Trim() is { Length: > 0 } pack ? $"기본 ({List().FirstOrDefault(p => p.Id == pack)?.Name ?? pack})" : "기본 (스티커 폴더 바로 아래)";
 
-    /// <summary>팩 폴더는 만들 때 한 번만 확인한다 — Options를 읽을 때마다 폴더를 다시 보지 않게 (ef2c83416c C2).</summary>
+    /// <summary>팩 폴더는 만들 때 한 번만 확인한다 — Options를 읽을 때마다 폴더를 다시 보지 않게.</summary>
     private StickerCatalog Catalog(string pack, string dir)
     {
         var url = "/sticker-pack/" + Uri.EscapeDataString(pack) + "/";

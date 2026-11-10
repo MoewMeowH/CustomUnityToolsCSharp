@@ -12,7 +12,7 @@ internal static class Program
     /// <summary>
     /// 하나만 실행: 데이터 폴더마다 이름 있는 Mutex. 두 번째 실행은 이름 있는 이벤트로 첫 창을 앞으로 부르고 끝난다.
     /// `--exit`로 실행하면 떠 있는 앱을 끝내고(트레이 메뉴 끝내기와 같음) 끝날 때까지 기다린다 — 끝났거나 떠 있지 않으면 0,
-    /// 사용자가 끄지 않기로 했거나 시간 안에 끝나지 않으면 1 (/self-review 0f0b6007a4 C5).
+    /// 사용자가 끄지 않기로 했거나 시간 안에 끝나지 않으면 1.
     /// 데이터 폴더를 이름에 넣어 시험용 실행(--data=)이 평소 앱과 부딪치지 않게 한다.
     /// </summary>
     [STAThread]
@@ -32,7 +32,7 @@ internal static class Program
         using var mutex = new Mutex(true, mutexName, out var first);
         if (!first)
         {
-            // 첫 창이 앞으로 나올 수 있게 전경 권한을 넘긴다 — 안 그러면 작업 표시줄만 깜빡인다 (26d478170f C7)
+            // 첫 창이 앞으로 나올 수 있게 전경 권한을 넘긴다 — 안 그러면 작업 표시줄만 깜빡인다
             AllowSetForegroundWindow(AsfwAny);
             show.Set();
             return 0;

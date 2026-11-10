@@ -61,7 +61,7 @@ public sealed class ChatOptions
     public string? ResolveCodex()
     {
         if (!string.IsNullOrWhiteSpace(CodexPath)) return CodexPath.Trim();
-        // x64 · ARM64 판 (59063d4106 C11). npm이 PATH에 두는 codex.cmd는 cmd를 거쳐야 해서 쓰지 않는다
+        // x64 · ARM64 판. npm이 PATH에 두는 codex.cmd는 cmd를 거쳐야 해서 쓰지 않는다
         foreach (var (package, triple) in new[] { ("codex-win32-x64", "x86_64-pc-windows-msvc"), ("codex-win32-arm64", "aarch64-pc-windows-msvc") })
         {
             var npm = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "npm", "node_modules", "@openai", "codex",
@@ -108,7 +108,7 @@ public sealed class ChatOptions
 
     /// <summary>
     /// 지휘자 브라우저가 로컬이어도 열지 못하는 포트 — 이 앱 · 대시보드 화면을 열면 같은 출처라 자기 승인 카드를 누를 수 있다
-    /// (/self-review security 8b11177bd5 C1). 이 앱이 듣는 포트 · DashboardUrl 포트는 따로 더한다. 기본은 사용자 앱 5290(시험 서버에서도 막히게).
+    ///. 이 앱이 듣는 포트 · DashboardUrl 포트는 따로 더한다. 기본은 사용자 앱 5290(시험 서버에서도 막히게).
     /// </summary>
     public int[] BrowserBlockedPorts { get; set; } = [5290];
 
@@ -141,7 +141,7 @@ public sealed class ChatOptions
 
     /// <summary>
     /// 지휘자 할 일 폴더 (세션마다 <c>&lt;세션 ID&gt;/*.json</c>, 3차 b). 세션 기록 폴더(projects) 옆의 tasks — 기본 ~/.claude/tasks
-    /// (CLAUDE_CONFIG_DIR를 쓰면 그 아래, ClaudeProjectsDir를 정하면 그 옆). 위치를 정하지 못하면 null — 단계 표시만 빠진다 (/self-review ea28ba9185 C4).
+    /// (CLAUDE_CONFIG_DIR를 쓰면 그 아래, ClaudeProjectsDir를 정하면 그 옆). 위치를 정하지 못하면 null — 단계 표시만 빠진다.
     /// </summary>
     public string? TasksRoot
     {

@@ -8,9 +8,9 @@ namespace HB.Chat;
 /// <summary>
 /// CLI가 stdio 호스트(앱)에 보낸 명령 승인 요청 하나 (control_request can_use_tool — 3차 0번 실측, 그 전 2-1은 PermissionRequest 훅 본문 · 같은 키).
 /// Summary는 카드에 보일 명령 전문(명령 · 파일 경로 · 그 밖은 입력 JSON).
-/// Truncated면 전문이 너무 길어 잘린 것 — 사용자가 다 보지 못한 명령이라 거절만 받는다 (/self-review 36e4e20e04 C5 · ab79e61df5 C5).
+/// Truncated면 전문이 너무 길어 잘린 것 — 사용자가 다 보지 못한 명령이라 거절만 받는다.
 /// Extra는 명령 · 설명 밖의 입력(예 <c>run_in_background=true</c>) — 허용하면 입력 전체가 그대로 실행되므로 카드에 같이 보인다.
-/// Risky면 그 입력 이름에 dangerously · bypass가 있다 (예 <c>dangerouslyDisableSandbox</c>) — 거절만 받는다 (/self-review 5e747ff851 C1).
+/// Risky면 그 입력 이름에 dangerously · bypass가 있다 (예 <c>dangerouslyDisableSandbox</c>) — 거절만 받는다.
 /// </summary>
 public sealed record ApprovalRequest(string Tool, string Summary, string? Description, bool Truncated = false)
 {
@@ -137,8 +137,8 @@ public sealed record ApprovalRequest(string Tool, string Summary, string? Descri
     private static readonly HashSet<string> PlanKeys = new(StringComparer.Ordinal) { "plan", "planFilePath" };
 
     /// <summary>
-    /// 계획 승인 허용 때 돌려줄 입력: 받은 입력에서 plan · planFilePath(글자일 때)만 새로 담는다 — "본 것 = 허용되는 것" (5e747ff851 C1),
-    /// 보이지 않는 키(예 명령 권한을 적는 항목)가 같이 승인되지 않게 (/self-review security d3dd55b237 C1). 읽지 못하면 빈 객체.
+    /// 계획 승인 허용 때 돌려줄 입력: 받은 입력에서 plan · planFilePath(글자일 때)만 새로 담는다 — "본 것 = 허용되는 것",
+    /// 보이지 않는 키(예 명령 권한을 적는 항목)가 같이 승인되지 않게. 읽지 못하면 빈 객체.
     /// </summary>
     public static string PlanInput(string inputJson)
     {
@@ -178,7 +178,7 @@ public sealed record ApprovalRequest(string Tool, string Summary, string? Descri
                 var hasInput = e.TryGetProperty("input", out var planInput) && planInput.ValueKind == JsonValueKind.Object;
                 var plan = hasInput ? Str(planInput, "plan") ?? "" : "";
                 var cut = plan.Length > MaxSummaryChars;
-                // 계획 글 · 파일 경로 밖의 입력은 허용 답에서 뺀다(PlanInput) — 카드에도 그 이름을 보인다 (/self-review security d3dd55b237 C1)
+                // 계획 글 · 파일 경로 밖의 입력은 허용 답에서 뺀다(PlanInput) — 카드에도 그 이름을 보인다
                 var others = hasInput ? planInput.EnumerateObject().Select(p => p.Name).Where(n => !PlanKeys.Contains(n)).ToList() : [];
                 return new ApprovalRequest(tool, cut ? plan[..MaxSummaryChars] + "…" : plan, null, cut)
                 {

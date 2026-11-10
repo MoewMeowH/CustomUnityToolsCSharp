@@ -11,7 +11,7 @@
 
     // 외부 에이전트 · API 리뷰 말풍선: 이 방에서 부른 run_mode 실행의 시작 줄과 단계 응답. 시각으로 끼운 자리에 (RoomRuns).
     // 답장 · data-line은 달지 않는다 (지휘자 · 사용자 말이 아니고, 줄 번호는 다음 말 것이라 쪽 경계를 흐린다).
-    // trailing: 마지막 말 뒤 말풍선 — run-trailing 클래스를 달아 새 말 받기 조각이 바꿔 끼운다 (/self-review a9e6066519 C1).
+    // trailing: 마지막 말 뒤 말풍선 — run-trailing 클래스를 달아 새 말 받기 조각이 바꿔 끼운다.
     void RunBubbleList(IReadOnlyList<RunBubble> bubbles, bool trailing = false)
     {
         foreach (var b in bubbles)
@@ -71,7 +71,7 @@
         }
     }
 
-    // 같은 말 앞(· 맨 뒤)의 외부 실행 말풍선 · 질문 답 · 방 기록 줄(승인 결과 · 정리 표시)을 시각 차례로 (e8091295fe C1)
+    // 같은 말 앞(· 맨 뒤)의 외부 실행 말풍선 · 질문 답 · 방 기록 줄(승인 결과 · 정리 표시)을 시각 차례로
     void Placed(IReadOnlyList<RunBubble> runs, IReadOnlyList<ChatAnswer> answers, IReadOnlyList<RoomNote> notes, bool trailing = false)
     {
         var waiting = new Queue<RoomNote>(notes);
@@ -142,7 +142,7 @@
     <div class="live-runs">@{ RunBubbleList(liveRuns); }</div>
     return;
 }
-@* data-error: 세션 기록을 읽지 못한 채 그린 쪽 — 화면은 다음 새 말 받기 대신 쪽 전체를 다시 받는다 (/self-review 83b453653b C6) *@
+@* data-error: 세션 기록을 읽지 못한 채 그린 쪽 — 화면은 다음 새 말 받기 대신 쪽 전체를 다시 받는다 *@
 <div class="chat" id="chat" data-title="@Model.Title" data-last-line="@Model.LastLine"
      data-first-line="@(items.Count > 0 ? items[0].Line : -1)" data-has-more="@(Model.Messages.HasMore ? "1" : "0")"
      data-error="@(Model.Transcript?.FormatError is null ? null : "1")" data-reset="@(Model.Messages.Reset ? "1" : null)">
@@ -152,7 +152,7 @@
     }
     @if (!Model.Fragment && Model.Messages.HasMore)
     {
-        @* 눌러도 불러온다 — 맨 위에서 실패하면 스크롤 이벤트가 다시 안 나므로 (83b453653b C8) *@
+        @* 눌러도 불러온다 — 맨 위에서 실패하면 스크롤 이벤트가 다시 안 나므로 *@
         <button type="button" class="older muted">앞 말 @(RoomList.PageSize)개 더 보기 (위로 올려도 됨)</button>
     }
     @foreach (var e in items)

@@ -52,7 +52,7 @@ public sealed partial class RoomHub
 
         /// <summary>
         /// 이 화면 턴에 끼어들기로 interrupt를 보냈다 — 성공 아닌 result로 끝나면 중지된 턴("끼어들기로 멈춤")으로 남긴다. 턴마다 따로라
-        /// 다른 턴(다음 말 · 자동 턴)의 결과에 번지지 않는다 (/self-review 42c732f7d3 C3).
+        /// 다른 턴(다음 말 · 자동 턴)의 결과에 번지지 않는다.
         /// </summary>
         public volatile bool Interrupting;
 
@@ -142,7 +142,7 @@ public sealed partial class RoomHub
     /// </summary>
     private bool TryInterruptRest(Live live)
     {
-        // 이 화면 턴(사용자 말)의 CLI 턴이 받아져 도는 중일 때만 — 자동 턴 · 받기 전 · 다른 턴 끝을 기다리는 중이면 예전 길 (42c732f7d3 C1 · C2)
+        // 이 화면 턴(사용자 말)의 CLI 턴이 받아져 도는 중일 때만 — 자동 턴 · 받기 전 · 다른 턴 끝을 기다리는 중이면 예전 길
         if (live.Session is not { } run || run.Wait is not { Auto: false } wait || live.Cts is not { } running) return false;
         if (run.Proc.InterruptUserTurn() is not { } sent) return false;
         wait.Interrupting = true;
@@ -230,7 +230,7 @@ public sealed partial class RoomHub
     /// 넣지 않는다(지금처럼 말 앞 안내로 전한다). "계획 먼저"는 <see cref="RoomRun.Plan"/>, + 요청 창 말은 <see cref="RoomRun.AskRunMode"/>로 따로 본다
     /// (말마다 바뀌는 값이라 열쇠에 넣으면 설정을 안 바꿔도 작업이 끝났다 — af6ffa3da5 C2). 인자에 쓰이는 단계에서만 넣는다
     /// (작업 폴더 목록 · 폴더 밖 쓰기 묻기는 앱 단계, 서브에이전트 강도는 서브에이전트를 쓰는 단계 — /cross-review 52ac1810e1 self C4).
-    /// 첨부 폴더는 쉬는 실행을 띄우기 전에 만들어 두어 첫 첨부로 열쇠가 바뀌지 않는다 (af6ffa3da5 C3).
+    /// 첨부 폴더는 쉬는 실행을 띄우기 전에 만들어 두어 첫 첨부로 열쇠가 바뀌지 않는다.
     /// </summary>
     private string RunKey(Room room)
     {
@@ -311,7 +311,7 @@ public sealed partial class RoomHub
 
     /// <summary>
     /// 쉬는 중 CLI가 스스로 턴을 시작함 (작업 끝 알림 뒤): 방이 놀고 있으면 화면 턴을 연다. 보낸 말을 막 꺼내는 중이면(Busy) 그 말이 이 턴 끝을 기다렸다 보낸다.
-    /// 방이 휴지통에 들어갔거나 띄운 뒤 설정(단계 등)이 바뀌었으면 옛 인자로 돌리지 않고 실행을 끝낸다 (/cross-review 52ac1810e1 security C1).
+    /// 방이 휴지통에 들어갔거나 띄운 뒤 설정(단계 등)이 바뀌었으면 옛 인자로 돌리지 않고 실행을 끝낸다.
     /// </summary>
     private void StartAutoTurn(string roomId, Live live, RoomRun run)
     {
@@ -440,7 +440,7 @@ public sealed partial class RoomHub
         var wantsPlan = room.PlanNext && ClaudeArgs.PlanMode(room.Level) is not null;
         bool picked;
         lock (live.Gate) picked = live.CurrentPick is not null;
-        // + 요청 창 말은 run_mode를 묻는 인자가 있어야 카드로 받는다 — 없이 띄운 실행이면 새로 (af6ffa3da5 C2)
+        // + 요청 창 말은 run_mode를 묻는 인자가 있어야 카드로 받는다 — 없이 띄운 실행이면 새로
         var changed = run.Key != key || wantsPlan && !run.Plan || picked && !run.AskRunMode;
         if (run.Generation != generation || changed || run.Proc.State is SessionState.Closing or SessionState.Exited)
             return await RetireAsync(live, run, changed ? "방 설정이 바뀌어" : null) ? null : NotSent(room, StillRunning);
@@ -545,7 +545,7 @@ public sealed partial class RoomHub
         if (why is not null && left > 0) Notice(live, $"{why} 백그라운드 작업 {left}개를 끝내고 새로 시작합니다.");
         // 끝나며 CLI가 쓴 줄도 이 앱이 쓴 것이다 — 새 말의 화면 턴이 돌고 있어 WatchRunAsync는 크기를 적지 않으니 아래에서 적는다 (새로 띄우기 전 검사가
         // "이 앱 밖에서 바뀌었습니다"를 잘못 띄웠다, 사용자 화면 2026-11-04: 1,171,421 → 1,173,341). 끝내기 전에 이미 달랐으면(쉬는 동안 다른 곳에서
-        // 이어 씀) 그대로 두어 그 검사가 알리게 한다 (/self-review f7aa28507a C1). 부른 쪽은 방을 다시 읽어 이 값을 쓴다
+        // 이어 씀) 그대로 두어 그 검사가 알리게 한다. 부른 쪽은 방을 다시 읽어 이 값을 쓴다
         bool unchanged;
         try { unchanged = store.Get(live.Id) is { } before && transcripts.Size(before.SessionId) is { } was && was == before.KnownSize; }
         catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException) { unchanged = false; }
@@ -626,12 +626,12 @@ public sealed partial class RoomHub
     }
 
     /// <summary>방 규칙 글 (실행 준비 값으로) — 처음 띄울 때와 이어 쓰는 턴이 같은 값을 만든다.</summary>
-    // 실측 전용 표시는 스티커처럼 지금 값으로 읽는다 — 쉬는 실행이 띄울 때 값에 묶이면 작업용으로 돌린 것이 지휘자에게 안 간다 (/self-review 9078a0fc44 C1)
+    // 실측 전용 표시는 스티커처럼 지금 값으로 읽는다 — 쉬는 실행이 띄울 때 값에 묶이면 작업용으로 돌린 것이 지휘자에게 안 간다
     internal string RulesFor(Room room, RunSetup s) =>
         RoomRules.For(room.Level, terminal: s.Terminal, unity: s.Unity, unityMeasure: s.Unity is { } u && options.Value.IsMeasureUnity(u),
             askWrites: s.AppAskWrites, rest: room.GroupId is null,
             extras: [.. s.Extras.Where(x => x != McpConfigFile.UnityServer)],
-            // 모델 선택창 안내는 기본 서버가 붙고 요청 창 · 스위치가 있는 방에만 (785ebb5e97 C7)
+            // 모델 선택창 안내는 기본 서버가 붙고 요청 창 · 스위치가 있는 방에만
             modeCard: s.McpOn && !room.McpOff.Contains(options.Value.McpServer) && room.GroupId is null)
         + StickerRules.For(Stickers?.Options) // 설정 태그 · Hints가 바뀌면 지문이 바뀌어 다음 말에 다시 붙는다
         + GroupRules.For(store, room, options.Value.WorkspacePath); // 단톡방 구성원 방이면 역할 · 다른 구성원

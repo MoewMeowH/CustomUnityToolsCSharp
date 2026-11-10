@@ -3,7 +3,7 @@ using HB.Chat;
 using HB.Orchestration.ChatUi;
 using Microsoft.Extensions.Options;
 
-// 설정은 켤 때 한 번만 읽는다 (/self-review security b19234c862 C1): 명령 방이 설정 파일을 고쳐도(ClaudePath · Workspaces · AllowedHosts)
+// 설정은 켤 때 한 번만 읽는다: 명령 방이 설정 파일을 고쳐도(ClaudePath · Workspaces · AllowedHosts)
 // 돌고 있는 앱에는 반영되지 않는다. 명령 단계에서는 설정 파일이 편집 금지 경로(ClaudeArgs.EditDenied)이기도 하다 — 두 겹. 앱 단계는 이 금지가 없다 (사용자 결정).
 var builder = WebApplication.CreateBuilder([.. args, "--hostBuilder:reloadConfigOnChange=false"]);
 
@@ -89,14 +89,13 @@ builder.Services.AddSingleton(sp => new RoomNotes(sp.GetRequiredService<IOptions
 
 var app = builder.Build();
 
-// 스티커 설정 폴더를 못 찾으면 스티커 · 표정 그림이 조용히 빠진다 — 상대 경로(content root 기준)로 바뀐 뒤라 시작 로그에 남긴다 (/self-review b280752387 C6)
+// 스티커 설정 폴더를 못 찾으면 스티커 · 표정 그림이 조용히 빠진다 — 상대 경로(content root 기준)로 바뀐 뒤라 시작 로그에 남긴다
 if (builder.Configuration["Chat:StickerSettingsDir"] is { Length: > 0 } configuredStickers && (stickerBase is null || !Directory.Exists(stickerBase)))
     app.Logger.LogWarning("스티커 설정 폴더를 찾지 못했습니다: {Configured} → {Resolved} (content root {Root}) — 스티커 · 표정 그림 없이 돕니다",
         configuredStickers, stickerBase, builder.Environment.ContentRootPath);
 
 // 데이터 폴더 쓰기가 Claude 데스크톱 앱(MSIX) 패키지 캐시로 옮겨지면 켜지 않는다 (4차 A) — 밖에서 띄운 앱과 방 목록 · 기록이 두 벌로 갈린다.
 // 데이터 폴더를 설정 · 인자로 준 실행도 같이 본다: 옮겨지지 않는 폴더(F: · %TEMP% — 시험 서버의 scratchpad)는 Probe가 null이라 막히지 않는다
-// (/self-review dc27a724bf C3).
 {
     var chat = app.Services.GetRequiredService<IOptions<ChatOptions>>().Value;
     if (RedirectedFolder.Probe(chat.DataFolder) is { } redirected)
@@ -105,7 +104,7 @@ if (builder.Configuration["Chat:StickerSettingsDir"] is { Length: > 0 } configur
 
 // 앱에서 더한 작업 폴더 (3차 d): 켤 때 한 번 읽어 설정 값에 붙인다 — 설정 파일(Chat:Workspaces)이 먼저다.
 // 아래 보호 폴더를 품거나 그 안인 폴더는 더하지 못한다 — 편집 금지 규칙이 작업 폴더 기준 상대 경로라, 이 폴더들을 따로 작업 폴더로 두면
-// 앱 · MCP 서버 · Claude 설정을 고칠 수 있게 되므로 (/self-review security eee1adb777 C2 · 460430d647 C1 · C2).
+// 앱 · MCP 서버 · Claude 설정을 고칠 수 있게 되므로.
 {
     var chat = app.Services.GetRequiredService<IOptions<ChatOptions>>().Value;
     // 보호 폴더: 이 앱 · 그 git 저장소 · 데이터 · Claude 설정 폴더 · 설정 작업 폴더 기준 편집 금지 폴더 (쓰기 카드 검사와 같은 함수)
@@ -175,7 +174,7 @@ void PurgeTrash()
     {
         var removed = Trash.Purge(app.Services.GetRequiredService<RoomStore>(),
             app.Services.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder, DateTimeOffset.Now);
-        // 지운 방의 터미널 목록(끝난 것의 버퍼 포함)도 버린다 (/self-review 57b59ef134 C12)
+        // 지운 방의 터미널 목록(끝난 것의 버퍼 포함)도 버린다
         foreach (var id in removed)
         {
             app.Services.GetRequiredService<Terminals>().Forget(id);
@@ -191,7 +190,7 @@ void PurgeTrash()
 }
 
 // 보내지 않은 첨부 (하루 넘고 기록에 안 나온 것) — 휴지통 정리와 같은 때, 뒤에서.
-// 세션 기록 폴더가 없으면(설정이 바뀜 등) 하지 않고, 예상 밖 예외도 로그로만 — 시작 · 타이머가 죽지 않게 (/self-review security 4c300badae C1 · C2, 70170a8801 C5)
+// 세션 기록 폴더가 없으면(설정이 바뀜 등) 하지 않고, 예상 밖 예외도 로그로만 — 시작 · 타이머가 죽지 않게
 void CleanAttachments()
 {
     try

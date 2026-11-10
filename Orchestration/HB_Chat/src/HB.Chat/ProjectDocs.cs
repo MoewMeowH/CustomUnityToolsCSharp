@@ -73,7 +73,7 @@ public static class ProjectDocs
                 if (depth < MaxDepth && !Skip(child.Name)) queue.Enqueue((child, depth + 1));
             }
         }
-        // 프로젝트 사이도 이 방에서 마지막으로 다룬 차례로 — docs를 찾은 차례로 두면 방금 다룬 프로젝트가 아래로 간다 (abc6476218 C1)
+        // 프로젝트 사이도 이 방에서 마지막으로 다룬 차례로 — docs를 찾은 차례로 두면 방금 다룬 프로젝트가 아래로 간다
         return (projects, [.. room.OrderByDescending(r => r.Line).Select(r => r.Project)]);
     }
 
@@ -166,7 +166,7 @@ public static class ProjectDocs
     {
         if (string.IsNullOrWhiteSpace(workspace) || string.IsNullOrEmpty(rel) || rel.Contains('\\') || rel.Contains(':') || rel.StartsWith('/')) return null;
         var parts = rel.Split('/');
-        // 끝 점 · 공백은 Windows가 지워 다른 이름이 되고(bin. → bin), ~는 8.3 짧은 이름(REVIEW~1)이라 건너뛸 폴더 검사를 비켜 간다 (caea21ac40 C3)
+        // 끝 점 · 공백은 Windows가 지워 다른 이름이 되고(bin. → bin), ~는 8.3 짧은 이름(REVIEW~1)이라 건너뛸 폴더 검사를 비켜 간다
         if (parts.Any(p => p.Length == 0 || p == "." || p == ".." || p.EndsWith('.') || p.EndsWith(' ') || p.Contains('~'))) return null;
         var docs = Array.FindIndex(parts, p => p.Equals("docs", StringComparison.OrdinalIgnoreCase));
         if (docs < 0 || docs > MaxDepth) return null; // 첫 docs 기준 — Find가 들어가지 않는 docs 안의 docs는 모양 검사에서 떨어진다
@@ -228,7 +228,7 @@ public static class ProjectDocs
         string? indexText = null;
         try
         {
-            // 찾은 뒤 지워지거나 잠긴 색인 하나로 목록 전체가 실패하지 않게 (256b92a166 C7)
+            // 찾은 뒤 지워지거나 잠긴 색인 하나로 목록 전체가 실패하지 않게
             if (indexFile.Exists && indexFile.LinkTarget is null && indexFile.Length <= MaxBytes)
             {
                 indexText = File.ReadAllText(indexFile.FullName);

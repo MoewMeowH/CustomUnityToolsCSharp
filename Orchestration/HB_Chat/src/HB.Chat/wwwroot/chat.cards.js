@@ -59,7 +59,7 @@
             const head = el("div", "head");
             const left = el("span"); left.style.marginLeft = "auto";
             head.append(el("span", null, who(a) + "승인 요청 · " + a.tool + (a.fromAgent ? " · 서브에이전트" : "")), left); // 서브에이전트가 낸 요청 (D)
-            // 명령 전문(스크롤 칸) — 사용자가 본 것이 허용되는 것과 같게 (/self-review 36e4e20e04 C3 · C5, ab79e61df5 C5).
+            // 명령 전문(스크롤 칸) — 사용자가 본 것이 허용되는 것과 같게.
             card.append(head, el("div", "cmd", a.summary));
             // 터미널 시작 · 브라우저 사이트 카드의 설명은 앱이 쓴 안내다 — 지휘자 설명으로 보이지 않게
             if (a.description) card.append(el("div", "desc", (a.tool === "터미널" || a.tool === "브라우저" || a.tool === "웹 가져오기" ? "" : "Claude 설명: ") + a.description));
@@ -67,7 +67,7 @@
             if (a.outsideWrite) card.append(el("div", "warn-line", "작업 폴더 밖 파일 쓰기입니다 — 허용하면 위 경로의 파일이 만들어지거나 바뀝니다."));
             // 앱 단계: 늘 허용하면 이 폴더(하위 포함) 쓰기는 모든 앱 단계 방에서 다시 묻지 않는다 — 설정 화면에서 뺄 수 있다
             if (a.alwaysFolder) card.append(el("div", "desc", "'이 폴더 늘 허용' 대상: " + a.alwaysFolder + " (하위 폴더 포함 · 모든 앱 단계 방 · 설정 화면에서 뺌)"));
-            // 명령 밖의 입력도 허용하면 같이 실행된다 — 본 것 = 허용되는 것 (/self-review 5e747ff851 C1)
+            // 명령 밖의 입력도 허용하면 같이 실행된다 — 본 것 = 허용되는 것
             if (a.extra) card.append(el("div", "cmd", (a.outsideWrite ? "쓸 내용: " : "추가 입력: ") + a.extra));
             // 백그라운드 실행 명령 — 답이 끝난 뒤에도 돈다 (결정 "넣음")
             if (a.backgroundMinutes) card.append(el("div", "warn-line",
@@ -116,7 +116,7 @@
             head.append(el("span", null, who(a) + "계획 승인"), left);
             card.append(head, el("div", "plan-text", a.summary));
             if (a.truncated) card.append(el("div", "warn-line", "계획이 길어 끝부분이 잘려 보입니다 — 지휘자는 전체 계획대로 진행합니다."));
-            // 계획 글 · 파일 경로 밖의 입력은 승인해도 넘기지 않는다 (/self-review security d3dd55b237 C1)
+            // 계획 글 · 파일 경로 밖의 입력은 승인해도 넘기지 않는다
             if (a.extra) card.append(el("div", "warn-line", "보이지 않는 추가 입력(" + a.extra + ")은 빼고 승인합니다."));
             card.append(el("div", "desc", "승인하면 지휘자가 지금 바로 이 계획대로 진행합니다. 명령은 따로 명령 카드로 묻습니다."));
             const acts = el("div", "acts");
@@ -198,7 +198,7 @@
                 return s;
             };
             const ws = field("작업 폴더", select(r.workspaces, r.workspace));
-            // 다른 작업 폴더도 단계처럼 권한 범위가 바뀐다 — 눈에 띄게 (/self-review 3eda32c3fb C2)
+            // 다른 작업 폴더도 단계처럼 권한 범위가 바뀐다 — 눈에 띄게
             const wsWarn = el("div", "warn-line ws-warn");
             card.append(wsWarn);
             const warnWs = () => {
@@ -224,7 +224,7 @@
             title.type = "text"; title.maxLength = 200; title.value = r.title || ""; title.placeholder = "비우면 첫 말로";
             const prompt = field("첫 말", el("textarea", "room-prompt"));
             prompt.value = r.prompt || "";
-            // 첫 말 크기: 글 칸은 높이가 정해져 있어 긴 글 끝을 놓치기 쉽다 — 길면 끝까지 읽으라고 (/self-review 3eda32c3fb C3)
+            // 첫 말 크기: 글 칸은 높이가 정해져 있어 긴 글 끝을 놓치기 쉽다 — 길면 끝까지 읽으라고
             const size = el("div", "desc prompt-size");
             card.append(size);
             const showSize = () => {
@@ -307,7 +307,7 @@
                 const other = el("input", "other");
                 other.type = "text"; other.maxLength = 1000; other.placeholder = item.options.length ? "기타 (직접 쓰기)" : "답 쓰기";
                 other.addEventListener("input", () => { if (!item.multiSelect && other.value.trim()) inputs.forEach(b => b.checked = false); });
-                // 반대로 하나 고르기에서 선택지를 고르면 기타 글을 비운다 — 안 그러면 보이는 선택과 다른 글이 답으로 갔다 (/self-review 7d839f4aa5 C3)
+                // 반대로 하나 고르기에서 선택지를 고르면 기타 글을 비운다 — 안 그러면 보이는 선택과 다른 글이 답으로 갔다
                 if (!item.multiSelect) inputs.forEach(b => b.addEventListener("change", () => { if (b.checked) other.value = ""; }));
                 otherLab.append(other);
                 set.append(otherLab);

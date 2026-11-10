@@ -22,7 +22,7 @@ public static class Trash
     /// <summary>
     /// 휴지통 즉시 비우기 (4차 C1 — 사용자 희망 "휴지통 즉시 비우기"): 준 방들 중 휴지통에 있는 방만 지운다 — 조건은 잠금 안에서 보므로
     /// 같은 순간 되살린 방은 남는다. "비우기"도 화면에 보인 방 ID만 받는다 — 확인한 범위 밖(그사이 다른 탭이 넣은 방)을 지우지 않게
-    /// (/self-review bd52c6f0d1 C3). 세션 기록은 남김 (4차 결정 C1 "남김").
+    ///. 세션 기록은 남김 (4차 결정 C1 "남김").
     /// </summary>
     public static IReadOnlyList<string> DeleteNow(RoomStore store, string dataFolder, IReadOnlyCollection<string> ids) =>
         Remove(store, dataFolder, r => r.DeletedAt is not null && ids.Contains(r.Id));
@@ -35,7 +35,7 @@ public static class Trash
         if (removed.Count > 0) removed.AddRange(store.RemoveWhere(r => r.GroupId is { } g && removed.Contains(g)));
         foreach (var id in removed.Where(RoomStore.IsRoomId))
         {
-            // 첨부 · 지휘자 브라우저 프로필(쿠키 · 로그인) · 스크린샷 (/self-review security 8b11177bd5 C6). 브라우저는 휴지통에 넣을 때 닫았다
+            // 첨부 · 지휘자 브라우저 프로필(쿠키 · 로그인) · 스크린샷. 브라우저는 휴지통에 넣을 때 닫았다
             foreach (var dir in new[] { Path.Combine(dataFolder, "attachments", id), Path.Combine(dataFolder, "browser", id), Path.Combine(dataFolder, "browser-shots", id) })
             {
                 try

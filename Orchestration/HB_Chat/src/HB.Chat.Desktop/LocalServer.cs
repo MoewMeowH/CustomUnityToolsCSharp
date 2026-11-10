@@ -24,7 +24,7 @@ public enum ServerState
 /// <summary>
 /// 서버 하나: 이미 떠 있으면 붙기만, 없으면 빌드된 exe를 창 없이 띄워 앱 Job에 넣는다.
 /// 확인: 채팅은 `GET /api/rooms`가 JSON 배열, 대시보드는 `GET /`의 제목이 HB Orchestration (서버 쪽에 새 끝점을 두지 않음).
-/// 띄운 서버는 답할 때까지(또는 끝날 때까지) 기다린다 — 늦게 떠도 탭이 오류에 멈추지 않게 (/self-review 26d478170f C2).
+/// 띄운 서버는 답할 때까지(또는 끝날 때까지) 기다린다 — 늦게 떠도 탭이 오류에 멈추지 않게.
 /// 출력은 로그 파일에 (켤 때마다 새로).
 /// </summary>
 public sealed class LocalServer(ServerKind kind, Uri baseUrl, string exePath, string contentRoot, IReadOnlyList<string> extraArgs, string logPath,
@@ -78,7 +78,7 @@ public sealed class LocalServer(ServerKind kind, Uri baseUrl, string exePath, st
             if (res.IsSuccessStatusCode && (kind == ServerKind.Chat ? IsChatRooms(body) : IsDashboard(body))) return ServerState.Ours;
             if (kind == ServerKind.Chat && res.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
-                // 2-3 전 빌드의 HB Chat이면 /api/rooms만 없다 — "다른 프로그램"이 아니라 다시 켜라고 알린다 (26d478170f C8)
+                // 2-3 전 빌드의 HB Chat이면 /api/rooms만 없다 — "다른 프로그램"이 아니라 다시 켜라고 알린다
                 using var page = await http.GetAsync(baseUrl, ct);
                 if (page.IsSuccessStatusCode && IsChatPage(await page.Content.ReadAsStringAsync(ct))) return ServerState.OldChat;
             }
@@ -116,7 +116,7 @@ public sealed class LocalServer(ServerKind kind, Uri baseUrl, string exePath, st
 
         Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
         var log = new StreamWriter(logPath, append: false, new UTF8Encoding(false)) { AutoFlush = true };
-        // 창 없는 자식도 숨은 콘솔(OEM 코드 페이지)로 쓴다 — 그 코드 페이지로 읽어야 한국어 로그가 깨지지 않는다 (26d478170f C14)
+        // 창 없는 자식도 숨은 콘솔(OEM 코드 페이지)로 쓴다 — 그 코드 페이지로 읽어야 한국어 로그가 깨지지 않는다
         var console = ConsoleEncoding();
         var psi = new ProcessStartInfo(exePath)
         {
@@ -139,7 +139,7 @@ public sealed class LocalServer(ServerKind kind, Uri baseUrl, string exePath, st
             await log.DisposeAsync();
             return $"{Name} 서버를 띄우지 못했습니다: {ex.Message}";
         }
-        // Job에 못 넣으면 앱이 끝나도 남으므로 띄우지 않은 것으로 한다 (d459e3af9b C5)
+        // Job에 못 넣으면 앱이 끝나도 남으므로 띄우지 않은 것으로 한다
         if (job.Assign(process) is { } jobError)
         {
             Write(log, "[desktop] " + jobError);
@@ -166,7 +166,7 @@ public sealed class LocalServer(ServerKind kind, Uri baseUrl, string exePath, st
             }
             if (await ProbeAsync(http, ct) == ServerState.Ours)
             {
-                // 그 사이 다른 우리 서버가 답했을 수 있다 — 띄운 것이 살아 있을 때만 소유 (26d478170f C1)
+                // 그 사이 다른 우리 서버가 답했을 수 있다 — 띄운 것이 살아 있을 때만 소유
                 await Task.Delay(300, ct);
                 Owned = !process.HasExited;
                 return null;

@@ -21,7 +21,7 @@ public sealed class TrayIcons : IDisposable
 
     public Icon this[TrayLevel level] => _icons[level].Icon;
 
-    /// <summary>트레이가 그리는 작은 아이콘 크기(배율 반영)로 그린다 — 큰 그림을 셸이 줄이면 흰 테두리가 뭉개진다 (0f0b6007a4 C9).</summary>
+    /// <summary>트레이가 그리는 작은 아이콘 크기(배율 반영)로 그린다 — 큰 그림을 셸이 줄이면 흰 테두리가 뭉개진다.</summary>
     private static (Icon, IntPtr) Draw(Color color)
     {
         var size = Math.Max(16, SystemInformation.SmallIconSize.Width);

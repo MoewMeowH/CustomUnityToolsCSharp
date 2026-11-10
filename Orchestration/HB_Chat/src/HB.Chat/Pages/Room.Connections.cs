@@ -107,7 +107,7 @@ public sealed partial class RoomModel
         if (name == o.McpServer || name == TerminalMcp.Server)
             return Change(id, r => r with { McpOff = on ? [.. r.McpOff.Where(n => n != name)] : [.. r.McpOff.Where(n => n != name), name] }, "연결을 바꾸지 못했습니다");
         // 켤 때는 작업 폴더 .mcp.json이나 앱 서버 목록에 있는 이름만 (끄기는 없어진 이름도 받는다).
-        // 앱 서버면 저장된 정식 이름으로 — 대소문자만 다른 이름이 따로 남지 않게 (/self-review 779716239c C4)
+        // 앱 서버면 저장된 정식 이름으로 — 대소문자만 다른 이름이 따로 남지 않게
         var inWorkspace = o.WorkspacePath(room.Workspace) is { } ws && McpConfigFile.ServerNames(ws).Contains(name);
         if (on && !inWorkspace)
         {

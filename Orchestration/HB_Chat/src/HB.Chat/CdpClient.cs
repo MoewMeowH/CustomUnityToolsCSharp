@@ -83,7 +83,7 @@ public sealed class CdpClient : IAsyncDisposable
         catch (Exception ex) when (ex is WebSocketException or OperationCanceledException or ObjectDisposedException) { }
         finally
         {
-            // 어떤 이유로 끝나든 기다리던 명령을 끝내고 끊김을 알린다 — 그 밖의 예외로 끝나면 IsOpen인 채 남았다 (/self-review 822a55c0cf C8)
+            // 어떤 이유로 끝나든 기다리던 명령을 끝내고 끊김을 알린다 — 그 밖의 예외로 끝나면 IsOpen인 채 남았다
             foreach (var (_, waiting) in _pending) waiting.TrySetException(new CdpException("연결", "브라우저 연결이 끊겼습니다."));
             if (_ws.State == WebSocketState.Open)
                 try { _ws.Abort(); } catch (ObjectDisposedException) { }

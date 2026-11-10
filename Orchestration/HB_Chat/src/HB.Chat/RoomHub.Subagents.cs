@@ -103,7 +103,7 @@ public sealed partial class RoomHub
 
     /// <summary>
     /// snapshot용: 도는 말풍선만. snapshot은 화면이 기록을 먼저 다시 받으므로, 끝난 것(전경 답은 이미 기록에 있음)을 같이 보내면
-    /// 기록 · 진행 칸에 두 번 보인다 (/self-review ad101bcdb6 R-C2).
+    /// 기록 · 진행 칸에 두 번 보인다.
     /// </summary>
     private static IReadOnlyList<SubagentBubble>? SnapshotSubagents(Live live) =>
         live.Subagents.Any(b => !b.Done) ? [.. live.Subagents.Where(b => !b.Done)] : null;
