@@ -1,4 +1,3 @@
-using System.Text;
 using System.Text.Json;
 
 namespace HB.Chat;
@@ -190,10 +189,7 @@ public sealed class AppWriteStore
     {
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(_path))!);
-            var tmp = _path + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(new WriteFile { Ask = _ask, Folders = [.. _saved] }, Json), new UTF8Encoding(false));
-            File.Move(tmp, _path, overwrite: true);
+            AtomicFile.WriteAllText(_path, JsonSerializer.Serialize(new WriteFile { Ask = _ask, Folders = [.. _saved] }, Json));
             return null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

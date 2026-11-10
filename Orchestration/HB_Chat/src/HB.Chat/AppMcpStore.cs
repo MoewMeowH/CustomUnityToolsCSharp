@@ -134,12 +134,9 @@ public sealed partial class AppMcpStore
 
     private void Save()
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(_path))!);
         var servers = new JsonObject();
         foreach (var (name, entry) in _servers) servers[name] = entry.DeepClone();
-        var tmp = _path + ".tmp";
-        File.WriteAllText(tmp, new JsonObject { ["version"] = 1, ["servers"] = servers }.ToJsonString(Json), new UTF8Encoding(false));
-        File.Move(tmp, _path, overwrite: true);
+        AtomicFile.WriteAllText(_path, new JsonObject { ["version"] = 1, ["servers"] = servers }.ToJsonString(Json));
     }
 
     /// <summary>

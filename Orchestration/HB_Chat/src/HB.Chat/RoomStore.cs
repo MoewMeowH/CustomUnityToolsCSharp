@@ -1,4 +1,3 @@
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -303,13 +302,7 @@ public sealed class RoomStore
         if (LoadError is not null) throw new InvalidOperationException($"방 색인을 읽지 못해 쓰지 않습니다 ({_path}): {LoadError}");
     }
 
-    private void Save()
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(_path))!);
-        var tmp = _path + ".tmp";
-        File.WriteAllText(tmp, JsonSerializer.Serialize(new RoomFile { Rooms = _rooms }, Json), new UTF8Encoding(false));
-        File.Move(tmp, _path, overwrite: true);
-    }
+    private void Save() => AtomicFile.WriteAllText(_path, JsonSerializer.Serialize(new RoomFile { Rooms = _rooms }, Json));
 
     private sealed class RoomFile
     {

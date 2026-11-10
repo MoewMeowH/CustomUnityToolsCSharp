@@ -566,12 +566,9 @@ public sealed partial class WorkspaceStore
 
     private void Save()
     {
-        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(_path))!);
-        var tmp = _path + ".tmp";
         var workspaces = _saved.ToDictionary(p => p.Key, p => (string?)p.Value, StringComparer.OrdinalIgnoreCase);
         var measure = _measure.Count > 0 ? new Dictionary<string, string>(_measure, StringComparer.OrdinalIgnoreCase) : null;
-        File.WriteAllText(tmp, JsonSerializer.Serialize(new WorkspaceFile { Workspaces = workspaces, Measure = measure }, Json), new UTF8Encoding(false));
-        File.Move(tmp, _path, overwrite: true);
+        AtomicFile.WriteAllText(_path, JsonSerializer.Serialize(new WorkspaceFile { Workspaces = workspaces, Measure = measure }, Json));
     }
 
     private sealed class WorkspaceFile

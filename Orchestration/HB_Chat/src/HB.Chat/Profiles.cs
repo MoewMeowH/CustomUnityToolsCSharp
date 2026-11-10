@@ -281,10 +281,7 @@ public sealed partial class ProfileStore
     {
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(_file))!);
-            var tmp = _file + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(new ProfileFile { Profiles = new(_profiles), Faces = new(_faces), StickerPack = _stickerPack, Theme = _theme, NotifyBody = _notifyBody }, Json), new UTF8Encoding(false));
-            File.Move(tmp, _file, overwrite: true);
+            AtomicFile.WriteAllText(_file, JsonSerializer.Serialize(new ProfileFile { Profiles = new(_profiles), Faces = new(_faces), StickerPack = _stickerPack, Theme = _theme, NotifyBody = _notifyBody }, Json));
             return null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
