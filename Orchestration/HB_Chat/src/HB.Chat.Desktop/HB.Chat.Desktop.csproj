@@ -29,7 +29,7 @@
   </ItemGroup>
 
   <!-- 내장 펫: 원본은 대시보드 IconPack/Pets/<이름>/ (스티커와 한 곳) — exe 옆 Pets/<이름>/으로 복사.
-       기본 펫 gpt_chan = CodePet 기본 스프라이트 (MIT, main ca3d5c1 — 폴더 안 LICENSE-CodePet.txt) -->
+       기본 펫은 PetSources.DefaultPet (crow) -->
   <ItemGroup>
     <None Include="..\..\..\HB_Orchestration\src\HB.Orchestration.Dashboard\IconPack\Pets\**" LinkBase="Pets" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

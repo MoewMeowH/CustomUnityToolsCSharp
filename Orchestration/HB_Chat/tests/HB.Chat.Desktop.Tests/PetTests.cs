@@ -182,7 +182,7 @@ public sealed class PetTests : IDisposable
     [Fact]
     public void Builtin_DefaultPetLoads_V2WithOccupiedIdleFrames()
     {
-        // 내장 기본 펫 gpt_chan (CodePet MIT) — 빌드가 IconPack/Pets에서 출력 Pets/gpt_chan으로 복사한다. WIC WebP 디코더가 있는 Windows에서
+        // 내장 기본 펫 (PetSources.DefaultPet) — 빌드가 IconPack/Pets에서 출력 Pets/<이름>으로 복사한다. WIC WebP 디코더가 있는 Windows에서
         var path = Path.Combine(AppContext.BaseDirectory, "Pets", PetSources.DefaultPet, PetSources.SheetFile);
         Assert.True(File.Exists(path), path);
         using var sprite = PetSprite.Load(path, 2);
