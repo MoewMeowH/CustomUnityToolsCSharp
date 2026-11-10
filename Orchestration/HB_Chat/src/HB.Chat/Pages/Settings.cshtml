@@ -8,7 +8,7 @@
     <partial name="_Sidebar" model="Model.Sidebar" />
     <section class="pane" id="pane">
         <div class="welcome settings">
-            <p class="mobile-only" style="margin:0 0 8px"><a class="back" href="/">@Icons.Svg("back") 방 목록</a></p>
+            <p class="u-gap-below mobile-only"><a class="back" href="/">@Icons.Svg("back") 방 목록</a></p>
             <h2 style="margin:0 0 12px;font-size:18px">설정</h2>
             @if (Model.DoneText is { } done)
             {
@@ -36,9 +36,9 @@
 
             <div class="settings-tab" id="tab-general" data-tab="general" role="tabpanel" aria-labelledby="tab-btn-general">
                 @* 화면 테마 (5차 a — 노션 "UI/UX 변경 희망": 디코 같은 어두운 테마, 결정 "설정으로") *@
-                <section class="panel" style="padding:12px 14px">
-                    <h3 style="margin:0 0 6px;font-size:15px">화면 테마</h3>
-                    <p class="muted" style="margin:0 0 8px;font-size:12.5px">데스크톱 앱에서는 대시보드 탭과 맨 위 줄도 같은 테마로 보입니다.</p>
+                <section class="u-panel-pad panel">
+                    <h3 class="u-sub-title">화면 테마</h3>
+                    <p class="u-hint muted">데스크톱 앱에서는 대시보드 탭과 맨 위 줄도 같은 테마로 보입니다.</p>
                     <form method="post" asp-page-handler="Theme" class="settings-add">
                         @{ var theme = Model.Profiles.Store.Theme(); }
                         <select name="theme" aria-label="화면 테마">
@@ -52,15 +52,15 @@
                 </section>
 
                 @* 프로필 (3차 e — 결정 4 "이름 · 그림 · 색 + 지휘자 표정"). 말투 · 프롬프트는 바꾸지 않는다 *@
-                <section class="panel" style="padding:12px 14px">
-                    <h3 style="margin:0 0 6px;font-size:15px">프로필</h3>
-                    <p class="muted" style="margin:0 0 8px;font-size:12.5px">
+                <section class="u-panel-pad panel">
+                    <h3 class="u-sub-title">프로필</h3>
+                    <p class="u-hint muted">
                         말풍선 · 방 목록 · 미니 창에 보이는 이름 · 아바타. 그림은 png · jpg · webp, @(ProfileStore.MaxImageBytes / 1024)KB까지 (회사 모드에서는 숨김).
                         외부 에이전트는 호출 기록에 나온 이름, 서브에이전트는 종류(기본 종류 · 작업 폴더 .claude/agents)입니다. 비우면 기본값.
                     </p>
                     @if (Model.Profiles.Store.LoadError is { } pError)
                     {
-                        <p style="color:var(--warn);margin:0 0 8px">profiles.json을 읽지 못해 저장을 막았습니다 (덮어쓰지 않음): @pError</p>
+                        <p class="u-warn-line">profiles.json을 읽지 못해 저장을 막았습니다 (덮어쓰지 않음): @pError</p>
                     }
                     @foreach (var (key, label, defaultName) in Model.ProfileRows)
                     {
@@ -82,9 +82,9 @@
                 </section>
 
                 @* 데스크톱 알림 (노션 "데스크톱 알림에 답변 내용 보이기", 결정 "설정 화면 토글" · 기본 끔). 승인 · 질문 풍선은 늘 제목만 *@
-                <section class="panel" style="padding:12px 14px">
-                    <h3 style="margin:0 0 6px;font-size:15px">데스크톱 알림</h3>
-                    <p class="muted" style="margin:0 0 8px;font-size:12.5px">켜면 '답 끝' · '실패' 풍선에 지휘자 답 앞부분(방 목록 미리보기와 같은 80자)이 보입니다. 글이 Windows 알림 센터에 남으니 회사에서는 끄세요. 승인 · 질문 풍선은 늘 방 제목만.</p>
+                <section class="u-panel-pad panel">
+                    <h3 class="u-sub-title">데스크톱 알림</h3>
+                    <p class="u-hint muted">켜면 '답 끝' · '실패' 풍선에 지휘자 답 앞부분(방 목록 미리보기와 같은 80자)이 보입니다. 글이 Windows 알림 센터에 남으니 회사에서는 끄세요. 승인 · 질문 풍선은 늘 방 제목만.</p>
                     <form method="post" asp-page-handler="Notify" class="settings-add">
                         <label class="switch">
                             <input type="checkbox" name="notifyBody" value="true" checked="@Model.Profiles.Store.NotifyBody()" />
@@ -97,20 +97,20 @@
             </div>
 
             <div class="settings-tab" id="tab-work" data-tab="work" role="tabpanel" aria-labelledby="tab-btn-work">
-                <section class="panel" style="padding:12px 14px">
-                    <h3 style="margin:0 0 6px;font-size:15px">작업 폴더</h3>
-                    <p class="muted" style="margin:0 0 8px;font-size:12.5px">
+                <section class="u-panel-pad panel">
+                    <h3 class="u-sub-title">작업 폴더</h3>
+                    <p class="u-hint muted">
                         방은 작업 폴더 안에서 읽고 · 편집하고 · (명령 방이면) 명령을 실행합니다. 설정 파일(appsettings) 것은 여기서 바꿀 수 없습니다.
                         읽기 이상 방은 그 폴더 .mcp.json의 <span class="mono">@Model.McpServer</span> 항목 명령을 <b>승인 없이</b> MCP 서버로 띄우고,
                         그 폴더 .claude/settings.json의 훅도 돕니다 — 믿을 수 있는 폴더만 더하세요.
                     </p>
                     @if (Model.WorkspaceLoadError is { } wsError)
                     {
-                        <p style="color:var(--warn);margin:0 0 8px">workspaces.json을 읽지 못해 더하기 · 지우기를 막았습니다 (덮어쓰지 않음): @wsError</p>
+                        <p class="u-warn-line">workspaces.json을 읽지 못해 더하기 · 지우기를 막았습니다 (덮어쓰지 않음): @wsError</p>
                     }
                     @foreach (var warning in Model.WorkspaceWarnings)
                     {
-                        <p style="color:var(--warn);margin:0 0 6px">쓰지 않는 앱 항목 — @warning (workspaces.json에는 남겨 둠 — 고치려면 앱을 끄고 그 파일을 고친 뒤 다시 켭니다)</p>
+                        <p class="u-warn-line-tight">쓰지 않는 앱 항목 — @warning (workspaces.json에는 남겨 둠 — 고치려면 앱을 끄고 그 파일을 고친 뒤 다시 켭니다)</p>
                     }
                     <table class="settings-table">
                         <thead><tr><th>이름</th><th>경로</th><th>출처</th><th>MCP 서버 명령</th><th>훅</th><th>방</th><th></th></tr></thead>
@@ -122,7 +122,7 @@
                                     <td class="mono">@w.Entry.Path@(w.Exists ? "" : " (없는 폴더)")
                                         @if (w.Unusable is { } why)
                                         {
-                                            <br /><span style="color:var(--warn);font-family:inherit">지금 쓸 수 없음 — @why</span>
+                                            <br /><span class="u-warn-text">지금 쓸 수 없음 — @why</span>
                                         }
                                     </td>
                                     <td class="muted">@(w.Entry.FromConfig ? "설정 파일" : "앱")</td>
@@ -149,16 +149,16 @@
                         <label class="muted"><input type="checkbox" name="confirm" value="true" /> 이 폴더에서 지휘자가 편집 · 명령 실행을 하고, 그 폴더의 MCP 서버 명령 · 프로젝트 훅이 돈다는 것을 압니다</label>
                         <button class="btn primary" type="submit">@Icons.Svg("plus") 더하기</button>
                     </form>
-                    <p class="muted" style="margin:6px 0 0;font-size:12px">
+                    <p class="u-note-top-12 muted">
                         드라이브 문자 경로만 받습니다. 드라이브 루트 · Windows · Program Files · 사용자 홈 전체 · 이 앱과 그 저장소 · 데이터 폴더 · Claude 설정 폴더(.claude)를
                         품거나 그 안인 폴더, 링크(정션)를 거치는 경로, 방이 쓰던 이름은 받지 않습니다.
                     </p>
                 </section>
 
                 @* 앱 단계 폴더 밖 쓰기 (claude 2.1.316 · 경로 ask 규칙): 묻기면 작업 폴더 밖 Write · Edit를 카드로, 늘 허용 폴더는 묻지 않음 *@
-                <section class="panel" style="padding:12px 14px">
-                    <h3 style="margin:0 0 6px;font-size:15px">앱 단계 폴더 밖 쓰기</h3>
-                    <p class="muted" style="margin:0 0 8px;font-size:12.5px">
+                <section class="u-panel-pad panel">
+                    <h3 class="u-sub-title">앱 단계 폴더 밖 쓰기</h3>
+                    <p class="u-hint muted">
                         앱 단계 방에서 지휘자가 Write · Edit로 작업 폴더 밖에 쓰려 할 때. <b>묻기</b>면 카드로 묻고(허용 · 이 폴더 늘 허용 · 거절), 작업 폴더 안 · 자동 메모리 ·
                         아래 늘 허용 폴더는 묻지 않습니다. <b>그냥 허용</b>이면 CLI auto 판정대로 묻지 않고 씁니다. 명령(Bash · PowerShell)으로 쓰는 것은 어느 쪽이든 auto 판정만 받습니다.
                         방의 다음 실행부터 적용됩니다.
@@ -171,18 +171,18 @@
                     {
                         @if (writes.LoadError is { } writesError)
                         {
-                            <p style="color:var(--warn);margin:0 0 8px">app-writes.json을 읽지 못해 바꾸기를 막고 묻기로 둡니다 (덮어쓰지 않음): @writesError</p>
+                            <p class="u-warn-line">app-writes.json을 읽지 못해 바꾸기를 막고 묻기로 둡니다 (덮어쓰지 않음): @writesError</p>
                         }
                         @foreach (var warning in writes.LoadWarnings)
                         {
-                            <p style="color:var(--warn);margin:0 0 6px">쓰지 않는 늘 허용 폴더 — @warning</p>
+                            <p class="u-warn-line-tight">쓰지 않는 늘 허용 폴더 — @warning</p>
                         }
                         <form method="post" asp-page-handler="AppWrites" class="settings-add">
                             <label><input type="radio" name="mode" value="ask" @(writes.Ask ? "checked" : null) /> 묻기 (카드)</label>
                             <label><input type="radio" name="mode" value="allow" @(writes.Ask ? null : "checked") /> 그냥 허용</label>
                             <button class="btn" type="submit">저장</button>
                         </form>
-                        <table class="settings-table" style="margin-top:8px">
+                        <table class="u-gap-above settings-table">
                             <thead><tr><th>늘 허용 폴더 (하위 포함 · 모든 앱 단계 방)</th><th></th></tr></thead>
                             <tbody>
                                 @if (writes.SavedFolders().Count == 0)
@@ -207,7 +207,7 @@
                             <input type="text" name="path" placeholder="절대 경로 (예: D:/Exports)" maxlength="400" required value="@Model.NewWriteFolder" class="mono" />
                             <button class="btn primary" type="submit">@Icons.Svg("plus") 더하기</button>
                         </form>
-                        <p class="muted" style="margin:6px 0 0;font-size:12px">
+                        <p class="u-note-top-12 muted">
                             작업 폴더와 같은 검사 — 드라이브 루트 · Windows · Program Files · 사용자 홈 전체 · 이 앱과 그 저장소 · 데이터 · Claude 설정 폴더를 품거나 그 안인 폴더,
                             링크를 거치는 경로는 받지 않습니다. 늘 허용 폴더 안이어도 지시 · 설정 · 실행으로 이어지는 파일은 쓰지 않습니다.
                         </p>
@@ -215,19 +215,19 @@
                 </section>
 
                 @* Unity 프로젝트: 명령 방이 곁칸 '연결'에서 하나를 고르면 그 실행에 unity mcp가 붙는다 *@
-                <section class="panel" style="padding:12px 14px">
-                    <h3 style="margin:0 0 6px;font-size:15px">Unity 프로젝트</h3>
-                    <p class="muted" style="margin:0 0 8px;font-size:12.5px">
+                <section class="u-panel-pad panel">
+                    <h3 class="u-sub-title">Unity 프로젝트</h3>
+                    <p class="u-hint muted">
                         명령 방의 곁칸 → 연결에서 고르면 그 방 지휘자가 열린 에디터를 <b>묻지 않고</b> 조작합니다 (씬 · 에셋 편집 · 빌드 · 패키지 포함, C# 코드 실행만 카드로 묻습니다).
                         Unity CLI: <span class="mono">@(Model.UnityCli ?? "찾지 못함 — Chat:UnityCliPath")</span>
                     </p>
                     @if (Model.UnityLoadError is { } uError)
                     {
-                        <p style="color:var(--warn);margin:0 0 8px">unity-projects.json을 읽지 못해 더하기 · 지우기를 막았습니다 (덮어쓰지 않음): @uError</p>
+                        <p class="u-warn-line">unity-projects.json을 읽지 못해 더하기 · 지우기를 막았습니다 (덮어쓰지 않음): @uError</p>
                     }
                     @foreach (var warning in Model.UnityWarnings)
                     {
-                        <p style="color:var(--warn);margin:0 0 6px">쓰지 않는 앱 항목 — @warning</p>
+                        <p class="u-warn-line-tight">쓰지 않는 앱 항목 — @warning</p>
                     }
                     <table class="settings-table">
                         <thead><tr><th>이름</th><th>경로</th><th>출처</th><th>방</th><th>실측 전용</th><th></th></tr></thead>
@@ -239,7 +239,7 @@
                                     <td class="mono">@u.Entry.Path@(u.Exists ? "" : " (없는 폴더)")
                                         @if (u.Unusable is { } why)
                                         {
-                                            <br /><span style="color:var(--warn);font-family:inherit">지금 쓸 수 없음 — @why</span>
+                                            <br /><span class="u-warn-text">지금 쓸 수 없음 — @why</span>
                                         }
                                     </td>
                                     <td class="muted">@(u.Entry.FromConfig ? "설정 파일" : "앱")</td>
@@ -270,7 +270,7 @@
                     </table>
                     @if (Model.UnityRows.Count == 0)
                     {
-                        <p class="muted" style="margin:6px 0 0">아직 없습니다.</p>
+                        <p class="u-note-top muted">아직 없습니다.</p>
                     }
                     <form method="post" asp-page-handler="AddUnity" class="settings-add">
                         <input type="text" name="name" placeholder="이름 (예: ToolCreate)" maxlength="40" required value="@Model.NewUnityName" />
@@ -281,9 +281,9 @@
                     </form>
                 </section>
 
-                <section class="panel" style="padding:12px 14px">
-                    <h3 style="margin:0 0 6px;font-size:15px">방 이름</h3>
-                    <p class="muted" style="margin:0 0 8px;font-size:12.5px">비우면 첫 말이 제목이 됩니다. 방의 작업 폴더는 바꿀 수 없습니다 — 세션 기록이 폴더마다 저장돼서 새 방을 만들어야 합니다.</p>
+                <section class="u-panel-pad panel">
+                    <h3 class="u-sub-title">방 이름</h3>
+                    <p class="u-hint muted">비우면 첫 말이 제목이 됩니다. 방의 작업 폴더는 바꿀 수 없습니다 — 세션 기록이 폴더마다 저장돼서 새 방을 만들어야 합니다.</p>
                     <table class="settings-table">
                         <thead><tr><th>제목</th><th>작업 폴더</th><th>권한</th></tr></thead>
                         <tbody>
@@ -306,7 +306,7 @@
                     </table>
                     @if (Model.Rooms.Count == 0)
                     {
-                        <p class="muted" style="margin:6px 0 0">아직 방이 없습니다.</p>
+                        <p class="u-note-top muted">아직 방이 없습니다.</p>
                     }
                 </section>
             </div>
@@ -315,12 +315,12 @@
                 @* claude CLI 판 · 카드 자가 시험 (결정 "사이드바 + 설정" · "설정 단추로만") *@
                 @{ var cli = Model.Cli; }
                 <section class="panel" id="cli" style="padding:12px 14px@(cli.NeedsCheck ? ";border-color:var(--warn)" : "")">
-                    <h3 style="margin:0 0 6px;font-size:15px">claude CLI · 카드 자가 시험</h3>
-                    <p class="muted" style="margin:0 0 8px;font-size:12.5px">
+                    <h3 class="u-sub-title">claude CLI · 카드 자가 시험</h3>
+                    <p class="u-hint muted">
                         승인 · 질문 카드는 claude CLI의 제어 요청 모양에 기댑니다. CLI가 바뀌면 자가 시험으로 확인하세요 —
                         임시 폴더에서 haiku로 짧은 턴 하나를 돌려 앱이 카드에 자동으로 답합니다 (토큰 조금).
                     </p>
-                    <p style="margin:0 0 8px;font-size:13px">
+                    <p class="u-lead">
                         지금 본 판 <b>@(cli.Seen ?? "아직 모름")</b> · 확인한 판 <b>@(cli.Checked ?? "없음")</b>@(cli.CheckedAt is { } at ? $" ({at.ToLocalTime():MM-dd HH:mm})" : "")
                         @if (cli.NeedsCheck) { <span class="badge warn">확인 필요</span> }
                     </p>
@@ -334,20 +334,20 @@
                             }
                         </ul>
                     }
-                    <form method="post" asp-page-handler="CliSelfTest" style="margin-top:8px" onsubmit="this.querySelector('button').disabled = true; this.querySelector('button').textContent = '시험 중… (최대 2분)';">
+                    <form method="post" asp-page-handler="CliSelfTest" class="u-gap-above" onsubmit="this.querySelector('button').disabled = true; this.querySelector('button').textContent = '시험 중… (최대 2분)';">
                         <button class="btn" type="submit" disabled="@Model.CliTestRunning">@Icons.Svg("check") 카드 자가 시험</button>
                     </form>
                 </section>
 
                 @* 앱에서 더한 MCP 서버: 모든 방 연결 탭에 "앱 서버"로, 방마다 켬. 작업 폴더 .mcp.json에 같은 이름이 있으면 그쪽 *@
                 @* Codex 구성원: 켤 수 있는 작업 폴더 — 기본 없음 *@
-                <section class="panel" style="padding:12px 14px">
-                    <h3 style="margin:0 0 6px;font-size:15px">Codex (단톡방 구성원)</h3>
-                    <p class="muted" style="margin:0 0 8px;font-size:12.5px">
+                <section class="u-panel-pad panel">
+                    <h3 class="u-sub-title">Codex (단톡방 구성원)</h3>
+                    <p class="u-hint muted">
                         단톡방에 OpenAI Codex CLI 구성원을 넣을 수 있는 작업 폴더를 고릅니다(기본 없음). Codex는 ChatGPT 로그인(터미널에서 <code class="mono">codex login</code>)으로 돌고,
                         늘 <b>읽기 전용</b>이지만 <b>디스크 전체를 읽을 수 있습니다</b> — 작업 폴더 밖 파일(사내 자료 등)도 읽어 OpenAI로 보낼 수 있으니 그런 자료가 있는 PC · 폴더에서는 켜지 마세요.
                     </p>
-                    <p class="muted" style="margin:0 0 8px;font-size:12.5px">
+                    <p class="u-hint muted">
                         실행 파일: @(Model.CodexExe is { } exe ? exe : "찾지 못함 — npm i -g @openai/codex (또는 설정 Chat:CodexPath)") ·
                         모델: @(Model.CodexModelList.Count == 0 ? "목록 없음 (Codex 기본만)" : string.Join(", ", Model.CodexModelList.Select(m => m.Name)))
                     </p>
@@ -360,19 +360,19 @@
                     </form>
                 </section>
 
-                <section class="panel" style="padding:12px 14px">
-                    <h3 style="margin:0 0 6px;font-size:15px">MCP 서버 (앱)</h3>
-                    <p class="muted" style="margin:0 0 8px;font-size:12.5px">
+                <section class="u-panel-pad panel">
+                    <h3 class="u-sub-title">MCP 서버 (앱)</h3>
+                    <p class="u-hint muted">
                         여기 더한 서버는 모든 방의 곁칸 → 연결에 "앱 서버"로 보이고, 방마다 켭니다(기본 꺼짐). 켠 방에서는 이 명령이 <b>승인 없이</b> 돌고 도구도 묻지 않고 씁니다.
                         작업 폴더 .mcp.json에 같은 이름이 있으면 그쪽을 씁니다. OAuth로 로그인하는 서버(Notion 등)는 터미널 claude의 /mcp에서 한 번 로그인해 두세요.
                     </p>
                     @if (Model.McpLoadError is { } mError)
                     {
-                        <p style="color:var(--warn);margin:0 0 8px">mcp-servers.json을 읽지 못해 더하기 · 빼기를 막았습니다 (덮어쓰지 않음): @mError</p>
+                        <p class="u-warn-line">mcp-servers.json을 읽지 못해 더하기 · 빼기를 막았습니다 (덮어쓰지 않음): @mError</p>
                     }
                     @foreach (var warning in Model.McpWarnings)
                     {
-                        <p style="color:var(--warn);margin:0 0 6px">쓰지 않는 항목 — @warning</p>
+                        <p class="u-warn-line-tight">쓰지 않는 항목 — @warning</p>
                     }
                     @if (Model.McpRows.Count > 0)
                     {
@@ -387,7 +387,7 @@
                                         <td class="mono">@m.Command
                                             @if (m.Secrets.Count > 0)
                                             {
-                                                <br /><span style="color:var(--warn);font-family:inherit">확인할 점: @string.Join(" · ", m.Secrets) (토큰은 ${변수} 자리표시를 권합니다)</span>
+                                                <br /><span class="u-warn-text">확인할 점: @string.Join(" · ", m.Secrets) (토큰은 ${변수} 자리표시를 권합니다)</span>
                                             }
                                         </td>
                                         <td>@m.Rooms</td>
@@ -436,7 +436,7 @@
                         <summary>더하기 — ~/.claude.json에서 가져오기 (@(Model.McpImports.Count)개)</summary>
                         @if (Model.McpImports.Count == 0)
                         {
-                            <p class="muted" style="margin:6px 0 0">~/.claude.json에 서버가 없거나 읽지 못했습니다.</p>
+                            <p class="u-note-top muted">~/.claude.json에 서버가 없거나 읽지 못했습니다.</p>
                         }
                         else
                         {
@@ -476,17 +476,17 @@
 
             <div class="settings-tab" id="tab-decor" data-tab="decor" role="tabpanel" aria-labelledby="tab-btn-decor">
                 @* 스티커 팩 (4차 D2 — 노션 "이모티콘 사용 종류 변경"): 스티커 폴더 아래 폴더 하나가 팩 하나, 파일 이름은 기본과 같다. 방마다는 곁칸 방 정보에서 *@
-                <section class="panel" style="padding:12px 14px">
-                    <h3 style="margin:0 0 6px;font-size:15px">스티커 팩</h3>
+                <section class="u-panel-pad panel">
+                    <h3 class="u-sub-title">스티커 팩</h3>
                     @{ var packList = Model.Packs.List(); var current = Model.Profiles.Store.StickerPack(); }
-                    <p class="muted" style="margin:0 0 8px;font-size:12.5px">
+                    <p class="u-hint muted">
                         스티커 폴더 아래 폴더 하나가 팩 하나입니다 (안의 그림 이름은 기본과 같게, 팩에 없는 그림은 기본 것으로).
                         폴더에 pack.json(<span class="mono">{"name": "보이는 이름"}</span>)을 두면 그 이름으로 보입니다. 방마다 다르게 하려면 방의 곁칸 → 방 정보.
                     </p>
                     @* 팩 폴더가 없어도 저장된 팩이 있으면 고르는 칸을 보인다 — 기본으로 되돌릴 수 있게 *@
                     @if (packList.Count == 0 && current is null)
                     {
-                        <p class="muted" style="margin:0">팩 폴더가 없습니다 — 기본 그림만 씁니다.</p>
+                        <p class="u-flush muted">팩 폴더가 없습니다 — 기본 그림만 씁니다.</p>
                     }
                     else
                     {
@@ -508,9 +508,9 @@
                     }
                 </section>
 
-                <section class="panel" style="padding:12px 14px">
-                    <h3 style="margin:0 0 6px;font-size:15px">지휘자 표정</h3>
-                    <p class="muted" style="margin:0 0 8px;font-size:12.5px">상태마다 보일 스티커 (설정 파일 Chat:Expressions보다 먼저). 비우면 기본.</p>
+                <section class="u-panel-pad panel">
+                    <h3 class="u-sub-title">지휘자 표정</h3>
+                    <p class="u-hint muted">상태마다 보일 스티커 (설정 파일 Chat:Expressions보다 먼저). 비우면 기본.</p>
                     <form method="post" asp-page-handler="Faces">
                         <table class="settings-table">
                             <thead><tr><th>상태</th><th>스티커</th><th></th></tr></thead>
@@ -543,7 +543,7 @@
                                 }
                             </tbody>
                         </table>
-                        <button class="btn primary" type="submit" style="margin-top:8px">@Icons.Svg("check") 표정 저장</button>
+                        <button class="u-gap-above btn primary" type="submit">@Icons.Svg("check") 표정 저장</button>
                     </form>
                 </section>
             </div>
@@ -551,14 +551,14 @@
             <div class="settings-tab" id="tab-data" data-tab="data" role="tabpanel" aria-labelledby="tab-btn-data">
                 @* 데이터 백업 (결정: 설정 단추로 zip 내려받기 · 앱 데이터 + 세션 기록 · 복원은 zip 안 글대로 · 암호 없음) *@
                 @{ var backup = Model.BackupPlan; }
-                <section class="panel" id="backup" style="padding:12px 14px">
-                    <h3 style="margin:0 0 6px;font-size:15px">데이터 백업</h3>
-                    <p class="muted" style="margin:0 0 8px;font-size:12.5px">
+                <section class="u-panel-pad panel" id="backup">
+                    <h3 class="u-sub-title">데이터 백업</h3>
+                    <p class="u-hint muted">
                         방 색인 · 단톡방 대화 · 승인 기록 · 첨부 · 프로필 · 설정 파일과, 이 앱 방들의 세션 기록(대화 본문) · 할 일을 zip 하나로 받습니다.
                         브라우저 캐시 · 로그와 단톡방 Codex 구성원의 스레드(~/.codex)는 빠집니다. 복원은 zip 안 "복원 방법.txt"대로 복사합니다.
                         대화 · 첨부 · MCP 설정(토큰이 있을 수 있음)이 들어 있으니 다른 사람에게 보내지 마세요.
                     </p>
-                    <p style="margin:0 0 8px;font-size:13px">
+                    <p class="u-lead">
                         지금 담길 것: 파일 @(backup.Files.Count)개 · 세션 기록 @(backup.Sessions)개 · 압축 전 @(backup.Bytes < 1024 * 1024 ? $"{backup.Bytes / 1024.0:0.#}KB" : $"{backup.Bytes / 1024.0 / 1024.0:0.#}MB")
                     </p>
                     @if (Model.RunningRooms is > 0 and var running)

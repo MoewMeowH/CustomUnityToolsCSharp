@@ -36,7 +36,7 @@
             <span id="ctx-text">@(room.ContextTokens is { } tokens ? "컨텍스트 " + RoomModel.Tokens(tokens) + (room.ContextWindow is > 0 and var win ? " / " + RoomModel.Tokens(win) : "") : "")</span>
         </span>
         <span class="muted" title="claude가 알려 준 세션 누적 비용 (클라이언트 추정)" id="cost">@(room.TotalCostUsd is { } cost ? "≈$" + cost.ToString("0.000") : "")</span>
-        <span class="muted" id="conn" style="margin-left:auto"></span>
+        <span class="u-push-right muted" id="conn"></span>
         @if (Model.DashboardLink is { } dash)
         {
             <a href="@dash" target="_blank" rel="noopener" class="icon-link" title="대시보드 채팅방 (run_mode 실행 · 판정 엮임)">@Icons.Svg("dashboard") 대시보드</a>
@@ -97,9 +97,9 @@
         }
         @if (room.Level == PermissionLevel.Command && Model.InheritedRules is { Count: > 0 } inherited)
         {
-            <details class="rules panel" style="padding:8px 12px" open>
+            <details class="u-pad-sm rules panel" open>
                 <summary>카드 없이 실행되는 명령 — 작업 폴더 설정 @(inherited.Count)개</summary>
-                <p class="muted" style="margin:6px 0 0">작업 폴더 · 사용자 설정이 미리 허용 (이 앱에서는 못 지움 — 그 settings 파일에서):</p>
+                <p class="u-note-top muted">작업 폴더 · 사용자 설정이 미리 허용 (이 앱에서는 못 지움 — 그 settings 파일에서):</p>
                 <ul style="margin:4px 0 0;padding-left:0;list-style:none">
                     @foreach (var (source, rule) in inherited)
                     {

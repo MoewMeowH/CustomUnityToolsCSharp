@@ -565,3 +565,26 @@ input.rename { font-size: 15px; font-weight: 600; min-width: 200px; }
     .composer textarea { flex-basis: 100%; order: -1; }
     .composer .plus-wrap { margin-right: auto; } /* + 메뉴 묶음 (모델 선택창) */
 }
+
+/* 화면(Razor)에서 되풀이되던 인라인 style을 옮긴 것 — 값은 옮기기 전과 같다. */
+.u-hint { margin: 0 0 8px; font-size: 12.5px; }
+.u-panel-pad { padding: 12px 14px; }
+.u-sub-title { margin: 0 0 6px; font-size: 15px; }
+.u-note-top { margin: 6px 0 0; }
+.u-note-top-12 { margin: 6px 0 0; font-size: 12px; }
+.u-note-top-125 { margin: 6px 0 0; font-size: 12.5px; }
+.u-warn-line { color: var(--warn); margin: 0 0 8px; }
+.u-warn-line-tight { color: var(--warn); margin: 0 0 6px; }
+.u-warn-text { color: var(--warn); font-family: inherit; }
+.u-pre-wrap { white-space: pre-wrap; }
+.u-push-right { margin-left: auto; }
+.u-centered { text-align: center; }
+.u-pad { padding: 12px; }
+.u-pad-sm { padding: 8px 12px; }
+.u-lead { margin: 0 0 8px; font-size: 13px; }
+.u-gap-below { margin: 0 0 8px; }
+.u-flush { margin: 0; }
+.u-grow-input { flex: 1; min-width: 160px; }
+.u-panel-title { margin: 0 0 10px; font-size: 16px; }
+.u-gap-above { margin-top: 8px; }
+.u-row-wrap { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }

@@ -8,7 +8,7 @@
     <partial name="_Sidebar" model="Model.Sidebar" />
     <section class="pane" id="pane">
         <div class="welcome">
-            <p class="mobile-only" style="margin:0 0 8px"><a class="back" href="/">@Icons.Svg("back") 방 목록</a></p>
+            <p class="u-gap-below mobile-only"><a class="back" href="/">@Icons.Svg("back") 방 목록</a></p>
             @if (Model.LoadError is not null)
             {
                 <div class="panel" style="padding:10px 14px;border-color:var(--err);margin-bottom:12px">방 색인을 읽지 못했습니다 (덮어쓰지 않음): @Model.LoadError</div>
@@ -25,7 +25,7 @@
                     <p class="muted" style="margin:0 0 10px;font-size:12.5px">넣은 지 30일이 지나면 방 목록 · 첨부를 지웁니다. 세션 기록(대시보드에서 보이는 대화)은 남습니다.</p>
                     @if (Model.TrashRooms.Count == 0)
                     {
-                        <p class="muted" style="margin:0">비어 있습니다.</p>
+                        <p class="u-flush muted">비어 있습니다.</p>
                     }
                     else
                     {
@@ -53,9 +53,9 @@
                     }
                 </section>
             }
-            <section class="panel" style="padding:12px 14px">
-                <h2 style="margin:0 0 10px;font-size:16px">새 방</h2>
-                <form method="post" asp-page-handler="Create" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+            <section class="u-panel-pad panel">
+                <h2 class="u-panel-title">새 방</h2>
+                <form method="post" asp-page-handler="Create" class="u-row-wrap">
                     <label>작업 폴더
                         <select name="workspace">
                             @* 설정 파일 것 + 설정 화면에서 더한 것 (3차 d) *@
@@ -90,10 +90,10 @@
                             }
                         </select>
                     </label>
-                    <input type="text" name="title" placeholder="제목 (비우면 첫 말)" maxlength="200" style="flex:1;min-width:160px" />
+                    <input type="text" name="title" placeholder="제목 (비우면 첫 말)" maxlength="200" class="u-grow-input" />
                     <button class="btn primary" type="submit">@Icons.Svg("plus") 만들기</button>
                 </form>
-                <p class="muted" style="margin:6px 0 0;font-size:12.5px">작업 폴더는 <a href="/Settings">설정</a>에서 더할 수 있습니다.</p>
+                <p class="u-note-top-125 muted">작업 폴더는 <a href="/Settings">설정</a>에서 더할 수 있습니다.</p>
                 <p class="muted" style="margin:8px 0 0;font-size:12.5px">
                     읽기: @RoomRules.Describe(PermissionLevel.Read).<br />
                     명령: @RoomRules.Describe(PermissionLevel.Command).<br />
@@ -103,9 +103,9 @@
             </section>
             @* 새 단톡방: 구성원 2~4명 · 구성원마다 단계(⑤) · 기본 MCP는 고름(기본 끔) *@
             <section class="panel" style="padding:12px 14px;margin-top:12px">
-                <h2 style="margin:0 0 10px;font-size:16px">새 단톡방</h2>
+                <h2 class="u-panel-title">새 단톡방</h2>
                 <form method="post" asp-page-handler="CreateGroup" class="group-create">
-                    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+                    <div class="u-row-wrap">
                         <label title="방 목록 묶음 · 구성원 작업 폴더 칸의 기본값">단톡방 작업 폴더
                             <select name="workspace">
                                 @foreach (var w in Model.Options.AllWorkspaces)
@@ -125,7 +125,7 @@
                                 }
                             </select>
                         </label>
-                        <input type="text" name="title" placeholder="단톡방 이름" maxlength="200" required style="flex:1;min-width:160px" />
+                        <input type="text" name="title" placeholder="단톡방 이름" maxlength="200" required class="u-grow-input" />
                     </div>
                     @* 구성원 칸 (단톡방 ③ — 2~4명): 앞 두 칸은 필수, 뒤 칸은 이름을 비우면 빠진다. 칸마다 모든 입력을 보내 배열 순서가 맞는다 *@
                     @for (var i = 0; i < GroupChat.MaxMembers; i++)
@@ -169,9 +169,9 @@
                             </select>
                         </div>
                     }
-                    <button class="btn primary" type="submit" style="margin-top:8px">@Icons.Svg("plus") 단톡방 만들기</button>
+                    <button class="u-gap-above btn primary" type="submit">@Icons.Svg("plus") 단톡방 만들기</button>
                 </form>
-                <p class="muted" style="margin:6px 0 0;font-size:12.5px">
+                <p class="u-note-top-125 muted">
                     부른 구성원만 답합니다 (@@이름 · 여러 명 · @@All은 동시에, 같은 대화를 받고). 구성원마다 세션이 따로 돌고, 단톡방 대화를 함께 받습니다.
                     명령 구성원이 낀 말은 구성원 순서대로 하나씩 돌고, 뒤 구성원은 앞 답을 받습니다. 승인 · 질문 카드는 단톡방 화면에 구성원 이름으로 나옵니다.
                     구성원마다 작업 폴더를 고를 수 있습니다 — 구성원은 자기 작업 폴더에서 돌고, 다른 구성원 폴더의 파일은 보지 못할 수 있습니다.

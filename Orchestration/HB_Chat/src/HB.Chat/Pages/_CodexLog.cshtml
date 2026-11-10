@@ -7,11 +7,11 @@
     var room = Model.Room;
     var steps = Model.CodexSteps; // 계산형 속성 — 한 번만 읽는다
 }
-<div class="panel codex-log" id="codex-log" style="padding:8px 12px">
+<div class="u-pad-sm panel codex-log" id="codex-log">
     <b>Codex 과정</b> <span class="muted">— 읽기 전용 · @Model.ModelLabel@(room.Effort is { } ce ? " · " + ce : "")</span>
     @if (steps.Count == 0)
     {
-        <p class="muted" style="margin:6px 0 0">아직 실행이 없습니다.</p>
+        <p class="u-note-top muted">아직 실행이 없습니다.</p>
     }
     <ol style="margin:6px 0 0;padding-left:18px">
         @foreach (var s in steps)
@@ -21,13 +21,13 @@
                 {
                     @* 앞에 붙은 단톡방 · 앱 안내 블록은 접어서 — 평소엔 사용자 말만, 누르면 보낸 그대로 *@
                     <details class="codex-guide" data-key="@(split.Text.Length)-@(split.Guide.Length)-@(split.Text.GetHashCode())"><summary class="muted">단톡방 안내 (보낸 그대로)</summary>
-                        <div style="white-space:pre-wrap">@(split.Guide.Length > 4000 ? split.Guide[..4000] + "…" : split.Guide)</div>
+                        <div class="u-pre-wrap">@(split.Guide.Length > 4000 ? split.Guide[..4000] + "…" : split.Guide)</div>
                     </details>
-                    <div style="white-space:pre-wrap">@(split.Text.Length > 4000 ? split.Text[..4000] + "…" : split.Text)</div>
+                    <div class="u-pre-wrap">@(split.Text.Length > 4000 ? split.Text[..4000] + "…" : split.Text)</div>
                 }
                 else if (s.Kind is "answer" or "user")
                 {
-                    <div style="white-space:pre-wrap">@(s.Text.Length > 4000 ? s.Text[..4000] + "…" : s.Text)</div>
+                    <div class="u-pre-wrap">@(s.Text.Length > 4000 ? s.Text[..4000] + "…" : s.Text)</div>
                 }
                 else
                 {
