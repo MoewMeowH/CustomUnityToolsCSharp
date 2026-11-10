@@ -12,6 +12,7 @@ public sealed record LimitWindow(string Name, double? Percent, DateTimeOffset? R
     {
         "five_hour" => "5시간",
         "seven_day" => "7일",
+        "seven_day_overage_included" => "Fable 7일",
         _ => Name,
     };
 }
