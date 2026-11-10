@@ -1260,103 +1260,14 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
         }
 
         store.Update(room.Id, r => r with { RunStartedAt = DateTimeOffset.Now });
-        string? mismatch = null;
-        // Unity 캡처 도구 호출 id → 이름 (결과 그림을 기록에 남길 것만, 결정 3)
-        var captures = new Dictionary<string, string>(StringComparer.Ordinal);
-        // 도구 호출 id → 대상 (CLI가 거절한 호출의 기록 줄에 파일 · 명령을 보인다)
-        var toolTargets = new Dictionary<string, string?>(StringComparer.Ordinal);
-        var runUses = new HashSet<string>(StringComparer.Ordinal); // 결과를 기다리는 run_mode 호출 id
-        var runTasks = new HashSet<string>(StringComparer.Ordinal); // 백그라운드로 넘어간 run_mode의 작업 id
         using var stopOnMismatch = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        RoomRun? startedRun = null; // 쉬는 실행으로 띄웠으면 그 실행 (세션이 다르면 까닭을 남기고 멈춘다 — 이어 쓰는 턴 결과에도 실리게)
         // 화면 처리: 쉬는 실행이면 프로세스가 사는 동안(다음 턴 · 자동 턴) 같은 처리를 쓴다
-        Action<StreamEvent> view = ev =>
-        {
-            if (ev is InitEvent init && init.SessionId is { } sid && !string.Equals(sid, room.SessionId, StringComparison.OrdinalIgnoreCase))
-            {
-                // CLI가 다른 세션으로 이어 갔다 — 이 방의 세션이 아니므로 멈춘다 (CodePet NativeSessionLink.observe와 같음).
-                mismatch = $"CLI가 다른 세션({sid})으로 시작해 멈췄습니다. 이 방의 세션은 {room.SessionId}입니다.";
-                try { stopOnMismatch.Cancel(); } catch (ObjectDisposedException) { } // 쉬는 실행의 다음 턴이면 이 턴의 토큰은 이미 없다
-                if (startedRun is { } sr)
-                {
-                    sr.StopReason = mismatch;
-                    sr.Proc.Stop();
-                }
-                return;
-            }
-            // 입력칸 '/' 자동 완성 (Claude 앱 기능 A): 이 방 실행이 알려 준 명령 · 스킬 · 플러그인을 기억한다 (앱을 다시 켜면 첫 실행 전에는 없음)
-            if (ev is InitEvent commands)
-            {
-                _commandSets[room.Id] = commands;
-                KeepMcpStatus(room.Id, live, generation, commands);
-                if (Cli?.Note(commands.Version) == true) TouchAll(); // CLI 판이 바뀌면 사이드바 띠
-            }
-            if (unityName is not null) KeepUnityShots(room.Id, ev, captures);
-            if (ev is RateLimitEvent limits) Limits?.SaveClaude(limits); // 사이드바 한도 줄은 목록을 다시 그릴 때 읽는다
-            if (ev is UsageEvent calls)
-                foreach (var call in calls.Tools)
-                {
-                    if (call.Id is { } callId) toolTargets[callId] = call.Detail;
-                    if (call.Id is { } runCall && IsRunModeTool(call.Name)) runUses.Add(runCall);
-                }
-            var runArrived = RunResultArrived(ev, runUses, runTasks);
-            if (ev is DeniedEvent denied) CliDenied(room, live, generation, denied, toolTargets);
-            // 할 일 도구를 쓴 뒤의 출력이면 그 사이 도구가 돌아 파일이 바뀌었을 수 있다 — 잠금 밖에서 읽는다 (3차 b).
-            // 잦은 stream_event(글 · 도구 입력 · 생각 조각)에서는 읽지 않고, 300ms 안에 다시 읽지 않는다 — 마지막 상태는 턴 끝 읽기가 맞춘다 (/self-review ea28ba9185 C1).
-            var fragment = ev is DeltaEvent or TextBlockStartEvent || (ev is OtherEvent other && other.Type.StartsWith("stream_event", StringComparison.Ordinal));
-            var steps = fragment ? null : RefreshSteps(room, live, generation);
-            lock (live.Gate)
-            {
-                if (live.Generation != generation) return;
-                if (steps is not null) Broadcast(live, new LiveEvent("steps") { Steps = steps });
-                // 외부 에이전트 말풍선은 세션 기록 · 호출 기록에서 그린다 — 결과가 온 순간 화면이 새 말풍선만 받아 가게 알린다
-                if (runArrived) Broadcast(live, new LiveEvent("runs"));
-                if (ev is DeltaEvent) SetFace(live, Face.Writing);
-                else if (ev is ToolEvent te) SetFace(live, Face.Tool, te.Name); // 화면은 표정을 face 알림으로만 바꾼다 (83b453653b C1)
-                // 칩은 tool_use 입력이 다 온 assistant 줄에서 — 대상(파일 이름 · 명령 첫 줄)까지 보인다 (3차 b, 0번 실측 C)
-                if (ev is UsageEvent)
-                {
-                    // assistant 줄 = 여기까지의 글과 이 턴의 말이 세션 기록에 있다
-                    live.PartialLogged = live.Partial.Length;
-                    live.TurnLogged = true;
-                }
-                if (ev is UsageEvent u)
-                    foreach (var tool in u.Tools)
-                    {
-                        Broadcast(live, SetTool(live, tool));
-                        LogAppCall(room, tool);
-                        if (tool.Name is "TaskCreate" or "TaskUpdate") live.StepsWatch = true; // 목록을 바꾸는 도구만
-                    }
-                if (ev is SubagentToolsEvent subagent)
-                {
-                    foreach (var tool in subagent.Tools) LogAppCall(room, tool);
-                    SubagentSaidLines(live, subagent);
-                }
-                if (ev is TaskEvent task) TrackSubagent(live, task);
-                if (ev is UsageEvent blocks)
-                {
-                    // 서버가 요약한 중간 글 — Partial에 넣지 않는다: 일반 방은 다시 열면 세션 기록으로 그려진다 (단톡방은 ReplayLive의 also로 다시 보낸다)
-                    foreach (var said in blocks.Narrations) Broadcast(live, new LiveEvent("narration") { Text = said });
-                    foreach (var text in blocks.Texts)
-                        try { TextBlock?.Invoke(live.Id, text); } catch (Exception ex) when (ex is InvalidOperationException or IOException) { }
-                }
-                var shown = ev switch
-                {
-                    DeltaEvent d => AppendPartial(live, d.Text),
-                    TextBlockStartEvent => BlockGap(live),
-                    RetryEvent r => new LiveEvent("retry") { Text = $"API 재시도 {r.Attempt}회 ({r.Error})" },
-                    StatusEvent s => new LiveEvent("status") { Status = new RoomStatus(s.Category, s.Detail, s.NeedsAction) },
-                    TaskEvent t => new LiveEvent("agent") { Task = ShownTask(live, t) }, // 서브에이전트 · 백그라운드 명령 진행 줄 (Claude 앱 기능 D)
-                    BackgroundWaitEvent b => Background(live, b), // 메인 답 뒤 기다림 — "지금 끝내기" 줄
-                    _ => null,
-                };
-                if (shown is not null) Broadcast(live, shown);
-            }
-        };
+        var state = new RunView(room, live, generation, unityName, stopOnMismatch);
+        Action<StreamEvent> view = ev => ShowRunEvent(state, ev);
         Func<ToolPermission, CancellationToken, Task<string>> decide =
             (ask, aborted) => DecideToolAsync(room, live, generation, ask, aborted, extraServers, unityName, workspace, spec.AskWrites);
         var result = rest
-            ? await StartRunAsync(room.Id, live, generation, RunKey(room), spec.Plan, spec.AskRunMode, setup, room, process, prompt, view, decide, resources, r => startedRun = r,
+            ? await StartRunAsync(room.Id, live, generation, RunKey(room), spec.Plan, spec.AskRunMode, setup, room, process, prompt, view, decide, resources, r => state.StartedRun = r,
                 stopOnMismatch.Token)
             : await ClaudeRunner.RunAsync(process, prompt, view, decide, stopOnMismatch.Token, wrapUp);
 
@@ -1365,9 +1276,9 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
             lock (live.Gate) Broadcast(live, new LiveEvent("steps") { Steps = last });
         lock (live.Gate) live.StepsWatch = false;
 
-        if (mismatch is not null) result = result with { Ok = false, Cancelled = false, Error = mismatch };
+        if (state.Mismatch is not null) result = result with { Ok = false, Cancelled = false, Error = state.Mismatch };
         // 규칙을 실은 말이 세션 기록에 들어갔으면 지휘자가 받은 규칙으로 적는다 (위 noted · rulesDelivered)
-        if (rulesDelivered && mismatch is null && (transcripts.Size(room.SessionId) ?? -1) > sizeBefore)
+        if (rulesDelivered && state.Mismatch is null && (transcripts.Size(room.SessionId) ?? -1) > sizeBefore)
         {
             try { store.Update(room.Id, r => r with { RulesHash = rulesHash }); }
             catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException) { } // 다음 말에 다시 붙을 뿐
@@ -1375,6 +1286,114 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
         // 답 뒤 백그라운드 기다림을 정리했으면 방 기록 줄로 남긴다 — 기록 화면이 그 자리에 그린다 ("끝남"이 몇 초뿐이던 것, 사용자 확인 2026-10-29)
         if (BackgroundNote(result) is { } note) Log?.Note(room.Id, RoomNotes.BackgroundTool, note);
         return Record(room, result, forked: spec.ForkFrom is not null && result.Ok);
+    }
+
+    /// <summary>실행 하나의 화면 처리(<see cref="ShowRunEvent"/>)가 이벤트 사이에 들고 가는 것.</summary>
+    private sealed class RunView(Room room, Live live, int generation, string? unityName, CancellationTokenSource stopOnMismatch)
+    {
+        public readonly Room Room = room;
+        public readonly Live Live = live;
+        public readonly int Generation = generation;
+        public readonly string? UnityName = unityName;
+        public readonly CancellationTokenSource StopOnMismatch = stopOnMismatch;
+        /// <summary>CLI가 다른 세션으로 시작했을 때의 까닭 — 턴 끝에 결과 오류로 싣는다.</summary>
+        public string? Mismatch;
+        /// <summary>쉬는 실행으로 띄웠으면 그 실행 (세션이 다르면 까닭을 남기고 멈춘다 — 이어 쓰는 턴 결과에도 실리게).</summary>
+        public RoomRun? StartedRun;
+        /// <summary>Unity 캡처 도구 호출 id → 이름 (결과 그림을 기록에 남길 것만, 결정 3).</summary>
+        public readonly Dictionary<string, string> Captures = new(StringComparer.Ordinal);
+        /// <summary>도구 호출 id → 대상 (CLI가 거절한 호출의 기록 줄에 파일 · 명령을 보인다).</summary>
+        public readonly Dictionary<string, string?> ToolTargets = new(StringComparer.Ordinal);
+        /// <summary>결과를 기다리는 run_mode 호출 id.</summary>
+        public readonly HashSet<string> RunUses = new(StringComparer.Ordinal);
+        /// <summary>백그라운드로 넘어간 run_mode의 작업 id.</summary>
+        public readonly HashSet<string> RunTasks = new(StringComparer.Ordinal);
+    }
+
+    /// <summary>실행이 낸 이벤트 하나를 화면 · 방 상태에 반영한다 (<see cref="RunWithConfigAsync"/>의 view).</summary>
+    private void ShowRunEvent(RunView view, StreamEvent ev)
+    {
+        var (room, live, generation) = (view.Room, view.Live, view.Generation);
+        if (ev is InitEvent init && init.SessionId is { } sid && !string.Equals(sid, room.SessionId, StringComparison.OrdinalIgnoreCase))
+        {
+            // CLI가 다른 세션으로 이어 갔다 — 이 방의 세션이 아니므로 멈춘다 (CodePet NativeSessionLink.observe와 같음).
+            view.Mismatch = $"CLI가 다른 세션({sid})으로 시작해 멈췄습니다. 이 방의 세션은 {room.SessionId}입니다.";
+            try { view.StopOnMismatch.Cancel(); } catch (ObjectDisposedException) { } // 쉬는 실행의 다음 턴이면 이 턴의 토큰은 이미 없다
+            if (view.StartedRun is { } sr)
+            {
+                sr.StopReason = view.Mismatch;
+                sr.Proc.Stop();
+            }
+            return;
+        }
+        // 입력칸 '/' 자동 완성 (Claude 앱 기능 A): 이 방 실행이 알려 준 명령 · 스킬 · 플러그인을 기억한다 (앱을 다시 켜면 첫 실행 전에는 없음)
+        if (ev is InitEvent commands)
+        {
+            _commandSets[room.Id] = commands;
+            KeepMcpStatus(room.Id, live, generation, commands);
+            if (Cli?.Note(commands.Version) == true) TouchAll(); // CLI 판이 바뀌면 사이드바 띠
+        }
+        if (view.UnityName is not null) KeepUnityShots(room.Id, ev, view.Captures);
+        if (ev is RateLimitEvent limits) Limits?.SaveClaude(limits); // 사이드바 한도 줄은 목록을 다시 그릴 때 읽는다
+        if (ev is UsageEvent calls)
+            foreach (var call in calls.Tools)
+            {
+                if (call.Id is { } callId) view.ToolTargets[callId] = call.Detail;
+                if (call.Id is { } runCall && IsRunModeTool(call.Name)) view.RunUses.Add(runCall);
+            }
+        var runArrived = RunResultArrived(ev, view.RunUses, view.RunTasks);
+        if (ev is DeniedEvent denied) CliDenied(room, live, generation, denied, view.ToolTargets);
+        // 할 일 도구를 쓴 뒤의 출력이면 그 사이 도구가 돌아 파일이 바뀌었을 수 있다 — 잠금 밖에서 읽는다 (3차 b).
+        // 잦은 stream_event(글 · 도구 입력 · 생각 조각)에서는 읽지 않고, 300ms 안에 다시 읽지 않는다 — 마지막 상태는 턴 끝 읽기가 맞춘다 (/self-review ea28ba9185 C1).
+        var fragment = ev is DeltaEvent or TextBlockStartEvent || (ev is OtherEvent other && other.Type.StartsWith("stream_event", StringComparison.Ordinal));
+        var steps = fragment ? null : RefreshSteps(room, live, generation);
+        lock (live.Gate)
+        {
+            if (live.Generation != generation) return;
+            if (steps is not null) Broadcast(live, new LiveEvent("steps") { Steps = steps });
+            // 외부 에이전트 말풍선은 세션 기록 · 호출 기록에서 그린다 — 결과가 온 순간 화면이 새 말풍선만 받아 가게 알린다
+            if (runArrived) Broadcast(live, new LiveEvent("runs"));
+            if (ev is DeltaEvent) SetFace(live, Face.Writing);
+            else if (ev is ToolEvent te) SetFace(live, Face.Tool, te.Name); // 화면은 표정을 face 알림으로만 바꾼다 (83b453653b C1)
+            // 칩은 tool_use 입력이 다 온 assistant 줄에서 — 대상(파일 이름 · 명령 첫 줄)까지 보인다 (3차 b, 0번 실측 C)
+            if (ev is UsageEvent)
+            {
+                // assistant 줄 = 여기까지의 글과 이 턴의 말이 세션 기록에 있다
+                live.PartialLogged = live.Partial.Length;
+                live.TurnLogged = true;
+            }
+            if (ev is UsageEvent u)
+                foreach (var tool in u.Tools)
+                {
+                    Broadcast(live, SetTool(live, tool));
+                    LogAppCall(room, tool);
+                    if (tool.Name is "TaskCreate" or "TaskUpdate") live.StepsWatch = true; // 목록을 바꾸는 도구만
+                }
+            if (ev is SubagentToolsEvent subagent)
+            {
+                foreach (var tool in subagent.Tools) LogAppCall(room, tool);
+                SubagentSaidLines(live, subagent);
+            }
+            if (ev is TaskEvent task) TrackSubagent(live, task);
+            if (ev is UsageEvent blocks)
+            {
+                // 서버가 요약한 중간 글 — Partial에 넣지 않는다: 일반 방은 다시 열면 세션 기록으로 그려진다 (단톡방은 ReplayLive의 also로 다시 보낸다)
+                foreach (var said in blocks.Narrations) Broadcast(live, new LiveEvent("narration") { Text = said });
+                foreach (var text in blocks.Texts)
+                    try { TextBlock?.Invoke(live.Id, text); } catch (Exception ex) when (ex is InvalidOperationException or IOException) { }
+            }
+            var shown = ev switch
+            {
+                DeltaEvent d => AppendPartial(live, d.Text),
+                TextBlockStartEvent => BlockGap(live),
+                RetryEvent r => new LiveEvent("retry") { Text = $"API 재시도 {r.Attempt}회 ({r.Error})" },
+                StatusEvent s => new LiveEvent("status") { Status = new RoomStatus(s.Category, s.Detail, s.NeedsAction) },
+                TaskEvent t => new LiveEvent("agent") { Task = ShownTask(live, t) }, // 서브에이전트 · 백그라운드 명령 진행 줄 (Claude 앱 기능 D)
+                BackgroundWaitEvent b => Background(live, b), // 메인 답 뒤 기다림 — "지금 끝내기" 줄
+                _ => null,
+            };
+            if (shown is not null) Broadcast(live, shown);
+        }
     }
 
     /// <summary>
