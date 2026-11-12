@@ -120,7 +120,7 @@ public sealed partial class RoomList(RoomStore store, RoomHub hub, ChatTranscrip
         var who = last is null ? null
             : last.Kind == GroupEntryKind.User ? "나"
             : room.Members.FirstOrDefault(m => m.Id == last.MemberId)?.Name;
-        var preview = last is null ? "[단톡방] " + string.Join(", ", room.Members.Select(m => m.Name))
+        var preview = last is null ? (room.Playground is not null ? "[놀이터] " : "[단톡방] ") + string.Join(", ", room.Members.Select(m => m.Name))
             : Preview((who is null ? "" : who + ": ") + last.Text);
         var lastAt = new[] { last?.At, room.CreatedAt }.Max() ?? room.CreatedAt;
         var activity = GroupChat.ActivityOf(room, hub);

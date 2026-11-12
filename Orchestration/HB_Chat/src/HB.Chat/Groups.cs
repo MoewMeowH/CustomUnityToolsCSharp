@@ -294,6 +294,9 @@ public static class GroupRules
     {
         if (room.GroupId is not { } groupId || store.Get(groupId) is not { IsGroup: true } group) return null;
         if (group.Members.FirstOrDefault(m => m.Id == room.MemberId) is not { } me) return null;
+        // 놀이터: 차례로 말하는 판 — 일반 단톡방 안내(부를 때만 답함 · 이어 부르기 한도)가 맞지 않는다
+        if (group.Playground is { } pg)
+            return PlaygroundRules.For(group, pg, me, group.Members.Where(m => m.Id != me.Id).Select(m => $"{m.Name}({Short(m.Role)})"));
         // 쓰는 구성원(명령, ⑤)은 단계를 같이 — 그 구성원이 낀 말은 차례로 돌고 파일이 바뀌어 있을 수 있다
         var writers = group.Members.Where(m => GroupChat.IsWriter(store.Get(m.RoomId))).Select(m => m.Id).ToHashSet(StringComparer.Ordinal);
         // 구성원 작업 폴더가 섞인 단톡방만 폴더를 알린다 — 모두 같으면 문장이 그대로라 이미 있는 단톡방의 규칙 지문이 바뀌지 않는다
@@ -356,6 +359,7 @@ public sealed partial class GroupChat
         hub.CardChanged += OnCard;
         hub.Streamed += OnStreamed;
         hub.Subscribed += OnSubscribed;
+        PauseInterrupted(); // 앱이 꺼지며 끊긴 놀이터 판은 일시 정지로 (사용자 결정)
     }
 
     /// <summary>기본 MCP 이름 · 작업 폴더 경로 (만들기 검사). 없으면(시험) 기본 이름만 쓰고 .mcp.json은 보지 않는다.</summary>
@@ -493,6 +497,8 @@ public sealed partial class GroupChat
         {
             try
             {
+                // 놀이터: 사람 말은 거절하지 않고 기록 경로로 (끼어들기 — 설계 검토 R2)
+                if (_store.Get(groupId) is { Playground: { } pg } playground) return PlaygroundSay(groupId, playground, pg, parsed, text);
                 return SendLocked(groupId, group, parsed, text);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
@@ -749,6 +755,8 @@ public sealed partial class GroupChat
         // _hub.Stop은 알림만 내고(단톡방 처리는 OnActivity가 Task.Run으로 따로 잠금) 이 잠금을 다시 잡지 않는다
         lock (_gates.GetOrAdd(groupId, _ => new Lock()))
         {
+            // 놀이터: 중지 단추는 일시 정지 — 멈춘 답이 끝나도 다음 차례를 보내지 않는다 (멈춤 단추는 PlaygroundStop)
+            if (group.Playground is { State: PlaygroundState.Running }) Halt(groupId, PlaygroundState.Paused, "중지 단추로 일시 정지했습니다.");
             // 판을 멈춘다 — 도는 답이 끝나도 이어 부르지 않고, 기다리던 이어 부르기는 중지로 닫는다 (④ 5)
             if (_rounds.TryGetValue(groupId, out var round))
             {
@@ -789,6 +797,8 @@ public sealed partial class GroupChat
         var states = group.Members.Where(m => m.RoomId.Length > 0).Select(m => hub.ActivityOf(m.RoomId)).ToList();
         return states.Contains(RoomActivity.Approval) ? RoomActivity.Approval
             : states.Contains(RoomActivity.Busy) ? RoomActivity.Busy
+            // 도는 놀이터는 차례 사이에도 실행 중 — 구성원 말마다 "답 끝" 알림이 나지 않고 판이 멈추거나 끝날 때만 (사용자 결정)
+            : group.Playground is { State: PlaygroundState.Running } ? RoomActivity.Busy
             : RoomActivity.Idle;
     }
 
@@ -808,6 +818,9 @@ public sealed partial class GroupChat
             return $"{busy.Name}이(가) 답하는 중입니다 — 중지한 뒤 휴지통에 넣으세요.";
         // 하나라도 저장하지 못하면 바꾼 방을 되돌린다 — 일부만 휴지통에 남지 않게 (b8697252eb C8 · Codex 리뷰)
         if (at is not null) _rounds.TryRemove(groupId, out _); // 판은 휴지통에 남기지 않는다 (4단계 리뷰 sub_self C7) — 되살린 뒤 첫 말이 새 판
+        // 도는 놀이터는 일시 정지로 — 휴지통에 든 구성원 방에 다음 차례를 보내지 않게 (판 폴더는 남긴다 — 사용자 결정)
+        if (at is not null && group.Playground is { State: PlaygroundState.Running })
+            lock (_gates.GetOrAdd(groupId, _ => new Lock())) Halt(groupId, PlaygroundState.Paused, "휴지통에 넣어 일시 정지했습니다.");
         var ids = group.Members.Where(m => m.RoomId.Length > 0).Select(m => m.RoomId).Append(groupId).ToList();
         var before = ids.ToDictionary(id => id, id => _store.Get(id)?.DeletedAt);
         var done = new List<string>();
@@ -895,10 +908,16 @@ public sealed partial class GroupChat
             try
             {
                 PostAnswer(groupId, roomId, pending, result, said);
-                // 이 구성원이 답하는 동안 다른 구성원이 불렀으면 이제 이어서. 옛 기다림을 지우기 전에 — 새 기다림이 덮어 쓰므로
-                // 기다림이 없는 틈이 생기지 않는다(그 틈에 화면이 찍으면 "이어 답이 없습니다"가 남았다 — 4단계 리뷰 지휘자 K1)
-                StartDeferred(groupId, roomId);
-                Pump(groupId, roomId); // 차례로 도는 말(⑤)의 다음 구성원
+                // 놀이터면 진행기만 다음 차례를 정한다 — 일반 단톡방의 이어 부르기 · 차례 대기열과 둘 중 하나만 (설계 검토 b420efd860 R2)
+                if (_store.Get(groupId)?.Playground is not null && _store.Get(roomId) is { MemberId: { } memberId })
+                    PlaygroundAfter(groupId, memberId, result.Ok && !string.IsNullOrWhiteSpace(result.Text) ? result.Text : null);
+                else
+                {
+                    // 이 구성원이 답하는 동안 다른 구성원이 불렀으면 이제 이어서. 옛 기다림을 지우기 전에 — 새 기다림이 덮어 쓰므로
+                    // 기다림이 없는 틈이 생기지 않는다(그 틈에 화면이 찍으면 "이어 답이 없습니다"가 남았다 — 4단계 리뷰 지휘자 K1)
+                    StartDeferred(groupId, roomId);
+                    Pump(groupId, roomId); // 차례로 도는 말(⑤)의 다음 구성원
+                }
             }
             finally { _pending.TryRemove(new KeyValuePair<string, Pending>(roomId, posting)); } // 새 이어 부르기가 덮었으면 그대로 둔다
         }
@@ -1135,15 +1154,26 @@ public sealed partial class GroupChat
                         RestoreSeen(groupId, memberId, pending.SeenBefore); // 실행이 시작되지 않았다 — 말이 가지 않음 (Codex sol 리뷰 C1)
                     }
                     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException) { }
-                    // 기다리던 이어 부르기(④)를 먼저 — 새 기다림이 옛 것을 덮은 뒤 옛 것을 지워, 기다림 없는 틈이 없게 (4단계 리뷰 지휘자 K1).
-                    // 단톡방 잠금 안이라 그 사이 다른 처리가 이 기다림을 건드리지 않는다
-                    StartDeferred(groupId, roomId);
-                    _pending.TryRemove(new KeyValuePair<string, Pending>(roomId, pending));
+                    if (_store.Get(groupId)?.Playground is not null)
+                    {
+                        // 놀이터: 이 차례는 실패로 세고 진행기가 다음을 정한다
+                        _pending.TryRemove(new KeyValuePair<string, Pending>(roomId, pending));
+                        PlaygroundAfter(groupId, memberId, null);
+                    }
+                    else
+                    {
+                        // 기다리던 이어 부르기(④)를 먼저 — 새 기다림이 옛 것을 덮은 뒤 옛 것을 지워, 기다림 없는 틈이 없게 (4단계 리뷰 지휘자 K1).
+                        // 단톡방 잠금 안이라 그 사이 다른 처리가 이 기다림을 건드리지 않는다
+                        StartDeferred(groupId, roomId);
+                        _pending.TryRemove(new KeyValuePair<string, Pending>(roomId, pending));
+                    }
                     _hub.Announce(groupId, new LiveEvent("group"));
                 }
                 // 차례로 도는 말(⑤)의 다음 구성원 — 기다림과 상관없이 쉼마다. TurnEnded는 그 방이 아직 Busy일 때 불려(LoopAsync), 두 구성원이 거의 같이
                 // 끝나면 뒤 답 처리의 Pump가 앞 방을 도는 중으로 보고 멈췄는데 앞 방의 쉼에는 기다림이 없어 다시 부를 곳이 없었다 (⑤ 리뷰 자료 요청 1-N1)
                 if (kind == "idle" && Pump(groupId)) _hub.Announce(groupId, new LiveEvent("group"));
+                // 놀이터: 쉼마다 — 답 처리 때 이 방이 아직 Busy라 멈춘 다음 차례를 이어 간다 (review a3c4ec407a 1-F2)
+                if (kind == "idle") PlaygroundIdle(groupId);
                 _hub.Announce(groupId, new LiveEvent("member") { Detail = memberId, Text = MemberState(roomId) });
             }
             _hub.Touch(groupId);

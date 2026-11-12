@@ -140,6 +140,17 @@ public sealed class ChatOptions
         string.IsNullOrWhiteSpace(ClaudeProjectsDir) ? ClaudeTranscriptReader.DefaultProjectsRoot() : ClaudeProjectsDir.Trim();
 
     /// <summary>
+    /// 놀이터 판 폴더를 만들 뿌리 (판마다 하위 폴더를 만들어 앱 작업 폴더로 등록). 비우면 %USERPROFILE%/HB_Playground —
+    /// 데이터 폴더 · 앱 저장소 안은 보호 폴더라 작업 폴더로 등록되지 않는다.
+    /// </summary>
+    public string? PlaygroundRoot { get; set; }
+
+    public string PlaygroundFolder =>
+        string.IsNullOrWhiteSpace(PlaygroundRoot)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "HB_Playground")
+            : PlaygroundRoot.Trim();
+
+    /// <summary>
     /// 지휘자 할 일 폴더 (세션마다 <c>&lt;세션 ID&gt;/*.json</c>, 3차 b). 세션 기록 폴더(projects) 옆의 tasks — 기본 ~/.claude/tasks
     /// (CLAUDE_CONFIG_DIR를 쓰면 그 아래, ClaudeProjectsDir를 정하면 그 옆). 위치를 정하지 못하면 null — 단계 표시만 빠진다.
     /// </summary>

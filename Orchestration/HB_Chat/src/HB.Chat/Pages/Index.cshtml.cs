@@ -25,11 +25,30 @@ public sealed class IndexModel(RoomStore store, RoomHub hub, RoomList list, Chat
     /// </summary>
     public IActionResult OnPostCreateGroup(string workspace, string model, string? title, string? effort,
         string[]? names, string[]? roles, string[]? engines, string[]? codexModels, string[]? codexEfforts, string[]? levels, string[]? memberWorkspaces,
-        bool baseMcp = false)
+        bool baseMcp = false, bool playground = false, string? topic = null, int maxMessages = Playground.DefaultMessages, int maxMinutes = Playground.DefaultMinutes,
+        double maxCost = Playground.DefaultCostUsd)
     {
         static string? At(string[]? values, int i) => values is not null && i < values.Length ? values[i] : null;
         var o = options.Value;
         var (cleanEffort, effortError) = RoomEffort.Clean(effort);
+        // 놀이터: 판 폴더를 앱이 만든다 — 작업 폴더 · 단계 · 구성원 작업 폴더 · 기본 MCP 칸은 쓰지 않는다
+        if (playground)
+        {
+            Error = !o.ModelList.Contains(model, StringComparer.Ordinal) ? "허용 목록에 없는 모델입니다." : effortError;
+            if (Error is null)
+            {
+                var members = (names ?? []).Select((n, i) => new GroupMemberSpec(n, At(roles, i) ?? "", At(engines, i), At(codexModels, i), At(codexEfforts, i))).ToList();
+                var (made, playError) = groups.CreatePlayground(model, cleanEffort, title, members, topic, maxMessages, maxMinutes, maxCost);
+                if (made is not null)
+                {
+                    hub.Touch(made.Id);
+                    return Redirect($"/Room/{made.Id}");
+                }
+                Error = playError;
+            }
+            OnGet();
+            return Page();
+        }
         Error = o.WorkspacePath(workspace) is null ? "허용 목록에 없는 작업 폴더입니다."
             : !o.ModelList.Contains(model, StringComparer.Ordinal) ? "허용 목록에 없는 모델입니다."
             : effortError;
@@ -130,7 +149,7 @@ public sealed class IndexModel(RoomStore store, RoomHub hub, RoomList list, Chat
         if (targets.Length == 0 || !targets.All(RoomStore.IsRoomId)) return NotFound();
         try
         {
-            foreach (var removed in Trash.DeleteNow(store, options.Value.DataFolder, targets))
+            foreach (var removed in Trash.DeleteNow(store, options.Value.DataFolder, targets, groups.ForgetPlayground))
             {
                 hub.ForgetCommands(removed);
                 hub.Touch(removed);

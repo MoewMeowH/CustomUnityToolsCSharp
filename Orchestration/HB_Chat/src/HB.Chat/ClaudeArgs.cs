@@ -53,6 +53,12 @@ public sealed record RunSpec(
 
     /// <summary>앱 단계: 모든 Write · Edit를 앱에 묻는다 (<see cref="ClaudeArgs.AppWriteAskRule"/> — 앱이 작업 폴더 밖만 카드로, 설정 "폴더 밖 쓰기 묻기").</summary>
     public bool AskWrites { get; init; }
+
+    /// <summary>
+    /// 놀이터 구성원 (명령 단계에서만): 도구를 읽기 · 찾기 · 편집 · 웹 검색으로 줄인다 — 명령 · 웹 가져오기 · 질문 · 할 일 · 서브에이전트 없음
+    /// (<see cref="ClaudeArgs.PlaygroundTools"/>). 사람 없이 도는 판이라 묻는 도구를 두지 않는다.
+    /// </summary>
+    public bool Playground { get; init; }
 }
 
 /// <summary>
@@ -175,6 +181,7 @@ public static partial class ClaudeArgs
         // 계획 모드 (Claude 앱 기능 C): --permission-mode plan + 승인 도구 ExitPlanMode (2.1.312 실측 — --tools에 없으면 계획만 쓰고 턴이 끝났다).
         // 계획 승인 뒤 모드는 앱의 허용 답(setMode)이 그 단계의 원래 모드로 돌린다.
         if (spec.Plan && PlanMode(spec.Level) is null) throw new ArgumentException($"{spec.Level} 단계는 계획 모드를 쓰지 않는다");
+        if (spec.Playground && (spec.Level != PermissionLevel.Command || spec.Plan)) throw new ArgumentException("놀이터 구성원은 명령 단계 · 계획 모드 없이만 돈다");
         var planTool = spec.Plan ? "," + ApprovalRequest.PlanTool : "";
         switch (spec.Level)
         {
@@ -193,10 +200,12 @@ public static partial class ClaudeArgs
                 // acceptEdits는 쓰지 않는다: 그 모드는 작업 폴더 안 cp · mv 같은 파일 명령을 묻지 않고 허용해, 편집 금지 규칙(Edit 도구에만 걸림)과
                 // 카드를 둘 다 지나치게 한다. 대신 작업 폴더 안 편집만 `Edit(**)`로 미리 허용한다 —
                 // 실측(2026-10-28): 작업 폴더 안 Write는 묻지 않음, 밖 Write는 거절, Bash cp는 승인 요청으로 옴.
-                args.AddRange(["--tools", "Read,Grep,Glob,Edit,Write,Bash,PowerShell," + HostTools + "," + WebTools + planTool]);
+                // 놀이터: 명령 도구 없이 — Windows에서 CLI 샌드박스가 돌지 않아 명령을 판 폴더에 가둘 수 없다 (2026-11-12 실측, 2.1.322)
+                args.AddRange(["--tools", spec.Playground ? PlaygroundTools : "Read,Grep,Glob,Edit,Write,Bash,PowerShell," + HostTools + "," + WebTools + planTool]);
                 if (spec.Plan) args.AddRange(["--permission-mode", "plan"]);
                 args.Add("--disallowedTools");
                 args.AddRange(EditDenied.Select(p => $"Edit({p})"));
+                if (spec.Playground) args.AddRange(PlaygroundDenied.Select(p => $"Edit({p})"));
                 args.AddRange(attachDeny);
                 AddMcp(args, spec);
                 // --allowedTools 가변 인자(AddMcp의 MCP 규칙 뒤)에 작업 폴더 안 편집을 이어 붙인다.
@@ -277,6 +286,21 @@ public static partial class ClaudeArgs
 
     /// <summary>명령 단계에서 작업 폴더 안 편집을 묻지 않게 하는 규칙 (Edit 규칙은 Write 도구에도 걸린다 — 2026-10-28 실측).</summary>
     public const string CommandEditAllow = "Edit(**)";
+
+    /// <summary>놀이터 구성원 도구 (<see cref="RunSpec.Playground"/>): 판 폴더 안 편집 · 웹 검색만.</summary>
+    public const string PlaygroundTools = "Read,Grep,Glob,Edit,Write," + WebSearchTool;
+
+    /// <summary>
+    /// 놀이터 구성원이 판 폴더 안에서도 쓰지 않는 것 (<see cref="EditDenied"/>에 더해, security review C2 · C3 · C5): 사람 없이 도는 판이 남기면
+    /// 다음 실행 · 사람의 열기로 명령이 되는 자리 — Codex 지시 · 설정(AGENTS.md · .codex · .agents), git 훅 · 설정, 편집기 작업 설정,
+    /// 더블클릭으로 도는 실행 형식. .js · .html은 놀이터 결과물(웹 게임 등)이라 막지 않는다 — 판 줄에 "열기 전에 확인" 안내.
+    /// </summary>
+    public static readonly IReadOnlyList<string> PlaygroundDenied =
+    [
+        "**/AGENTS*.md", "**/.codex/**", "**/.agents/**", "**/.git/**", "**/.vscode/**", "**/.idea/**",
+        "**/*.vbs", "**/*.vbe", "**/*.wsf", "**/*.wsh", "**/*.hta", "**/*.url", "**/*.lnk", "**/*.scr", "**/*.exe", "**/*.com",
+        "**/*.msi", "**/*.reg", "**/*.psm1",
+    ];
 
     /// <summary>명령 방에서 승인 카드로 받는 도구. 그 밖의 승인 요청(작업 폴더 밖 쓰기 등)은 카드 없이 거절한다.</summary>
     public static readonly IReadOnlySet<string> CommandTools = new HashSet<string>(StringComparer.Ordinal) { "Bash", "PowerShell" };

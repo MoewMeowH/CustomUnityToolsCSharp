@@ -16,23 +16,29 @@ public static class Trash
     /// 30일이 지난 방을 지운다: 방 색인에서 빼고 데이터 폴더의 attachments/&lt;방 ID&gt; 폴더를 지운다. 지운 방 ID 목록.
     /// 방 ID는 12자 16진만 경로에 쓴다 (색인이 손으로 고쳐졌어도 다른 폴더를 지우지 않게). 방 색인이 깨졌으면 아무것도 하지 않는다.
     /// </summary>
-    public static IReadOnlyList<string> Purge(RoomStore store, string dataFolder, DateTimeOffset now) =>
-        Remove(store, dataFolder, r => r.DeletedAt is { } at && now - at >= KeepFor);
+    /// <param name="forget">지운 놀이터 단톡방마다 (방 색인에서 빠진 뒤) — 판 폴더 작업 폴더 등록 · 이 판이 더한 Codex 허용을 뺀다 (<see cref="GroupChat.ForgetPlayground"/>).
+    /// 판 폴더 자체는 지우지 않는다 (사용자 결정 "판 폴더는 남김").</param>
+    public static IReadOnlyList<string> Purge(RoomStore store, string dataFolder, DateTimeOffset now, Action<Room>? forget = null) =>
+        Remove(store, dataFolder, r => r.DeletedAt is { } at && now - at >= KeepFor, forget);
 
     /// <summary>
     /// 휴지통 즉시 비우기 (4차 C1 — 사용자 희망 "휴지통 즉시 비우기"): 준 방들 중 휴지통에 있는 방만 지운다 — 조건은 잠금 안에서 보므로
     /// 같은 순간 되살린 방은 남는다. "비우기"도 화면에 보인 방 ID만 받는다 — 확인한 범위 밖(그사이 다른 탭이 넣은 방)을 지우지 않게
     ///. 세션 기록은 남김 (4차 결정 C1 "남김").
     /// </summary>
-    public static IReadOnlyList<string> DeleteNow(RoomStore store, string dataFolder, IReadOnlyCollection<string> ids) =>
-        Remove(store, dataFolder, r => r.DeletedAt is not null && ids.Contains(r.Id));
+    public static IReadOnlyList<string> DeleteNow(RoomStore store, string dataFolder, IReadOnlyCollection<string> ids, Action<Room>? forget = null) =>
+        Remove(store, dataFolder, r => r.DeletedAt is not null && ids.Contains(r.Id), forget);
 
-    private static IReadOnlyList<string> Remove(RoomStore store, string dataFolder, Func<Room, bool> which)
+    private static IReadOnlyList<string> Remove(RoomStore store, string dataFolder, Func<Room, bool> which, Action<Room>? forget)
     {
         if (store.LoadError is not null) return [];
+        var playgrounds = store.All().Where(r => r.Playground is not null).ToDictionary(r => r.Id);
         var removed = store.RemoveWhere(which).ToList();
         // 단톡방을 지우면 구성원 자식 방도 — 자식 방만 따로 지우지는 않는다(휴지통 목록에 없음)
         if (removed.Count > 0) removed.AddRange(store.RemoveWhere(r => r.GroupId is { } g && removed.Contains(g)));
+        // 놀이터: 구성원 방까지 색인에서 빠진 뒤에 — 작업 폴더 등록은 그 이름을 쓰는 방이 남으면 빠지지 않는다
+        foreach (var id in removed)
+            if (playgrounds.TryGetValue(id, out var playground)) forget?.Invoke(playground);
         foreach (var id in removed.Where(RoomStore.IsRoomId))
         {
             // 첨부 · 지휘자 브라우저 프로필(쿠키 · 로그인) · 스크린샷. 브라우저는 휴지통에 넣을 때 닫았다

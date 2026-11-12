@@ -24,7 +24,9 @@ public sealed partial class RoomModel
     public string? MemberState(GroupMember m) => groups.MemberState(m.RoomId);
 
     /// <summary>구성원 단계 표시: 쓰는 구성원(명령)만 — 그 구성원이 낀 말은 차례로 돈다 (⑤).</summary>
-    public string? WriterLabel(GroupMember m) => store.Get(m.RoomId) is { } child && GroupChat.IsWriter(child) ? RoomRules.LevelName(child.Level) : null;
+    public string? WriterLabel(GroupMember m) => store.Get(m.RoomId) is { } child && GroupChat.IsWriter(child)
+        ? (GroupChat.IsPlaygroundMember(store, child) ? "편집만" : RoomRules.LevelName(child.Level)) // 놀이터 구성원은 명령 도구가 없다
+        : null;
 
     /// <summary>
     /// 그 구성원이 그 사용자 말에 답했는지 (답 줄 · 보내지 못함 안내 줄) — 아니고 실행 중도 아니면 "답이 없음"으로 보인다.
@@ -123,6 +125,48 @@ public sealed partial class RoomModel
         Response.Headers.CacheControl = "no-store";
         if (!RoomStore.IsRoomId(id) || store.Get(id) is not { IsGroup: true } group) return NotFound();
         return Content(GroupCostLine(group) ?? "", "text/plain; charset=utf-8");
+    }
+
+    /// <summary>
+    /// 놀이터 줄: 상태 · 말 수 · 시간 · 추정 비용(시작 뒤 늘어난 구성원 Claude 추정 비용 — 답이 끝난 뒤 보는 중단 기준) · 끝난 까닭. 놀이터가 아니면 null.
+    /// </summary>
+    public string? PlaygroundLine(Room? group = null)
+    {
+        group ??= Room;
+        if (group.Playground is not { } pg) return null;
+        var state = pg.State switch
+        {
+            PlaygroundState.Waiting => "시작 전",
+            PlaygroundState.Running => pg.Wrapping ? "마무리 요약 중" : "진행 중",
+            PlaygroundState.Paused => "일시 정지",
+            _ => "끝",
+        };
+        var minutes = pg.ElapsedSeconds(DateTimeOffset.Now) / 60;
+        var cost = pg.State == PlaygroundState.Waiting ? 0 : Math.Max(0, group.Members.Sum(m => store.Get(m.RoomId)?.TotalCostUsd ?? 0) - pg.CostAtStart);
+        return $"놀이터 · {state} · 말 {pg.Messages}/{pg.MaxMessages} · {minutes:0}/{pg.MaxMinutes}분 · 추정 ${cost:0.00}/${pg.MaxCostUsd:0.##}" +
+               (pg.State == PlaygroundState.Done && pg.EndReason is { } why ? " — " + why : "");
+    }
+
+    /// <summary>놀이터 줄 · 상태 (화면이 대화 줄을 받을 때 다시 받는다).</summary>
+    public IActionResult OnGetPlayground(string id)
+    {
+        Response.Headers.CacheControl = "no-store";
+        if (!RoomStore.IsRoomId(id) || store.Get(id) is not { Playground: { } pg } group) return NotFound();
+        return new JsonResult(new { line = PlaygroundLine(group), state = pg.State.ToString() });
+    }
+
+    /// <summary>놀이터 단추: start(시작 · 계속) · pause(일시 정지) · stop(멈춤 — 판을 끝냄).</summary>
+    public IActionResult OnPostPlayground(string id, string? action)
+    {
+        if (!RoomStore.IsRoomId(id) || store.Get(id) is not { Playground: not null }) return NotFound();
+        var error = action switch
+        {
+            "start" => groups.PlaygroundStart(id),
+            "pause" => groups.PlaygroundPause(id),
+            "stop" => groups.PlaygroundStop(id),
+            _ => "알 수 없는 놀이터 동작입니다.",
+        };
+        return error is null ? new JsonResult(new { ok = true }) : BadRequest(error);
     }
 
     /// <summary>단톡방 칩의 엔진 표시: Codex면 "Codex · 모델"(빈 모델 = 기본), Claude면 null.</summary>

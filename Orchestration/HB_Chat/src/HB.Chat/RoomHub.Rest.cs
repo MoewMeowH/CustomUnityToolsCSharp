@@ -628,11 +628,13 @@ public sealed partial class RoomHub
     /// <summary>방 규칙 글 (실행 준비 값으로) — 처음 띄울 때와 이어 쓰는 턴이 같은 값을 만든다.</summary>
     // 실측 전용 표시는 스티커처럼 지금 값으로 읽는다 — 쉬는 실행이 띄울 때 값에 묶이면 작업용으로 돌린 것이 지휘자에게 안 간다
     internal string RulesFor(Room room, RunSetup s) =>
-        RoomRules.For(room.Level, terminal: s.Terminal, unity: s.Unity, unityMeasure: s.Unity is { } u && options.Value.IsMeasureUnity(u),
-            askWrites: s.AppAskWrites, rest: room.GroupId is null,
-            extras: [.. s.Extras.Where(x => x != McpConfigFile.UnityServer)],
-            // 모델 선택창 안내는 기본 서버가 붙고 요청 창 · 스위치가 있는 방에만
-            modeCard: s.McpOn && !room.McpOff.Contains(options.Value.McpServer) && room.GroupId is null)
+        // 놀이터 구성원은 놀이터 단계 안내 (명령 · 카드 · 질문 카드 안내가 맞지 않음)
+        (GroupChat.IsPlaygroundMember(store, room) ? PlaygroundRules.Base
+            : RoomRules.For(room.Level, terminal: s.Terminal, unity: s.Unity, unityMeasure: s.Unity is { } u && options.Value.IsMeasureUnity(u),
+                askWrites: s.AppAskWrites, rest: room.GroupId is null,
+                extras: [.. s.Extras.Where(x => x != McpConfigFile.UnityServer)],
+                // 모델 선택창 안내는 기본 서버가 붙고 요청 창 · 스위치가 있는 방에만
+                modeCard: s.McpOn && !room.McpOff.Contains(options.Value.McpServer) && room.GroupId is null))
         + StickerRules.For(Stickers?.Options) // 설정 태그 · Hints가 바뀌면 지문이 바뀌어 다음 말에 다시 붙는다
         + GroupRules.For(store, room, options.Value.WorkspacePath); // 단톡방 구성원 방이면 역할 · 다른 구성원
 }

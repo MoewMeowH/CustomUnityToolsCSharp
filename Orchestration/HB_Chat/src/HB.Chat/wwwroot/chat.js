@@ -158,11 +158,25 @@
         // 숨겨도 고른 값은 둔다 — 서버는 Claude 구성원의 Codex 값을 쓰지 않는다
         row.querySelectorAll("select[name=codexModels], select[name=codexEfforts]").forEach(s => { s.hidden = !codex; });
     }
+    // 놀이터 체크: 주제 · 상한 칸을 보이고 판 폴더를 앱이 만드는 칸(작업 폴더 · 단계 · 구성원 작업 폴더 · 기본 MCP)은 숨긴다. 켤 때 모델은 sonnet으로 (사용자 결정 — 구독 한도)
+    function syncPlaygroundForm(box, pickModel) {
+        const form = box?.closest("form.group-create");
+        if (!form) return;
+        const on = box.checked;
+        form.querySelector(".playground-fields").hidden = !on;
+        form.querySelectorAll("[data-not-playground]").forEach(el => { el.hidden = on; });
+        const model = form.querySelector("select[name=model]");
+        if (on && pickModel && model && [...model.options].some(o => o.value === "sonnet")) model.value = "sonnet";
+    }
     document.addEventListener("change", (e) => {
         if (e.target instanceof Element && e.target.matches("form.group-create select[name=engines]")) syncEngine(e.target);
+        if (e.target instanceof Element && e.target.matches("form.group-create input[name=playground]")) syncPlaygroundForm(e.target, true);
     });
     // 뒤로 가기 · 양식 복원으로 엔진 칸이 Codex로 돌아와도 맞추게 (C6)
-    window.addEventListener("pageshow", () => document.querySelectorAll("form.group-create select[name=engines]").forEach(syncEngine));
+    window.addEventListener("pageshow", () => {
+        document.querySelectorAll("form.group-create select[name=engines]").forEach(syncEngine);
+        document.querySelectorAll("form.group-create input[name=playground]").forEach(b => syncPlaygroundForm(b, false));
+    });
     searchBox?.addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(runSearch, 250); });
     searchBox?.addEventListener("keydown", (e) => { if (e.key === "Escape") { searchBox.value = ""; searchSeq++; showList(); } });
 
@@ -2264,6 +2278,38 @@
                 const cost = $("#group-cost");
                 if (res.ok && !disposed && cost) cost.textContent = await res.text();
             } catch { }
+            await syncPlayground();
+        }
+        // 놀이터 줄: 상태 · 말 수 · 시간 · 비용, 상태에 맞는 단추만 (시작 · 계속 / 일시 정지 / 멈춤)
+        const playground = $("#playground");
+        function showPlayground(state) {
+            if (!playground) return;
+            playground.dataset.state = state;
+            playground.querySelectorAll("[data-pg-show]").forEach(b => { b.hidden = !b.dataset.pgShow.split(" ").includes(state); });
+            const start = playground.querySelector("[data-pg-start]");
+            if (start) start.textContent = state === "Paused" ? "계속" : "시작";
+        }
+        async function syncPlayground() {
+            if (!playground) return;
+            try {
+                const res = await fetch(self + "?handler=Playground", { cache: "no-store" });
+                if (!res.ok || disposed) return;
+                const pg = await res.json();
+                $("#playground-line").textContent = pg.line || "";
+                showPlayground(pg.state);
+            } catch { }
+        }
+        if (playground) {
+            showPlayground(playground.dataset.state);
+            playground.querySelectorAll("[data-pg-action]").forEach(b => b.addEventListener("click", async () => {
+                if (b.dataset.pgAction === "stop" && !confirm("놀이터를 끝낼까요? 도는 답도 멈추고, 다시 시작할 수 없습니다.")) return;
+                const data = new FormData();
+                data.append("action", b.dataset.pgAction);
+                b.disabled = true;
+                await post("Playground", data);
+                b.disabled = false;
+                await syncPlayground();
+            }));
         }
 
         const es = new EventSource("/events/" + roomId);

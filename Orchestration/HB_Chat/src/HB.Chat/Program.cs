@@ -173,7 +173,8 @@ void PurgeTrash()
     try
     {
         var removed = Trash.Purge(app.Services.GetRequiredService<RoomStore>(),
-            app.Services.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder, DateTimeOffset.Now);
+            app.Services.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder, DateTimeOffset.Now,
+            app.Services.GetRequiredService<GroupChat>().ForgetPlayground); // 지운 놀이터의 작업 폴더 등록 · 자동 Codex 허용
         // 지운 방의 터미널 목록(끝난 것의 버퍼 포함)도 버린다
         foreach (var id in removed)
         {

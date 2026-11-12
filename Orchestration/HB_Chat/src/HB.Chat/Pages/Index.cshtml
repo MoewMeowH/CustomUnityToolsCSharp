@@ -105,8 +105,23 @@
             <section class="panel" style="padding:12px 14px;margin-top:12px">
                 <h2 class="u-panel-title">새 단톡방</h2>
                 <form method="post" asp-page-handler="CreateGroup" class="group-create">
+                    @* 놀이터: 구성원끼리 주제 하나로 차례로 노는 판 — 판 폴더를 앱이 만든다 (작업 폴더 · 단계 · 기본 MCP 칸은 숨김, chat.js syncPlayground) *@
                     <div class="u-row-wrap">
-                        <label title="방 목록 묶음 · 구성원 작업 폴더 칸의 기본값">단톡방 작업 폴더
+                        <label title="구성원끼리 주제 하나로 차례로 말하며 판 폴더 안에서 파일을 만든다 — 명령 실행 없음, 사람은 구경 · 끼어들기">
+                            <input type="checkbox" name="playground" value="true" /> 놀이터 (구성원끼리 자율로)
+                        </label>
+                    </div>
+                    <div class="playground-fields" hidden style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+                        <textarea name="topic" rows="2" maxlength="@Playground.TopicMaxChars" placeholder="주제 (예: 같이 작은 텍스트 게임을 기획하고 파일로 만들어 봐)"></textarea>
+                        <div class="u-row-wrap">
+                            <label title="구성원 차례 수 상한 (마무리 요약은 빼고)">말 <input type="number" name="maxMessages" value="@Playground.DefaultMessages" min="@Playground.MinMessages" max="@Playground.MaxMessagesLimit" style="width:70px" /></label>
+                            <label title="도는 시간 상한 (일시 정지 시간은 빼고) — 답이 끝난 뒤 보며, 넘긴 답은 5분 더 지나면 멈춤">분 <input type="number" name="maxMinutes" value="@Playground.DefaultMinutes" min="@Playground.MinMinutes" max="@Playground.MaxMinutesLimit" style="width:70px" /></label>
+                            <label title="구성원 Claude 추정 비용 합 — 답이 끝난 뒤 보는 중단 기준이라 답 하나만큼 넘을 수 있음 (구독 사용량과 다름)">추정 $ <input type="number" name="maxCost" value="@Playground.DefaultCostUsd" min="@Playground.MinCostUsd" max="@Playground.MaxCostUsdLimit" step="0.1" style="width:70px" /></label>
+                            <span class="muted" style="font-size:12.5px">판 폴더: @Model.Options.PlaygroundFolder 아래에 새로</span>
+                        </div>
+                    </div>
+                    <div class="u-row-wrap">
+                        <label title="방 목록 묶음 · 구성원 작업 폴더 칸의 기본값" data-not-playground>단톡방 작업 폴더
                             <select name="workspace">
                                 @foreach (var w in Model.Options.AllWorkspaces)
                                 {
@@ -114,7 +129,7 @@
                                 }
                             </select>
                         </label>
-                        <label title="Claude 구성원이 작업 폴더 .mcp.json의 @(Model.Options.McpServer) (run_mode로 외부 에이전트 부르기)를 쓰게 — 켜면 .mcp.json에 그 항목이 있어야 합니다">
+                        <label title="Claude 구성원이 작업 폴더 .mcp.json의 @(Model.Options.McpServer) (run_mode로 외부 에이전트 부르기)를 쓰게 — 켜면 .mcp.json에 그 항목이 있어야 합니다" data-not-playground>
                             <input type="checkbox" name="baseMcp" value="true" /> 구성원 기본 MCP (@Model.Options.McpServer)
                         </label>
                         <label>모델
@@ -135,7 +150,7 @@
                             <input type="text" name="names" placeholder="@(optional ? "구성원 이름 (선택)" : "구성원 이름 (예: " + (i == 0 ? "A" : "B") + ")")" maxlength="20" required="@(!optional)" style="width:140px" />
                             <input type="text" name="roles" placeholder="@(i switch { 0 => "역할 (예: 내 코드의 위험을 찾는다)", 1 => "역할 (예: A의 의견에 반박한다)", _ => "역할" })" maxlength="@GroupChat.RoleMaxChars" style="flex:1;min-width:200px" />
                             @* 단계 (단톡방 ⑤ — 구성원마다): 명령 구성원이 낀 말은 차례로 돈다. Codex는 읽기만 *@
-                            <select name="levels" title="이 구성원의 권한 단계 (Codex는 읽기만)">
+                            <select name="levels" title="이 구성원의 권한 단계 (Codex는 읽기만)" data-not-playground>
                                 <option value="Read" selected>읽기</option>
                                 <option value="Command">명령</option>
                             </select>
@@ -145,7 +160,7 @@
                                 <option value="codex">Codex (읽기 전용)</option>
                             </select>
                             @* 작업 폴더: 비면 단톡방 작업 폴더. 구성원은 자기 작업 폴더에서 돈다 *@
-                            <select name="memberWorkspaces" title="이 구성원의 작업 폴더 (비면 단톡방 작업 폴더)">
+                            <select name="memberWorkspaces" title="이 구성원의 작업 폴더 (비면 단톡방 작업 폴더)" data-not-playground>
                                 <option value="" selected>단톡방 작업 폴더</option>
                                 @foreach (var w in Model.Options.AllWorkspaces)
                                 {
@@ -176,6 +191,10 @@
                     명령 구성원이 낀 말은 구성원 순서대로 하나씩 돌고, 뒤 구성원은 앞 답을 받습니다. 승인 · 질문 카드는 단톡방 화면에 구성원 이름으로 나옵니다.
                     구성원마다 작업 폴더를 고를 수 있습니다 — 구성원은 자기 작업 폴더에서 돌고, 다른 구성원 폴더의 파일은 보지 못할 수 있습니다.
                     Codex 구성원은 <a href="/Settings">설정</a>에서 고른 작업 폴더에서만 됩니다 (지금: @(Model.CodexWorkspaces.Count == 0 ? "없음" : string.Join(", ", Model.CodexWorkspaces))) — 읽기 전용이지만 디스크 전체를 읽을 수 있습니다.
+                </p>
+                <p class="u-note-top-125 muted">
+                    놀이터: 시작을 누르면 구성원이 한 명씩 차례로 말합니다 (답에서 @@부른 구성원이 다음, 없으면 순서대로). Claude 구성원은 판 폴더 안 파일 편집 · 웹 검색만 하고 명령은 실행하지 않습니다 —
+                    Windows에서는 명령을 판 폴더 안에 가둘 수 없어서입니다. 상한에 닿으면 첫 구성원이 마무리 요약을 하고 끝납니다. Codex 구성원은 읽기 전용 해설자로 낄 수 있고, 그러면 판 폴더를 Codex 허용에 자동으로 더합니다.
                 </p>
             </section>
         </div>

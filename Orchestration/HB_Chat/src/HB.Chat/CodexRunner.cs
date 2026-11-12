@@ -432,6 +432,17 @@ public sealed class CodexSettings(Func<string> dataFolder, Func<string, string?>
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { return false; }
     }
 
+    /// <summary>하나 더하기 · 빼기 — 읽기와 저장을 한 잠금 안에서 (동시에 만든 놀이터가 서로의 항목을 지우지 않게, review a3c4ec407a 1-F6).</summary>
+    public void Add(string workspace)
+    {
+        lock (_gate) Save([.. Workspaces(), workspace]);
+    }
+
+    public void Remove(string workspace)
+    {
+        lock (_gate) Save(Workspaces().Where(w => !string.Equals(w, workspace, StringComparison.OrdinalIgnoreCase)));
+    }
+
     /// <summary>켤 작업 폴더 저장 — 지금 경로를 함께 적는다.</summary>
     public void Save(IEnumerable<string> workspaces)
     {

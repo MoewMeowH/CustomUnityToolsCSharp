@@ -15,6 +15,15 @@ public sealed partial class RoomHub
     private async Task<string> DecideToolAsync(Room room, Live live, int generation, ToolPermission ask, CancellationToken aborted,
         IReadOnlyCollection<string>? attached = null, string? unity = null, string? workspace = null, bool askWrites = false)
     {
+        // 놀이터 구성원: 사람 없이 도는 판 — 웹 검색만 받고 나머지 승인 요청(폴더 밖 쓰기 등)은 카드 없이 거절 (설계 검토 b420efd860 R3).
+        // 부모를 못 찾아도 놀이터로 본다(일반 권한으로 돌아가지 않게)
+        if (GroupChat.IsPlaygroundMember(store, room))
+        {
+            if (ask.Tool == ClaudeArgs.WebSearchTool) return PermissionDecision.Allow(ask.InputJson);
+            var asked = ApprovalRequest.Parse(ask.RequestJson)?.Summary ?? "";
+            HostDenied(room, live, generation, ask.Tool, asked, "놀이터", $"{ask.Tool}{(asked.Length > 0 ? " " + (asked.Length > 120 ? asked[..120] + "…" : asked) : "")}: 놀이터에서는 판 폴더 밖 쓰기 · 그 밖의 요청을 받지 않아 거절");
+            return PermissionDecision.Deny("놀이터에서는 판 폴더(지금 작업 폴더) 안 편집과 웹 검색만 됩니다 — 이 요청은 거절됐습니다. 다시 시도하지 말고 판 폴더 안에서 다른 방법으로 하세요.");
+        }
         if (attached is { Count: > 0 } && McpServerOf(ask.Tool) is { } server && attached.Contains(server))
             return await DecideRoomServerAsync(room, live, generation, ask, aborted, server, unity);
         // 계획 승인 (Claude 앱 기능 C): 계획 모드로 돈 명령 방의 ExitPlanMode → 계획 카드. 허용이면 그 방 단계의 원래 모드로 돌려

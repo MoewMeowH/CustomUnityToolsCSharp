@@ -126,6 +126,9 @@ public sealed record Room
     public long CodexInputTokens { get; init; }
     public long CodexOutputTokens { get; init; }
 
+    /// <summary>놀이터 단톡방이면 그 판 상태 (주제 · 상한 · 진행). 단톡방 방에만 둔다 — 구성원 자식 방은 부모를 보고 판단한다.</summary>
+    public Playground? Playground { get; init; }
+
     [JsonIgnore]
     public bool IsGroup => Members.Count > 0;
 }

@@ -80,6 +80,6 @@
     }
     @if (!Model.GroupFragment && Model.GroupEntries.Count == 0)
     {
-        <p class="u-centered muted empty">아직 대화가 없습니다. 아래에서 @@이름으로 구성원을 불러 보세요.</p>
+        <p class="u-centered muted empty">@(Model.Room.Playground is not null ? "아직 대화가 없습니다. 위의 시작을 누르면 첫 구성원이 주제로 말을 꺼냅니다." : "아직 대화가 없습니다. 아래에서 @이름으로 구성원을 불러 보세요.")</p>
     }
 </div>
