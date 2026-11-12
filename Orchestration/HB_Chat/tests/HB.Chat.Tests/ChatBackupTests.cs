@@ -30,7 +30,7 @@ public sealed class ChatBackupTests : IDisposable
         var mine = Guid.NewGuid().ToString("D");
         var other = Guid.NewGuid().ToString("D");
         foreach (var rel in new[] { "data/rooms.json", "data/approvals.jsonl", "data/groups/g.jsonl", "data/attachments/r1/pic.png", "data/profiles.json",
-                     "data/mcp-servers.json", "data/webview2/cache.bin", "data/browser/prof.db", "data/logs/a.log", "data/selftest/ws/x",
+                     "data/mcp-servers.json", "data/webview2/cache.bin", "data/webapps/EBWebView/Default/Network/Cookies", "data/browser/prof.db", "data/logs/a.log", "data/selftest/ws/x",
                      "data/mcp-hb-orchestration-abc.json", "data/rooms.json.tmp", "data/attachments/r1/.abc.part", "data/toast-images/t.png",
                      $"claude/projects/F--ws/{mine}.jsonl", $"claude/projects/F--ws/{mine}/subagents/a.jsonl", $"claude/projects/F--ws/{other}.jsonl",
                      $"claude/tasks/{mine}/1.json", $"claude/tasks/{other}/1.json" })
@@ -51,7 +51,7 @@ public sealed class ChatBackupTests : IDisposable
                      "data/profiles.json", "data/mcp-servers.json", $"claude/projects/F--ws/{mine}.jsonl", $"claude/projects/F--ws/{mine}/subagents/a.jsonl",
                      $"claude/tasks/{mine}/1.json" })
             Assert.Contains(want, names);
-        Assert.DoesNotContain(names, n => n.StartsWith("data/webview2/") || n.StartsWith("data/browser/") || n.StartsWith("data/logs/") || n.StartsWith("data/selftest/")
+        Assert.DoesNotContain(names, n => n.StartsWith("data/webview2/") || n.StartsWith("data/webapps/") || n.StartsWith("data/browser/") || n.StartsWith("data/logs/") || n.StartsWith("data/selftest/")
             || n.StartsWith("data/toast-images/"));
         Assert.DoesNotContain("data/mcp-hb-orchestration-abc.json", names);
         Assert.DoesNotContain("data/rooms.json.tmp", names);

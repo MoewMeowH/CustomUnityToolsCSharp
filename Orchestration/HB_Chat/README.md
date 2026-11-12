@@ -11,7 +11,7 @@ Claude Code(지휘자)를 **브라우저 · 데스크톱 창**에서 방 단위�
 - **그려 보이기**: 답 속 ` ```widget ` · ` ```chart ` · ` ```slides ` · ` ```mermaid ` 코드 블록을 격리된 틀 · Chart.js · 슬라이드 · Mermaid 도표로.
 - **연결**: 방마다 MCP 서버 켜기 · 끄기, 앱에서 MCP 서버 더하기, Unity 프로젝트 연결.
 - **사용량 한도**: Claude · Codex 구독 한도를 사이드바 아래에.
-- **데스크톱 앱** (`HB.Chat.Desktop`, WebView2): 채팅 · 대시보드를 한 창에, 트레이 · Windows 알림 · 미니 창 · 전역 단축키 · 바탕화면 펫.
+- **데스크톱 앱** (`HB.Chat.Desktop`, WebView2): 채팅 · 대시보드 · 앱(Claude · ChatGPT · Gemini 웹, 따로 된 로그인)을 한 창에, 트레이 · Windows 알림 · 미니 창 · 전역 단축키 · 바탕화면 펫.
 
 ## 실행
 

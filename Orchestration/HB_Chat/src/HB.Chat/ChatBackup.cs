@@ -12,10 +12,11 @@ namespace HB.Chat;
 public static class ChatBackup
 {
     /// <summary>
-    /// 데이터 폴더 맨 위에서 빼는 폴더 — 브라우저 캐시 · 지휘자 브라우저 프로필 · 화면 사진 · 로그 · 자가 시험 폴더 · 데스크톱 알림 그림 (다시 만들어진다).
+    /// 데이터 폴더 맨 위에서 빼는 폴더 — 브라우저 캐시 · 지휘자 브라우저 프로필 · 화면 사진 · 로그 · 자가 시험 폴더 · 데스크톱 알림 그림 (다시 만들어진다),
+    /// 데스크톱 앱 탭의 웹 프로필 webapps (Claude · ChatGPT · Gemini 로그인 쿠키 — zip에 넣지 않는다).
     /// 들어가지도 않는다 (webview2 · browser는 캐시 파일이 수만 개).
     /// </summary>
-    public static readonly IReadOnlyList<string> SkipFolders = ["webview2", "browser", "browser-shots", "logs", "selftest", "toast-images"];
+    public static readonly IReadOnlyList<string> SkipFolders = ["webview2", "webapps", "browser", "browser-shots", "logs", "selftest", "toast-images"];
 
     /// <summary>실행 때 다시 만드는 MCP 설정 (맨 위만).</summary>
     private static bool SkipTopFile(string name) =>
@@ -148,7 +149,7 @@ public static class ChatBackup
                작업 폴더는 원래와 같은 경로로 두기를 권한다 — 세션 기록 폴더 이름이 작업 폴더 경로에서 나와, 경로가 다르면 대화는 보여도 claude가 이어 가지 못할 수 있다.
             5. 방을 열어 대화가 보이는지 확인한다.
 
-            빠진 것: 브라우저 캐시(webview2) · 지휘자 브라우저 프로필 · 로그 · 실행 때 다시 만드는 MCP 설정 파일 ·
+            빠진 것: 브라우저 캐시(webview2) · 앱 탭 웹 로그인(webapps — 복원 뒤 다시 로그인) · 지휘자 브라우저 프로필 · 로그 · 실행 때 다시 만드는 MCP 설정 파일 ·
             단톡방 Codex 구성원의 스레드(~/.codex/sessions — 복원하면 단톡방 대화는 보이지만 Codex 구성원은 맥락 없이 새로 시작한다).
             받을 때 실행 중이던 방은 그 순간까지의 기록만 담긴다.
             이 zip에는 대화 · 첨부 · MCP 서버 설정(토큰이 있을 수 있음)이 들어 있다 — 다른 사람에게 보내지 않는다.

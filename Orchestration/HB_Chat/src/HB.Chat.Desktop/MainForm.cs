@@ -40,13 +40,16 @@ public sealed class MainForm : Form
     private readonly NavigationPolicy _policy;
 
     /// <summary>
-    /// 맨 위 줄 (5차 b — Windows 제목 줄 대신): 탭 채팅 · 대시보드 · 설정. 설정(3차 d)은 채팅 탭에서 /Settings를 여는 바로 가기.
+    /// 맨 위 줄 (5차 b — Windows 제목 줄 대신): 탭 채팅 · 대시보드 · 앱 · 설정. 설정(3차 d)은 채팅 탭에서 /Settings를 여는 바로 가기.
     /// </summary>
-    private readonly TitleBar _titleBar = new("HB Chat", [("채팅", null), ("대시보드", null), ("설정", "작업 폴더 · 방 이름 · 화면 테마 (채팅 탭에서 열림)")]);
-    private const int ChatTabIndex = 0, DashTabIndex = 1, SettingsTabIndex = 2;
+    private readonly TitleBar _titleBar = new("HB Chat",
+        [("채팅", null), ("대시보드", null), ("앱", "Claude · ChatGPT · Gemini 웹 (따로 된 로그인)"), ("설정", "작업 폴더 · 방 이름 · 화면 테마 (채팅 탭에서 열림)")]);
+    private const int ChatTabIndex = 0, DashTabIndex = 1, AppsTabIndex = 2, SettingsTabIndex = 3;
     private readonly Panel _body = new() { Dock = DockStyle.Fill };
     private readonly WebView2 _chatView = new() { Dock = DockStyle.Fill };
     private readonly WebView2 _dashView = new() { Dock = DockStyle.Fill, Visible = false };
+    private readonly AppsPane _apps;
+    private bool _appsShown;
     private readonly Label _message = new() { Dock = DockStyle.Fill, Visible = false, TextAlign = ContentAlignment.MiddleCenter, Padding = new Padding(24) };
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(3) };
     private readonly CancellationTokenSource _cts = new();
@@ -93,6 +96,7 @@ public sealed class MainForm : Form
         _placementPath = Path.Combine(settings.DataFolder, "desktop-window.json");
         _themePath = Path.Combine(settings.DataFolder, "desktop-theme.json");
         _theme = Appearance.LoadLast(_themePath) ?? Appearance.Default;
+        _apps = new AppsPane(settings.DataFolder, Trace) { Dock = DockStyle.Fill, Visible = false };
 
         Text = "HB Chat";
         Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); // exe 아이콘(app.ico) — 작업 표시줄 · Alt+Tab
@@ -113,6 +117,7 @@ public sealed class MainForm : Form
                 // 설정 화면에서 '채팅'을 누르면 방 목록으로 돌아간다 (4차 B1 — 설정은 채팅 탭 안의 화면)
                 case ChatTabIndex: ShowTab(AppTab.Chat, OnSettingsPage ? _chatUrl.AbsoluteUri : null); break;
                 case DashTabIndex: ShowTab(AppTab.Dashboard, null); break;
+                case AppsTabIndex: ShowTab(AppTab.Apps, null); break;
                 case SettingsTabIndex: ShowTab(AppTab.Chat, new Uri(_chatUrl, "/Settings").AbsoluteUri); break;
             }
         };
@@ -120,7 +125,7 @@ public sealed class MainForm : Form
         _titleBar.MaximizeClicked += () => WindowState = WindowState == FormWindowState.Maximized ? FormWindowState.Normal : FormWindowState.Maximized;
         _titleBar.CloseClicked += Close; // 닫기(X)와 같다 — 트레이로 숨김
         _titleBar.RequiredWidthChanged += UpdateMinimumSize;
-        _body.Controls.AddRange([_chatView, _dashView, _message]);
+        _body.Controls.AddRange([_chatView, _dashView, _apps, _message]);
         Controls.Add(_body);
         Controls.Add(_titleBar);
         UpdateTabs();
@@ -337,7 +342,7 @@ public sealed class MainForm : Form
     private void ShowTab(AppTab tab, string? url)
     {
         _tab = tab;
-        if (url is not null)
+        if (url is not null && tab != AppTab.Apps)
         {
             var view = tab == AppTab.Chat ? _chatView : _dashView;
             var ready = (tab == AppTab.Chat ? _chatError : _dashError) is null && view.CoreWebView2 is not null;
@@ -358,13 +363,20 @@ public sealed class MainForm : Form
 
     private void UpdateTabs()
     {
-        _titleBar.CheckedTab = OnSettingsPage ? SettingsTabIndex : _tab == AppTab.Chat ? ChatTabIndex : DashTabIndex;
+        _titleBar.CheckedTab = OnSettingsPage ? SettingsTabIndex : _tab switch { AppTab.Chat => ChatTabIndex, AppTab.Dashboard => DashTabIndex, _ => AppsTabIndex };
         _titleBar.SetTabEnabled(SettingsTabIndex, _chatError is null); // 채팅 화면이 준비되기 전에는 주소를 받을 곳이 없다
-        var error = _tab == AppTab.Chat ? _chatError : _dashError;
+        var error = _tab switch { AppTab.Chat => _chatError, AppTab.Dashboard => _dashError, _ => null }; // 앱 탭은 서버가 필요 없다
         _message.Text = error ?? "";
         _message.Visible = error is not null;
         _chatView.Visible = _tab == AppTab.Chat && error is null;
         _dashView.Visible = _tab == AppTab.Dashboard && error is null;
+        // Visible 읽기는 창이 숨으면(트레이) false라 쓰지 않는다 — 탭에 들어올 때만 연다
+        var showApps = _tab == AppTab.Apps;
+        if (showApps != _appsShown)
+        {
+            _appsShown = _apps.Visible = showApps;
+            if (showApps) _apps.Open(); // 처음이면 웹 환경 · 마지막 사이트를 만든다
+        }
     }
 
     /// <summary>상태 줄: 이번 글 + 계속 남는 경고(시작 설정 · 단축키). 다른 글이 경고를 덮지 않게 한 곳에서 붙인다.</summary>
@@ -707,6 +719,7 @@ public sealed class MainForm : Form
         _message.ForeColor = colors.Text;
         _chatView.DefaultBackgroundColor = _dashView.DefaultBackgroundColor = colors.Page; // 화면이 뜨기 전 흰 번쩍임 없게
         if (_chatView.CoreWebView2 is { } core) core.Profile.PreferredColorScheme = Appearance.Scheme(theme); // 두 탭 · 미니 창이 같은 프로필
+        _apps.ApplyTheme(colors, Appearance.Scheme(theme)); // 앱 탭은 따로 된 프로필
         if (IsHandleCreated) WindowFrame.SetDark(Handle, dark);
         _mini?.ApplyTheme(colors, dark);
         _pet?.SetDark(dark);

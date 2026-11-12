@@ -1,6 +1,7 @@
 namespace HB.Chat.Desktop;
 
-public enum AppTab { Chat, Dashboard }
+/// <summary>큰 창 탭. Apps(공식 웹 대화)는 따로 된 웹 환경이라 이 이동 규칙을 쓰지 않는다 — <see cref="WebAppPolicy"/>.</summary>
+public enum AppTab { Chat, Dashboard, Apps }
 
 public enum NavAction
 {
