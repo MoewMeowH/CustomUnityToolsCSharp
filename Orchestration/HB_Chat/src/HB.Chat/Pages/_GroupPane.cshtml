@@ -13,7 +13,7 @@
         <a class="back" href="/" title="방 목록" aria-label="방 목록">@Icons.Svg("back")</a>
         <div class="head-title">
             <h2 id="room-title">@Model.Title</h2>
-            <span class="muted">@(room.Playground is not null ? "놀이터 · 판 폴더 안 편집만" : "단톡방 · " + RoomRules.LevelName(room.Level)) · @room.Model · @Model.GroupWorkspaceLabel</span>
+            <span class="muted">@(room.Playground is not null ? "놀이터 · 판 폴더 편집 · 웹" : "단톡방 · " + RoomRules.LevelName(room.Level)) · @room.Model · @Model.GroupWorkspaceLabel</span>
             <span class="muted group-cost" id="group-cost" title="Claude 구성원: claude가 알려 준 세션 누적 비용(구독이라 실제 청구 아님) · Codex 구성원: 과정 기록의 토큰">@Model.GroupCostLine()</span>
         </div>
         <div class="members" id="members">
@@ -90,10 +90,10 @@
         </form>
         @if (room.Playground is not null)
         {
-            <details class="hint"><summary>놀이터: 판 폴더 안 편집만</summary>
+            <details class="hint"><summary>놀이터: 판 폴더 편집 · 웹</summary>
                 시작하면 구성원이 한 명씩 차례로 말합니다 — 다음 차례는 사람이 @@이름으로 고른 구성원, 아니면 답에서 @@부른 구성원, 아니면 순서대로입니다.
                 여기 쓴 말(끼어들기)은 다음 차례 구성원이 같이 봅니다. 중지 단추는 일시 정지, 멈춤은 판을 끝냅니다.
-                Claude 구성원은 판 폴더 안 파일 읽기 · 만들기 · 고치기와 웹 검색만 합니다 — 명령 실행 · 웹 페이지 가져오기 · 질문 카드는 없고, 판 폴더 밖 쓰기는 카드 없이 거절됩니다.
+                Claude 구성원은 판 폴더 안 파일 읽기 · 만들기 · 고치기와 웹 검색 · 웹 페이지 읽기(카드 없이 — 로컬 · 사설망 주소는 안 됨, 승인 기록에 남음)를 하고, 찾은 것은 링크 · 요약으로 대화에 공유합니다. 명령 실행 · 질문 카드는 없고, 판 폴더 밖 쓰기는 카드 없이 거절됩니다.
                 말 수 · 시간 · 추정 비용 상한에 닿으면 첫 구성원이 마무리 요약을 한 번 하고 끝납니다 (시간 · 비용은 답이 끝난 뒤 봐서 답 하나만큼 넘을 수 있습니다).
             </details>
         }

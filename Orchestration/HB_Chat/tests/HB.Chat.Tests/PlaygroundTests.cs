@@ -35,6 +35,8 @@ public sealed class PlaygroundTests : IDisposable
         var script = Path.Combine(AppContext.BaseDirectory, "TestData", "fake-claude.ps1");
         _hub = new RoomHub(_store, new ChatTranscripts(() => Path.Combine(_dir, "projects")), Options.Create(options))
         {
+            // 이름 풀기는 네트워크 없이 — "private"로 시작하는 이름만 사설망으로 풀린 것으로
+            PlaygroundResolveCheck = (u, _) => Task.FromResult<string?>(u.Host.StartsWith("private", StringComparison.Ordinal) ? "이 이름은 로컬 · 사설망 주소로 풀려 가져오지 않습니다." : null),
             ProcessFactory = (room, spec, workspace) =>
             {
                 lock (_specs) _specs.Add((room.Id, spec));
@@ -189,6 +191,32 @@ public sealed class PlaygroundTests : IDisposable
             Assert.Contains(rule, args);
         Assert.DoesNotContain("Edit(**/*.js)", args); // 웹 게임 같은 결과물은 막지 않음
         Assert.DoesNotContain("Edit(**/AGENTS*.md)", ClaudeArgs.Build(spec with { Playground = false }, ["opus"])); // 일반 명령 방은 그대로
+    }
+
+    [Theory]
+    [InlineData("https://example.com/news", true)]   // 카드 없이 허용 (사용자 결정 "허용, Codex도")
+    [InlineData("http://localhost:5290/", false)]    // 주소 검사는 그대로
+    [InlineData("http://192.168.0.1/admin", false)]
+    [InlineData("https://private.example.com/", false)] // 이름이 사설망으로 풀림 (5928f1753b)
+    public async Task MemberWebFetch_NoCard_AddressCheckStays(string url, bool allowed)
+    {
+        var group = NewPlayground();
+        var child = group.Members[0].RoomId;
+        var ended = new TaskCompletionSource<RunResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _hub.TurnEnded += (roomId, result) => { if (roomId == child) ended.TrySetResult(result); };
+        Assert.Null(_hub.Send(child, "webfetch " + url));
+        var result = await ended.Task.WaitAsync(Wait);
+        Assert.Equal(allowed, result.Ok);
+        Assert.Empty(_hub.WaitingCards(child).Approvals); // 카드는 뜨지 않는다
+        Assert.Contains(ClaudeArgs.WebFetchTool, ClaudeArgs.PlaygroundTools);
+    }
+
+    [Fact]
+    public async Task WhyNotResolved_LoopbackName_Refused_IpSkipped()
+    {
+        // localhost는 이 PC 안에서 풀린다 (네트워크 없이) — 실제 DNS 검사가 루프백을 거르는지
+        Assert.Contains("사설망", await WebFetchSites.WhyNotResolved(new Uri("http://localhost/"), CancellationToken.None));
+        Assert.Null(await WebFetchSites.WhyNotResolved(new Uri("https://93.184.215.14/"), CancellationToken.None)); // IP는 WhyNot이 본다
     }
 
     [Fact]

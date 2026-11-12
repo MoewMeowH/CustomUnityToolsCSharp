@@ -25,7 +25,7 @@ public sealed partial class RoomModel
 
     /// <summary>구성원 단계 표시: 쓰는 구성원(명령)만 — 그 구성원이 낀 말은 차례로 돈다 (⑤).</summary>
     public string? WriterLabel(GroupMember m) => store.Get(m.RoomId) is { } child && GroupChat.IsWriter(child)
-        ? (GroupChat.IsPlaygroundMember(store, child) ? "편집만" : RoomRules.LevelName(child.Level)) // 놀이터 구성원은 명령 도구가 없다
+        ? (GroupChat.IsPlaygroundMember(store, child) ? "편집 · 웹" : RoomRules.LevelName(child.Level)) // 놀이터 구성원은 명령 도구가 없다
         : null;
 
     /// <summary>

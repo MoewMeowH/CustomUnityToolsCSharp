@@ -287,8 +287,11 @@ public static partial class ClaudeArgs
     /// <summary>명령 단계에서 작업 폴더 안 편집을 묻지 않게 하는 규칙 (Edit 규칙은 Write 도구에도 걸린다 — 2026-10-28 실측).</summary>
     public const string CommandEditAllow = "Edit(**)";
 
-    /// <summary>놀이터 구성원 도구 (<see cref="RunSpec.Playground"/>): 판 폴더 안 편집 · 웹 검색만.</summary>
-    public const string PlaygroundTools = "Read,Grep,Glob,Edit,Write," + WebSearchTool;
+    /// <summary>
+    /// 놀이터 구성원 도구 (<see cref="RunSpec.Playground"/>): 판 폴더 안 편집 · 웹 검색 · 웹 페이지 읽기 (사용자 결정 "둘 다 항상" · "허용, Codex도" —
+    /// 읽기는 주소 검사만 하고 카드 없이, RoomHub.DecideToolAsync).
+    /// </summary>
+    public const string PlaygroundTools = "Read,Grep,Glob,Edit,Write," + WebSearchTool + "," + WebFetchTool;
 
     /// <summary>
     /// 놀이터 구성원이 판 폴더 안에서도 쓰지 않는 것 (<see cref="EditDenied"/>에 더해, security review C2 · C3 · C5): 사람 없이 도는 판이 남기면

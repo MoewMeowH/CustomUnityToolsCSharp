@@ -3,6 +3,9 @@ namespace HB.Chat;
 /// <summary>승인 · 질문 카드: 도구 호출 판정, 카드 답, 미리 허용된 명령 규칙.</summary>
 public sealed partial class RoomHub
 {
+    /// <summary>놀이터 웹 페이지 읽기의 이름 풀기 검사 (시험이 바꾼다 — 기본은 실제 DNS).</summary>
+    public Func<Uri, CancellationToken, Task<string?>> PlaygroundResolveCheck { get; init; } = WebFetchSites.WhyNotResolved;
+
     /// <summary>
     /// 실행 중인 claude가 묻는 승인 하나 (stdio 호스트 — <see cref="ClaudeRunner"/>의 onPermission, 3차 a). 답(<see cref="PermissionDecision"/> JSON)을 돌려준다.
     /// 명령 방의 명령 도구 → 승인 카드, AskUserQuestion → 질문 카드, 그 밖은 카드 없이 거절 (그 전 --permission-prompts none과 같은 동작).
@@ -15,14 +18,27 @@ public sealed partial class RoomHub
     private async Task<string> DecideToolAsync(Room room, Live live, int generation, ToolPermission ask, CancellationToken aborted,
         IReadOnlyCollection<string>? attached = null, string? unity = null, string? workspace = null, bool askWrites = false)
     {
-        // 놀이터 구성원: 사람 없이 도는 판 — 웹 검색만 받고 나머지 승인 요청(폴더 밖 쓰기 등)은 카드 없이 거절 (설계 검토 b420efd860 R3).
+        // 놀이터 구성원: 사람 없이 도는 판 — 웹 검색 · 웹 페이지 읽기(주소 검사)만 받고 나머지 승인 요청(폴더 밖 쓰기 등)은 카드 없이 거절 (설계 검토 b420efd860 R3).
         // 부모를 못 찾아도 놀이터로 본다(일반 권한으로 돌아가지 않게)
         if (GroupChat.IsPlaygroundMember(store, room))
         {
             if (ask.Tool == ClaudeArgs.WebSearchTool) return PermissionDecision.Allow(ask.InputJson);
+            // 웹 페이지 읽기: 주소 검사(로컬 · 사설망 등)만 통과하면 카드 없이 — 사람 없는 판 (사용자 결정 "허용, Codex도"). 기록에는 남긴다
+            if (ask.Tool == ClaudeArgs.WebFetchTool)
+            {
+                var urlText = TerminalMcp.ParseString(ask.InputJson, "url");
+                // 이름 모양 검사 + 실제로 풀리는 주소 (사람이 이름을 보지 않으므로 — 5928f1753b)
+                if ((WebFetchSites.WhyNot(urlText, out var url) ?? await PlaygroundResolveCheck(url!, aborted)) is { } why)
+                {
+                    HostDenied(room, live, generation, ask.Tool, urlText ?? "", "가져오지 않는 주소", $"WebFetch {(urlText is { Length: > 120 } ? urlText[..120] + "…" : urlText)}: {why} — 거절");
+                    return PermissionDecision.Deny($"{why} 이 주소는 가져오지 않습니다. 같은 요청을 다시 하지 마세요.");
+                }
+                Log?.Write(room.Id, new ApprovalRequest(WebFetchCardTool, url!.AbsoluteUri, null), "허용 (놀이터 자동)");
+                return PermissionDecision.Allow(System.Text.Json.JsonSerializer.Serialize(new { url = url.AbsoluteUri, prompt = TerminalMcp.ParseString(ask.InputJson, "prompt") ?? "" }));
+            }
             var asked = ApprovalRequest.Parse(ask.RequestJson)?.Summary ?? "";
             HostDenied(room, live, generation, ask.Tool, asked, "놀이터", $"{ask.Tool}{(asked.Length > 0 ? " " + (asked.Length > 120 ? asked[..120] + "…" : asked) : "")}: 놀이터에서는 판 폴더 밖 쓰기 · 그 밖의 요청을 받지 않아 거절");
-            return PermissionDecision.Deny("놀이터에서는 판 폴더(지금 작업 폴더) 안 편집과 웹 검색만 됩니다 — 이 요청은 거절됐습니다. 다시 시도하지 말고 판 폴더 안에서 다른 방법으로 하세요.");
+            return PermissionDecision.Deny("놀이터에서는 판 폴더(지금 작업 폴더) 안 편집과 웹 검색 · 웹 페이지 읽기만 됩니다 — 이 요청은 거절됐습니다. 다시 시도하지 말고 판 폴더 안에서 다른 방법으로 하세요.");
         }
         if (attached is { Count: > 0 } && McpServerOf(ask.Tool) is { } server && attached.Contains(server))
             return await DecideRoomServerAsync(room, live, generation, ask, aborted, server, unity);

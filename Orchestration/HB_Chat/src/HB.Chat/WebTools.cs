@@ -66,6 +66,28 @@ public sealed class WebFetchSites
         return null;
     }
 
+    /// <summary>
+    /// 이름이 로컬 · 사설망 주소로 풀리는지 — 사람이 사이트 이름을 보지 않고 허용하는 놀이터용 (sub_security 5928f1753b: localtest.me처럼 127.0.0.1로 풀리는
+    /// 이름이 <see cref="WhyNot"/>를 지났다). 못 풀어도 거절. 검사 뒤 이름이 다른 주소로 바뀌는 것(리바인딩) · 리다이렉트는 막지 못한다.
+    /// </summary>
+    public static async Task<string?> WhyNotResolved(Uri url, CancellationToken ct)
+    {
+        if (url.HostNameType != UriHostNameType.Dns) return null; // IP는 WhyNot이 봤다
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TimeSpan.FromSeconds(5));
+            var addresses = await Dns.GetHostAddressesAsync(url.IdnHost.TrimEnd('.'), timeout.Token);
+            return addresses.Length == 0 ? "이름을 풀지 못해 가져오지 않습니다."
+                : addresses.Any(Private) ? "이 이름은 로컬 · 사설망 주소로 풀려 가져오지 않습니다."
+                : null;
+        }
+        catch (Exception ex) when (ex is SocketException or OperationCanceledException or ArgumentException)
+        {
+            return "이름을 풀지 못해 가져오지 않습니다.";
+        }
+    }
+
     private static bool NumericLabel(string label) =>
         label.Length > 0 && (label.All(char.IsAsciiDigit) || (label.StartsWith("0x", StringComparison.OrdinalIgnoreCase) && label.Length > 2 && label[2..].All(char.IsAsciiHexDigit)));
 

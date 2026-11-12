@@ -1238,7 +1238,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
             InheritedAttachDirs = inheritedDirs, // 갈래 방: 원래 방들의 첨부
             Effort = room.Effort, // 곁칸에서 바꾸면 다음 실행부터 (Claude 앱 기능 B)
             Plan = room.PlanNext && ClaudeArgs.PlanMode(room.Level) is not null && !playground, // "계획 먼저" (C) — 명령 단계만
-            Playground = playground, // 놀이터 구성원: 판 폴더 안 편집 · 웹 검색만
+            Playground = playground, // 놀이터 구성원: 판 폴더 안 편집 · 웹 검색 · 웹 페이지 읽기
             AskRunMode = room.AskRunMode || runPick is not null, // 외부 요청 전에 묻기 · + 요청 창 말
             ProtectedWorkspaces = room.Level == PermissionLevel.App ? [.. o.AllWorkspaces.Select(w => w.Path)] : [],
             AskWrites = room.Level == PermissionLevel.App && askWrites, // 앱 단계 폴더 밖 쓰기 묻기 (설정 · 규칙 글과 같은 값)
