@@ -45,6 +45,7 @@
             <template class="member-avatar" data-member="@m.Id">@Profiles.Avatar(ProfileStore.AgentKey(m.Name), m.Name)</template>
         }
         <span class="u-push-right muted" id="conn"></span>
+        <button type="button" class="btn icon-only" data-house="@room.Id" title="놀이방 — 구성원 작업을 집 안 캐릭터로 보는 따로 창" aria-label="놀이방 열기">@Icons.Svg("house")</button>
         <details class="menu">
             <summary class="btn icon-only" title="방 메뉴" aria-label="방 메뉴">@Icons.Svg("more")</summary>
             <div class="menu-items">

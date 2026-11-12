@@ -43,6 +43,7 @@
         }
         @* 곁칸 열고 닫기 (3차 c) — 열림 · 고른 탭은 브라우저 저장 *@
         <button type="button" class="btn" id="side-toggle" title="오른쪽 곁칸: 단계 · 방 정보 · 외부 실행 · 첨부" aria-controls="side" aria-expanded="false">@Icons.Svg("panel") 정보</button>
+        <button type="button" class="btn icon-only" data-house="@Model.Room.Id" title="놀이방 — 작업을 집 안 캐릭터로 보는 따로 창" aria-label="놀이방 열기">@Icons.Svg("house")</button>
         @* 방 메뉴 — 메뉴 단추는 아이콘만, 항목은 아이콘 + 글 (4차 D3) *@
         <details class="menu">
             <summary class="btn icon-only" title="방 메뉴" aria-label="방 메뉴">@Icons.Svg("more")</summary>

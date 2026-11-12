@@ -172,6 +172,13 @@
         if (e.target instanceof Element && e.target.matches("form.group-create select[name=engines]")) syncEngine(e.target);
         if (e.target instanceof Element && e.target.matches("form.group-create input[name=playground]")) syncPlaygroundForm(e.target, true);
     });
+    // 놀이방 단추: 방마다 이름 붙은 따로 창 — 같은 방을 다시 누르면 그 창으로 (데스크톱 앱은 새 창 요청을 받아 놀이방 창을 띄운다)
+    document.addEventListener("click", (e) => {
+        const b = e.target instanceof Element ? e.target.closest("[data-house]") : null;
+        if (!b) return;
+        const w = window.open("/House/" + encodeURIComponent(b.dataset.house), "hb-house-" + b.dataset.house, "width=1000,height=720");
+        w?.focus();
+    });
     // 뒤로 가기 · 양식 복원으로 엔진 칸이 Codex로 돌아와도 맞추게 (C6)
     window.addEventListener("pageshow", () => {
         document.querySelectorAll("form.group-create select[name=engines]").forEach(syncEngine);

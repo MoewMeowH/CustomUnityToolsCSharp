@@ -84,6 +84,7 @@ builder.Services.AddSingleton(sp => new ProfileStore(sp.GetRequiredService<IOpti
 builder.Services.AddSingleton<ProfileView>();
 builder.Services.AddSingleton<FaceCatalog>();
 builder.Services.AddSingleton<StickerPacks>(); // 스티커 팩 (4차 D2)
+builder.Services.AddSingleton(sp => new HousePetCatalog(() => sp.GetRequiredService<IOptionsMonitor<StickerOptions>>().CurrentValue.Dir)); // 놀이방 캐릭터 (스티커 폴더 Pets)
 builder.Services.AddSingleton<RoomRuns>();
 builder.Services.AddSingleton(sp => new RoomNotes(sp.GetRequiredService<IOptions<ChatOptions>>())); // 방 기록 줄 (승인 결과 · 정리 표시)
 
@@ -256,7 +257,10 @@ app.Use(async (ctx, next) =>
     await next();
 });
 // 화면 스크립트 · CSS (wwwroot). 배치는 프로젝트 폴더에서 dotnet run으로 띄워 content root = 프로젝트 폴더다.
-app.UseStaticFiles();
+// .glb(놀이방 가구 모델)는 기본 MIME 목록에 없어 더한다 — 없으면 정적 파일이 404
+var staticTypes = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider();
+staticTypes.Mappings[".glb"] = "model/gltf-binary";
+app.UseStaticFiles(new StaticFileOptions { ContentTypeProvider = staticTypes });
 app.MapRazorPages();
 app.MapStickerImages();
 app.MapMcp(TerminalMcp.Path);
@@ -285,6 +289,15 @@ app.MapGet("/profile-image/{file}", IResult (string file, ProfileStore profiles,
     response.Headers["Cross-Origin-Resource-Policy"] = "same-origin";
     response.Headers.CacheControl = "private, max-age=86400"; // 바꾸면 파일 이름이 바뀐다
     return TypedResults.PhysicalFile(path,ProfileStore.ContentType(path)); // 경로는 GetFullPath로 만든 절대 경로
+});
+// 놀이방 캐릭터 시트: 내장 펫 이름만 · 스티커 폴더 Pets 안만 (HousePetCatalog.SheetPath)
+app.MapGet("/house/pet/{pet}", IResult (string pet, HousePetCatalog pets, HttpResponse response) =>
+{
+    if (pets.SheetPath(pet) is not { } path) return Results.NotFound();
+    response.Headers.XContentTypeOptions = "nosniff";
+    response.Headers["Cross-Origin-Resource-Policy"] = "same-origin";
+    response.Headers.CacheControl = "private, no-cache";
+    return TypedResults.PhysicalFile(path, "image/webp", lastModified: File.GetLastWriteTimeUtc(path));
 });
 // 승인 · 질문은 claude 프로세스의 stdin/stdout(stdio 호스트)으로 주고받는다 — 승인용 HTTP 경로는 없다 (3차 a, 그 전 2-1의 /approve).
 

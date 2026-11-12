@@ -18,6 +18,7 @@ public static class Icons
         ["back"] = "M15 5l-7 7 7 7",
         ["more"] = "M5 12h.01M12 12h.01M19 12h.01",
         ["panel"] = "M4 5h16v14H4zM15 5v14",
+        ["house"] = "M4 11l8-7 8 7M6 9.5V20h12V9.5M10 20v-6h4v6",
         ["reply"] = "M9 7l-5 5 5 5M4 12h10a6 6 0 0 1 6 6v1",
         ["external"] = "M14 4h6v6M20 4l-9 9M18 14v5H5V6h5",
         ["send"] = "M12 19V5M6 11l6-6 6 6",

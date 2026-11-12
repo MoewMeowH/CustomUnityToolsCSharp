@@ -31,6 +31,14 @@ public sealed class NavigationPolicy(Uri chat, Uri dashboard)
         return u.Scheme is "http" or "https" ? new(NavAction.External, current, u.AbsoluteUri) : new(NavAction.Block, current, null);
     }
 
+    /// <summary>
+    /// 놀이방 창 주소(채팅 출처 /House/{방 ID})면 그 방 ID, 아니면 null. 채팅 탭의 새 창 요청이 이것이면 큰 창 탭이 아니라 따로 된 놀이방 창으로 연다 —
+    /// 그 창 안에서도 이 방 놀이방 주소로만 이동한다 (<see cref="HouseWindow"/>).
+    /// </summary>
+    public string? HouseRoom(string? url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var u) && SameOrigin(u, chat)
+        && u.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries) is ["House", var id] && MainForm.IsRoomId(id) ? id : null;
+
     /// <summary>하위 틀이 갈 수 있는 곳: 위젯 srcdoc과 빈 틀뿐.</summary>
     public static bool FrameAllowed(string? url) =>
         string.Equals(url, "about:srcdoc", StringComparison.OrdinalIgnoreCase) || string.Equals(url, "about:blank", StringComparison.OrdinalIgnoreCase);

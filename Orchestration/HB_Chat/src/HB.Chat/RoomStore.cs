@@ -129,6 +129,9 @@ public sealed record Room
     /// <summary>놀이터 단톡방이면 그 판 상태 (주제 · 상한 · 진행). 단톡방 방에만 둔다 — 구성원 자식 방은 부모를 보고 판단한다.</summary>
     public Playground? Playground { get; init; }
 
+    /// <summary>놀이방 창에서 고른 캐릭터: 구성원 ID(1:1 방은 <see cref="HousePetCatalog.MainKey"/>) → 펫 이름. 없는 키는 기본값 (HousePetCatalog.For).</summary>
+    public IReadOnlyDictionary<string, string>? HousePets { get; init; }
+
     [JsonIgnore]
     public bool IsGroup => Members.Count > 0;
 }

@@ -1,0 +1,55 @@
+@page "{id}"
+@model HouseModel
+@{
+    Layout = null;
+    var room = Model.Room;
+    var data = System.Text.Json.JsonSerializer.Serialize(new
+    {
+        room = room.Id,
+        kind = Model.Kind,
+        characters = Model.Characters.Select(c => new { key = c.Key, name = c.Name, pet = c.Pet }),
+        pets = Model.Pets.Select(p => new { id = p.Id, name = p.Name }),
+    });
+}
+<!doctype html>
+@* 놀이방 따로 창 — 동작은 wwwroot/house.js (방 SSE를 읽어 캐릭터를 움직인다). Three.js · 가구 모델은 앱 안 파일만 쓴다 (CDN 없음). *@
+<html lang="ko">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>놀이방 · @(room.Title ?? (room.IsGroup ? "단톡방" : "방"))</title>
+    <style>
+        html, body { margin: 0; height: 100%; background: #2a2f3a; color: #e8e8e8; font: 13px/1.4 "Segoe UI", "Malgun Gothic", sans-serif; overflow: hidden; }
+        #view { position: absolute; inset: 0; }
+        #labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+        .label { position: absolute; transform: translate(-50%, -100%); text-align: center; white-space: nowrap; }
+        .label b { display: block; font-size: 12px; text-shadow: 0 1px 2px #000; }
+        .label span { display: inline-block; margin-top: 2px; padding: 1px 7px; border-radius: 9px; background: rgba(255,255,255,.92); color: #222; font-size: 11px; }
+        .label span:empty { display: none; }
+        #panel { position: absolute; left: 10px; top: 10px; background: rgba(20,22,28,.85); padding: 8px 10px; border-radius: 8px; }
+        #panel button { margin: 0 4px 6px 0; padding: 4px 8px; border: 0; border-radius: 5px; background: #3a4150; color: #fff; cursor: pointer; }
+        #panel .pick { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
+        #panel .pick span { min-width: 56px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #notice { position: absolute; inset: 0; display: grid; place-items: center; color: #aab; pointer-events: none; }
+        #notice[hidden] { display: none; } /* display:grid가 hidden을 이겨 화면을 덮지 않게 */
+        #credit { position: absolute; right: 8px; bottom: 6px; color: #889; font-size: 11px; }
+    </style>
+    @* <!script>: 태그 도우미 끔 — .NET 스크립트 태그 도우미가 importmap을 자기 것으로 바꾸며 type을 지웠다 *@
+    <!script type="importmap">
+        { "imports": { "three": "/lib/three/build/three.module.js", "three/addons/": "/lib/three/addons/" } }
+    </!script>
+</head>
+<body>
+    <div id="view"></div>
+    <div id="labels"></div>
+    <div id="notice" hidden></div>
+    <div id="panel">
+        <button type="button" id="new-house" title="이 브라우저에서만 집 배치를 바꿉니다">새 집</button>
+        <div id="picks"></div>
+    </div>
+    <div id="credit">가구: Kenney Furniture Kit (CC0) · 휠 = 확대 · 끌기 = 이동</div>
+    <form id="token" hidden>@Html.AntiForgeryToken()</form>
+    <script type="application/json" id="house-data">@* 기본 JSON 인코더가 < > & 를 \u 꼴로 바꿔 script를 닫지 못한다 *@@Html.Raw(data)</script>
+    <script type="module" src="~/house.js" asp-append-version="true"></script>
+</body>
+</html>

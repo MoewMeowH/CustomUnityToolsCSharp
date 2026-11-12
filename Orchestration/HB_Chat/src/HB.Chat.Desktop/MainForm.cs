@@ -299,6 +299,11 @@ public sealed class MainForm : Form
             e.Handled = true;
             Trace($"{tab} 새 창 요청 {Short(e.Uri)} (사용자 {e.IsUserInitiated})");
             if (!e.IsUserInitiated) return;
+            if (tab == AppTab.Chat && _policy.HouseRoom(e.Uri) is { } house)
+            {
+                BeginInvoke(() => OpenHouse(house)); // 놀이방 단추 — 따로 된 창 (방마다 하나)
+                return;
+            }
             var d = _policy.Main(e.Uri, tab);
             BeginInvoke(() => Route(d.Action == NavAction.Allow ? d with { Action = NavAction.Switch } : d));
         };
@@ -785,6 +790,43 @@ public sealed class MainForm : Form
         if (IsRoomId(roomId)) ShowTab(AppTab.Chat, new Uri(_chatUrl, "/Room/" + roomId).AbsoluteUri);
     }
 
+    /// <summary>놀이방 창 (방마다 하나): 이미 있으면 앞으로, 없으면 채팅 탭과 같은 환경으로 새로 띄운다.</summary>
+    private async void OpenHouse(string roomId)
+    {
+        if (_closing || _env is null) return;
+        if (_houses.TryGetValue(roomId, out var open) && !open.IsDisposed)
+        {
+            if (open.WindowState == FormWindowState.Minimized) open.WindowState = FormWindowState.Normal;
+            open.Activate();
+            return;
+        }
+        // 창마다 방 SSE를 하나씩 잡는다 — HTTP/1.1 한 호스트 연결 6개를 채팅 탭 · 미니 창과 나눠 쓰니 창 수를 막는다 (사용자 결정 "2개")
+        if (_houses.Values.Count(w => !w.IsDisposed) >= MaxHouses)
+        {
+            SetStatus($"놀이방 창은 {MaxHouses}개까지 엽니다 — 다른 놀이방 창을 닫고 여세요");
+            return;
+        }
+        var house = new HouseWindow(roomId, _policy, Trace);
+        _houses[roomId] = house;
+        house.FormClosed += (_, _) => { if (_houses.TryGetValue(roomId, out var w) && w == house) _houses.Remove(roomId); };
+        try
+        {
+            house.Show();
+            await house.OpenAsync(_env, _chatUrl);
+            if (!house.IsDisposed) Trace($"놀이방 창 {roomId}");
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or COMException or WebView2RuntimeNotFoundException)
+        {
+            if (house.IsDisposed || _closing) return; // 띄우는 사이 창 · 앱이 닫힘 — 실패가 아니다
+            Trace($"놀이방 창 못 띄움 {roomId}: {ex.Message}");
+            house.Close();
+            SetStatus("놀이방 창을 띄우지 못했습니다: " + ex.Message);
+        }
+    }
+
+    private const int MaxHouses = 2;
+    private readonly Dictionary<string, HouseWindow> _houses = new(StringComparer.Ordinal);
+
     /// <summary>트레이 메뉴 끝내기 — 진짜로 끈다 (도는 턴이 있으면 OnFormClosing이 묻는다).</summary>
     private void Exit()
     {
@@ -861,6 +903,8 @@ public sealed class MainForm : Form
         _mini?.CloseForExit(); // 미니 창 위치를 남기고 진짜 닫는다
         _pet?.Dispose(); // 펫 창 · 말풍선도 같이 (위치는 끌 때마다 저장)
         _pet = null;
+        foreach (var house in _houses.Values.ToList()) house.Close(); // 놀이방 창도 같이
+        _houses.Clear();
         var bounds = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
         new WindowPlacement(bounds.X, bounds.Y, bounds.Width, bounds.Height, WindowState == FormWindowState.Maximized).Save(_placementPath);
         base.OnFormClosing(e);

@@ -47,6 +47,19 @@ public sealed class DesktopLogicTests : IDisposable
     }
 
     [Theory]
+    [InlineData("http://localhost:5290/House/0123456789ab", "0123456789ab")]
+    [InlineData("http://localhost:5290/House/0123456789ab/", "0123456789ab")]
+    [InlineData("http://localhost:5290/House/0123456789ab?x=1", "0123456789ab")]
+    [InlineData("http://localhost:5290/Room/0123456789ab", null)]            // 방 화면은 큰 창
+    [InlineData("http://localhost:5290/House/0123456789AB", null)]           // 방 ID 모양 아님
+    [InlineData("http://localhost:5290/House/0123456789ab/x", null)]
+    [InlineData("http://localhost:5290/House/../Room/0123456789ab", null)]
+    [InlineData("http://localhost:5280/House/0123456789ab", null)]           // 대시보드 출처
+    [InlineData("https://example.com/House/0123456789ab", null)]
+    [InlineData(null, null)]
+    public void HouseRoom_OnlyChatOriginHousePage(string? url, string? room) => Assert.Equal(room, Policy.HouseRoom(url));
+
+    [Theory]
     [InlineData("about:srcdoc", true)]
     [InlineData("about:blank", true)]
     [InlineData("https://example.com/?leak=1", false)]  // 위젯이 스스로 밖으로 (0번 실측)
