@@ -717,8 +717,10 @@ public sealed class RoomHubTests : IDisposable
         Assert.Contains(McpConfigFile.UnityServer, spec.ExtraMcpServers);
         Assert.Contains("MyGame", spec.AppendSystemPrompt);
         var shots = notes.Notes(room.Id).Where(n => n.Image is not null).ToList();
-        Assert.Equal(2, shots.Count); // 캡처 결과의 두 장(png · jpg) 다 — editor_status 그림은 남기지 않는다 (/self-review 0bcf01451b C7)
-        Assert.All(shots, shot => Assert.Contains("capture_game_view", shot.Text));
+        // 캡처 결과의 두 장(png · jpg) 다 + 묶음 capture(command scene_view) 한 장 — editor_status 그림은 남기지 않는다 (/self-review 0bcf01451b C7)
+        Assert.Equal(3, shots.Count);
+        Assert.Equal(2, shots.Count(shot => shot.Text!.Contains("capture_game_view", StringComparison.Ordinal)));
+        Assert.Single(shots, shot => shot.Text!.Contains("capture_scene_view", StringComparison.Ordinal));
         Assert.All(shots, shot => Assert.NotNull(RoomShots.PathOf(Path.Combine(_dir, "data"), room.Id, shot.Image)));
         Assert.Contains(shots, shot => shot.Image!.EndsWith(".jpg", StringComparison.Ordinal));
     }

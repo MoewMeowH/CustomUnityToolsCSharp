@@ -1125,19 +1125,28 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
         }
     }
 
-    /// <summary>Unity 캡처 도구 이름 앞부분 — capture_game_view · capture_scene_view · capture_editor_element · capture_runtime_element (0단계 명령 목록).</summary>
+    /// <summary>Unity 캡처 도구 이름 앞부분 — 명령마다 도구일 때 capture_game_view · capture_scene_view · capture_editor_window.</summary>
     public const string UnityCapturePrefix = "mcp__" + McpConfigFile.UnityServer + "__capture_";
 
+    /// <summary>Unity 캡처 묶음 도구 (<c>--tool-groups</c>) — 입력 command가 game_view · scene_view · editor_window.</summary>
+    public const string UnityCaptureGroup = "mcp__" + McpConfigFile.UnityServer + "__capture";
+
     /// <summary>
-    /// Unity 캡처 결과 그림을 방 기록에 남긴다 (결정 3 "capture_game_view로"): assistant 줄의 도구 호출 id를 기억했다가
-    /// 같은 id의 tool_result 그림을 RoomShots에 쓰고 기록 줄을 단다. 남기지 못해도 실행은 그대로.
+    /// Unity 캡처 결과 그림을 방 기록에 남긴다 (결정 3 "capture_game_view로" · 2026-11-14 "셋 다"): assistant 줄의 도구 호출 id를 기억했다가
+    /// 같은 id의 tool_result 그림을 RoomShots에 쓰고 기록 줄("Unity capture_game_view" 등)을 단다. 남기지 못해도 실행은 그대로.
     /// </summary>
     internal void KeepUnityShots(string roomId, StreamEvent ev, Dictionary<string, string> captures)
     {
         if (ev is UsageEvent u)
         {
             foreach (var tool in u.Tools)
-                if (tool.Id is { Length: > 0 } id && tool.Name.StartsWith(UnityCapturePrefix, StringComparison.Ordinal)) captures[id] = tool.Name;
+            {
+                if (tool.Id is not { Length: > 0 } id) continue;
+                if (tool.Name == UnityCaptureGroup && tool.Command is { Length: > 0 and <= 40 } command && command.All(c => char.IsAsciiLetterLower(c) || c == '_'))
+                    captures[id] = "capture_" + command;
+                else if (tool.Name.StartsWith(UnityCapturePrefix, StringComparison.Ordinal))
+                    captures[id] = tool.Name[(UnityCapturePrefix.Length - "capture_".Length)..];
+            }
             return;
         }
         if (ev is not ToolImagesEvent images) return;
@@ -1151,7 +1160,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
             try
             {
                 var file = RoomShots.Save(options.Value.DataFolder, roomId, Convert.FromBase64String(image.Base64), ext);
-                Log?.Write(roomId, new ApprovalRequest(RoomNotes.UnityShotTool, file, null), "Unity " + name[(UnityCapturePrefix.Length - "capture_".Length)..]);
+                Log?.Write(roomId, new ApprovalRequest(RoomNotes.UnityShotTool, file, null), "Unity " + name);
             }
             catch (Exception ex) when (ex is FormatException or IOException or UnauthorizedAccessException or InvalidOperationException) { }
         }

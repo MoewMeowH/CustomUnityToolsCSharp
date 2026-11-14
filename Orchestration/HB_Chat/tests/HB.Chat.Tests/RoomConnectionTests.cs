@@ -33,7 +33,7 @@ public sealed class RoomConnectionTests : IDisposable
         var servers = JsonNode.Parse(File.ReadAllText(path))!["mcpServers"]!.AsObject();
         Assert.Equal(["hb-orchestration", "notion", "unity"], servers.Select(p => p.Key));
         Assert.Equal("${K:-}", servers["hb-orchestration"]!["env"]!["K"]!.GetValue<string>()); // 자리표시는 그대로 (CLI가 푼다)
-        Assert.Equal(["mcp", "--project-path", "F:/Game"], servers["unity"]!["args"]!.AsArray().Select(a => a!.GetValue<string>()));
+        Assert.Equal(["mcp", "--tool-groups", "--project-path", "F:/Game"], servers["unity"]!["args"]!.AsArray().Select(a => a!.GetValue<string>()));
         McpConfigFile.DeleteRoom(path);
         Assert.False(File.Exists(path));
     }
@@ -105,6 +105,10 @@ public sealed class RoomConnectionTests : IDisposable
         var usage = Assert.IsType<UsageEvent>(StreamParser.Parse(
             """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"mcp__unity__capture_game_view","input":{}}]}}"""));
         Assert.Equal("toolu_1", Assert.Single(usage.Tools).Id);
+        // 묶음 도구는 입력 command를 함께 — MCP 도구만 (Bash의 command는 담지 않는다)
+        var grouped = Assert.IsType<UsageEvent>(StreamParser.Parse(
+            """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_2","name":"mcp__unity__capture","input":{"command":"game_view","args":{}}},{"type":"tool_use","id":"toolu_3","name":"Bash","input":{"command":"ls"}}]}}"""));
+        Assert.Equal(["game_view", null], grouped.Tools.Select(t => t.Command));
 
         var images = Assert.IsType<ToolImagesEvent>(StreamParser.Parse(
             """{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":[{"type":"text","text":"ok"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAAA"}},{"type":"image","source":{"type":"base64","media_type":"image/gif","data":"AAAA"}}]}]}}"""));
@@ -340,9 +344,10 @@ public sealed class RoomConnectionTests : IDisposable
         Assert.DoesNotContain("Unity", RoomRules.For(PermissionLevel.Command, terminal: true));
         var rules = RoomRules.For(PermissionLevel.Command, terminal: true, unity: "ToolCreate");
         Assert.Contains("ToolCreate", rules);
-        Assert.Contains("capture_game_view", rules);
+        Assert.Contains("capture 도구(command game_view)", rules);
+        Assert.Contains("unity-cli-status", rules);
         Assert.Contains("에디터를 켜 달라고", rules);
-        Assert.Contains("eval", rules);
+        Assert.Contains("script_eval", rules);
         Assert.Contains("notion", RoomRules.For(PermissionLevel.Read, extras: ["notion"]));
         Assert.Contains("단계와 상관없이", RoomRules.For(PermissionLevel.Read, extras: ["notion"]));
         Assert.DoesNotContain("단계와 상관없이", RoomRules.For(PermissionLevel.Read));

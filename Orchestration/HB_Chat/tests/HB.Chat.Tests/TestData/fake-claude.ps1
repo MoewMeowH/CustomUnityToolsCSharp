@@ -116,21 +116,23 @@ switch ($mode) {
         }
     }
     'roomtools' {
-        # room servers: unity editor_status (expect allow, no card), unity eval (card; test lowers the level then denies), editor_status again (expect deny)
-        $r1 = Ask 'req_u1' '{"subtype":"can_use_tool","tool_name":"mcp__unity__editor_status","input":{},"tool_use_id":"toolu_u1"}'
-        $r2 = Ask 'req_u2' '{"subtype":"can_use_tool","tool_name":"mcp__unity__eval","input":{"code":"Debug.Log(1);"},"tool_use_id":"toolu_u2"}'
-        $r3 = Ask 'req_u3' '{"subtype":"can_use_tool","tool_name":"mcp__unity__editor_status","input":{},"tool_use_id":"toolu_u3"}'
-        $text = 'r1=' + $r1.behavior + ' r2=' + $r2.behavior + ' r3=' + $r3.behavior
-        if ($text -eq 'r1=allow r2=deny r3=deny') {
+        # room servers: unity editor (grouped) and script_eval (expect allow, no card), a Bash card holds the turn (test lowers the level then denies),
+        # unity editor again (expect deny)
+        $r1 = Ask 'req_u1' '{"subtype":"can_use_tool","tool_name":"mcp__unity__editor","input":{"command":"status","args":{}},"tool_use_id":"toolu_u1"}'
+        $r2 = Ask 'req_u2' '{"subtype":"can_use_tool","tool_name":"mcp__unity__script_eval","input":{"code":"return 1;"},"tool_use_id":"toolu_u2"}'
+        $hold = Ask 'req_hold' '{"subtype":"can_use_tool","tool_name":"Bash","display_name":"Bash","input":{"command":"echo hold"},"tool_use_id":"toolu_hold"}'
+        $r3 = Ask 'req_u3' '{"subtype":"can_use_tool","tool_name":"mcp__unity__editor","input":{"command":"status","args":{}},"tool_use_id":"toolu_u3"}'
+        $text = 'r1=' + $r1.behavior + ' r2=' + $r2.behavior + ' hold=' + $hold.behavior + ' r3=' + $r3.behavior
+        if ($text -eq 'r1=allow r2=allow hold=deny r3=deny') {
             Emit '{"type":"result","subtype":"success","is_error":false,"result":"roomtools ok","total_cost_usd":0.001,"permission_denials":[]}'
         } else {
             Emit ('{"type":"result","subtype":"error_during_execution","is_error":true,"result":' + (ConvertTo-Json $text -Compress) + ',"total_cost_usd":0.001,"permission_denials":[]}')
         }
     }
     'unityshot' {
-        # unity capture tool_use + tool_result image (kept), editor_status image (not kept)
-        Emit '{"type":"assistant","message":{"model":"opus","content":[{"type":"tool_use","id":"toolu_u1","name":"mcp__unity__capture_game_view","input":{}},{"type":"tool_use","id":"toolu_u2","name":"mcp__unity__editor_status","input":{}}]}}'
-        Emit '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_u1","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}},{"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":"/9j/4AAQ"}}]},{"type":"tool_result","tool_use_id":"toolu_u2","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}}]}]}}'
+        # unity capture tool_use + tool_result image (kept): per-command name and grouped capture{command}; editor_status image (not kept)
+        Emit '{"type":"assistant","message":{"model":"opus","content":[{"type":"tool_use","id":"toolu_u1","name":"mcp__unity__capture_game_view","input":{}},{"type":"tool_use","id":"toolu_u2","name":"mcp__unity__editor_status","input":{}},{"type":"tool_use","id":"toolu_u3","name":"mcp__unity__capture","input":{"command":"scene_view","args":{}}}]}}'
+        Emit '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_u1","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}},{"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":"/9j/4AAQ"}}]},{"type":"tool_result","tool_use_id":"toolu_u2","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}}]},{"type":"tool_result","tool_use_id":"toolu_u3","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}}]}]}}'
         Emit '{"type":"result","subtype":"success","is_error":false,"result":"shot","total_cost_usd":0.001,"permission_denials":[]}'
     }
     'runbubble' {

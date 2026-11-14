@@ -84,7 +84,7 @@ public sealed partial class RoomModel
             {
                 var path = o.UnityProjectPath(unity);
                 var cli = o.ResolveUnityCli();
-                rows.Add(new(McpConfigFile.UnityServer, "unity", "stdio", cli is null || path is null ? null : $"unity mcp --project-path {path}",
+                rows.Add(new(McpConfigFile.UnityServer, "unity", "stdio", cli is null || path is null ? null : $"unity mcp --tool-groups --project-path {path}",
                     true, ClaudeArgs.RunsCommands(room.Level) && path is not null && cli is not null,
                     path is null ? $"'{unity}'가 설정에 없습니다" : cli is null ? "Unity CLI(unity.exe)를 찾지 못했습니다 — 설정 Chat:UnityCliPath"
                     : ClaudeArgs.RunsCommands(room.Level) ? null : "명령 방에서만 붙습니다",

@@ -1410,7 +1410,7 @@ public sealed class ApprovalFlowTests : IDisposable
     // ---- 방별 서버 도구 ----
 
     [Fact]
-    public async Task UnityTools_NoCardButEval_AndRecheckedAfterLowering()
+    public async Task UnityTools_NoCardEvenEval_AndRecheckedAfterLowering()
     {
         var project = Path.Combine(_dir, "Game");
         Directory.CreateDirectory(project);
@@ -1423,11 +1423,10 @@ public sealed class ApprovalFlowTests : IDisposable
         var ch = _hub.Subscribe(room.Id);
         _hub.Send(room.Id, "roomtools");
 
-        // editor_status는 카드 없이 지나가고 eval만 카드
+        // editor 묶음 · script_eval(C# 실행)도 카드 없이 지나가고 (결정 "카드 없앰"), 턴을 붙잡는 Bash 카드만 뜬다
         var before = await Until(ch, e => e.Kind == "approval");
         var card = before.Single(e => e.Kind == "approval").Approval!;
-        Assert.Equal("mcp__unity__eval", card.Tool);
-        Assert.Contains("Debug.Log(1);", card.Summary);
+        Assert.Equal("Bash", card.Tool);
 
         // 카드를 기다리는 사이 권한을 내리면 카드 허용도 막히고(기존 장치), 그 뒤 Unity 호출은 카드 없이 거절된다 (미리 허용하지 않으므로)
         _store.Update(room.Id, r => r with { Level = PermissionLevel.Read });

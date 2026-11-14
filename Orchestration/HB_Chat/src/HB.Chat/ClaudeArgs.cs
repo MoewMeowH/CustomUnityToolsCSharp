@@ -97,7 +97,7 @@ public static partial class ClaudeArgs
 
     /// <summary>
     /// 앱 단계에서도 호스트에 묻는 도구. auto는 AskUserQuestion 말고는 호스트에 묻지 않아, ask 규칙이 없으면 모델 선택 · 사이트 검사 · 터미널 표 카드가 사라진다 (2.1.312 실측).
-    /// 방별 서버는 서버 단위로 — 호스트가 지금 연결을 다시 보고 Unity 코드 실행만 카드로 묻는다 (<see cref="RunSpec.ExtraMcpServers"/>, /cross-review a30ebb2d3a 1-F1).
+    /// 방별 서버는 서버 단위로 — 호스트가 지금 연결을 다시 보고 허용 · 거절한다 (<see cref="RunSpec.ExtraMcpServers"/>, /cross-review a30ebb2d3a 1-F1).
     /// </summary>
     public static IReadOnlyList<string> AppAskTools(RunSpec spec) =>
         [$"mcp__{spec.McpServer}__{RunModeTool}", TerminalMcp.StartTool, TerminalMcp.BrowserOpenTool, RoomOpen.Tool, WebFetchTool, .. spec.ExtraMcpServers.Select(s => $"mcp__{s}")];

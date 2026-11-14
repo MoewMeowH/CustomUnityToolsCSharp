@@ -41,7 +41,7 @@ public sealed partial class RoomHub
             return PermissionDecision.Deny("놀이터에서는 판 폴더(지금 작업 폴더) 안 편집과 웹 검색 · 웹 페이지 읽기만 됩니다 — 이 요청은 거절됐습니다. 다시 시도하지 말고 판 폴더 안에서 다른 방법으로 하세요.");
         }
         if (attached is { Count: > 0 } && McpServerOf(ask.Tool) is { } server && attached.Contains(server))
-            return await DecideRoomServerAsync(room, live, generation, ask, aborted, server, unity);
+            return DecideRoomServer(room, live, generation, ask, server, unity);
         // 계획 승인 (Claude 앱 기능 C): 계획 모드로 돈 명령 방의 ExitPlanMode → 계획 카드. 허용이면 그 방 단계의 원래 모드로 돌려
         // 같은 턴에서 진행하고 "계획 먼저"를 끈다. 거절이면 이유가 지휘자에게 가서 계획을 고쳐 다시 묻는다 (결정 "이유 적어 다시 계획").
         // 계획 모드로 시작한 실행(시작 때 "계획 먼저")에서만 — 그 밖에서 온 ExitPlanMode는 카드 없이 거절 (지휘자 검토 S1, 겹 방어)
@@ -313,12 +313,6 @@ public sealed partial class RoomHub
         return PermissionDecision.Allow(card.Apply(ask.InputJson, answer.Picks));
     }
 
-    /// <summary>Unity 도구 중 명령 카드로 묻는 것 — C# 코드 실행 셋 (결정 4 "eval만 카드로"). 나머지 Unity 도구는 묻지 않는다.</summary>
-    public static readonly IReadOnlySet<string> UnityCardTools = new HashSet<string>(StringComparer.Ordinal)
-    {
-        $"mcp__{McpConfigFile.UnityServer}__eval", $"mcp__{McpConfigFile.UnityServer}__eval_file", $"mcp__{McpConfigFile.UnityServer}__run_script",
-    };
-
     /// <summary>mcp__서버__도구 → 서버 이름. MCP 도구가 아니면 null.</summary>
     public static string? McpServerOf(string tool)
     {
@@ -329,9 +323,9 @@ public sealed partial class RoomHub
 
     /// <summary>
     /// 방별 서버 도구: 지금 방을 다시 보고 — 단계를 내렸거나 · 연결을 끊었거나 · 다른 Unity 프로젝트로 바꿨으면 거절(내리기는 바로 막힌다),
-    /// Unity 코드 실행 셋은 명령 카드, 그 밖은 카드 없이 허용(결정 "묻지 않음" · "연결하면 편집").
+    /// 그 밖은 카드 없이 허용(결정 "묻지 않음" · "연결하면 편집", Unity C# 실행도 — 2026-11-14 결정 "카드 없앰").
     /// </summary>
-    private async Task<string> DecideRoomServerAsync(Room room, Live live, int generation, ToolPermission ask, CancellationToken aborted, string server, string? unity)
+    private string DecideRoomServer(Room room, Live live, int generation, ToolPermission ask, string server, string? unity)
     {
         var now = store.Get(room.Id);
         var isUnity = server == McpConfigFile.UnityServer;
@@ -344,14 +338,7 @@ public sealed partial class RoomHub
             HostDenied(room, live, generation, ask.Tool, ApprovalRequest.Parse(ask.RequestJson)?.Summary ?? "", why, $"{ask.Tool}: {why} — 거절");
             return PermissionDecision.Deny($"사용자가 이 방의 {(isUnity ? "Unity 연결 · 권한" : "연결 · 권한")}을 바꿨습니다 — 이 도구를 쓰지 않습니다.");
         }
-        if (!isUnity || !UnityCardTools.Contains(ask.Tool)) return PermissionDecision.Allow(ask.InputJson);
-        if (ApprovalRequest.Parse(ask.RequestJson) is not { } request) return PermissionDecision.Deny("승인 요청 모양을 읽지 못해 거절했습니다.");
-        var card = request with
-        {
-            Description = $"Unity 에디터({unity}) 안에서 C# 코드를 실행합니다 — 에디터 · 프로젝트 파일 · 이 PC의 파일을 바꿀 수 있고, 편집 금지 경로도 막히지 않습니다.",
-        };
-        var answer = await RequestApprovalAsync(room.Id, live, generation, card, aborted);
-        return (answer ?? new ApprovalAnswer(false, "실행이 이미 끝나 거절했습니다.")).ToDecisionJson(ask.InputJson);
+        return PermissionDecision.Allow(ask.InputJson);
     }
 
     /// <summary>

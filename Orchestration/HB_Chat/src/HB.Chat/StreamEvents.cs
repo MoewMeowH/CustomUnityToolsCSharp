@@ -113,6 +113,9 @@ public sealed record ToolUse(string Name, string? Detail)
 {
     /// <summary>tool_use id — 결과(tool_result)와 잇는다 (Unity 그림 기록).</summary>
     public string? Id { get; init; }
+
+    /// <summary>MCP 도구 입력의 command 글 — 묶음 도구(Unity <c>--tool-groups</c>의 capture 등)가 어느 명령인지. 없으면 null.</summary>
+    public string? Command { get; init; }
 }
 
 /// <summary>
@@ -400,10 +403,14 @@ public static class StreamParser
         var list = new List<ToolUse>();
         foreach (var c in content.EnumerateArray())
             if (c.ValueKind == JsonValueKind.Object && Str(c, "type") == "tool_use" && Str(c, "name") is { Length: > 0 } name)
-                list.Add(new ToolUse(name, c.TryGetProperty("input", out var input) && input.ValueKind == JsonValueKind.Object ? Detail(name, input) : null)
+            {
+                var hasInput = c.TryGetProperty("input", out var input) && input.ValueKind == JsonValueKind.Object;
+                list.Add(new ToolUse(name, hasInput ? Detail(name, input) : null)
                 {
                     Id = Str(c, "id"),
+                    Command = hasInput && name.StartsWith("mcp__", StringComparison.Ordinal) ? Str(input, "command") : null,
                 });
+            }
         return list;
     }
 

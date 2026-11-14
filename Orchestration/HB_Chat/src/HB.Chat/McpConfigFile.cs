@@ -68,7 +68,7 @@ public static class McpConfigFile
 
     /// <summary>
     /// 방마다 고른 연결로 만든 --mcp-config 파일: 작업 폴더 .mcp.json에서 servers 이름들을 옮기고,
-    /// unity가 있으면 <c>unity.exe mcp --project-path 경로</c> 항목을 더한다. 방 ID 이름의 파일이라 실행이 끝나면 <see cref="DeleteRoom"/>로 지운다.
+    /// unity가 있으면 <c>unity.exe mcp --tool-groups --project-path 경로</c> 항목을 더한다. 방 ID 이름의 파일이라 실행이 끝나면 <see cref="DeleteRoom"/>로 지운다.
     /// .mcp.json에 없는 이름은 appServer(앱에서 더한 서버)에서 찾고 — 작업 폴더 것이 먼저 —
     /// 둘 다 없으면 빼고 missing으로 돌려준다 (방 칸이 알린다). servers가 비고 unity도 없으면 빈 mcpServers. .mcp.json이 없으면 앱 서버만.
     /// </summary>
@@ -109,11 +109,14 @@ public static class McpConfigFile
         return (path, missing);
     }
 
-    /// <summary>Unity 연결 항목: <c>unity.exe mcp --project-path 경로</c> (stdio, 0단계 실측).</summary>
+    /// <summary>
+    /// Unity 연결 항목: <c>unity.exe mcp --tool-groups --project-path 경로</c> (stdio) — CLI 1.0 <c>mcp configure</c>가 쓰는 공식 모양.
+    /// 묶음마다 도구 하나(<c>capture</c> + command game_view 등), C# 실행 script_eval · script_run만 따로.
+    /// </summary>
     public static JsonObject UnityEntry(string cli, string project) => new()
     {
         ["command"] = cli,
-        ["args"] = new JsonArray("mcp", "--project-path", project),
+        ["args"] = new JsonArray("mcp", "--tool-groups", "--project-path", project),
     };
 
     public static string RoomPath(string dataDir, string roomId) => Path.Combine(dataDir, $"mcp-room-{roomId}.json");
