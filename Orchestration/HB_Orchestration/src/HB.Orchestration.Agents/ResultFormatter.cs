@@ -12,10 +12,13 @@ public static class ResultFormatter
     /// <param name="returnAll">false면 마지막 단계만 (실패가 있으면 첫 실패 단계만) 보여준다 (Claude 쪽 토큰 절약).</param>
     /// <param name="note">끝에 붙일 안내 (조기 종료, 에이전트 교체 등).</param>
     /// <param name="header">runId 다음 줄에 붙일 한 줄 (첨부 여유 등). 첫 줄은 늘 runId만 — 세션 기록이 첫 줄로 runId를 읽는다.</param>
-    public static string Format(string runId, IReadOnlyList<StepResult> results, bool returnAll, string? note, string? header = null)
+    /// <param name="shownSteps">보여줄 단계 번호. 주면 returnAll 대신 이 단계들만 보여준다 (순차 · 동시 · Graph 모드의 끝 단계 + 실패한 단계).</param>
+    public static string Format(string runId, IReadOnlyList<StepResult> results, bool returnAll, string? note, string? header = null,
+        IReadOnlySet<int>? shownSteps = null)
     {
         var failed = results.FirstOrDefault(r => !r.Success);
-        var shown = returnAll || results.Count == 0 ? results : [failed ?? results[^1]];
+        IReadOnlyList<StepResult> shown = shownSteps is not null ? [.. results.Where(r => shownSteps.Contains(r.Step))]
+            : returnAll || results.Count == 0 ? results : [failed ?? results[^1]];
 
         // 출력에서 빠지는 단계(Last 모드의 앞 단계 등)의 재시도·경고는 끝에 모은다 (보이는 단계는 제목 아래).
         var hidden = results.Except(shown).SelectMany(r => r.Notices.Select(n => $"단계 {r.Step} {n}")).ToList();

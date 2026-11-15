@@ -247,8 +247,15 @@ public sealed class ModesModel(ModesConfigService service, CallLogCache log) : P
         ModeFlow.Sequential => "순차",
         ModeFlow.Concurrent => "동시",
         ModeFlow.Debate => "토론",
+        ModeFlow.Graph => "그래프",
         _ => flow.ToString(),
     };
+
+    /// <summary>Graph 모드에서 단계마다 보는 것 ("요청 · 1 · 2"). 연결 설정이 틀렸으면 null.</summary>
+    public static IReadOnlyList<string>? GraphSees(ModeDefinition mode) =>
+        ModeGraph.Resolve(mode).Nodes?
+            .Select(n => string.Join(" · ", (n.SeesInput ? new[] { "요청" } : []).Concat(n.Sees.Select(s => s.ToString()))))
+            .ToList();
 
     public static string SeesLabel(StepSees sees) => sees switch
     {

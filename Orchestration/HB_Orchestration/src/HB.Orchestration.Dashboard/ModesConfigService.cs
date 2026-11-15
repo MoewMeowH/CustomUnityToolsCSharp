@@ -719,6 +719,9 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
             if (mode.MaxRounds is { } r && (r < 1 || r > ModeDefinition.MaxRoundsHardCap))
                 errors.Add($"[{name}] MaxRounds는 1~{ModeDefinition.MaxRoundsHardCap} 사이여야 합니다.");
 
+            if (ModeGraph.Resolve(mode).Error is { } graphError)
+                errors.Add($"[{name}] {graphError}");
+
             foreach (var step in mode.Steps)
             {
                 if (!roles.Contains(step.Role))

@@ -54,6 +54,10 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         if (mode.Flow == ModeFlow.Debate && mode.Steps.Count is not (2 or 3))
             return $"[모드 '{modeName}'] Debate는 Steps가 2개(토론자 둘) 또는 3개(+판정자)여야 합니다.";
 
+        // 단계 연결(무엇을 기다리고 볼지)을 푼다. Id · From 설정이 틀리면 여기서 거절한다.
+        var (nodes, graphError) = ModeGraph.Resolve(mode);
+        if (graphError is not null) return $"[모드 '{modeName}'] {graphError}";
+
         // 지휘자의 판단 근거: 기록에만 남긴다 (CallMeta → CallRecord). 프롬프트·시스템 프롬프트 조립에는 넘기지 않는다.
         if (CheckConductorNotes(modeName, mode, reason, ownReview) is { } notesError) return notesError;
 
@@ -93,7 +97,9 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             OwnReview = string.IsNullOrWhiteSpace(ownReview) ? null : ownReview,
         };
 
-        if (loadedImages!.Count > 0 && plan.Where(p => !p.Agent.Options.Vision).Select(p => p.Agent.Name).Distinct().ToList() is { Count: > 0 } blind)
+        // 이미지는 요청을 받는 단계에만 붙는다 (BuildPrompt). Graph에서는 요청을 보지 않는 단계의 에이전트에 Vision을 요구하지 않는다.
+        var imageSteps = mode.Flow == ModeFlow.Graph ? plan.Where((_, i) => nodes![i].SeesInput) : plan;
+        if (loadedImages!.Count > 0 && imageSteps.Where(p => !p.Agent.Options.Vision).Select(p => p.Agent.Name).Distinct().ToList() is { Count: > 0 } blind)
             return $"[모드 '{modeName}'] 이미지를 받지 않는 에이전트(Vision=false): {string.Join(", ", blind)}. images 없이 호출하거나 agents로 바꾸세요.";
 
         // 작업 폴더 단계(claude-cli · codex-cli): context 파일을 통째로 작업 폴더에 복사하고, 프롬프트의 첨부 본문 대신 "주목할 범위"만 넣는다
@@ -158,19 +164,16 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         List<StepResult> results;
         try
         {
-            switch (mode.Flow)
+            if (mode.Flow == ModeFlow.Debate)
+                (results, note) = await RunDebateAsync(runId, modeName, mode, plan, promptInput, meta, ct);
+            else
             {
-                case ModeFlow.Concurrent:
-                    results = await RunConcurrentAsync(runId, modeName, plan, promptInput, meta, ct, tool);
-                    break;
-                case ModeFlow.Debate:
-                    (results, note) = await RunDebateAsync(runId, modeName, mode, plan, promptInput, meta, ct);
-                    break;
-                default:
-                    results = await RunSequentialAsync(runId, modeName, plan, promptInput, meta, ct, tool);
-                    if (results.Count < plan.Count)
-                        note = $"(단계 {results.Count}에서 실패해 이후 {plan.Count - results.Count}단계는 실행하지 않음)";
-                    break;
+                (results, var skipped) = await RunGraphAsync(runId, modeName, plan, nodes!, promptInput, meta, ct, tool);
+                if (skipped.Count > 0)
+                    note = mode.Flow == ModeFlow.Graph
+                        // 실패와 건너뜀을 나눠 적는다 — 다른 갈래의 실패가 건너뛴 단계의 원인처럼 읽히지 않게.
+                        ? $"(실패: 단계 {string.Join(", ", results.Where(r => !r.Success).Select(r => r.Step))} · 실행하지 않음: 단계 {string.Join(", ", skipped)})"
+                        : $"(단계 {results.Count}에서 실패해 이후 {skipped.Count}단계는 실행하지 않음)";
             }
         }
         finally
@@ -185,9 +188,17 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             return await RunFallbackAsync(retry, reasoningOverrides,
                 $"(runId {runId}: {plan[0].Agent.ProviderOptions?.Type} 한도 소진으로 실패 → 대체 에이전트로 다시 실행)");
 
-        // ── 3. 반환: Last면 마지막 결과만 (Claude 쪽 토큰 절약) ─────────────────
+        // ── 3. 반환: Last면 끝 단계만 (Claude 쪽 토큰 절약) ─────────────────────
         // 맨 위 runId와 단계 제목의 토큰·시간은 항상 붙인다 (save_result에 넘길 값, 서버 로그를 뒤지지 않도록).
-        var returnAll = mode.Return == ModeReturn.All || mode.Flow == ModeFlow.Concurrent;
+        // Last에서 보이는 것 = 끝 단계(다른 단계가 기다리지 않는 단계) 중 실행된 것 + 실패한 단계.
+        // 순차는 마지막 단계(실패면 그 단계) 하나, 동시는 전부가 된다. Debate는 턴 목록의 마지막 하나 (ResultFormatter 기본).
+        var returnAll = mode.Return == ModeReturn.All;
+        IReadOnlySet<int>? shownSteps = null;
+        if (!returnAll && mode.Flow != ModeFlow.Debate)
+        {
+            var terminals = ModeGraph.Terminals(nodes!);
+            shownSteps = results.Where(r => !r.Success || terminals.Contains(r.Step)).Select(r => r.Step).ToHashSet();
+        }
 
         if (swap.Count > 0)
         {
@@ -213,7 +224,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         if (FindingOverlap.Lines(results.SelectMany(r => r.Structured?.Findings ?? [])) is { Count: > 0 } overlaps)
             note = note is null ? string.Join("\n", overlaps) : $"{string.Join("\n", overlaps)}\n{note}";
 
-        return ResultFormatter.Format(runId, results, returnAll, note, headroom);
+        return ResultFormatter.Format(runId, results, returnAll, note, headroom, shownSteps);
 
         // 대체 에이전트로 같은 입력을 다시 부른다. 추론 강도 덮어쓰기는 교체 뒤 이름으로 옮기고 (b476ab3099 1-F1 · 90978dee2f C1),
         // 대체 실행이 실행 전 검증에서 걸리면 왜 대체했는지를 앞에 붙인다 — 지휘자가 요청하지 않은 교체 · 상한 오류만 보지 않게.
@@ -452,7 +463,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         bool withoutGuidelines = false, IReadOnlyList<(string Agent, GuidelinesProvenance Guidelines, string? AppendSha256)>? expected = null, bool requireSearchLast = false,
         IReadOnlyList<string>? reasoningOverrides = null)
     {
-        var (plan, error) = PlanFixedMode(modeName, agentOverrides, input.Length, withoutGuidelines, requireSearchLast, reasoningOverrides);
+        var (plan, nodes, error) = PlanFixedMode(modeName, agentOverrides, input.Length, withoutGuidelines, requireSearchLast, reasoningOverrides);
         if (error is not null) return (null, null, error);
 
         if (expected is not null)
@@ -473,7 +484,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
 
         var runId = Guid.NewGuid().ToString("N")[..10];
         var meta = new CallMeta(null, []) { Reason = reason, Provenance = RunProvenance(plan!) };
-        var results = await RunSequentialAsync(runId, modeName, plan!.Steps, new PromptInput(input, "", []), meta, ct, tool);
+        var (results, _) = await RunGraphAsync(runId, modeName, plan!.Steps, nodes!, new PromptInput(input, "", []), meta, ct, tool);
         return (runId, results, null);
     }
 
@@ -482,7 +493,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         string modeName, IReadOnlyList<string>? agentOverrides, int inputLength, bool withoutGuidelines = false, bool requireSearchLast = false,
         IReadOnlyList<string>? reasoningOverrides = null)
     {
-        var (plan, error) = PlanFixedMode(modeName, agentOverrides, inputLength, withoutGuidelines, requireSearchLast, reasoningOverrides);
+        var (plan, _, error) = PlanFixedMode(modeName, agentOverrides, inputLength, withoutGuidelines, requireSearchLast, reasoningOverrides);
         return error is not null ? (null, error) : ([.. plan!.Steps.Select(s => (s.Def.Role, s.Agent.Name, s.Agent.Model, s.Guidelines, s.EffortName, s.Append?.Sha256))], null);
     }
 
@@ -490,27 +501,30 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     /// Sequential 모드만 (crash처럼 단계마다 앞 결과를 받는 흐름). 구조화 출력은 요구하지 않는다 (텍스트·웹검색 기록으로 채점).
     /// requireSearchLast: 단계 2개 이상이고 마지막 단계에 WebSearch가 있어야 한다 (crash 채점은 1단계 = 분류, 마지막 = 검색으로 읽으므로).
     /// </summary>
-    private (PreparedPlan? Plan, string? Error) PlanFixedMode(string modeName, IReadOnlyList<string>? agentOverrides, int inputLength, bool withoutGuidelines,
+    /// <returns>계획과 그 단계 연결(실행기에 함께 넘긴다). 문제가 있으면 둘 다 null이고 Error.</returns>
+    private (PreparedPlan? Plan, IReadOnlyList<GraphNode>? Nodes, string? Error) PlanFixedMode(string modeName, IReadOnlyList<string>? agentOverrides, int inputLength, bool withoutGuidelines,
         bool requireSearchLast, IReadOnlyList<string>? reasoningOverrides = null)
     {
         ModeStore.Loaded loaded;
         try { loaded = store.Load(); }
-        catch (ModeConfigException ex) { return (null, $"[모드 설정 오류] {ex.Message}"); }
+        catch (ModeConfigException ex) { return (null, null, $"[모드 설정 오류] {ex.Message}"); }
 
         if (!loaded.File.Modes.TryGetValue(modeName, out var mode))
-            return (null, UnknownMode(modeName, loaded));
+            return (null, null, UnknownMode(modeName, loaded));
         if (mode.Steps.Count == 0 || mode.Flow != ModeFlow.Sequential)
-            return (null, $"[모드 '{modeName}'] 골든 다단계 실행은 Sequential 모드만 됩니다 (지금 {mode.Steps.Count}단계, {mode.Flow}).");
+            return (null, null, $"[모드 '{modeName}'] 골든 다단계 실행은 Sequential 모드만 됩니다 (지금 {mode.Steps.Count}단계, {mode.Flow}).");
         if (requireSearchLast && (mode.Steps.Count < 2 || mode.Steps[^1].WebSearch is null))
-            return (null, $"[모드 '{modeName}'] crash 사례는 단계가 2개 이상이고 마지막 단계에 WebSearch가 있는 모드여야 합니다 " +
+            return (null, null, $"[모드 '{modeName}'] crash 사례는 단계가 2개 이상이고 마지막 단계에 WebSearch가 있는 모드여야 합니다 " +
                           $"(1단계 = 분류, 마지막 = 검색으로 채점. 지금 {mode.Steps.Count}단계, 마지막 WebSearch {(mode.Steps[^1].WebSearch is null ? "없음" : "있음")}). case.json의 mode·--mode를 확인하세요.");
+        var (nodes, graphError) = ModeGraph.Resolve(mode);
+        if (graphError is not null) return (null, null, $"[모드 '{modeName}'] {graphError}");
 
         var maxChars = mode.MaxInputChars ?? Options.Budget.MaxInputChars;
         if (maxChars > 0 && inputLength > maxChars)
-            return (null, $"[입력이 너무 깁니다] {inputLength:N0}자 / 상한 {maxChars:N0}자 (모드 '{modeName}').");
+            return (null, null, $"[입력이 너무 깁니다] {inputLength:N0}자 / 상한 {maxChars:N0}자 (모드 '{modeName}').");
 
         var (plan, error) = BuildPlan(loaded, modeName, mode, agentOverrides, withoutGuidelines, reasoningOverrides);
-        return error is not null ? (null, error) : (plan, null);
+        return error is not null ? (null, null, error) : (plan, nodes, null);
     }
 
     /// <summary>
@@ -613,7 +627,8 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             if (maxChars > 0 && total > maxChars)
                 return $"[입력이 너무 깁니다] 원래 프롬프트 + 응답 + 보충 {total:N0}자 / 상한 {maxChars:N0}자. 보충 범위를 줄이세요.";
 
-            var newStep = run.Max(r => r.Step ?? 0) + 1;
+            // 모드의 단계 수보다 뒤 번호로 — 실행되지 않은 단계(앞 단계 실패로 건너뜀)의 번호를 보충 응답이 차지하지 않게.
+            var newStep = Math.Max(run.Max(r => r.Step ?? 0), mode.Steps.Count) + 1;
             var meta = new CallMeta(files, attached.Sources) { ContextRoots = attached.Roots, Reason = reason, Provenance = RunProvenance(plan) };
             var call = NewCall(runId, modeName, newStep, step, step.Instructions, new BuiltPrompt(prompt, null), meta) with
             {
@@ -691,6 +706,9 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             return (null, UnknownMode(modeName, loaded));
         if (mode.Steps.Count != 1 || mode.Flow == ModeFlow.Debate)
             return (null, $"[모드 '{modeName}'] 골든 실행은 단계가 하나인 모드만 됩니다 (지금 {mode.Steps.Count}단계, {mode.Flow}).");
+        // run_mode가 거절할 연결 설정이면 여기서도 거절한다 (실행 전 확인이 실제 실행과 같은 검사를 하도록).
+        if (ModeGraph.Resolve(mode).Error is { } graphError)
+            return (null, $"[모드 '{modeName}'] {graphError}");
 
         var maxChars = mode.MaxInputChars ?? Options.Budget.MaxInputChars;
         if (maxChars > 0 && promptLength > maxChars)
@@ -743,33 +761,34 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     /// <summary>보낼 프롬프트. ContextPrefix는 Text의 앞부분(첨부 자료)이고 없으면 null. Images는 입력을 받는 단계에만 (없으면 null).</summary>
     private sealed record BuiltPrompt(string Text, string? ContextPrefix, IReadOnlyList<AttachedImage>? Images = null);
 
+    /// <summary>
+    /// 순차 · 동시 · Graph 모드의 실행. 단계마다 작업 하나를 만들고, 기다릴 단계(<see cref="GraphNode.WaitFor"/>)가 끝난 뒤 호출한다 —
+    /// 서로 기다리지 않는 단계는 동시에 돈다. WaitFor는 앞 번호만 가리키므로 차례로 만들면 기다릴 작업이 이미 있다.
+    /// 기다린 단계가 실패했거나 실행되지 않았으면 그 단계도 호출하지 않는다 (앞 결과 없이는 의미가 없으므로 토큰을 쓰지 않는다).
+    /// </summary>
     /// <param name="tool">호출 기록의 Tool (골든 crash 실행이면 "golden"). null이면 run_mode.</param>
-    private async Task<List<StepResult>> RunSequentialAsync(
-        string runId, string mode, List<PlannedStep> plan,
+    /// <returns>실행한 단계의 결과(단계 번호 차례)와 실행하지 않은 단계 번호.</returns>
+    private async Task<(List<StepResult> Results, List<int> Skipped)> RunGraphAsync(
+        string runId, string mode, List<PlannedStep> plan, IReadOnlyList<GraphNode> nodes,
         PromptInput input, CallMeta meta, CancellationToken ct, string? tool = null)
     {
-        var results = new List<StepResult>();
-        for (var i = 0; i < plan.Count; i++)
+        var tasks = new Task<StepResult?>[plan.Count];
+        for (var i = 0; i < plan.Count; i++) tasks[i] = RunNodeAsync(i);
+        var done = await Task.WhenAll(tasks);
+
+        return ([.. done.OfType<StepResult>()], [.. nodes.Where(n => done[n.Step - 1] is null).Select(n => n.Step)]);
+
+        async Task<StepResult?> RunNodeAsync(int index)
         {
-            var p = plan[i];
-            var prompt = BuildPrompt(input, results, i == 0 ? StepSees.Input : p.Def.Sees);
+            var node = nodes[index];
+            var waited = await Task.WhenAll(node.WaitFor.Select(s => tasks[s - 1]));
+            if (waited.Any(r => r is not { Success: true })) return null;
 
-            var result = await runner.RunStepAsync(NewCall(runId, mode, i + 1, p, p.Instructions, prompt, meta) with { Tool = tool }, ct);
-            results.Add(result);
-
-            // 앞 단계가 실패하면 뒤 단계는 의미가 없으므로 토큰을 쓰지 않고 멈춘다.
-            if (!result.Success) break;
+            // Sees는 WaitFor 안에 있으므로 그 작업은 이미 끝났다.
+            var p = plan[index];
+            var prompt = BuildPrompt(input, [.. node.Sees.Select(s => tasks[s - 1].Result!)], node.SeesInput);
+            return await runner.RunStepAsync(NewCall(runId, mode, node.Step, p, p.Instructions, prompt, meta) with { Tool = tool }, ct);
         }
-        return results;
-    }
-
-    private async Task<List<StepResult>> RunConcurrentAsync(
-        string runId, string mode, List<PlannedStep> plan,
-        PromptInput input, CallMeta meta, CancellationToken ct, string? tool = null)
-    {
-        var prompt = BuildPrompt(input, [], StepSees.Input);
-        var tasks = plan.Select((p, i) => runner.RunStepAsync(NewCall(runId, mode, i + 1, p, p.Instructions, prompt, meta) with { Tool = tool }, ct));
-        return [.. await Task.WhenAll(tasks)];
     }
 
     private async Task<(List<StepResult> Results, string? Note)> RunDebateAsync(
@@ -851,16 +870,10 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         return sb.ToString();
     }
 
-    private static BuiltPrompt BuildPrompt(PromptInput input, List<StepResult> previous, StepSees sees)
+    /// <param name="prior">"앞 단계 결과"에 넣을 결과 (단계 번호 차례).</param>
+    /// <param name="includeInput">요청과 첨부를 넣는지.</param>
+    private static BuiltPrompt BuildPrompt(PromptInput input, IReadOnlyList<StepResult> prior, bool includeInput)
     {
-        var includeInput = sees is StepSees.Input or StepSees.InputAndPrevious or StepSees.All;
-        IEnumerable<StepResult> prior = sees switch
-        {
-            StepSees.Previous or StepSees.InputAndPrevious => previous.TakeLast(1),
-            StepSees.All => previous,
-            _ => Enumerable.Empty<StepResult>(),
-        };
-
         var sb = new StringBuilder();
         string? prefix = null;
         if (includeInput)
@@ -869,11 +882,10 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             sb.AppendLine("## 요청").AppendLine(input.Request).AppendLine();
         }
 
-        var priorList = prior.ToList();
-        if (priorList.Count > 0)
+        if (prior.Count > 0)
         {
             sb.AppendLine("## 앞 단계 결과");
-            foreach (var r in priorList)
+            foreach (var r in prior)
                 sb.AppendLine($"### {r.Step}. {r.Role}").AppendLine(r.Text).AppendLine();
         }
 
@@ -979,12 +991,16 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             sb.AppendLine($"[주의] appsettings.json 다시 읽기 실패, 이전 설정으로 동작 중: {reloadError}");
         foreach (var (name, mode) in loaded.File.Modes)
         {
-            var arrow = mode.Flow switch { ModeFlow.Concurrent => " | ", ModeFlow.Debate => " ⇄ ", _ => " → " };
-            var steps = string.Join(arrow, mode.Steps.Select(s =>
-                catalog.TryGet(s.Agent, out _) ? $"{s.Role}@{s.Agent}" : $"{s.Role}@{s.Agent}(사용불가)"));
+            // Graph는 단계를 ", "로 잇고, 요청만 보는 단계가 아니면 보는 것을 붙인다 (예: Judge@x←요청·1·2).
+            var arrow = mode.Flow switch { ModeFlow.Concurrent => " | ", ModeFlow.Debate => " ⇄ ", ModeFlow.Graph => ", ", _ => " → " };
+            var (nodes, graphError) = ModeGraph.Resolve(mode);
+            var steps = string.Join(arrow, mode.Steps.Select((s, i) =>
+                (catalog.TryGet(s.Agent, out _) ? $"{s.Role}@{s.Agent}" : $"{s.Role}@{s.Agent}(사용불가)")
+                + (mode.Flow == ModeFlow.Graph && nodes is not null ? SeesSuffix(nodes[i]) : "")));
             var rounds = mode.Flow == ModeFlow.Debate ? $" 최대 {Math.Clamp(mode.MaxRounds ?? 2, 1, ModeDefinition.MaxRoundsHardCap)}회차" : "";
             var ownReview = mode.RequireOwnReview ? " [ownReview 필수]" : "";
-            sb.AppendLine($"- {name}: {mode.Description} [{steps}]{rounds}{ownReview}");
+            var problem = graphError is null ? "" : $" (설정 오류: {graphError})";
+            sb.AppendLine($"- {name}: {mode.Description} [{steps}]{rounds}{ownReview}{problem}");
         }
         if (sb.Length == 0) return "정의된 모드가 없습니다.";
 
@@ -1029,6 +1045,11 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         }
         return sb.ToString().TrimEnd();
     }
+
+    /// <summary>list_modes의 Graph 단계 꼬리: 보는 것이 요청뿐이면 빈 글, 아니면 "←요청·1·2".</summary>
+    private static string SeesSuffix(GraphNode node) =>
+        node.SeesInput && node.Sees.Count == 0 ? ""
+        : "←" + string.Join("·", (node.SeesInput ? new[] { "요청" } : []).Concat(node.Sees.Select(s => s.ToString())));
 
     /// <summary>server_info용: publish 후 새 서버가 떴는지, 설정이 언제 읽혔는지 확인.</summary>
     public string ServerInfo()

@@ -339,7 +339,8 @@
         {
             var steps = mode.Steps;
             var returnRaw = Model.Raw(name, "Return");
-            var returnLabel = mode.Flow == ModeFlow.Concurrent || mode.Return == ModeReturn.All ? "모든 결과" : "마지막 결과만";
+            var returnLabel = mode.Flow == ModeFlow.Concurrent || mode.Return == ModeReturn.All ? "모든 결과"
+                : mode.Flow == ModeFlow.Graph ? "끝 단계 결과" : "마지막 결과만";
 
             <section class="panel mode">
                 <div class="mode-head">
@@ -375,6 +376,19 @@
                             await RenderNode(name, 2, steps[2], showSees: false);
                         }
                     }
+                    else if (mode.Flow == ModeFlow.Graph)
+                    {
+                        @* 연결은 화살표로 그리지 않고 단계마다 보는 것을 글로 쓴다 *@
+                        var graphSees = ModesModel.GraphSees(mode);
+                        <div class="stack">
+                            <div class="stack-label">보는 것이 끝난 단계부터 실행 · 서로 기다리지 않으면 동시</div>
+                            @for (var i = 0; i < steps.Count; i++)
+                            {
+                                await RenderNode(name, i, steps[i], showSees: false,
+                                    graphSees: graphSees is null ? "연결 설정 오류" : $"{i + 1}단계 · 보는 것: {graphSees[i]}");
+                            }
+                        </div>
+                    }
                     else
                     {
                         for (var i = 0; i < steps.Count; i++)
@@ -400,8 +414,8 @@
                     {
                         <label>Claude에게 반환
                             <select name="@ModesModel.SettingField(name, "Return")">
-                                <option value="" selected="@(returnRaw is null)">기본 (마지막만)</option>
-                                <option value="Last" selected="@(returnRaw == "Last")">마지막만</option>
+                                <option value="" selected="@(returnRaw is null)">@(mode.Flow == ModeFlow.Graph ? "기본 (끝 단계만)" : "기본 (마지막만)")</option>
+                                <option value="Last" selected="@(returnRaw == "Last")">@(mode.Flow == ModeFlow.Graph ? "끝 단계만" : "마지막만")</option>
                                 <option value="All" selected="@(returnRaw == "All")">모든 단계</option>
                             </select>
                         </label>
@@ -420,7 +434,7 @@
 @functions {
     // 단계 하나를 그린다: 역할 + 에이전트 선택.
     // <option>이 태그 헬퍼로 처리되므로 이 메서드는 async Task여야 한다 (MVC1006).
-    async Task RenderNode(string mode, int index, StepDefinition step, bool showSees)
+    async Task RenderNode(string mode, int index, StepDefinition step, bool showSees, string? graphSees = null)
     {
         var current = Model.FindAgent(step.Agent);
         <div class="node">
@@ -440,7 +454,11 @@
             </select>
             @if (showSees)
             {
-                <div class="meta">보는 내용: @ModesModel.SeesLabel(step.Sees)</div>
+                <div class="meta">보는 내용: @ModesModel.SeesLabel(step.Sees ?? StepSees.InputAndPrevious)</div>
+            }
+            @if (graphSees is not null)
+            {
+                <div class="meta">@graphSees</div>
             }
             @if (step.WebSearch is { } search)
             {

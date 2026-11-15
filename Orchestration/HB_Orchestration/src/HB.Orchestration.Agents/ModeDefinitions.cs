@@ -78,10 +78,19 @@ public sealed class ModeDefinition
 
     /// <summary>설정 실수로 토론이 길어지는 것을 막는 서버 측 절대 상한.</summary>
     public const int MaxRoundsHardCap = 5;
+
+    /// <summary>Graph 전용: 단계 수의 서버 측 절대 상한 (자유롭게 이은 모드가 한 번에 많은 모델을 부르지 않게).</summary>
+    public const int MaxGraphStepsHardCap = 8;
 }
 
 public sealed class StepDefinition
 {
+    /// <summary>
+    /// 다른 단계가 <see cref="From"/>으로 가리킬 이름 (선택). 영문 · 숫자 · _ · - 1~32자, 모드 안에서 겹치지 않는다 (대소문자 무시).
+    /// "input"은 요청을 뜻하므로 쓸 수 없다.
+    /// </summary>
+    public string? Id { get; set; }
+
     public string Role { get; set; } = "";
     public string Agent { get; set; } = "";
 
@@ -91,8 +100,14 @@ public sealed class StepDefinition
     /// </summary>
     public string? FallbackAgent { get; set; }
 
-    /// <summary>Sequential에서 이 단계가 볼 내용. Concurrent에서는 항상 Input.</summary>
-    public StepSees Sees { get; set; } = StepSees.InputAndPrevious;
+    /// <summary>Sequential에서 이 단계가 볼 내용 (없으면 InputAndPrevious). Concurrent에서는 항상 Input. Graph에서는 쓰지 않는다 (From으로 적는다).</summary>
+    public StepSees? Sees { get; set; }
+
+    /// <summary>
+    /// Graph에서 이 단계가 보는 것: "input"(요청과 첨부) 또는 앞에 있는 단계의 Id. 없으면 ["input"].
+    /// 가리킨 단계가 끝난 뒤에 실행되고, 그중 하나라도 실패했거나 실행되지 않았으면 이 단계도 실행하지 않는다.
+    /// </summary>
+    public List<string>? From { get; set; }
 
     /// <summary>
     /// 웹검색을 켠다 (없으면 끔). 에이전트 제공사가 openai-responses여야 한다 — 일반 모델의 web_search 도구는 Responses API에만 있다.
@@ -139,6 +154,11 @@ public enum ModeFlow
     /// 어느 쪽이든 마지막 줄에 [합의]를 쓰면 남은 회차를 건너뛰고 판정으로 간다.
     /// </summary>
     Debate,
+    /// <summary>
+    /// 단계마다 무엇을 보는지(Steps[].From)를 적는다. 볼 것이 끝난 단계부터 실행하고, 서로 기다리지 않는 단계는 동시에 돈다.
+    /// From은 앞 단계만 가리킨다 (순환 없음).
+    /// </summary>
+    Graph,
 }
 
 public enum ModeReturn

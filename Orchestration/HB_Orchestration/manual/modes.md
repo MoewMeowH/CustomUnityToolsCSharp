@@ -153,9 +153,9 @@ agents: "deepseek_main_flash=gemini_high_argon"
 | 키 | 값 | 의미 |
 |---|---|---|
 | `Description` | 문자열 | `list_modes`에서 Claude에게 보이는 한 줄 설명. 짧을수록 토큰 절약 |
-| `Flow` | `Sequential` / `Concurrent` / `Debate` | 순서대로 넘기기 / 동시에 독립 실행 / 다회차 토론 |
+| `Flow` | `Sequential` / `Concurrent` / `Debate` / `Graph` | 순서대로 넘기기 / 동시에 독립 실행 / 다회차 토론 / 단계마다 보는 것을 적은 대로 실행 (아래 [Graph 흐름](#graph-흐름)) |
 | `Steps` | 배열 | 단계 목록 (아래 표) |
-| `Return` | `Last`(기본) / `All` | Claude에게 돌려줄 범위. Concurrent는 항상 All |
+| `Return` | `Last`(기본) / `All` | Claude에게 돌려줄 범위. `Last`는 끝 단계(다른 단계가 기다리지 않는 단계)와 실패한 단계 — Sequential은 마지막 하나, Concurrent는 전부 |
 | `MaxInputChars` | 숫자 | 이 모드의 입력 길이 상한. 없으면 `Budget.MaxInputChars` |
 | `PromptCache` | `Off` / `Context` / 없음 | 이 모드의 프롬프트 캐시 방식 (아래) |
 | `RequireOwnReview` | `true` / 없음 | `true`면 `run_mode`의 `ownReview`가 필수 (review 계열). `list_modes`에 `[ownReview 필수]` 표시 |
@@ -177,6 +177,8 @@ agents: "deepseek_main_flash=gemini_high_argon"
 | `Role` | 역할 이름 | 이 단계가 맡을 역할 |
 | `Agent` | 에이전트 이름 | appsettings.json `Agents`의 `Name` |
 | `Sees` (Sequential) | 아래 표 | 이 단계가 볼 내용 |
+| `Id` | 영문 · 숫자 · `_` · `-` 1~32자 | 다른 단계가 `From`으로 가리킬 이름 (선택). 모드 안에서 겹치지 않고 `input`은 쓸 수 없습니다 |
+| `From` (Graph) | `"input"` · 앞 단계의 `Id` 배열 | 이 단계가 보는 것. 없으면 `["input"]` |
 | `WebSearch` | `{ "MaxCalls": 5, "BlockedDomains": [], "ContextSize": "medium" }` | 이 단계에 웹검색을 켭니다 (없으면 끔). 아래 [웹검색](#웹검색-stepswebsearch) |
 
 | `Sees` 값 | 보는 것 |
@@ -239,6 +241,33 @@ agents: "deepseek_main_flash=gemini_high_argon"
 - Gemini의 Google 검색 연동은 OpenAI 호환 엔드포인트에 없습니다 (전용 API 필요).
 - 약관이 검색 결과의 저장 · 분석 · 다른 내용과 섞기를 제한하고, 검색 추천 표시를 요구합니다.
 - 이 서버는 결과를 기록에 저장하고 지휘자가 분석 · 종합하므로 맞지 않습니다.
+
+### Graph 흐름
+
+단계마다 무엇을 보는지를 `From`에 적습니다. 서버는 볼 것이 끝난 단계부터 실행하고, 서로 기다리지 않는 단계는 동시에 돌립니다.
+
+```json
+"review_merge": {
+  "Description": "두 리뷰어 동시 → 한 판정자가 합쳐 봄",
+  "Flow": "Graph",
+  "Steps": [
+    { "Id": "a", "Role": "Reviewer", "Agent": "gpt_main_sol" },
+    { "Id": "b", "Role": "Reviewer", "Agent": "deepseek_main_flash" },
+    { "Role": "Judge", "Agent": "gemini_high_carbon", "From": ["input", "a", "b"] }
+  ]
+}
+```
+
+- `From`의 값은 `"input"`(요청과 첨부) 또는 **앞에 있는** 단계의 `Id`입니다. 뒤 단계나 자기 자신은 가리킬 수 없어 순환이 생기지 않습니다.
+- 단계 번호는 다른 흐름처럼 `Steps` 배열 차례입니다 (결과 제목 · `save_result` · `record_verdicts` · `followUp`).
+- 프롬프트는 `From`에 `"input"`이 있으면 요청, 그 뒤에 가리킨 단계의 결과가 단계 번호 차례로 붙습니다.
+- 가리킨 단계가 실패했거나 실행되지 않았으면 그 단계도 실행하지 않습니다. 다른 갈래는 끝까지 돌고, 결과 끝에 `(실패: 단계 2 · 실행하지 않음: 단계 4)`가 붙습니다.
+- `Return`이 `Last`면 끝 단계(아무도 `From`으로 가리키지 않는 단계)와 실패한 단계만 돌려줍니다. 끝 단계가 여럿이면 여럿입니다.
+- 단계는 8개까지입니다 (서버 상한).
+- 실행 전에 거절하는 설정: `Id` 형식 · 겹침, 없는 `Id` · 뒤 단계 · 자기 자신을 가리키는 `From`, 빈 `From`, 같은 값을 두 번 적은 `From`, Graph에 적은 `Sees`, Graph가 아닌 흐름에 적은 `From`, 네 흐름 이름이 아닌 `Flow` 값(숫자 등).
+- `images`는 요청을 보는 단계에만 갑니다. 이미지 입력(Vision) 검사도 그 단계의 에이전트만 봅니다.
+- `list_modes`는 요청만 보는 단계가 아니면 보는 것을 붙여 보여 줍니다: `[Reviewer@gpt_main_sol, Reviewer@deepseek_main_flash, Judge@gemini_high_carbon←요청·1·2]`.
+- 다단계 골든 실행(crash 사례)은 Sequential 모드만 받습니다.
 
 ### Debate 흐름
 
@@ -465,6 +494,7 @@ run_mode(mode, input, context, reason, followUp: { runId, step, requests: ["1-N1
 **결과**
 
 - 같은 runId의 **새 단계 번호**(예: 2)로 남습니다. 지적 · 요청 ID(`2-F1`)와 `save_result`가 원래 응답과 섞이지 않습니다.
+  - 새 번호는 모드의 단계 수와 기록에 남은 가장 큰 단계 번호 중 큰 값 + 1입니다. 앞 단계 실패로 실행되지 않은 단계의 번호는 쓰지 않습니다.
 - 기록에 `FollowUpOf` · `FollowUpRequests` · `FollowUpSkipped`가 남습니다.
 - 결과 끝에 붙는 것:
   - 원래 단계와 보충 단계 지적의 `겹침 후보`
