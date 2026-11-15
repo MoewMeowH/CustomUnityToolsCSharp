@@ -137,7 +137,7 @@ powershell -ExecutionPolicy Bypass -File tools\Test-SyncProjectFiles.ps1
   3. 사용자 확정
   4. `preflight_p3` — 최종 수정안
   5. 지휘자 종합
-  6. `preflight_check`(전체, argon) · `preflight_perf`(성능, sol)
+  6. `preflight_check`(전체, carbon) · `preflight_perf`(성능, sol)
   - 단계마다 멈춥니다. P5에는 앞 단계 논의를 붙이지 않습니다.
   - 산출물은 `docs/preflight/<날짜>_<주제>/`.
   - 첨부 xlsx · csv는 `xlsx_dump.py`로 Markdown을 만들어 `context`로 붙입니다.

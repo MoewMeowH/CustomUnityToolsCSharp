@@ -17,9 +17,9 @@
 | `gpt_main_sol` | openai | gpt-6.1-sol | 리뷰 · 반박 · 판정 · 성능 · preflight 대부분 |
 | `gpt_mini_luna` | openai | gpt-6-luna | 지시서 검토 (work_order_main) |
 | `gpt_mini_luna_web` | openai-web | gpt-6-luna | 웹검색 단계 (research_main Scout · crash_main CrashSearch) |
-| `gemini_high_argon` | gemini | gemini-4-argon | crash 분류 · preflight B · preflight_check |
+| `gemini_high_argon` | gemini | gemini-4-argon | 교체용 (기본 모드에는 없음) |
 | `gemini_main_hydrogen` | gemini | gemini-4-hydrogen | 논리 검증 · 토론 상대 · parallel · 지시서 검토 (추론 medium) |
-| `gemini_high_carbon` | gemini | gemini-4-carbon | 교체용 (기본 모드에는 없음) |
+| `gemini_high_carbon` | gemini | gemini-4-carbon | crash 분류 · preflight B · preflight_check |
 | `gemini_mini_lite` | gemini | gemini-3.5-flash-lite | 가벼운 교체용 |
 | `deepseek_main_flash` | fireworks | `accounts/fireworks/models/deepseek-v4p1-flash-1017` | review_high · perf_high의 두 번째 시선 (`Vision: false`) |
 | `local` | local (Ollama) | `ollama list`의 모델 | 꺼 둠 (`Enabled: false`) |
@@ -137,7 +137,7 @@ OpenAI Chat Completions 전용입니다. 다른 제공사에는 넣지 않습니
 | `Schema` | 거기에 `response_format: json_schema`(strict)까지 보내 강제합니다 |
 
 - 모델이 `Schema`를 지원하지 않으면 400 → 그 단계가 실패합니다. 자동으로 `Prompt`로 다시 보내지 않으니, 이 값을 `Prompt`로 바꿉니다.
-- 기본 설정: 제공사 단위로는 `openai`만 `Schema`, 에이전트 단위로는 `gemini_high_argon` · `deepseek_main_flash`도 `Schema`입니다 ([modes.md](modes.md) "구조화 출력").
+- 기본 설정: 제공사 단위로는 `openai`만 `Schema`, 에이전트 단위로는 `gemini_high_argon` · `gemini_high_carbon` · `deepseek_main_flash`도 `Schema`입니다 ([modes.md](modes.md) "구조화 출력").
 
 ### 추론 강도 (`ReasoningEffort`)
 
@@ -185,8 +185,9 @@ OpenAI Chat Completions 전용입니다. 다른 제공사에는 넣지 않습니
 - 추론 토큰을 usage의 `total_tokens`에만 넣습니다. 그래서 서버는 Gemini 제공사(엔드포인트 generativelanguage.googleapis.com)에서만, 추론 칸이 없고 total > prompt + completion이면:
   - 그 차이를 `ReasoningTokens`로 기록하고
   - `OutputTokens`에 더합니다 (비용이 출력 단가로 잡힙니다).
-- **`gemini_high_argon`은 ReasoningEffort가 비어 있어 모델 기본값으로 동작합니다 (위 표: 추론 토큰이 잡히지 않음).** 이 에이전트를 쓰는 crash_main · preflight_* 모두 해당합니다 (review_high · perf_high는 DeepSeek을 씁니다).
-  - 비워 둔 까닭: high를 명시하면 비용 약 6배 · 시간 약 10배입니다.
+- **crash_main 분류 · preflight B · preflight_check는 `gemini_high_carbon`입니다 (2026-11-15부터, 그 전에는 `gemini_high_argon`).** ReasoningEffort가 비어 있어 모델 기본값(medium)으로 추론합니다.
+  - carbon은 추론이 길어질 수 있습니다: 골든 리뷰 사례 하나에서 추론 30,726 토큰 · 373초 (제공사 `TimeoutSeconds` 600초가 호출 전체 상한).
+  - `gemini_high_argon`은 교체용으로 남겼습니다. ReasoningEffort가 비어 있어 추론 토큰이 잡히지 않습니다 (위 표). high를 명시하면 비용 약 6배 · 시간 약 10배입니다.
   - 에이전트 이름은 호출 기록(provenance)과 이어져 있어 그대로 둡니다.
   - appsettings 에이전트의 `Note` 칸에도 같은 설명이 있습니다. `Note`는 서버가 읽지 않는 메모 칸이고, 주석과 달리 대시보드 저장 때 지워지지 않습니다.
 

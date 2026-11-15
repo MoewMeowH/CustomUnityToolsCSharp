@@ -128,7 +128,7 @@
 | 성능 | `perf_main` · `perf_high` | sol · (sol \| DeepSeek) | `/mode`, ownReview는 perf-reviewer |
 | 설계 판단 | `design_lite` · `design_main` · `design_high` | 비평(sol) · 반박(sol) → 논리 검증(hydrogen) · 반박 ⇄ 옹호 → 판정 | `/mode` |
 | 조사 | `research_main` | luna(웹) → sol | `/mode` |
-| 크래시 | `crash_main` → `crash_check` | argon → luna(웹) · sol | `/mode` |
+| 크래시 | `crash_main` → `crash_check` | carbon → luna(웹) · sol | `/mode` |
 | 구현 | `parallel_main` | sol \| hydrogen | `/mode` (요청할 때만) |
 | 지시서 | `work_order_main` | luna \| hydrogen | `/work-order` |
 | 실행 전 점검 | `preflight_p1` · `p2` · `p3` · `preflight_check` · `preflight_perf` | 단계 모드 | `/preflight` |

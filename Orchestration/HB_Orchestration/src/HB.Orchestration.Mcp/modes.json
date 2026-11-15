@@ -267,14 +267,14 @@
     },
     "crash_main": {
       "RequireOwnReview": true,
-      "Description": "크래시 조사: 원인 분류(argon) → 웹검색으로 알려진 이슈·재현 스텝 찾기(luna). input에 크래시 정보, context에 관련 코드. 지휘자 사전 조사를 ownReview로",
+      "Description": "크래시 조사: 원인 분류(carbon) → 웹검색으로 알려진 이슈·재현 스텝 찾기(luna). input에 크래시 정보, context에 관련 코드. 지휘자 사전 조사를 ownReview로",
       "Flow": "Sequential",
       "Return": "All",
       "MaxInputChars": 120000,
       "Steps": [
         {
           "Role": "CrashTriage",
-          "Agent": "gemini_high_argon"
+          "Agent": "gemini_high_carbon"
         },
         {
           "Role": "CrashSearch",
@@ -332,7 +332,7 @@
     },
     "preflight_p1": {
       "PromptCache": "Off",
-      "Description": "실행 전 점검 1: A 반박(sol) · B 위험(argon) · 성능(sol) 독립 검토. 다음은 preflight_p2",
+      "Description": "실행 전 점검 1: A 반박(sol) · B 위험(carbon) · 성능(sol) 독립 검토. 다음은 preflight_p2",
       "RequireOwnReview": true,
       "Flow": "Concurrent",
       "Return": "All",
@@ -343,7 +343,7 @@
         },
         {
           "Role": "Preflight_P1_B",
-          "Agent": "gemini_high_argon"
+          "Agent": "gemini_high_carbon"
         },
         {
           "Role": "Preflight_P1_Perf",
@@ -363,7 +363,7 @@
         },
         {
           "Role": "Preflight_P2_B",
-          "Agent": "gemini_high_argon"
+          "Agent": "gemini_high_carbon"
         }
       ]
     },
@@ -379,7 +379,7 @@
         },
         {
           "Role": "Preflight_P3_B",
-          "Agent": "gemini_high_argon"
+          "Agent": "gemini_high_carbon"
         }
       ]
     },
@@ -391,7 +391,7 @@
       "Steps": [
         {
           "Role": "Preflight_Check",
-          "Agent": "gemini_high_argon"
+          "Agent": "gemini_high_carbon"
         }
       ]
     },
