@@ -71,6 +71,7 @@
 | `MaxAttempts` | 2 | 한 단계의 최대 시도 횟수 (첫 시도 포함). 에이전트에 값이 없을 때 적용 |
 | `PromptCache` | `ProviderDefault` | 프롬프트 캐시 방식. 아래 [프롬프트 캐시](#프롬프트-캐시-promptcache) |
 | `ImageDetail` | 보내지 않음 (= 제공사 기본값) | 이미지 부분에 실을 `detail` 값 (OpenAI: `auto` · `low` · `high` · `original`) |
+| `Stream` | `false` | `openai-compatible` 전용. 응답을 스트리밍으로 받아 한 응답으로 합칩니다. 원본 설정은 `gemini`에만 켭니다 — 스트리밍이 아니면 carbon · argon 출력이 32,768 토큰(추론 포함)에서 끊깁니다 |
 | `StructuredOutput` | `Prompt` | 구조화 출력 요청 방식. 아래 [구조화 출력](#구조화-출력-structuredoutput) |
 
 `ImageDetail`이 제공사 단위인 까닭: Gemini OpenAI 호환 엔드포인트가 이 필드를 문서화하지 않습니다.

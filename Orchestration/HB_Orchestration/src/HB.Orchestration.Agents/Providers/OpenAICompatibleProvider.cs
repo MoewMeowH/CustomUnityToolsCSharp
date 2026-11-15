@@ -47,8 +47,9 @@ public sealed class OpenAICompatibleProvider : IChatClientProvider
         if (options.PromptCache != PromptCacheMode.ProviderDefault)
             clientOptions.AddPolicy(new PromptCachePolicy(), PipelinePosition.PerCall);
 
-        return new OpenAIClient(new ApiKeyCredential(apiKey), clientOptions)
+        var client = new OpenAIClient(new ApiKeyCredential(apiKey), clientOptions)
             .GetChatClient(agent.Model)
             .AsIChatClient();
+        return options.Stream ? new StreamingChatClient(client, AgentSettings.ResolveTimeout(agent, options)) : client;
     }
 }

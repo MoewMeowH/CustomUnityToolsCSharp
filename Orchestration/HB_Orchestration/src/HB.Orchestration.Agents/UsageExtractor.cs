@@ -43,6 +43,7 @@ public static class UsageExtractor
                     case AgentResponse agent: raw = agent.RawRepresentation; break;
                     case ChatResponse chat: raw = chat.RawRepresentation; break;
                     case Providers.ClaudeCliRawResponse cli: return cli.Json;
+                    case Providers.StreamedUsage streamed: return streamed.Json;
                     case ChatCompletion completion:
                         return completion.Usage is null ? null : ModelReaderWriter.Write(completion.Usage).ToString();
 #pragma warning disable OPENAI001 // Responses 형식은 SDK에서 평가용 표시 (웹검색 단계만 씀)

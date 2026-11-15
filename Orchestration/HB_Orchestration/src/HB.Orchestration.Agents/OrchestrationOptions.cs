@@ -425,6 +425,12 @@ public sealed class ProviderOptions
     public int? MaxAttempts { get; set; }
 
     /// <summary>
+    /// openai-compatible 전용: 응답을 스트리밍으로 받아 한 응답으로 합친다.
+    /// Gemini는 스트리밍이 아니면 carbon · argon 출력이 32,768 토큰(추론 포함)에서 끊긴다.
+    /// </summary>
+    public bool Stream { get; set; }
+
+    /// <summary>
     /// 프롬프트 캐시 방식. OpenAI Chat Completions 요청 본문에만 적용한다 (다른 제공사는 모르는 필드에 오류를 낼 수 있음).
     /// 비우면 ProviderDefault = 손대지 않음.
     /// </summary>

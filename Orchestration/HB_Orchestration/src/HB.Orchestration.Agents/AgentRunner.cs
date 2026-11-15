@@ -385,14 +385,24 @@ public sealed class AgentRunner
                 call.Mode, call.Step, call.Role, call.Agent.Name, attempt, maxAttempts, kind ?? "분류 안 됨");
             // claude-cli: 턴 · 비용 상한 · refusal로 실패해도 이미 쓴 토큰은 기록한다 (비용 집계에서 빠지지 않게).
             var spent = Providers.ClaudeCliException.Find(ex)?.Spent;
+            // 스트리밍: 중간에 끊겨도 그때까지 받은 usage는 기록한다 (성공 경로와 같은 Gemini 추론 보정).
+            var cut = Providers.StreamedUsage.Find(ex);
+            var cutOutput = cut?.Details.OutputTokenCount;
+            var cutReasoning = cut?.Details.ReasoningTokenCount;
+            if (cut is not null && cutReasoning is null && UsageExtractor.IsGeminiEndpoint(call.Agent.ProviderOptions?.Endpoint)
+                && UsageExtractor.HiddenReasoningTokens(cut.Json) is { } cutHidden)
+            {
+                cutReasoning = cutHidden;
+                cutOutput = (cutOutput ?? 0) + cutHidden;
+            }
             return new AttemptOutcome(NewRecord() with
             {
-                InputTokens = spent?.InputTokens,
-                CachedInputTokens = spent?.CachedInputTokens,
+                InputTokens = spent?.InputTokens ?? cut?.Details.InputTokenCount,
+                CachedInputTokens = spent?.CachedInputTokens ?? cut?.Details.CachedInputTokenCount,
                 CacheWriteTokens = spent?.CacheWriteTokens,
-                OutputTokens = spent?.OutputTokens,
-                ReasoningTokens = spent?.ReasoningTokens,
-                UsageRaw = spent?.RawJson,
+                OutputTokens = spent?.OutputTokens ?? cutOutput,
+                ReasoningTokens = spent?.ReasoningTokens ?? cutReasoning,
+                UsageRaw = spent?.RawJson ?? cut?.Json,
                 ElapsedMs = sw.ElapsedMilliseconds,
                 Success = false,
                 Error = error,
