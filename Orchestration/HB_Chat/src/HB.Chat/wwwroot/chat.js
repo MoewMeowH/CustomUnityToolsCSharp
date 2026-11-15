@@ -1839,7 +1839,7 @@
             let editor = null;
             const render = () => {
                 const m = list.modes.find(x => x.name === select.value);
-                const arrow = m.flow === "Concurrent" ? " | " : m.flow === "Debate" ? " ⇄ " : " → ";
+                const arrow = m.flow === "Concurrent" ? " | " : m.flow === "Debate" ? " ⇄ " : m.flow === "Graph" ? ", " : " → ";
                 desc.textContent = (m.description || "") + "  [" + m.steps.map(s => s.role + "@" + s.agent).join(arrow) + "]" + (m.ownReview ? " · 지휘자 자체 검토 필수" : "");
                 // 에이전트별 줄 (카드와 같은 단위) — 지금 칩의 값이 같은 모드면 그 값으로
                 const rows = [];
