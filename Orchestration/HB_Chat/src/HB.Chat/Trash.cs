@@ -54,6 +54,7 @@ public static class Trash
             McpConfigFile.DeleteRoom(McpConfigFile.RoomPath(dataFolder, id));
             new GroupLog(() => dataFolder).Delete(id); // 단톡방 대화 줄 (없으면 아무것도 안 함)
             new CodexLog(() => dataFolder).Delete(id); // Codex 구성원 과정 기록
+            new RoomMemos(() => dataFolder).Delete(id); // 방 메모
         }
         return removed;
     }

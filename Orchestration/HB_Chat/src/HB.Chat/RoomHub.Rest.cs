@@ -631,7 +631,7 @@ public sealed partial class RoomHub
         // 놀이터 구성원은 놀이터 단계 안내 (명령 · 카드 · 질문 카드 안내가 맞지 않음)
         (GroupChat.IsPlaygroundMember(store, room) ? PlaygroundRules.Base
             : RoomRules.For(room.Level, terminal: s.Terminal, unity: s.Unity, unityMeasure: s.Unity is { } u && options.Value.IsMeasureUnity(u),
-                askWrites: s.AppAskWrites, rest: room.GroupId is null,
+                askWrites: s.AppAskWrites, rest: room.GroupId is null, memory: s.Terminal && room.GroupId is null,
                 extras: [.. s.Extras.Where(x => x != McpConfigFile.UnityServer)],
                 // 모델 선택창 안내는 기본 서버가 붙고 요청 창 · 스위치가 있는 방에만
                 modeCard: s.McpOn && !room.McpOff.Contains(options.Value.McpServer) && room.GroupId is null))

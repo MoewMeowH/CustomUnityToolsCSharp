@@ -190,6 +190,9 @@ select, input[type=text], textarea { background: var(--panel); border: 1px solid
 .side-info { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 6px 8px; margin: 10px 0 0; }
 .side-info dt { color: var(--muted); }
 .side-info dd { margin: 0; overflow-wrap: anywhere; }
+/* 방 메모 (지휘자가 적은 한 장 — 읽기 전용) */
+.side-memo { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.side-memo-text { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; max-height: 320px; overflow-y: auto; }
 .side-rename { display: flex; gap: 6px; align-items: center; }
 /* 방 설정 (Claude 앱 기능 B): 모델 · 추론 강도 · 권한 select + 바꾸기 */
 .side-settings { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: flex-end; margin-top: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }

@@ -1252,6 +1252,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
             ProtectedWorkspaces = room.Level == PermissionLevel.App ? [.. o.AllWorkspaces.Select(w => w.Path)] : [],
             AskWrites = room.Level == PermissionLevel.App && askWrites, // 앱 단계 폴더 밖 쓰기 묻기 (설정 · 규칙 글과 같은 값)
             TerminalMcpConfigPath = terminalConfig, // 명령 방: 앱 MCP(터미널 도구)
+            RoomMemory = terminalConfig is not null && room.GroupId is null, // 방 기억 도구 — 규칙 글(RulesFor)과 같은 조건
         };
         ProcessSpec process;
         try

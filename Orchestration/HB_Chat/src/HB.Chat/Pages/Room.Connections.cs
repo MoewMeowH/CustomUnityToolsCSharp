@@ -50,14 +50,21 @@ public sealed partial class RoomModel
                     .Select(t => (t[$"mcp__{name}__".Length..], (string?)null)).Order(),
             ];
             string Transport(string name) => ws is not null && McpConfigFile.Entry(ws, name)?["url"] is not null ? "http" : "stdio";
+            // 앱 MCP는 명령 · 앱 단계와, 단톡방 구성원이 아닌 방이면 읽기 단계에도 붙는다 (RoomHub 실행 준비와 같은 조건).
+            // 읽기 방은 새 방 열기 · 방 기억 도구만, 구성원 방은 방 기억 도구 없이
+            var commands = ClaudeArgs.RunsCommands(room.Level);
+            var plain = room.GroupId is null;
             var rows = new List<Connection>
             {
                 new(o.McpServer, "base", ws is null ? "?" : Transport(o.McpServer), ws is null ? null : WorkspaceStore.McpCommand(ws, o.McpServer),
                     !room.McpOff.Contains(o.McpServer), true, null,
                     Init(o.McpServer), probe.Last(room.Id, o.McpServer), probe.IsRunning(room.Id, o.McpServer)) { InitTools = InitTools(o.McpServer) },
-                new(TerminalMcp.Server, "app", "http", "이 앱 (터미널 · 지휘자 브라우저 도구)", !room.McpOff.Contains(TerminalMcp.Server),
-                    ClaudeArgs.RunsCommands(room.Level), ClaudeArgs.RunsCommands(room.Level) ? null : "명령 방에서만 붙습니다",
-                    Init(TerminalMcp.Server), null, false, McpProbe.AppTools()),
+                new(TerminalMcp.Server, "app", "http",
+                    !commands ? "이 앱 (새 방 열기 · 방 기억 도구 — 터미널 · 지휘자 브라우저는 명령 방에서)"
+                    : plain ? "이 앱 (터미널 · 지휘자 브라우저 · 방 기억 도구)" : "이 앱 (터미널 · 지휘자 브라우저 도구)",
+                    !room.McpOff.Contains(TerminalMcp.Server),
+                    commands || plain, commands || plain ? null : "명령 방에서만 붙습니다",
+                    Init(TerminalMcp.Server), null, false, [.. McpProbe.AppTools().Where(t => MemoryTools.IsTool(t.Name) ? plain : commands)]),
             };
             var names = ws is null ? [] : McpConfigFile.ServerNames(ws);
             // 앱에서 더한 서버 — 같은 이름이 작업 폴더에 있으면 그쪽을 쓴다

@@ -46,7 +46,9 @@ builder.Services.AddHttpContextAccessor();
 // 지휘자 브라우저: 방마다 화면 없는 Chrome(없으면 Edge) · 별도 프로필 — 같은 앱 MCP
 builder.Services.AddSingleton(sp => new AgentBrowser(() => sp.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder,
     blockedPorts: () => TerminalMcp.BlockedPorts(sp.GetRequiredService<Microsoft.AspNetCore.Hosting.Server.IServer>(), sp.GetRequiredService<IOptions<ChatOptions>>().Value)));
-builder.Services.AddMcpServer().WithHttpTransport(o => o.Stateless = true).WithTools<TerminalTools>().WithTools<BrowserTools>().WithTools<RoomTools>();
+builder.Services.AddMcpServer().WithHttpTransport(o => o.Stateless = true).WithTools<TerminalTools>().WithTools<BrowserTools>().WithTools<RoomTools>().WithTools<MemoryTools>();
+// 방 메모 (지휘자가 이어 갈 것을 적는 한 장) — 같은 앱 MCP의 room_memo_* 도구 · 곁칸
+builder.Services.AddSingleton(sp => new RoomMemos(() => sp.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder));
 // 구독 한도: Claude는 실행 때 받은 값을 데이터 폴더에, Codex는 계정 조회(codex app-server, 5분마다) · 세션 기록 중 새 것
 builder.Services.AddSingleton(sp =>
 {

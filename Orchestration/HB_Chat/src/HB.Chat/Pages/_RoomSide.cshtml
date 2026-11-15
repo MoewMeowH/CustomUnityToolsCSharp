@@ -105,6 +105,14 @@
             <dt>대시보드</dt><dd><a href="@dash" target="_blank" rel="noopener">채팅방 열기</a></dd>
         }
     </dl>
+    @* 방 메모: 지휘자가 room_memo_write로 적은 한 장 — 읽기 전용, 글 그대로 *@
+    @if (Model.Memo is { } memo)
+    {
+        <div class="side-memo">
+            <div class="muted">방 메모 — 지휘자가 적음 · @memo.At.ToLocalTime().ToString("MM-dd HH:mm")</div>
+            <pre class="side-memo-text">@memo.Text</pre>
+        </div>
+    }
 </section>
 <section class="side-sec" data-tab="runs" id="side-sec-runs" role="tabpanel" aria-labelledby="side-tab-runs">
     @{ var runs = Model.SideRuns; }

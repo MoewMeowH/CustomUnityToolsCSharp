@@ -41,6 +41,9 @@ public sealed record RunSpec(
     /// <summary>앱 MCP(터미널 도구) 설정 파일 — 명령 단계에서만 쓴다 (<see cref="TerminalMcp"/>). null이면 터미널 도구 없이.</summary>
     public string? TerminalMcpConfigPath { get; init; }
 
+    /// <summary>앱 MCP의 방 기억 도구(<see cref="MemoryTools.Quiet"/>)를 묻지 않고 쓰게 한다 — 앱 MCP를 붙인 보통 방 (단톡방 구성원이 아님), 모든 단계.</summary>
+    public bool RoomMemory { get; init; }
+
     /// <summary>
     /// McpConfigPath 파일에 기본 서버 말고 더 든 서버 이름 (방이 더한 .mcp.json 서버 · unity).
     /// --allowedTools에 넣지 않는다 — 호출마다 앱(stdio 호스트)이 지금 방 단계 · 연결을 다시 보고 허용한다 (결정 4: 실행 중 내리기가 바로 막히게).
@@ -359,6 +362,8 @@ public static partial class ClaudeArgs
         foreach (var extra in spec.ExtraMcpServers)
             if (!IsServerName(extra) || extra == TerminalMcp.Server) throw new ArgumentException($"MCP 서버 이름 형식이 올바르지 않다: {extra}");
         if (terminal && RunsCommands(spec.Level)) args.AddRange(TerminalMcp.QuietTools);
+        // 방 기억 도구는 읽기 단계에도 — 자기 방 기록 · 메모만 다룬다
+        if (terminal && spec.RoomMemory) args.AddRange(MemoryTools.Quiet);
     }
 
     /// <summary>모델 · 서버 이름: 영숫자로 시작, 영숫자 . _ : / - 만 64자까지.</summary>

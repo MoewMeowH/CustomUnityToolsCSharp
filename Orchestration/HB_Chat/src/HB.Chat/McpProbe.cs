@@ -83,7 +83,7 @@ public sealed partial class McpProbe
     /// <summary>앱 MCP(hb-chat) 도구: 이 앱 안의 도구 형식에서 이름 · 설명을 읽는다 (띄울 것이 없다).</summary>
     public static IReadOnlyList<(string Name, string? Description)> AppTools() =>
     [
-        .. new[] { typeof(TerminalTools), typeof(BrowserTools) }
+        .. new[] { typeof(TerminalTools), typeof(BrowserTools), typeof(MemoryTools) }
             .SelectMany(t => t.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static))
             .Select(m => (Attr: m.GetCustomAttribute<McpServerToolAttribute>(), Desc: m.GetCustomAttribute<DescriptionAttribute>()?.Description))
             .Where(x => x.Attr?.Name is not null)

@@ -10,8 +10,9 @@ public static class RoomRules
     /// <param name="modeCard">모델 선택창 안내(+ 요청 창 머리 줄 · run_mode 카드)를 넣을지 — 기본 서버가 붙은 보통 방.</param>
     /// <param name="askWrites">앱 단계: 작업 폴더 밖 Write · Edit를 카드로 묻는지 (설정 — <see cref="ChatOptions.AskAppWrites"/>).</param>
     /// <param name="rest">쉬는 실행 방(단톡방 구성원이 아님) — 백그라운드 작업이 답 뒤에도 돌고 끝나면 이어 답한다. 아니면 예전(그 턴에서만 · 10분).</param>
+    /// <param name="memory">이 실행에 방 기억 도구(<see cref="MemoryTools"/>)를 붙였는지 — 앱 MCP를 붙인 보통 방.</param>
     public static string For(PermissionLevel level, bool terminal = false, string? unity = null, IReadOnlyList<string>? extras = null, bool modeCard = false,
-        bool askWrites = true, bool rest = false, bool unityMeasure = false) =>
+        bool askWrites = true, bool rest = false, bool unityMeasure = false, bool memory = false) =>
         "이 대화는 HB_Chat 채팅 앱의 방이다. 사용자는 브라우저 채팅 화면으로 읽고 말한다. " +
         $"이 방의 권한: {Describe(level, askWrites)}. " +
         (extras is { Count: > 0 }
@@ -61,6 +62,11 @@ public static class RoomRules
         (terminal && rest
             ? " 다른 일 · 긴 작업을 새 세션으로 넘길 때는 room_open 도구로 새 방을 연다 — 새 방은 이 대화를 모르므로 첫 말(prompt)에 인계할 내용(목적 · 결정 · 파일 · 다음 할 일)을 모두 쓴다. " +
               "사용자가 카드에서 값을 고쳐 허용하거나 거절한다 — 거절되면 다시 부르지 않는다."
+            : "") +
+        // 방 기억 (room_search · room_read · room_memo_*)
+        (memory
+            ? " 앞 대화의 정확한 내용이 필요하면(압축 뒤 · 오래전 말) 추측하지 말고 room_search로 찾아 room_read로 읽는다 — 사용자 글 · 지휘자 글 · 서브에이전트 답만 있고 그 밖의 도구 결과는 없다. " +
+              "이 방에서 이어 갈 것(결정 · 답을 기다리는 일 · runId · 커밋)은 room_memo_write로 적어 두고, 압축 뒤나 방을 이어받았을 때 room_memo_read로 먼저 본다. 메모는 사용자도 곁칸에서 본다."
             : "") +
         // 질문 카드 (3차 a)
         (

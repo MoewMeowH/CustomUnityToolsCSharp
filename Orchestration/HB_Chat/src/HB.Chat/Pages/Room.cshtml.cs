@@ -14,10 +14,13 @@ namespace HB.Chat.Pages;
 /// </summary>
 public sealed partial class RoomModel(
     RoomStore store, RoomHub hub, RoomList list, ChatTranscripts transcripts, StickerPacks packs, FaceCatalog faces, RoomRuns runs,
-    RoomNotes notes, Terminals terminals, AgentBrowser browser, McpProbe probe, IOptions<ChatOptions> options, GroupChat groups)
+    RoomNotes notes, Terminals terminals, AgentBrowser browser, McpProbe probe, IOptions<ChatOptions> options, GroupChat groups, RoomMemos memos)
     : PageModel
 {
     public Room Room { get; private set; } = null!;
+
+    /// <summary>방 메모 (지휘자가 room_memo_write로 적은 것 — 곁칸 정보 탭에 읽기 전용). 없으면 null.</summary>
+    public (string Text, DateTimeOffset At)? Memo => memos.Read(Room.Id);
 
     /// <summary>이 방 마지막 실행이 알려 준 서브에이전트 이름 (Claude 앱 기능 D — 곁칸 목록). 이 앱을 켠 뒤 아직 돌지 않았으면 null.</summary>
     public IReadOnlyList<string>? Agents => hub.Commands(Room.Id)?.Agents;
@@ -456,6 +459,8 @@ public sealed partial class RoomModel(
                 StickerPack = Room.StickerPack, Effort = Room.Effort, McpExtra = Room.McpExtra, McpOff = Room.McpOff, UnityProject = Room.UnityProject,
                 AttachFrom = [.. Room.AttachFrom.Where(a => a != Room.Id), Room.Id],
             });
+            memos.Copy(Room.Id, fork.Id); // 방 메모도 — 이어받은 대화의 결정 · 기다리는 일
+
             hub.Touch(fork.Id);
             return new JsonResult(new { ok = true, id = fork.Id });
         }
