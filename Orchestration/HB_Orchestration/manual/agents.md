@@ -18,7 +18,8 @@
 | `gpt_mini_luna` | openai | gpt-6-luna | 지시서 검토 (work_order_main) |
 | `gpt_mini_luna_web` | openai-web | gpt-6-luna | 웹검색 단계 (research_main Scout · crash_main CrashSearch) |
 | `gemini_high_argon` | gemini | gemini-4-argon | crash 분류 · preflight B · preflight_check |
-| `gemini_main_flash` | gemini | gemini-3.8-flash | 논리 검증 · 토론 상대 · parallel · 지시서 검토 |
+| `gemini_main_hydrogen` | gemini | gemini-4-hydrogen | 논리 검증 · 토론 상대 · parallel · 지시서 검토 (추론 medium) |
+| `gemini_high_carbon` | gemini | gemini-4-carbon | 교체용 (기본 모드에는 없음) |
 | `gemini_mini_lite` | gemini | gemini-3.5-flash-lite | 가벼운 교체용 |
 | `deepseek_main_flash` | fireworks | `accounts/fireworks/models/deepseek-v4p1-flash-1017` | review_high · perf_high의 두 번째 시선 (`Vision: false`) |
 | `local` | local (Ollama) | `ollama list`의 모델 | 꺼 둠 (`Enabled: false`) |
@@ -170,11 +171,20 @@ OpenAI Chat Completions 전용입니다. 다른 제공사에는 넣지 않습니
 
 **Gemini OpenAI 호환의 특이점**
 
-- **강도를 비우면 추론을 거의 하지 않습니다.**
+- **강도를 비우면 모델 기본값으로 돕니다** (공식 문서: carbon · argon · 3.8-flash는 medium, hydrogen은 high). 골든 리뷰 사례로 잰 추론 토큰 (2026-11-15):
+
+  | 모델 | 비움 | medium |
+  |---|---|---|
+  | gemini-3.8-flash (9건) | 142,482 | 117,618 |
+  | gemini-4-hydrogen (9건) | 132,388 | 65,937 |
+  | gemini-4-carbon (8건) | 139,408 | 136,441 |
+  | gemini-4-argon (1건) | 0 | 0 |
+
+  - argon은 비움 · medium 모두 추론 토큰이 잡히지 않았고, high를 명시한 호출에서만 잡혔습니다 (2026-10-25, 2,440 · 6,265).
 - 추론 토큰을 usage의 `total_tokens`에만 넣습니다. 그래서 서버는 Gemini 제공사(엔드포인트 generativelanguage.googleapis.com)에서만, 추론 칸이 없고 total > prompt + completion이면:
   - 그 차이를 `ReasoningTokens`로 기록하고
   - `OutputTokens`에 더합니다 (비용이 출력 단가로 잡힙니다).
-- **`gemini_high_argon`은 ReasoningEffort가 비어 있어 호환 경로 기본값(추론 거의 없음)으로 동작합니다.** 이 에이전트를 쓰는 crash_main · preflight_* 모두 해당합니다 (review_high · perf_high는 DeepSeek을 씁니다).
+- **`gemini_high_argon`은 ReasoningEffort가 비어 있어 모델 기본값으로 동작합니다 (위 표: 추론 토큰이 잡히지 않음).** 이 에이전트를 쓰는 crash_main · preflight_* 모두 해당합니다 (review_high · perf_high는 DeepSeek을 씁니다).
   - 비워 둔 까닭: high를 명시하면 비용 약 6배 · 시간 약 10배입니다.
   - 에이전트 이름은 호출 기록(provenance)과 이어져 있어 그대로 둡니다.
   - appsettings 에이전트의 `Note` 칸에도 같은 설명이 있습니다. `Note`는 서버가 읽지 않는 메모 칸이고, 주석과 달리 대시보드 저장 때 지워지지 않습니다.

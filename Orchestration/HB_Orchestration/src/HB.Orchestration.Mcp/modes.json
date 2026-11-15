@@ -219,7 +219,7 @@
         },
         {
           "Role": "LogicCheck",
-          "Agent": "gemini_main_flash",
+          "Agent": "gemini_main_hydrogen",
           "Sees": "InputAndPrevious"
         }
       ]
@@ -237,7 +237,7 @@
         },
         {
           "Role": "Proponent",
-          "Agent": "gemini_main_flash"
+          "Agent": "gemini_main_hydrogen"
         },
         {
           "Role": "Judge",
@@ -309,7 +309,7 @@
         },
         {
           "Role": "Worker",
-          "Agent": "gemini_main_flash"
+          "Agent": "gemini_main_hydrogen"
         }
       ]
     },
@@ -326,7 +326,7 @@
         },
         {
           "Role": "WorkOrderCheck",
-          "Agent": "gemini_main_flash"
+          "Agent": "gemini_main_hydrogen"
         }
       ]
     },

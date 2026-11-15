@@ -41,7 +41,7 @@
       "MaxInputChars": 100000,
       "Steps": [
         { "Role": "Rebuttal",   "Agent": "gpt_main_sol" },
-        { "Role": "LogicCheck", "Agent": "gemini_main_flash", "Sees": "InputAndPrevious" }
+        { "Role": "LogicCheck", "Agent": "gemini_main_hydrogen", "Sees": "InputAndPrevious" }
       ]
     }
   }
@@ -126,11 +126,11 @@
 |---|---|---|---|
 | 리뷰 | `review_main` · `review_high` | sol · (sol \| DeepSeek) | `/cross-review [main\|high]` |
 | 성능 | `perf_main` · `perf_high` | sol · (sol \| DeepSeek) | `/mode`, ownReview는 perf-reviewer |
-| 설계 판단 | `design_lite` · `design_main` · `design_high` | 비평(sol) · 반박(sol) → 논리 검증(flash) · 반박 ⇄ 옹호 → 판정 | `/mode` |
+| 설계 판단 | `design_lite` · `design_main` · `design_high` | 비평(sol) · 반박(sol) → 논리 검증(hydrogen) · 반박 ⇄ 옹호 → 판정 | `/mode` |
 | 조사 | `research_main` | luna(웹) → sol | `/mode` |
 | 크래시 | `crash_main` → `crash_check` | argon → luna(웹) · sol | `/mode` |
-| 구현 | `parallel_main` | sol \| flash | `/mode` (요청할 때만) |
-| 지시서 | `work_order_main` | luna \| flash | `/work-order` |
+| 구현 | `parallel_main` | sol \| hydrogen | `/mode` (요청할 때만) |
+| 지시서 | `work_order_main` | luna \| hydrogen | `/work-order` |
 | 실행 전 점검 | `preflight_p1` · `p2` · `p3` · `preflight_check` · `preflight_perf` | 단계 모드 | `/preflight` |
 
 `review_high` · `perf_high`의 두 번째 리뷰어(DeepSeek, `deepseek_main_flash`)는 Vision이 없습니다. `images`를 붙이면 실행 전에 거절됩니다. 이미지가 필요하면 `run_mode`의 `agents`로 argon을 지정해 실행합니다.
