@@ -76,7 +76,7 @@ argument-hint: [agent|human] <요청> [첨부 파일 경로 ...]
 1. <위치> — <의심 내용> / <왜 의심하는지> / <확인 방법>
 
 ## 함께 확인할 것
-- 이 지시서는 work_order_main(gpt_mini_luna · gemini_main_flash)로 검토받았다 (runId <값>).
+- 이 지시서는 work_order_main(gpt_mini_luna · gemini_main_hydrogen)로 검토받았다 (runId <값>).
 - <실행 세션이 사용자에게 먼저 확인할 것, 계획서에서 답할 것>
 
 ## 그외 이상사항
