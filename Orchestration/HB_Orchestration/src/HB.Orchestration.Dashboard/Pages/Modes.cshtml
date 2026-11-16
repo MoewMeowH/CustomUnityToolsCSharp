@@ -19,24 +19,7 @@
     .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
     h2.section { font-size: 14px; color: var(--muted); font-weight: 600; margin: 24px 0 8px; }
     .agents td { white-space: nowrap; }
-    .mode { padding: 14px 16px; margin-bottom: 12px; }
-    .mode-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; margin-bottom: 12px; }
-    .mode-head .name { font-weight: 650; font-size: 15px; }
-    .pipe { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-    .node { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--bg); min-width: 150px; }
-    .node .role { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
-    .node .meta { font-size: 11.5px; color: var(--muted); margin-top: 4px; }
-    .node select { width: 100%; font: inherit; font-size: 12.5px; padding: 3px 4px; border-radius: 5px;
-                   border: 1px solid var(--line); background: var(--panel); color: var(--text); }
-    .node.claude { min-width: 0; background: var(--code); text-align: center; font-weight: 600; font-size: 13px; }
-    .node.claude small { display: block; font-weight: 400; color: var(--muted); font-size: 11.5px; }
     .arrow { color: var(--muted); font-size: 18px; }
-    .stack { display: flex; flex-direction: column; gap: 6px; padding: 6px; border: 1px dashed var(--line); border-radius: 10px; }
-    .stack-label, .loop-label { font-size: 11.5px; color: var(--muted); text-align: center; }
-    .loop { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px; border: 1px dashed var(--line); border-radius: 10px; }
-    .settings { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 12px; font-size: 12.5px; color: var(--muted); }
-    .settings input, .settings select { font: inherit; width: 90px; padding: 3px 6px; border-radius: 5px;
-                                        border: 1px solid var(--line); background: var(--panel); color: var(--text); }
     .agents.edit input, .agents.edit select { font: inherit; font-size: 12.5px; padding: 3px 6px; border-radius: 5px;
         border: 1px solid var(--line); background: var(--panel); color: var(--text); width: 140px; }
     .agents.edit input.wide { width: 200px; }
@@ -50,15 +33,19 @@
     .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 10px 0 4px; }
     .replace { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
     .replace select { font: inherit; padding: 3px 6px; border-radius: 5px; border: 1px solid var(--line); background: var(--panel); color: var(--text); }
-    .savebar { position: sticky; bottom: 0; padding: 12px 0; background: var(--bg); display: flex; gap: 10px; align-items: center; }
 </style>
 
 @if (Model.Saved is not null && Model.Errors.Count == 0)
 {
     <div class="notice ok">
         @Model.SavedMessage
-        @if (Model.Note is not null) { <div class="muted" style="margin-top:4px">@Model.Note</div> }
+        @if (Model.Note is not null && !Model.NoteIsWarning) { <div class="muted" style="margin-top:4px">@Model.Note</div> }
     </div>
+    if (Model.NoteIsWarning)
+    {
+        @* 사용 중 사본은 저장됐지만 git 원본에는 못 썼다 — 눈에 띄게 *@
+        <div class="notice warn">@Model.Note</div>
+    }
 }
 @if (Model.LoadError is not null)
 {
@@ -136,6 +123,9 @@
         저장하면 MCP 서버가 다음 호출 때 스스로 다시 읽습니다 — 재시작 불필요. 단, API 키 환경 변수를 바꿨을 때만 PC를 재시작하세요.
         서버는 설정 <span class="mono">Orchestration:ModesPath</span> → <span class="mono">HB_MODES_PATH</span> → 세션(Unity 프로젝트) 폴더의 <span class="mono">hb-modes.json</span> → 서버 폴더 <span class="mono">modes.json</span> 순으로 찾습니다. 이 화면은 위 경로의 파일만 고칩니다.
     </div>
+
+    @* 모드 편집기를 맨 위에 둔다 — 저장하면 화면이 위로 돌아오므로 아래에 두면 매번 내려가야 한다 *@
+    <partial name="_ModeEditor" model="Model" />
 
     var missing = snap.Agents.Count > 0 ? snap.MissingAgents.ToList() : new List<string>();
     if (missing.Count > 0)
@@ -329,147 +319,5 @@
                 <span class="muted">설정 · 에이전트 · 호출 기록에 나온 모델을 모두 보여줍니다 · 캐시를 비우면 입력 단가와 같음 · 세 칸을 다 비우면 그 모델의 단가 삭제 · 마지막 빈 줄 = 새 모델 · 칸은 처음 단가, 날짜별 변경(Changes)은 appsettings.json에서 고침</span>
             </div>
         </form>
-    }
-
-    <h2 class="section">모드</h2>
-    <form method="post">
-        <input type="hidden" name="stamp" value="@snap.Stamp" />
-
-        @foreach (var (name, mode) in snap.Typed.Modes)
-        {
-            var steps = mode.Steps;
-            var returnRaw = Model.Raw(name, "Return");
-            var returnLabel = mode.Flow == ModeFlow.Concurrent || mode.Return == ModeReturn.All ? "모든 결과"
-                : mode.Flow == ModeFlow.Graph ? "끝 단계 결과" : "마지막 결과만";
-
-            <section class="panel mode">
-                <div class="mode-head">
-                    <span class="name mono">@name</span>
-                    <span class="badge">@ModesModel.FlowLabel(mode.Flow)</span>
-                    <span class="muted">@mode.Description</span>
-                </div>
-
-                <div class="pipe">
-                    <div class="node claude">Claude<small>요청</small></div>
-                    <span class="arrow">→</span>
-
-                    @if (mode.Flow == ModeFlow.Concurrent)
-                    {
-                        <div class="stack">
-                            <div class="stack-label">동시 실행 · 서로 결과를 보지 않음</div>
-                            @for (var i = 0; i < steps.Count; i++) { await RenderNode(name, i, steps[i], showSees: false); }
-                        </div>
-                    }
-                    else if (mode.Flow == ModeFlow.Debate && steps.Count >= 2)
-                    {
-                        <div class="loop">
-                            @{ await RenderNode(name, 0, steps[0], showSees: false); }
-                            <span class="arrow">⇄</span>
-                            @{ await RenderNode(name, 1, steps[1], showSees: false); }
-                            <div class="loop-label" style="width:100%">
-                                최대 @(Math.Clamp(mode.MaxRounds ?? 2, 1, ModeDefinition.MaxRoundsHardCap))회차 · 직전 발언 @(mode.HistoryWindow)개만 봄 · [합의] 시 조기 종료
-                            </div>
-                        </div>
-                        if (steps.Count >= 3)
-                        {
-                            <span class="arrow">→</span>
-                            await RenderNode(name, 2, steps[2], showSees: false);
-                        }
-                    }
-                    else if (mode.Flow == ModeFlow.Graph)
-                    {
-                        @* 연결은 화살표로 그리지 않고 단계마다 보는 것을 글로 쓴다 *@
-                        var graphSees = ModesModel.GraphSees(mode);
-                        <div class="stack">
-                            <div class="stack-label">보는 것이 끝난 단계부터 실행 · 서로 기다리지 않으면 동시</div>
-                            @for (var i = 0; i < steps.Count; i++)
-                            {
-                                await RenderNode(name, i, steps[i], showSees: false,
-                                    graphSees: graphSees is null ? "연결 설정 오류" : $"{i + 1}단계 · 보는 것: {graphSees[i]}");
-                            }
-                        </div>
-                    }
-                    else
-                    {
-                        for (var i = 0; i < steps.Count; i++)
-                        {
-                            if (i > 0) { <span class="arrow">→</span> }
-                            await RenderNode(name, i, steps[i], showSees: i > 0);
-                        }
-                    }
-
-                    <span class="arrow">→</span>
-                    <div class="node claude">Claude<small>@returnLabel</small></div>
-                </div>
-
-                <div class="settings">
-                    @if (mode.Flow == ModeFlow.Debate)
-                    {
-                        <label>최대 회차
-                            <input type="number" min="1" max="@ModeDefinition.MaxRoundsHardCap" name="@ModesModel.SettingField(name, "MaxRounds")"
-                                   value="@Model.Raw(name, "MaxRounds")" placeholder="2" />
-                        </label>
-                    }
-                    @if (mode.Flow != ModeFlow.Concurrent)
-                    {
-                        <label>Claude에게 반환
-                            <select name="@ModesModel.SettingField(name, "Return")">
-                                <option value="" selected="@(returnRaw is null)">@(mode.Flow == ModeFlow.Graph ? "기본 (끝 단계만)" : "기본 (마지막만)")</option>
-                                <option value="Last" selected="@(returnRaw == "Last")">@(mode.Flow == ModeFlow.Graph ? "끝 단계만" : "마지막만")</option>
-                                <option value="All" selected="@(returnRaw == "All")">모든 단계</option>
-                            </select>
-                        </label>
-                    }
-                </div>
-            </section>
-        }
-
-        <div class="savebar">
-            <button type="submit" class="btn primary">저장</button>
-            <span class="muted">저장 전 자동 백업: <span class="mono">modes-backup/</span> (최근 10개)</span>
-        </div>
-    </form>
-}
-
-@functions {
-    // 단계 하나를 그린다: 역할 + 에이전트 선택.
-    // <option>이 태그 헬퍼로 처리되므로 이 메서드는 async Task여야 한다 (MVC1006).
-    async Task RenderNode(string mode, int index, StepDefinition step, bool showSees, string? graphSees = null)
-    {
-        var current = Model.FindAgent(step.Agent);
-        <div class="node">
-            <div class="role">@step.Role</div>
-            <select name="@ModesModel.AgentField(mode, index)">
-                @if (current is null)
-                {
-                    <option value="@step.Agent" selected>@step.Agent (appsettings에 없음)</option>
-                }
-                @foreach (var a in Model.Snapshot!.Agents)
-                {
-                    var isCurrent = string.Equals(a.Name, step.Agent, StringComparison.OrdinalIgnoreCase);
-                    <option value="@a.Name" selected="@isCurrent" disabled="@(!a.Enabled && !isCurrent)">
-                        @a.Name · @(a.Model + (a.Enabled ? "" : " (꺼짐)"))
-                    </option>
-                }
-            </select>
-            @if (showSees)
-            {
-                <div class="meta">보는 내용: @ModesModel.SeesLabel(step.Sees ?? StepSees.InputAndPrevious)</div>
-            }
-            @if (graphSees is not null)
-            {
-                <div class="meta">@graphSees</div>
-            }
-            @if (step.WebSearch is { } search)
-            {
-                <div class="meta" title="@(search.BlockedDomains.Count > 0 ? "막는 도메인: " + string.Join(", ", search.BlockedDomains) : "막는 도메인 없음")">
-                    웹검색: 최대 @(search.MaxCalls)회@(search.BlockedDomains.Count > 0 ? $" · 막는 도메인 {search.BlockedDomains.Count}" : "")@(search.ContextSize is { Length: > 0 } cs ? $" · {cs}" : "")
-                    @if (current is not null && Model.Snapshot!.ProviderTypes.GetValueOrDefault(current.Provider) is { } type && type != HB.Orchestration.Agents.Providers.OpenAIResponsesProvider.TypeName)
-                    {
-                        <span class="err"> (이 에이전트는 검색 불가 — openai-responses 제공사 필요)</span>
-                    }
-                </div>
-            }
-        </div>
     }
 }

@@ -34,4 +34,5 @@ builder.Services.AddHttpClient<BillingApi>(c => c.Timeout = TimeSpan.FromSeconds
 var app = builder.Build();
 app.MapRazorPages();
 app.MapStickerImages();
+app.MapLibFiles();
 app.Run();

@@ -6,6 +6,7 @@ using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using HB.Orchestration.Agents;
+using HB.Orchestration.Agents.Providers;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 
@@ -63,12 +64,6 @@ public sealed class ModesSnapshot
             .Where(a => !Agents.Any(x => string.Equals(x.Name, a, StringComparison.OrdinalIgnoreCase)))
             .Distinct(StringComparer.OrdinalIgnoreCase);
 }
-
-/// <summary>
-/// 모드 하나에 대해 화면에서 바꾼 값.
-/// Settings: 키가 있으면 적용 (빈 값이면 항목 삭제 = 기본값 사용), 키가 없으면 건드리지 않는다.
-/// </summary>
-public sealed record ModeEdit(string Mode, IReadOnlyList<string> StepAgents, IReadOnlyDictionary<string, string> Settings);
 
 /// <summary>에이전트 표의 한 줄. OriginalName이 비어 있으면 새 에이전트.</summary>
 public sealed record AgentEdit(string? OriginalName, string Name, string Provider, string Model, string MaxOutputTokens, bool Enabled, bool Delete, string TimeoutSeconds = "",
@@ -345,53 +340,7 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
         return false;
     }
 
-    // ── 모드 저장 ────────────────────────────────────────────────────────────
-
-    public SaveResult Save(string expectedStamp, IReadOnlyList<ModeEdit> edits) =>
-        WithSaveLock(() => SaveCore(expectedStamp, edits));
-
-    private SaveResult SaveCore(string expectedStamp, IReadOnlyList<ModeEdit> edits)
-    {
-        var snap = Load();
-        if (snap.Stamp != expectedStamp) return SaveResult.Fail(ChangedElsewhere);
-
-        var modesObj = Child(snap.Root, "Modes") as JsonObject
-                       ?? throw new ModesConfigException("modes.json에 Modes가 없습니다.");
-
-        var inputErrors = new List<string>();
-        foreach (var edit in edits)
-        {
-            if (modesObj[edit.Mode] is not JsonObject modeObj) continue;
-
-            if (Child(modeObj, "Steps") is JsonArray steps)
-            {
-                for (var i = 0; i < steps.Count && i < edit.StepAgents.Count; i++)
-                {
-                    if (steps[i] is JsonObject step && !string.IsNullOrWhiteSpace(edit.StepAgents[i]))
-                        step[KeyOf(step, "Agent")] = JsonValue.Create(edit.StepAgents[i]);
-                }
-            }
-
-            foreach (var (key, raw) in edit.Settings)
-            {
-                if (!EditableSettings.Contains(key)) continue;
-                var k = KeyOf(modeObj, key);
-                if (string.IsNullOrWhiteSpace(raw)) modeObj.Remove(k);
-                else if (key == "Return") modeObj[k] = JsonValue.Create(raw.Trim());
-                else if (int.TryParse(raw, out var n)) modeObj[k] = JsonValue.Create(n);
-                else inputErrors.Add($"[{edit.Mode}] {key} 값 '{raw}'은(는) 숫자가 아닙니다.");
-            }
-        }
-
-        if (inputErrors.Count > 0) return new SaveResult(inputErrors, []);
-
-        var json = Serialize(snap.Root);
-        var result = Validate(json, snap.Agents);
-        if (!result.Ok) return result;
-
-        WriteSafely(snap.ModesPath, json, "modes-backup");
-        return result;
-    }
+    // ── 모드 저장 (모드 · 역할 하나씩 저장하는 편집기 쪽은 ModesConfigService.Editor.cs) ──
 
     /// <summary>modes.json에서 from 에이전트를 쓰는 모든 단계를 to로 바꾼다.</summary>
     public SaveResult ReplaceAgent(string expectedStamp, string from, string to) =>
@@ -687,7 +636,11 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
         "이 화면을 연 뒤에 설정 파일이 다른 곳에서 바뀌었습니다. '다시 불러오기' 후 다시 수정하세요.";
 
     /// <summary>MCP 서버가 실행 시 거부할 설정을 저장 전에 걸러낸다.</summary>
-    public static SaveResult Validate(string json, IReadOnlyList<AgentInfo> agents)
+    /// <param name="providerTypes">
+    /// 제공사 이름 → Type. 주면 웹검색 단계도 실행 때와 같이 검사한다 (설정 값 · 검색할 수 있는 제공사 · 구조화 출력과 함께 쓰기)
+    /// — 편집기 저장만 준다. 에이전트 표 저장은 웹검색을 고치지 않으므로 주지 않는다.
+    /// </param>
+    public static SaveResult Validate(string json, IReadOnlyList<AgentInfo> agents, IReadOnlyDictionary<string, string>? providerTypes = null)
     {
         var errors = new List<string>();
         var warnings = new List<string>();
@@ -727,6 +680,17 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
                 if (!roles.Contains(step.Role))
                     errors.Add($"[{name}] 역할 '{step.Role}'이(가) 정의되지 않았습니다.");
 
+                if (providerTypes is not null && step.WebSearch is { } search)
+                {
+                    if (search.Problem() is { } searchProblem)
+                        errors.Add($"[{name}] {step.Role}@{step.Agent}: {searchProblem}");
+                    if (RoleOutput(file, step.Role) is not null)
+                        errors.Add($"[{name}] {step.Role}@{step.Agent}: 구조화 출력(Output)이 있는 역할은 WebSearch와 함께 쓸 수 없습니다.");
+                    if (known.TryGetValue(step.Agent, out var searcher) && providerTypes.TryGetValue(searcher.Provider, out var type)
+                        && !string.Equals(type, OpenAIResponsesProvider.TypeName, StringComparison.OrdinalIgnoreCase))
+                        errors.Add($"[{name}] {step.Role}@{step.Agent}: WebSearch는 제공사 Type이 '{OpenAIResponsesProvider.TypeName}'인 에이전트에서만 됩니다 (지금 '{type}').");
+                }
+
                 if (agents.Count == 0) continue; // MCP appsettings를 못 읽었으면 에이전트 검사는 건너뜀
 
                 if (!known.TryGetValue(step.Agent, out var agent))
@@ -740,6 +704,15 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
             warnings.Add("MCP appsettings.json을 읽지 못해 에이전트 이름 검사를 건너뛰었습니다.");
 
         return new SaveResult(errors, warnings);
+    }
+
+    /// <summary>역할의 구조화 출력 이름 (실행기 ModeStore와 같은 순서: 파일의 프롬프트가 있으면 그 Output, 없으면 내장 역할의 것). 없으면 null.</summary>
+    private static string? RoleOutput(ModesFile file, string role)
+    {
+        var def = file.Roles.FirstOrDefault(r => string.Equals(r.Key, role, StringComparison.OrdinalIgnoreCase)).Value;
+        var output = string.IsNullOrWhiteSpace(def?.Output) ? null : def?.Output;
+        if (def is not null && (!string.IsNullOrWhiteSpace(def.Prompt) || !string.IsNullOrWhiteSpace(def.PromptFile))) return output;
+        return output ?? Prompts.BuiltInOutputs.GetValueOrDefault(role);
     }
 
     // ── 파일 쓰기 ────────────────────────────────────────────────────────────
@@ -764,17 +737,21 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
     private static string Serialize(JsonObject root) => root.ToJsonString(WriteOptions) + Environment.NewLine;
 
     /// <summary>백업을 남기고, 임시 파일에 쓴 뒤 한 번에 교체한다 (MCP 서버가 읽는 도중이어도 반쯤 쓴 파일을 보지 않게).</summary>
-    private void WriteSafely(string path, string json, string backupFolderName)
+    /// <param name="backupFolderName">백업 폴더 이름. null이면 백업하지 않는다 (git 원본 — 이력은 git이 가진다).</param>
+    private void WriteSafely(string path, string json, string? backupFolderName)
     {
         var dir = Path.GetDirectoryName(path)!;
-        var backupDir = Path.Combine(dir, backupFolderName);
-        Directory.CreateDirectory(backupDir);
-        File.Copy(path, Path.Combine(backupDir, $"{Path.GetFileNameWithoutExtension(path)}-{DateTime.Now:yyyyMMdd-HHmmss-fffffff}-{Guid.NewGuid():N}.json"), overwrite: false);
-
-        foreach (var old in new DirectoryInfo(backupDir).GetFiles("*.json")
-                     .OrderByDescending(f => f.LastWriteTimeUtc).Skip(BackupKeep))
+        if (backupFolderName is not null)
         {
-            try { old.Delete(); } catch (IOException) { /* 다음 저장 때 다시 시도 */ }
+            var backupDir = Path.Combine(dir, backupFolderName);
+            Directory.CreateDirectory(backupDir);
+            File.Copy(path, Path.Combine(backupDir, $"{Path.GetFileNameWithoutExtension(path)}-{DateTime.Now:yyyyMMdd-HHmmss-fffffff}-{Guid.NewGuid():N}.json"), overwrite: false);
+
+            foreach (var old in new DirectoryInfo(backupDir).GetFiles("*.json")
+                         .OrderByDescending(f => f.LastWriteTimeUtc).Skip(BackupKeep))
+            {
+                try { old.Delete(); } catch (IOException) { /* 다음 저장 때 다시 시도 */ }
+            }
         }
 
         var tmp = Path.Combine(dir, $".{Guid.NewGuid():N}.tmp");
@@ -808,16 +785,5 @@ public sealed partial class ModesConfigService(IOptions<DashboardOptions> option
     private static string KeyOf(JsonObject obj, string name) =>
         obj.Select(p => p.Key).FirstOrDefault(k => string.Equals(k, name, StringComparison.OrdinalIgnoreCase)) ?? name;
 
-    private static JsonNode? Child(JsonObject obj, string name) => obj[KeyOf(obj, name)];
-
-    /// <summary>화면에서 바꿀 수 있는 모드 단위 설정.</summary>
-    public static readonly IReadOnlySet<string> EditableSettings =
-        new HashSet<string> { "MaxRounds", "Return" };
-
-    /// <summary>모드 항목의 원본 값 (없으면 null). 화면에 "파일에 실제로 적힌 값"을 보여줄 때 쓴다.</summary>
-    public static string? GetRaw(JsonObject root, string mode, string key)
-    {
-        if (Child(root, "Modes") is not JsonObject modes || modes[mode] is not JsonObject modeObj) return null;
-        return Child(modeObj, key)?.ToString();
-    }
+    internal static JsonNode? Child(JsonObject obj, string name) => obj[KeyOf(obj, name)];
 }

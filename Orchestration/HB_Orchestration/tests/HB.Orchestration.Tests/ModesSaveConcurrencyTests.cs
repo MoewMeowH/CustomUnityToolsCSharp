@@ -45,11 +45,10 @@ public sealed class ModesSaveConcurrencyTests : IDisposable
         using var entered = new ManualResetEventSlim();
         using var release = new ManualResetEventSlim();
         using var secondStarted = new ManualResetEventSlim();
-        var firstTask = Task.Factory.StartNew(() => agents
-            ? first.SaveAgents(snap.SettingsStamp, snap.Stamp, new BlockingList<AgentEdit>(
-                new("a", "renamed", "p", "model", "", true, false), entered, release))
-            : first.Save(snap.Stamp, new BlockingList<ModeEdit>(
-                new("m", ["a"], new Dictionary<string, string> { ["Return"] = "All" }), entered, release)),
+        // 첫 저장은 늘 에이전트 저장(줄 목록을 읽다 멈출 수 있는 진입점). 둘째가 단가 저장(true) 또는 편집기의 모드 저장(false).
+        var firstTask = Task.Factory.StartNew(() =>
+            first.SaveAgents(snap.SettingsStamp, snap.Stamp, new BlockingList<AgentEdit>(
+                new("a", "renamed", "p", "model", "", true, false), entered, release)),
             CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
         Task<SaveResult>? secondTask = null;
         try
@@ -60,7 +59,7 @@ public sealed class ModesSaveConcurrencyTests : IDisposable
                 secondStarted.Set();
                 return agents
                     ? second.SavePrices(snap.SettingsStamp, [], "1500")
-                    : second.ReplaceAgent(snap.Stamp, "a", "a");
+                    : second.SaveMode(snap.Stamp, "m", "m", """{"Steps":[{"Role":"r","Agent":"a"}],"Return":"All"}""");
             }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
             Assert.True(secondStarted.Wait(TimeSpan.FromSeconds(5)));
             // 첫 저장이 스냅샷 검사를 끝낸 채 멈췄다. 다른 진입점이 먼저 저장하면 안 된다.
@@ -74,10 +73,10 @@ public sealed class ModesSaveConcurrencyTests : IDisposable
         }
         Assert.True((await firstTask).Ok);
         Assert.False((await secondTask!).Ok);
-        Assert.Equal(agents ? 2 : 1, first.WriteCount); // 이름 변경은 설정과 모드 두 파일에 쓴다.
+        Assert.Equal(2, first.WriteCount); // 이름 변경은 설정과 모드 두 파일에 쓴다.
         Assert.Equal(0, second.WriteCount);
         var final = first.Load();
-        Assert.Equal(agents ? "renamed" : "a", final.Typed.Modes["m"].Steps[0].Agent);
+        Assert.Equal("renamed", final.Typed.Modes["m"].Steps[0].Agent);
         Assert.Empty(Directory.GetFiles(_dir, "*.tmp"));
     }
 
@@ -97,7 +96,7 @@ public sealed class ModesSaveConcurrencyTests : IDisposable
         File.SetLastWriteTimeUtc(path, timestamp);
         var result = settings
             ? service.SavePrices(before.SettingsStamp, [], "1600")
-            : service.Save(before.Stamp, []);
+            : service.SaveMode(before.Stamp, "m", "m", """{"Steps":[{"Role":"r","Agent":"a"}]}""");
         Assert.False(result.Ok);
         Assert.Equal(changed, File.ReadAllText(path));
     }

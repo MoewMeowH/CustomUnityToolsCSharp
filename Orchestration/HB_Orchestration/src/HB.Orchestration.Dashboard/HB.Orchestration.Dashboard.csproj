@@ -13,6 +13,12 @@
     <None Include="IconPack\**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!-- 화면이 쓰는 스크립트: 정적 파일 서빙이 없어 어셈블리에 넣고 /lib/{이름}으로 내보낸다 (LibFiles.cs) -->
+  <ItemGroup>
+    <EmbeddedResource Include="Lib\x6\x6.min.js" LogicalName="lib/x6.min.js" />
+    <EmbeddedResource Include="Lib\mode-graph.js" LogicalName="lib/mode-graph.js" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\HB.Orchestration.Shared\HB.Orchestration.Shared.csproj" />
     <!-- 말풍선 화면 공용 (SafeMarkdown · 스티커 · 실시간 표시), 채팅 앱 HB_Chat과 같이 쓴다 -->

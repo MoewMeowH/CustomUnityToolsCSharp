@@ -29,33 +29,59 @@ public sealed class ModesModel(ModesConfigService service, CallLogCache log) : P
     /// <summary>저장 결과 안내. 리다이렉트 쿼리로 넘겨받는다.</summary>
     [BindProperty(SupportsGet = true)] public string? Note { get; set; }
 
+    /// <summary>편집기에서 고른 모드 (저장 뒤 같은 모드를 다시 연다).</summary>
+    [BindProperty(SupportsGet = true)] public string? Mode { get; set; }
+
+    /// <summary>저장이 거절됐을 때 화면에 되돌려 줄 편집 내용 (편집을 이어 가게).</summary>
+    public EditorDraft? Draft { get; private set; }
+
+    /// <summary>그래프 편집기 자료 (페이지 안 JSON 블록).</summary>
+    public string EditorJson { get; private set; } = "{}";
+
+    private string? _postedStamp;
+
+    /// <summary>
+    /// 편집기 폼의 스탬프. 저장이 거절돼 고치던 내용을 되돌려 줄 때는 화면이 보낸 스탬프를 그대로 둔다 —
+    /// "다른 곳에서 바뀜"으로 거절됐는데 새 스탬프를 주면, 다시 누르기만 해도 그 사이 변경을 덮는다.
+    /// </summary>
+    public string EditorStamp => Errors.Count > 0 && _postedStamp is not null ? _postedStamp : Snapshot?.Stamp ?? "";
+
     public void OnGet() => TryLoad();
 
-    // ── 모드 저장 ────────────────────────────────────────────────────────────
-    public IActionResult OnPost(string stamp)
+    // ── 그래프 편집기: 모드 · 역할을 하나씩 저장 ───────────────────────────────
+    public IActionResult OnPostMode(string stamp, string? originalName, string name, string modeJson)
     {
+        _postedStamp = stamp;
+        Draft = new EditorDraft("mode", name ?? "", originalName, modeJson ?? "");
         TryLoad();
         if (Snapshot is null) return Page();
+        return Finish(() => service.SaveMode(stamp ?? "", originalName, name ?? "", modeJson ?? ""), "mode", name);
+    }
 
-        var edits = new List<ModeEdit>();
-        foreach (var (name, mode) in Snapshot.Typed.Modes)
-        {
-            var agents = new List<string>();
-            for (var i = 0; i < mode.Steps.Count; i++)
-                agents.Add(Request.Form[AgentField(name, i)].ToString());
+    public IActionResult OnPostDeleteMode(string stamp, string name)
+    {
+        _postedStamp = stamp;
+        TryLoad();
+        if (Snapshot is null) return Page();
+        return Finish(() => service.DeleteMode(stamp ?? "", name ?? ""), "delete-mode");
+    }
 
-            // 화면에 실제로 있었던 입력만 적용한다 (없는 항목은 파일 값 그대로).
-            var settings = new Dictionary<string, string>();
-            foreach (var key in ModesConfigService.EditableSettings)
-            {
-                if (Request.Form.TryGetValue(SettingField(name, key), out var value))
-                    settings[key] = value.ToString();
-            }
+    public IActionResult OnPostRole(string stamp, string name, string roleJson, bool isNew)
+    {
+        _postedStamp = stamp;
+        // 되돌려 줄 내용의 OriginalName: 새 역할이면 null (화면이 "새 역할"로 다시 연다)
+        Draft = new EditorDraft("role", name ?? "", isNew ? null : name, roleJson ?? "");
+        TryLoad();
+        if (Snapshot is null) return Page();
+        return Finish(() => service.SaveRole(stamp ?? "", name ?? "", roleJson ?? "", isNew), "role", Mode);
+    }
 
-            edits.Add(new ModeEdit(name, agents, settings));
-        }
-
-        return Finish(() => service.Save(stamp ?? "", edits), "modes");
+    public IActionResult OnPostDeleteRole(string stamp, string name)
+    {
+        _postedStamp = stamp;
+        TryLoad();
+        if (Snapshot is null) return Page();
+        return Finish(() => service.DeleteRole(stamp ?? "", name ?? ""), "delete-role", Mode);
     }
 
     // ── 에이전트 저장 ────────────────────────────────────────────────────────
@@ -107,7 +133,8 @@ public sealed class ModesModel(ModesConfigService service, CallLogCache log) : P
         return Finish(() => service.ReplaceAgent(stamp ?? "", from ?? "", to ?? ""), "replace");
     }
 
-    private IActionResult Finish(Func<SaveResult> save, string what)
+    /// <param name="mode">편집기에서 다시 열 모드 (편집기 저장만).</param>
+    private IActionResult Finish(Func<SaveResult> save, string what, string? mode = null)
     {
         SaveResult result;
         try
@@ -129,7 +156,7 @@ public sealed class ModesModel(ModesConfigService service, CallLogCache log) : P
 
         // 새로고침해도 다시 저장되지 않도록 GET으로 돌려보낸다. 경고는 다시 읽은 화면에서 재계산된다.
         var note = result.Notes.Count > 0 ? string.Join(" · ", result.Notes) : null;
-        return RedirectToPage(new { saved = what, note });
+        return RedirectToPage(new { saved = what, note, mode });
     }
 
     private void TryLoad()
@@ -147,10 +174,11 @@ public sealed class ModesModel(ModesConfigService service, CallLogCache log) : P
 
         // 최근 사용 modes.json · 리뷰 지침은 부가 정보: 호출 기록을 못 읽어도 편집 화면은 그대로 둔다.
         // 리뷰 지침은 편집 중인 modes.json과 무관하므로 modes.json을 못 읽어도 계산한다.
+        IReadOnlyList<CallRecord> calls = [];
+        var now = DateTimeOffset.Now;
         try
         {
-            var calls = log.All; // 한 번만 받는다 — CallLogCache는 파일이 바뀌면 다시 읽어 세 집계가 서로 다른 목록을 볼 수 있다
-            var now = DateTimeOffset.Now;
+            calls = log.All; // 한 번만 받는다 — CallLogCache는 파일이 바뀌면 다시 읽어 세 집계가 서로 다른 목록을 볼 수 있다
             RecentGuidelines = GuidelinesUsage.Recent(calls, now, ModesUsage.Window);
             MissingGuidelines = GuidelinesUsage.Missing(calls, now, ModesUsage.Window);
             if (Snapshot is not null)
@@ -163,18 +191,22 @@ public sealed class ModesModel(ModesConfigService service, CallLogCache log) : P
         {
             Warnings.Add($"최근 실행이 쓴 modes.json · 리뷰 지침을 확인하지 못했습니다 (호출 기록 읽기 실패: {ex.GetType().Name}: {ex.Message}).");
         }
+
+        // 호출 기록을 못 읽었으면 최근 실행 수만 0으로 보인다.
+        if (Snapshot is not null)
+            EditorJson = ModeEditorData.Build(Snapshot, calls, now, HasModesSource, Mode, Draft);
     }
 
     // ── 화면 도우미 ─────────────────────────────────────────────────────────
 
-    public static string AgentField(string mode, int index) => $"agent|{mode}|{index}";
-
     /// <summary>내용 해시 앞 12자리 (지침 목록용).</summary>
     public static string ShortSha(string? sha) => sha is { Length: > 12 } ? sha[..12] + "…" : sha ?? "해시 없음"; // modes 이전 내용 목록과 같은 표기
-    public static string SettingField(string mode, string key) => $"set|{mode}|{key}";
 
-    public string? Raw(string mode, string key) =>
-        Snapshot is null ? null : ModesConfigService.GetRaw(Snapshot.Root, mode, key);
+    /// <summary>저장하면 git 원본에도 적용되는가 (편집기 안내용).</summary>
+    public bool HasModesSource => Snapshot is not null && service.WritesSource(Snapshot);
+
+    /// <summary>저장은 됐지만 git 원본 반영이 실패한 안내인가 (화면이 경고로 보인다).</summary>
+    public bool NoteIsWarning => Note?.Contains(ModesConfigService.SourceFailedPrefix, StringComparison.Ordinal) == true;
 
     /// <summary>
     /// 단가 표에 보일 모델: 설정에 단가가 있는 모델 + 켜진 에이전트가 쓰는 모델 + 호출 기록에 나온 모델.
@@ -239,30 +271,10 @@ public sealed class ModesModel(ModesConfigService service, CallLogCache log) : P
         "agents" => "에이전트를 저장했습니다. MCP 서버는 다음 호출 때 appsettings.json을 다시 읽습니다 (재시작 불필요).",
         "prices" => "모델 단가와 환율을 저장했습니다. 호출 기록 화면의 비용에 바로 반영됩니다.",
         "replace" => "모드의 에이전트를 바꿨습니다. 다음 run_mode부터 반영됩니다.",
+        "mode" => "모드를 저장했습니다. 다음 run_mode부터 반영됩니다 (재시작 불필요).",
+        "delete-mode" => "모드를 지웠습니다.",
+        "role" => "역할을 저장했습니다. 다음 run_mode부터 반영됩니다 (재시작 불필요).",
+        "delete-role" => "역할을 지웠습니다.",
         _ => "저장했습니다. MCP 서버는 다음 run_mode 실행부터 새 설정을 씁니다 (재시작 불필요).",
-    };
-
-    public static string FlowLabel(ModeFlow flow) => flow switch
-    {
-        ModeFlow.Sequential => "순차",
-        ModeFlow.Concurrent => "동시",
-        ModeFlow.Debate => "토론",
-        ModeFlow.Graph => "그래프",
-        _ => flow.ToString(),
-    };
-
-    /// <summary>Graph 모드에서 단계마다 보는 것 ("요청 · 1 · 2"). 연결 설정이 틀렸으면 null.</summary>
-    public static IReadOnlyList<string>? GraphSees(ModeDefinition mode) =>
-        ModeGraph.Resolve(mode).Nodes?
-            .Select(n => string.Join(" · ", (n.SeesInput ? new[] { "요청" } : []).Concat(n.Sees.Select(s => s.ToString()))))
-            .ToList();
-
-    public static string SeesLabel(StepSees sees) => sees switch
-    {
-        StepSees.Input => "요청만",
-        StepSees.Previous => "앞 단계만",
-        StepSees.InputAndPrevious => "요청 + 앞 단계",
-        StepSees.All => "요청 + 앞 단계 전부",
-        _ => sees.ToString(),
     };
 }

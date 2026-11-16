@@ -21,6 +21,12 @@ public sealed class DashboardOptions
     public string? ModesPath { get; set; }
 
     /// <summary>
+    /// git 원본 modes.json 경로 (선택). 있으면 모드 화면의 편집기가 사용 중 사본에 저장한 뒤 같은 수정을 이 파일에도 적용한다
+    /// (publish는 사용 중 사본을 지키므로, 사본만 고치면 새 모드가 git에 남지 않는다). HB_Orchestration.bat이 넘긴다.
+    /// </summary>
+    public string? ModesSourcePath { get; set; }
+
+    /// <summary>
     /// 파일 링크 템플릿. {project}가 있으면 {project}=Rider 프로젝트 이름, {path}=그 프로젝트 폴더 기준 상대 경로,
     /// 없으면 {path}=절대 경로(URL 인코딩). {line}=줄 번호.
     /// 기본값은 jetbrains:// 프로토콜(JetBrains 데몬이 Rider로 넘김). 예전 기본값인 내장 서버 /api/file은

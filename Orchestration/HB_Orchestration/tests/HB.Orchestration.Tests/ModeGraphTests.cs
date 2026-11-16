@@ -380,7 +380,7 @@ public sealed class ModeGraphTests
     }
 
     [Fact]
-    public void Dashboard_agent_change_keeps_id_and_from()
+    public void Dashboard_agent_replace_keeps_id_and_from()
     {
         var dir = Directory.CreateTempSubdirectory("hb-modes-graph-").FullName;
         try
@@ -392,12 +392,12 @@ public sealed class ModeGraphTests
                 """);
             var service = new ModesConfigService(Options.Create(new DashboardOptions { McpConfigDir = dir }), _ => null);
 
-            var saved = service.Save(service.Load().Stamp, [new ModeEdit("g", ["a2", "a1", "a2"], new Dictionary<string, string>())]);
+            var saved = service.ReplaceAgent(service.Load().Stamp, "a1", "a2"); // 파일 전체를 다시 쓰는 저장
 
             Assert.True(saved.Ok, string.Join(" / ", saved.Errors));
             var mode = service.Load().Typed.Modes["g"];
             Assert.Equal(ModeFlow.Graph, mode.Flow);
-            Assert.Equal(["a2", "a1", "a2"], mode.Steps.Select(s => s.Agent));
+            Assert.Equal(["a2", "a2", "a2"], mode.Steps.Select(s => s.Agent));
             Assert.Equal(["a", "b", null], mode.Steps.Select(s => s.Id));
             Assert.Equal(["input", "a", "b"], mode.Steps[2].From);
         }

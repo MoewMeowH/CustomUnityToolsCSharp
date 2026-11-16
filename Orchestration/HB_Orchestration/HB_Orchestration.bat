@@ -336,7 +336,8 @@ if errorlevel 1 (
 )
 
 rem Runs in its own window. The publish folder is passed so the Modes page edits the right files.
-start "HB Dashboard" /D "%DASH_DIR%" cmd /k dotnet run --no-build -c %CONFIGURATION% -- --urls=%DASH_URL% "--Dashboard:McpConfigDir=%PUBLISH_DIR%"
+rem The source modes.json is passed too: the mode editor applies each save to it as well, so new modes reach git.
+start "HB Dashboard" /D "%DASH_DIR%" cmd /k dotnet run --no-build -c %CONFIGURATION% -- --urls=%DASH_URL% "--Dashboard:McpConfigDir=%PUBLISH_DIR%" "--Dashboard:ModesSourcePath=%MCP_SRC%\modes.json"
 
 echo [Info] Dashboard started in a separate window. Close that window to stop it.
 timeout /t 4 /nobreak >nul
