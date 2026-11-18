@@ -6,6 +6,7 @@
 
 * `Orchestration/HB_Orchestration` — MCP 서버 · 대시보드(채팅방 `/Rooms` 포함) · 골든 · project-files 원본 · 공통 규칙 · 훅.
 * `Orchestration/HB_Chat` — 대화형 채팅 앱(HB.Chat) · 데스크톱 껍데기(HB.Chat.Desktop).
+* `HB_Lint` — 규칙을 어셈블리 어트리뷰트로 받는 범용 Roslyn 분석기 · 생성기 · UPM 패키지.
 * 둘에 걸친 작업은 주로 고치는 쪽에 두고, 다른 쪽 변경도 계획서에 적는다. `Orchestration/Perf`는 프로젝트가 아니다 (git 밖 preflight 자료).
 
 ## project-files 원본을 바꿀 때 (동기화 대상 확인)

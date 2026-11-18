@@ -1,0 +1,7 @@
+<Project>
+  <!-- 모든 프로젝트 공통 설정. TargetFramework는 프로젝트마다 (분석기 · 어트리뷰트는 netstandard2.0, 시험은 net10.0). -->
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+</Project>

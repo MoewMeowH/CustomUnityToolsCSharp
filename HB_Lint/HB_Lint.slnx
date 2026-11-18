@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/HBLint.Analyzers/HBLint.Analyzers.csproj" />
+    <Project Path="src/HBLint.Attributes/HBLint.Attributes.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/HBLint.Analyzers.Tests/HBLint.Analyzers.Tests.csproj" />
+  </Folder>
+</Solution>

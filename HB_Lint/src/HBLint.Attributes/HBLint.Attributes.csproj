@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 규칙 어트리뷰트 정의. 의존 없는 순수 C#이라 .cs를 Unity asmdef(noEngineReferences)로 그대로 옮겨 쓸 수 있다.
+       분석기는 이 어셈블리를 참조하지 않고 어셈블리 이름 "HBLint.Attributes"와 어트리뷰트 전체 이름으로 찾는다. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <RootNamespace>HBLint</RootNamespace>
+    <AssemblyName>HBLint.Attributes</AssemblyName>
+  </PropertyGroup>
+
+</Project>
