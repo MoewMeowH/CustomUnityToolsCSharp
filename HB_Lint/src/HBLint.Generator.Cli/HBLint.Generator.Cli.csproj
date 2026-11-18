@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>HBLint.Generator.Cli</RootNamespace>
+    <AssemblyName>hblint-gen</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HBLint.Generator\HBLint.Generator.csproj" />
+    <ProjectReference Include="..\HBLint.Attributes\HBLint.Attributes.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="HBLint.Generator.Tests" />
+  </ItemGroup>
+
+</Project>

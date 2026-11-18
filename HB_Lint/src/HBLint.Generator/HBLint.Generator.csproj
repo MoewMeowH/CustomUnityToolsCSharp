@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- rules.json → LintRules.g.cs · rules.schema.json 생성기 코어. 의존 없는 netstandard2.0이라 Unity 6.3 에디터에서도 그대로 불러 쓸 수 있다.
+       HBLint.Attributes도 참조하지 않는다 — 어트리뷰트 어셈블리는 RuleCatalog.FromAssembly로 받는다 (Unity에서는 asmdef로 컴파일한 어셈블리). -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <RootNamespace>HBLint.Generator</RootNamespace>
+    <AssemblyName>HBLint.Generator</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="HBLint.Generator.Tests" />
+  </ItemGroup>
+
+</Project>

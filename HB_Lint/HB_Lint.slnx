@@ -2,8 +2,11 @@
   <Folder Name="/src/">
     <Project Path="src/HBLint.Analyzers/HBLint.Analyzers.csproj" />
     <Project Path="src/HBLint.Attributes/HBLint.Attributes.csproj" />
+    <Project Path="src/HBLint.Generator/HBLint.Generator.csproj" />
+    <Project Path="src/HBLint.Generator.Cli/HBLint.Generator.Cli.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/HBLint.Analyzers.Tests/HBLint.Analyzers.Tests.csproj" />
+    <Project Path="tests/HBLint.Generator.Tests/HBLint.Generator.Tests.csproj" />
   </Folder>
 </Solution>

@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HBLint rules.json",
+  "description": "이 파일은 hblint-gen schema가 HBLint.Attributes에서 만들었습니다. 직접 고치지 마세요.",
+  "type": "object",
+  "required": [
+    "rules"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/rule"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "rule": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "description": "규칙 이름. 생성물은 id 순으로 정렬된다."
+        },
+        "kind": {
+          "enum": [
+            "BanNullOperator"
+          ],
+          "description": "규칙 종류 = HBLint.{kind}RuleAttribute"
+        },
+        "description": {
+          "type": "string",
+          "description": "설명. 생성물에 주석으로 들어간다."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "BanNullOperator"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/kind-BanNullOperator"
+          }
+        }
+      ]
+    },
+    "kind-BanNullOperator": {
+      "required": [
+        "type",
+        "message"
+      ],
+      "properties": {
+        "id": true,
+        "kind": true,
+        "description": true,
+        "type": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "requires": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "severity": {
+          "enum": [
+            "Info",
+            "Warning",
+            "Error"
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

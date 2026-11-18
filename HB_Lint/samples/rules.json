@@ -1,0 +1,14 @@
+{
+  "$schema": "../rules.schema.json",
+  "rules": [
+    {
+      "id": "unity-null-operator",
+      "kind": "BanNullOperator",
+      "description": "파괴된 Unity 오브젝트는 C# null이 아니라서 ?. · ?? · ??= · is null이 통과시킨다.",
+      "type": "UnityEngine.Object",
+      "message": "Unity 오브젝트는 ?. · ?? · ??= · is null이 파괴된 오브젝트를 null로 보지 않습니다. '== null' 또는 'if (obj)'로 확인하세요.",
+      "requires": ["UnityEngine.CoreModule"],
+      "severity": "Warning"
+    }
+  ]
+}
