@@ -15,6 +15,8 @@
 |---|---|---|---|
 | `gpt_high_astra` | openai | gpt-6-astra | 교체용 상위 모델 (기본 모드에는 없음) |
 | `gpt_main_sol` | openai | gpt-6.1-sol | 리뷰 · 반박 · 판정 · 성능 · preflight 대부분 |
+| `gpt_high_astra62` | openai | gpt-6.2-astra | 교체용 (기본 모드에는 없음) |
+| `gpt_main_sol62` | openai | gpt-6.2-sol | 교체용 (기본 모드에는 없음) |
 | `gpt_mini_luna` | openai | gpt-6-luna | 지시서 검토 (work_order_main) |
 | `gpt_mini_luna_web` | openai-web | gpt-6-luna | 웹검색 단계 (research_main Scout · crash_main CrashSearch) |
 | `gemini_high_argon` | gemini | gemini-4-argon | 교체용 (기본 모드에는 없음) |
@@ -25,6 +27,8 @@
 | `local` | local (Ollama) | `ollama list`의 모델 | 꺼 둠 (`Enabled: false`) |
 | `claude_cli_opus` | anthropic-cli | claude-opus-5-5 | API 리뷰 `sub_*` ([claude-cli 제공사](#claude-cli-제공사-sub_-모드)) |
 | `codex_cli_sol` | codex | gpt-6.1-sol | `review_main` 1순위 (ChatGPT 구독, [codex-cli 제공사](#codex-cli-제공사-review_main)) |
+| `codex_cli_sol62` | codex | gpt-6.2-sol | 교체용 (기본 모드에는 없음) |
+| `codex_cli_astra62` | codex | gpt-6.2-astra | 교체용 (기본 모드에는 없음) |
 
 제공사는 일곱입니다.
 
