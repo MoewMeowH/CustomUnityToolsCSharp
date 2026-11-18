@@ -29,6 +29,8 @@ public sealed class ChatApp : IDisposable
     public Uri BaseAddress { get; } = null!;
     public IServiceProvider Services => Factory.Services;
     public RoomStore Store => Services.GetRequiredService<RoomStore>();
+    /// <summary>설정 화면 CLI 도구의 가짜 실행기 (돌린 명령 기록 · 설치 버전).</summary>
+    public FakeCli Cli { get; } = new();
 
     public ChatApp()
     {
@@ -53,6 +55,8 @@ public sealed class ChatApp : IDisposable
             b.UseSetting("Chat:StickerSettingsDir", "");
             b.UseSetting("Chat:ClaudePath", Path.Combine(Dir, "no-claude.exe")); // 가짜 claude를 빼먹으면 진짜 대신 실패로 보이게
             b.UseSetting("Chat:CallLogPath", Path.Combine(Dir, "calls.jsonl")); // 기본값은 실제 호출 기록 파일 (외부 말풍선이 읽는다)
+            // CLI 도구는 가짜 실행기로 — 시험이 실제 codex · claude · Unity CLI를 올리지 않게
+            b.ConfigureTestServices(s => s.AddSingleton(Cli.Tools()));
             // RoomHub를 Program.cs와 같은 모양으로 다시 등록하되 ProcessFactory만 더한다 (마지막 등록이 쓰인다)
             b.ConfigureTestServices(s => s.AddSingleton(sp =>
             {

@@ -300,6 +300,39 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
 
     private bool _disposed;
 
+    // ---- 새 실행 막기 (설정 화면 CLI 올리기 — 실행 중인 CLI를 바꾸지 않게) ----
+
+    public const string StartsHeldError = "CLI 도구를 올리는 중입니다 — 끝난 뒤 다시 보내세요.";
+
+    private readonly Lock _startGate = new();
+    private bool _startsHeld;
+
+    /// <summary>
+    /// 도는 방(화면 턴 · 답 뒤에도 프로세스가 남은 쉬는 실행)이 없으면 새 말 받기를 막고 손잡이를 준다 — Dispose하면 풀린다.
+    /// 도는 방이 있거나 이미 막혀 있으면 null (active = 도는 방 수). 검사와 막기가 한 잠금 안이라 그 사이에 방이 시작되지 않는다.
+    /// </summary>
+    public IDisposable? TryHoldStarts(out int active)
+    {
+        lock (_startGate)
+        {
+            active = 0;
+            foreach (var live in _rooms.Values)
+                lock (live.Gate)
+                    if (live.Busy || Resting(live)) active++;
+            if (active > 0 || _startsHeld) return null;
+            _startsHeld = true;
+            return new StartHold(this);
+        }
+    }
+
+    private sealed class StartHold(RoomHub hub) : IDisposable
+    {
+        public void Dispose()
+        {
+            lock (hub._startGate) hub._startsHeld = false;
+        }
+    }
+
     /// <summary>앱을 끄는 중 (Dispose 뒤) — 그 때문에 끊긴 실행은 끝난 것으로 적지 않는다 (단톡방 답 줄도).</summary>
     public bool ShuttingDown => _disposed;
 
@@ -586,8 +619,10 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
         if (store.LoadError is not null) return "방 색인을 읽지 못해 보내지 않습니다.";
 
         var live = _rooms.GetOrAdd(roomId, id => new Live(id));
+        lock (_startGate) // 잠금 차례: _startGate → 방 Gate (TryHoldStarts와 같다)
         lock (live.Gate)
         {
+            if (_startsHeld) return StartsHeldError;
             var message = new QueuedMessage(Guid.NewGuid().ToString("N")[..10], text) { Pick = pick };
             if (live.Busy)
             {

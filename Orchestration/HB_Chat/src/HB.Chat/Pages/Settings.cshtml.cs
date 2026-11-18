@@ -10,7 +10,7 @@ namespace HB.Chat.Pages;
 /// </summary>
 public sealed class SettingsModel(
     RoomStore store, RoomHub hub, RoomList list, ChatTranscripts transcripts, IOptions<ChatOptions> options,
-    ProfileView profiles, FaceCatalog faces, RoomRuns runs, StickerPacks packs, CodexSettings codexSettings, CliVersions cliVersions) : PageModel
+    ProfileView profiles, FaceCatalog faces, RoomRuns runs, StickerPacks packs, CodexSettings codexSettings, CliVersions cliVersions, CliTools cliTools) : PageModel
 {
     // ---- Codex 구성원: 켤 수 있는 작업 폴더 · 실행 파일 · 이 계정 모델 ----
 
@@ -155,7 +155,7 @@ public sealed class SettingsModel(
         "theme" or "notify" or "profile" or "image-size" => "general",
         "addworkspace" or "removeworkspace" or "addunity" or "removeunity" or "measureunity" or "measure" or "rename" or "added" or "removed" or "renamed"
             or "appwrites" or "addappwritefolder" or "removeappwritefolder" or "appwrites-added" or "appwrites-removed" => "work",
-        "cliselftest" or "cli" or "codexworkspaces" or "codex" or "addmcpfields" or "addmcpjson" or "importmcp" or "removemcp"
+        "cliselftest" or "cli" or "clicheck" or "cliupdate" or "cli-checked" or "cli-updated" or "codexworkspaces" or "codex" or "addmcpfields" or "addmcpjson" or "importmcp" or "removemcp"
             or "mcp-added" or "mcp-secret" or "mcp-removed" => "connect",
         "stickerpack" or "pack" or "faces" => "decor",
         "backup" => "data",
@@ -191,6 +191,11 @@ public sealed class SettingsModel(
         "appwrites" => "앱 단계 폴더 밖 쓰기 설정을 바꿨습니다 — 방의 다음 실행부터 적용됩니다.",
         "appwrites-added" => "늘 허용 폴더를 더했습니다.",
         "appwrites-removed" => "늘 허용 폴더를 뺐습니다 — 그 폴더 쓰기는 다시 카드로 묻습니다.",
+        "cli-checked" => "CLI 버전을 확인했습니다.",
+        "cli-updated" => CliTools.LastUpdate is { } u
+            ? u.Ok ? $"{CliToolLabel(u.Tool)}: {u.Before ?? "?"} → {u.After ?? "?"}" + (u.Before == u.After ? " (바뀐 것 없음)" : "로 올렸습니다.")
+                : $"{CliToolLabel(u.Tool)}를 올리지 못했습니다 — CLI 도구 칸의 출력을 보세요."
+            : null,
         "cli" => Cli.LastTest is { } t ? t.Passed ? $"카드 자가 시험 통과 — claude CLI {t.Version}을 확인한 판으로 적었습니다." : "카드 자가 시험이 통과하지 못했습니다 — 아래 단계를 보세요." : null,
         _ => null,
     };
@@ -244,6 +249,12 @@ public sealed class SettingsModel(
     /// </summary>
     public async Task<IActionResult> OnPostCliSelfTest()
     {
+        if (cliTools.Busy) // 올리는 중인 claude로 시험하지 않는다
+        {
+            Error = CliTools.BusyError;
+            Fill();
+            return Page();
+        }
         var o = options.Value;
         var model = o.ModelList.Contains("haiku", StringComparer.Ordinal) ? "haiku" : o.ModelList[0];
         var result = await CliSelfTest.RunAsync(o.DataFolder, model, o.McpServer,
@@ -259,6 +270,45 @@ public sealed class SettingsModel(
         cliVersions.Save(result);
         hub.TouchAll(); // 사이드바 띠
         return Redirect("/Settings?done=cli#cli");
+    }
+
+    // ---- CLI 도구: codex · claude · Unity CLI 버전 확인 · 올리기 (정해 둔 명령만) ----
+
+    public CliTools CliTools => cliTools;
+
+    public static string CliToolLabel(string tool) => CliTools.Tools.FirstOrDefault(t => t.Name == tool).Label ?? tool;
+
+    /// <summary>설치 버전 · 최신 버전 확인 (최신은 네트워크 — 단추를 눌렀을 때만).</summary>
+    public async Task<IActionResult> OnPostCliCheck()
+    {
+        Error = await cliTools.CheckAsync(HttpContext.RequestAborted);
+        if (Error is null) return Redirect("/Settings?done=cli-checked#cli-tools");
+        Fill();
+        return Page();
+    }
+
+    /// <summary>
+    /// 한 도구 올리기 — 도는 방(화면 턴 · 백그라운드 작업이 남은 쉬는 실행)이나 자가 시험이 있으면 거절하고, 올리는 동안은 방이 새 말을 받지 않게
+    /// 막는다 (실행 중인 CLI를 바꾸지 않게). claude가 올라가면 본 판을 적어 "확인 필요" 띠가 뜨게 한다.
+    /// </summary>
+    public async Task<IActionResult> OnPostCliUpdate(string? tool)
+    {
+        if (CliSelfTest.Running) Error = "카드 자가 시험이 도는 중입니다 — 끝난 뒤 올리세요.";
+        else
+        {
+            using var hold = hub.TryHoldStarts(out var active);
+            // 방 색인의 RunStartedAt이 아니라 허브의 지금 상태로 센다 — 앱이 꺼지며 남은 표시에 막히지 않고, 쉬는 실행도 든다
+            Error = active > 0 ? $"방 {active}개가 도는 중입니다 (백그라운드 작업 포함) — 끝난 뒤 올리세요."
+                : hold is null ? CliTools.BusyError
+                : await cliTools.UpdateAsync(tool);
+        }
+        if (Error is null)
+        {
+            if (tool == CliTools.Claude && cliTools.LastUpdate?.After is { } version && cliVersions.Note(version)) hub.TouchAll();
+            return Redirect("/Settings?done=cli-updated#cli-tools");
+        }
+        Fill();
+        return Page();
     }
 
     /// <summary>요청을 받기 전에 막힌 오류 (리다이렉트 뒤 한 줄, 4차 B2) — Done처럼 코드만 받고 문구는 여기서 고른다.</summary>

@@ -14,6 +14,10 @@ public sealed class SettingsTabsTests(ChatApp app) : IClassFixture<ChatApp>
     [InlineData("added", null, "work")]
     [InlineData("renamed", null, "work")]
     [InlineData("cli", null, "connect")]
+    [InlineData("cli-checked", null, "connect")]
+    [InlineData("cli-updated", null, "connect")]
+    [InlineData(null, "CliUpdate", "connect")]
+    [InlineData(null, "CliCheck", "connect")]
     [InlineData("mcp-secret", null, "connect")]
     [InlineData("codex", null, "connect")]
     [InlineData("pack", null, "decor")]
@@ -48,6 +52,7 @@ public sealed class SettingsTabsTests(ChatApp app) : IClassFixture<ChatApp>
         Assert.Equal("work", TabOf("작업 폴더"));
         Assert.Equal("work", TabOf("Unity 프로젝트"));
         Assert.Equal("work", TabOf("방 이름"));
+        Assert.Equal("connect", TabOf("CLI 도구"));
         Assert.Equal("connect", TabOf("claude CLI · 카드 자가 시험"));
         Assert.Equal("connect", TabOf("Codex (단톡방 구성원)"));
         Assert.Equal("connect", TabOf("MCP 서버 (앱)"));

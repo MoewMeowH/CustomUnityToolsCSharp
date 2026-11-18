@@ -6,6 +6,7 @@ namespace HB.Chat.Tests;
 /// claude CLI 판 기록 · 카드 자가 시험: 처음 본 판은 확인한 판으로(결정), 판이 바뀌면 확인 필요, 자가 시험 통과면 확인한 판으로.
 /// 자가 시험은 가짜 claude 'hb-selftest' 모드로 — 통과 · 명령이 다름(실패) · 질문이 안 옴.
 /// </summary>
+[Collection(CliToolsPageTests.SelfTestCollection)] // 자가 시험 실행 여부는 전역 — 올리기 시험이 그 사이에 거절되지 않게 차례로
 public sealed class CliCheckTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "hbchat-cli-" + Guid.NewGuid().ToString("N"));

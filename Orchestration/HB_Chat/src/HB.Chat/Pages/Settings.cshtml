@@ -312,6 +312,65 @@
             </div>
 
             <div class="settings-tab" id="tab-connect" data-tab="connect" role="tabpanel" aria-labelledby="tab-btn-connect">
+                @* CLI 도구: codex · claude · Unity CLI 버전 확인 · 올리기 — 정해 둔 명령만 (결정 "도는 방이 있으면 거절" · "최신 확인은 단추로") *@
+                @{
+                    var tools = Model.CliTools;
+                    var toolPaths = tools.CurrentPaths;
+                }
+                <section class="u-panel-pad panel" id="cli-tools">
+                    <h3 class="u-sub-title">CLI 도구</h3>
+                    <p class="u-hint muted">
+                        이 앱이 쓰는 명령줄 도구의 버전을 확인하고 올립니다. 올리기는 도는 방이 없을 때만 됩니다 (최대 5분).
+                        claude를 올리면 아래 카드 자가 시험으로 확인하세요.
+                    </p>
+                        <table class="settings-table">
+                            <thead><tr><th>도구</th><th>설치 버전</th><th>최신 버전</th><th></th></tr></thead>
+                            <tbody>
+                                @foreach (var (toolName, toolLabel) in CliTools.Tools)
+                                {
+                                    var versions = tools.LastCheck?.Tools.GetValueOrDefault(toolName);
+                                    var (_, whyNot) = CliTools.UpdateCommand(toolName, toolPaths);
+                                    var same = versions is { Installed: not null } && versions.Installed == versions.Latest;
+                                    <tr>
+                                        <td>@toolLabel<br /><span class="muted mono" style="font-size:12px">@(toolPaths.Exe(toolName) ?? "찾지 못함")</span></td>
+                                        <td>@(versions?.Installed ?? "—")</td>
+                                        <td>@(versions?.Latest ?? "—")@(toolName == CliTools.Claude && versions?.Latest is not null ? " (npm 기준)" : "")</td>
+                                        <td>
+                                            @if (whyNot is not null)
+                                            {
+                                                <span class="muted" style="font-size:12.5px">@whyNot</span>
+                                            }
+                                            else
+                                            {
+                                                <form method="post" asp-page-handler="CliUpdate" onsubmit="this.querySelector('button').disabled = true; this.querySelector('button').textContent = '올리는 중… (최대 5분)';">
+                                                    <input type="hidden" name="tool" value="@toolName" />
+                                                    <button class="btn" type="submit" disabled="@(tools.Busy || same)">@(same ? "최신" : "올리기")</button>
+                                                </form>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    @if (tools.LastCheck is { } checkedAt)
+                    {
+                        <p class="muted" style="margin:6px 0 0;font-size:12.5px">마지막 확인 @checkedAt.At.ToLocalTime().ToString("MM-dd HH:mm")</p>
+                    }
+                    @if (tools.LastUpdate is { } update)
+                    {
+                        <p class="muted" style="margin:6px 0 0;font-size:12.5px">
+                            마지막 올리기 @update.At.ToLocalTime().ToString("MM-dd HH:mm") · @SettingsModel.CliToolLabel(update.Tool) · @(update.Before ?? "?") → @(update.After ?? "?") · @(update.Ok ? "성공" : "실패")
+                        </p>
+                        @if (update.Output.Length > 0)
+                        {
+                            <details open="@(!update.Ok)"><summary class="muted" style="font-size:12.5px">출력</summary><pre class="mono" style="white-space:pre-wrap;font-size:12px;margin:6px 0 0">@update.Output</pre></details>
+                        }
+                    }
+                    <form method="post" asp-page-handler="CliCheck" class="u-gap-above" onsubmit="this.querySelector('button').disabled = true; this.querySelector('button').textContent = '확인 중…';">
+                        <button class="btn" type="submit" disabled="@tools.Busy">@Icons.Svg("check") 버전 확인</button>
+                    </form>
+                </section>
+
                 @* claude CLI 판 · 카드 자가 시험 (결정 "사이드바 + 설정" · "설정 단추로만") *@
                 @{ var cli = Model.Cli; }
                 <section class="panel" id="cli" style="padding:12px 14px@(cli.NeedsCheck ? ";border-color:var(--warn)" : "")">

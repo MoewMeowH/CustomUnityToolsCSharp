@@ -58,6 +58,8 @@ builder.Services.AddSingleton(sp =>
 });
 // claude CLI 판 기록 (카드 자가 시험 · 확인하지 않은 판 띠)
 builder.Services.AddSingleton(sp => new CliVersions(() => sp.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder));
+// 설정 화면 CLI 도구 (codex · claude · Unity CLI 버전 확인 · 올리기)
+builder.Services.AddSingleton(sp => new CliTools(() => CliTools.Paths.From(sp.GetRequiredService<IOptions<ChatOptions>>().Value)));
 builder.Services.AddSingleton(sp =>
 {
     var options = sp.GetRequiredService<IOptions<ChatOptions>>();
