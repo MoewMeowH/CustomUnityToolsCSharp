@@ -88,14 +88,47 @@ CLL0001이 잡지 않는 것: 정적 타입이 인터페이스 · `object`인 �
 
 ## Unity (UPM 패키지, 6000.3+)
 
-1. `Packages/manifest.json`의 dependencies에 넣는다:
-   `"com.hb.lint": "https://github.com/MoewMeowH/CustomUnityToolsCSharp.git?path=HB_Lint/unity/com.hb.lint"`
-2. `Tools/HB Lint/설치` — 없는 것만 만든다: `Assets/HBLint/rules.json`(예시 규칙) · `rules.schema.json` · `Assets/HBLint/Rules/CLL.LintRules.asmdef`(HBLint.Attributes 참조, Auto Referenced) · `LintRules.g.cs`.
-3. Assembly-CSharp는 자동으로 검사된다. 다른 asmdef는 `CLL.LintRules`를 참조에 넣는다.
-4. 규칙은 `Tools/HB Lint/규칙 편집` 창(표 · 상세 칸 · 검증)이나 rules.json을 직접 고친다. rules.json을 저장하면 생성물이 자동으로 다시 만들어진다 (Project Settings > HB Lint에서 끌 수 있음). 오류는 콘솔에 `rules.json(줄,칸) [id] 메시지`로 나오고 생성물은 그대로 남는다.
-5. 경로 · 규칙 asmdef 이름 · 자동 생성은 `ProjectSettings/HBLintSettings.asset`(Project Settings > HB Lint).
+### 설치
+
+1. `Packages/manifest.json`의 `dependencies`에 한 줄 넣는다 (Package Manager > `+` > *Install package from git URL…*에 URL만 넣어도 된다):
+
+   ```json
+   "com.hb.lint": "https://github.com/MoewMeowH/CustomUnityToolsCSharp.git?path=HB_Lint/unity/com.hb.lint"
+   ```
+
+   특정 커밋에 고정하려면 URL 끝에 `#<커밋 해시>`를 붙인다. 고정하지 않으면 Package Manager에서 *Update*를 눌러야 새 판을 받는다 (packages-lock.json이 받은 커밋을 기억한다).
+2. 메뉴 `Tools/HB Lint/설치`를 누른다. 없는 것만 만든다:
+   - `Assets/HBLint/rules.json` — 예시 규칙 하나 (Unity 오브젝트에 `?.` · `??` · `??=` · `is null` 금지)
+   - `Assets/HBLint/rules.schema.json` — IDE · AI가 rules.json을 검사할 스키마
+   - `Assets/HBLint/Rules/CLL.LintRules.asmdef` — 규칙 asmdef (HBLint.Attributes 참조, Auto Referenced)
+   - `Assets/HBLint/Rules/LintRules.g.cs` — 생성물
+3. 컴파일이 끝나면 위반 코드에 `warning CLL0001`이 뜬다.
+
+**손으로 넣어 둔 설치가 있으면 먼저 지운다** — 패키지 이전 방식으로 `HBLint.Analyzers.dll` · 어트리뷰트 `.cs` · `LintRules.g.cs`를 `Assets/`에 직접 넣었다면, 그대로 두면 분석기와 어트리뷰트 타입이 두 벌이 되어 컴파일 에러가 난다. 그 파일들을 지운 뒤 설치한다 (규칙을 이어 쓰려면 지우기 전에 내용을 rules.json으로 옮긴다).
+
+### 어느 코드가 검사되나
+
+- **Assembly-CSharp**(asmdef 없는 스크립트)는 자동으로 검사된다.
+- **asmdef**는 `CLL.LintRules`를 *직접* 참조에 넣어야 검사된다. asmdef 참조는 간접으로 이어지지 않으므로 C → B → `CLL.LintRules`인 C는 검사되지 않는다. 검사할 asmdef마다 넣는다.
+- 패키지 · 플러그인 어셈블리도 분석기는 받지만 `CLL.LintRules`를 참조하지 않으면 규칙이 없어 아무것도 하지 않는다.
+
+### 규칙 고치기
+
+- `Tools/HB Lint/규칙 편집` — 왼쪽 표에서 규칙을 고르고 오른쪽 칸을 고친다. 고칠 때마다 아래 "검증"에 오류가 보인다 (규칙 타입이 실제로 있는지까지). *규칙 더하기* · *복제* · *지우기* · *저장*.
+- rules.json을 텍스트로 직접 고쳐도 된다 (`$schema` 덕분에 Rider · VS Code에서 자동 완성 · 검사).
+- 저장하면 생성물이 자동으로 다시 만들어진다. 오류가 있으면 콘솔에 `rules.json(줄,칸) [id] 메시지`로 나오고 생성물은 그대로 남는다.
+- `Tools/HB Lint/다시 생성` — 손으로 다시 만들 때.
 
 `Severity = Error`인 규칙은 Unity 컴파일을 막는다. 패키지 에디터 코드는 Assembly-CSharp와 따로라 그때도 편집 창 · 메뉴는 쓸 수 있다.
+
+### 설정
+
+Project Settings > HB Lint (`ProjectSettings/HBLintSettings.asset`, git에 올려 팀이 같이 씀): rules.json 경로 · 생성물 경로 · 규칙 asmdef 이름 · 저장하면 자동 생성. 규칙 asmdef 이름을 바꿔도 이미 있는 asmdef는 바꾸지 않는다 (같은 폴더에 asmdef가 둘이면 컴파일이 막히므로) — 이름을 바꾸려면 그 asmdef를 직접 고친다.
+
+### 알아 둘 것
+
+- 규칙 타입 오타 경고 CLL9001은 위치 없는 진단이라 Unity 콘솔에 안 보인다. 대신 Unity는 생성 단계에서 타입을 확인해 rules.json 줄과 함께 막는다.
+- 편집 창에서 저장하지 않은 편집은 스크립트 컴파일(도메인 리로드)에도 남는다. 연 뒤에 rules.json이 밖에서(git pull 등) 바뀌었으면 저장할 때 덮어쓸지 묻는다.
 
 ## 시험
 

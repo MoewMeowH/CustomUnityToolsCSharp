@@ -10,6 +10,7 @@ AI 에 익숙해지고 익숙해지는 김에 평소 필요하다 느꼈던 툴�
 |---|---|---|---|
 | [`EString/`](EString/README.md) | Roslyn 소스 생성기 | `[E2String]`이 붙은 enum에 박싱·할당 없는 문자열/정수 변환 확장 메서드를 생성 | Unity (dll 복사) |
 | [`UnityTestFrameWorkChecker/`](UnityTestFrameWorkChecker/README.md) | Roslyn 분석기 + 코드 수정 | `[NeedSlotNullCheck]` 슬롯 필드의 타입과 `[SerializeField]` 누락을 컴파일 단계에서 검사 | Unity (dll 복사) / Rider |
+| [`HB_Lint/`](HB_Lint/README.md) | Roslyn 분석기 + 규칙 생성기 + Unity 패키지 | `rules.json`에 적은 팀 규칙(예: Unity 오브젝트에 `?.` 금지)을 컴파일 경고 · 에러로 강제. Unity 에디터에서 규칙 편집 창 · 자동 생성 | Unity (UPM git URL) / .NET |
 | [`Orchestration/HB_Orchestration/`](Orchestration/HB_Orchestration/README.md) | MCP 서버 + 대시보드 | Claude Code를 지휘자로 두고 GPT · Gemini · DeepSeek · Codex를 모드 단위로 호출 (리뷰 · 설계 검토 · 조사) | Claude Code (Unity 프로젝트에서 실행) |
 | [`Orchestration/HB_Chat/`](Orchestration/HB_Chat/README.md) | 웹 채팅 앱 + 데스크톱 앱 | Claude Code를 브라우저 · 데스크톱 창에서 방 단위로 쓰는 채팅 화면 (단톡방 · 승인 카드 · 곁칸) | 로컬 PC |
 
@@ -24,6 +25,10 @@ ToolWithCS/
 ├─ UnityTestFrameWorkChecker/
 │  └─ HB_TestFrameworkHelper/    ← 분석기 · 코드 수정 소스 (.sln, .csproj)
 │     └─ bin/Release/netstandard2.0/HB_TestFrameworkHelper.dll     ← Unity에 넣는 dll
+├─ HB_Lint/                      ← 솔루션 HB_Lint.slnx (자세한 설명은 이 폴더의 README)
+│  ├─ unity/com.hb.lint/         ← Unity 패키지 (UPM) — 분석기 dll · 어트리뷰트 · 생성기 · 에디터 소스 원본
+│  ├─ src/ · tests/              ← 분석기 · 생성기 CLI, dotnet 테스트
+│  └─ tools/Build-UnityPackage.ps1 ← 분석기를 빌드해 패키지에 넣음
 ├─ Orchestration/
 │  ├─ HB_Orchestration/          ← 솔루션 · 배치 (자세한 설명은 이 폴더의 README · manual/)
 │  │  ├─ src/ · tests/           ← MCP 서버 · 대시보드 · 공용 코드, xunit 테스트
@@ -40,12 +45,16 @@ ToolWithCS/
 |---|---|---|
 | EString | `netstandard2.0` | .NET SDK (6 이상이면 충분). `Microsoft.CodeAnalysis.CSharp` 4.3.0 (`IIncrementalGenerator`) — Unity 6.3 이상 (Unity 6은 생성기에 Roslyn 4.3을 요구) |
 | UnityTestFrameWorkChecker | `netstandard2.0` | .NET SDK (6 이상이면 충분). Roslyn 3.8.0 분석기 — Unity 6.3 이상 (분석기는 더 새 컴파일러에서도 로드됨) |
+| HB_Lint | `netstandard2.0` (분석기 · 패키지 코드) · `net10.0` (CLI · 테스트) | .NET 10 SDK. 분석기는 `Microsoft.CodeAnalysis.CSharp` 4.3.0 — Unity 6.3 이상 |
 | HB_Orchestration | `net10.0` | .NET 10 SDK (없으면 `Directory.Build.props`에서 `net9.0`으로 변경) |
 
 ```powershell
 # Unity용 dll 두 개 (Release)
 dotnet build EString/Script/EString.csproj -c Release
 dotnet build UnityTestFrameWorkChecker/HB_TestFrameworkHelper/HB_TestFrameworkHelper.csproj -c Release
+
+# HB_Lint 분석기를 고쳤으면 패키지 dll 갱신 (Release 빌드 → unity/com.hb.lint/Analyzers/)
+powershell -ExecutionPolicy Bypass -File HB_Lint/tools/Build-UnityPackage.ps1
 
 # 오케스트레이션은 배치 메뉴로 (publish · 대시보드)
 Orchestration/HB_Orchestration/HB_Orchestration.bat
@@ -55,6 +64,7 @@ Rider에서는 각 폴더의 솔루션을 따로 엽니다.
 
 - `UnityTestFrameWorkChecker/HB_TestFrameworkHelper/HB_TestFrameworkHelper.sln`
 - `Orchestration/HB_Orchestration/HB_Orchestration.slnx`
+- `HB_Lint/HB_Lint.slnx`
 - EString은 솔루션이 없으므로 `EString/Script/EString.csproj`를 직접 엽니다.
 
 ## Git 정책 (`.gitignore`)
@@ -73,5 +83,6 @@ Orchestration/Publish_Output/               ← publish 결과
 - **Unity에 넣는 Release dll 두 개만 일부러 커밋합니다.** Unity 프로젝트에 바로 복사해 쓸 수 있게 하려는 것입니다. 같은 폴더의 `.pdb` · `.deps.json`, `bin/Debug/`, 언어별 리소스 폴더는 커밋하지 않습니다.
   소스를 고치면 **Release로 다시 빌드한 뒤 dll도 같이 커밋**해야 합니다. 그렇지 않으면 소스와 dll이 어긋납니다.
 - 커밋할 dll을 새로 추가하거나 이름을 바꾸면 `.gitignore`의 `!` 예외 줄도 같이 고쳐야 합니다.
+- HB_Lint 패키지의 분석기 dll(`HB_Lint/unity/com.hb.lint/Analyzers/HBLint.Analyzers.dll`)은 `bin/` 밖이라 예외 없이 커밋됩니다. 분석기 소스를 고치면 `HB_Lint/tools/Build-UnityPackage.ps1`로 다시 넣고 같이 커밋합니다. 그 옆 `.meta`(라벨 `RoslynAnalyzer` · 모든 플랫폼 끔)는 Unity가 만든 것을 그대로 둡니다.
 - Orchestration은 빌드 산출물을 커밋하지 않습니다. `Publish_Output/`은 배치가 매번 다시 만듭니다.
 - API 키는 어떤 파일에도 넣지 않습니다. 시스템 환경 변수로만 둡니다 (`OPENAI_API_KEY` · `GEMINI_API_KEY` · `FIREWORKS_API_KEY` — [에이전트 설정](Orchestration/HB_Orchestration/manual/agents.md)).
