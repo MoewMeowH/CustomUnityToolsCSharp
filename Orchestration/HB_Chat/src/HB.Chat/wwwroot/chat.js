@@ -1235,8 +1235,12 @@
             if (disposed || seq !== docSeq) return;
             docPath = path;
             $("#docs-path").textContent = path;
-            $("#docs-body").replaceChildren(...(html !== null ? parseHtml(html)
+            const body = $("#docs-body");
+            body.replaceChildren(...(html !== null ? parseHtml(html)
                 : [el("p", "muted", "문서를 열지 못했습니다 (" + (res?.status ?? "연결 끊김") + ") — 작업 폴더 docs의 계획서 · 작업 로그만 열립니다.")]));
+            // 말풍선처럼 Mermaid · 차트를 그리고 코드 복사 단추를 붙인다 (위젯 · 슬라이드는 말풍선만). 자동 그리기 수는 문서마다 새로 센다
+            delete body.dataset.sheets;
+            if (html !== null) decorate(body);
             docsList.hidden = true;
             docsView.hidden = false;
             docsSec.scrollTop = 0;

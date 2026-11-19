@@ -53,6 +53,11 @@ public sealed class ChatScriptTests(ChatApp app, ChatBrowser browser) : IClassFi
         page.AssertNoErrors();
     }
 
+    // 곁칸을 열고 그 탭으로. 시험들이 브라우저 프로필(localStorage)을 같이 써서, 앞 시험이 곁칸을 연 채 끝나면 "열림"이 되살아난다
+    // — 닫혀 있을 때만 누른다 (무조건 누르면 도로 닫혀 실행 순서에 따라 깨진다)
+    private static string OpenSideTab(string tab) =>
+        "(() => { const t = document.querySelector('#side-toggle'); if (t.getAttribute('aria-expanded') !== 'true') t.click(); document.querySelector('#side-tab-" + tab + "').click(); })()";
+
     /// <summary>곁칸 문서 탭: 목록 → 로그 본문 → 본문 속 계획서 링크(같은 칸) → 목록. 턴 끝 곁칸 다시 받기에도 본문이 남는다.</summary>
     [Fact]
     public async Task SideDocs_ListOpenFollowLinkBack()
@@ -65,7 +70,7 @@ public sealed class ChatScriptTests(ChatApp app, ChatBrowser browser) : IClassFi
         File.WriteAllText(Path.Combine(docs, "worklog", "2026-10-30_곁칸-문서.md"), "[계획서](../plans/2026-10-30_곁칸-문서.md)\n\n# 로그 본문\n");
         var room = app.Room("docs-tab", ChatApp.User("q", 0), ChatApp.Conductor("first", 1));
         await using var page = await browser.OpenAsync(app.RoomUrl(room));
-        await page.EvalAsync("document.querySelector('#side-toggle').click(); document.querySelector('#side-tab-docs').click()");
+        await page.EvalAsync(OpenSideTab("docs"));
         await page.WaitForAsync("!!document.querySelector('#docs-list a.docs-log')", "문서 목록", TimeSpan.FromSeconds(10));
         Assert.Contains("곁칸 문서", await page.EvalAsync<string>("document.querySelector('#docs-list').textContent"));
 
@@ -95,6 +100,42 @@ public sealed class ChatScriptTests(ChatApp app, ChatBrowser browser) : IClassFi
         page.AssertNoErrors();
     }
 
+    /// <summary>곁칸 문서 본문 (2026-11-19): Mermaid · 차트는 말풍선처럼 그리고, 위젯 · 슬라이드는 코드 그대로. 문법 오류는 이유 한 줄 + 코드.</summary>
+    [Fact]
+    public async Task SideDocs_DrawsMermaidAndChart_WidgetStaysCode()
+    {
+        if (!browser.Available) return;
+        var docs = Path.Combine(app.Dir, "ws", "DocsDraw", "docs");
+        Directory.CreateDirectory(Path.Combine(docs, "plans"));
+        File.WriteAllText(Path.Combine(docs, "plans", "2026-11-19_문서-도표.md"),
+            "# 도표 본문\n\n```mermaid\nflowchart LR\n  A[문서 시작] --> B[끝]\n```\n\n```mermaid\nflowchart LR\n  A -->\n```\n\n" +
+            "```chart\n{\"type\":\"bar\",\"data\":{\"labels\":[\"가\",\"나\"],\"datasets\":[{\"label\":\"값\",\"data\":[1,2]}]}}\n```\n\n" +
+            "```widget\n<p>위젯</p>\n```\n\n```slides\n{\"slides\":[{\"title\":\"장\"}]}\n```\n");
+        var room = app.Room("docs-draw", ChatApp.User("q", 0), ChatApp.Conductor("first", 1));
+        await using var page = await browser.OpenAsync(app.RoomUrl(room));
+        await page.EvalAsync(OpenSideTab("docs"));
+        await page.WaitForAsync("!!document.querySelector('#docs-list a[data-doc$=\"2026-11-19_문서-도표.md\"]')", "문서 목록", TimeSpan.FromSeconds(10));
+        await page.EvalAsync("document.querySelector('#docs-list a[data-doc$=\"2026-11-19_문서-도표.md\"]').click()");
+        await page.WaitForAsync("!!document.querySelector('#docs-body iframe.mermaid-frame') && !!document.querySelector('#docs-body .widget.mermaid .widget-note')" +
+            " && !!document.querySelector('#docs-body iframe.chart-frame')", "문서 도표 · 오류 한 줄 · 차트", TimeSpan.FromSeconds(20));
+
+        const string Frame = "document.querySelector('#docs-body iframe.mermaid-frame')";
+        Assert.Equal("", await page.EvalAsync<string>($"{Frame}.getAttribute('sandbox')"));
+        var srcdoc = await page.EvalAsync<string>($"{Frame}.srcdoc");
+        Assert.Contains("문서 시작", srcdoc);
+        Assert.DoesNotContain("<script", srcdoc);
+        Assert.Contains("Parse error", await page.EvalAsync<string>("document.querySelector('#docs-body .widget.mermaid .widget-note').dataset.note"));
+        Assert.Equal("\"문서 글로 앱이 그린 도표\"",
+            await page.EvalAsync<string>("getComputedStyle(document.querySelector('#docs-body .widget.mermaid .widget-bar'), '::before').content"));
+        Assert.Equal("\"문서 데이터로 앱이 그린 차트\"",
+            await page.EvalAsync<string>("getComputedStyle(document.querySelector('#docs-body .widget.chart .widget-bar'), '::before').content"));
+        // 위젯 · 슬라이드는 말풍선 전용 — 문서에서는 코드 블록(복사 단추 포함) 그대로
+        Assert.Equal(2, await page.EvalAsync<int>("document.querySelectorAll('#docs-body pre > code.language-widget, #docs-body pre > code.language-slides').length"));
+        Assert.Equal(0, await page.EvalAsync<int>("document.querySelectorAll('#docs-body .widget.slides, #docs-body iframe:not(.mermaid-frame):not(.chart-frame)').length"));
+        Assert.True(await page.EvalAsync<bool>("!!document.querySelector('#docs-body code.language-widget').parentElement.querySelector(':scope > .copy')"));
+        page.AssertNoErrors();
+    }
+
     /// <summary>문서 탭을 열어 둔 채 턴이 끝나면 "이 방에서 다룬 문서"를 다시 받는다 (목록 화면일 때만).</summary>
     [Fact]
     public async Task SideDocs_TurnEnd_RefreshesRoomList()
@@ -106,7 +147,7 @@ public sealed class ChatScriptTests(ChatApp app, ChatBrowser browser) : IClassFi
         File.WriteAllText(plan, "# 턴 끝");
         var room = app.Room("docs-turn", ChatApp.User("q", 0), ChatApp.Conductor("first", 1));
         await using var page = await browser.OpenAsync(app.RoomUrl(room));
-        await page.EvalAsync("document.querySelector('#side-toggle').click(); document.querySelector('#side-tab-docs').click()");
+        await page.EvalAsync(OpenSideTab("docs"));
         await page.WaitForAsync("(document.querySelector('#docs-list').textContent || '').includes('이 방에서 다룬 계획서 · 로그가 없습니다')", "빈 방 목록", TimeSpan.FromSeconds(10));
 
         // 이 턴에 지휘자가 그 계획서를 읽은 것으로 — 턴이 끝나며 붙는 줄 앞에 둔다
@@ -409,7 +450,7 @@ public sealed class ChatScriptTests(ChatApp app, ChatBrowser browser) : IClassFi
         Assert.Equal(1, await page.EvalAsync<int>("[...document.querySelectorAll('#chat a.attach')].filter(a => !a.querySelector('img') && a.target === '_blank').length"));
 
         // 곁칸 첨부 탭의 그림 줄도 같은 크게 보기 — Esc로 닫힌다 (사용자 보고: "첨부에서 이미지 클릭하면 x 버튼이 없엉" — 곁칸 첨부 탭)
-        await page.EvalAsync("document.querySelector('#side-toggle').click(); document.querySelector('#side-tab-files').click()");
+        await page.EvalAsync(OpenSideTab("files"));
         await page.WaitForAsync("!!document.querySelector('#side-sec-files a.attach-image')", "곁칸 첨부 그림 줄", ChatPage.TurnWait);
         Assert.Equal(1, await page.EvalAsync<int>("document.querySelectorAll('#side-sec-files a.attach-image').length")); // notes.txt는 링크 그대로
         await page.EvalAsync("document.querySelector('#side-sec-files a.attach-image').click()");

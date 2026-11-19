@@ -118,11 +118,11 @@
         if (!isChart(config)) return { error: "차트 종류(type)가 없거나 지원하지 않는 종류라 코드로만 보입니다." };
         return { config };
     }
-    // 이 말풍선에서 바로 그릴 차례인지 (차트 · 슬라이드를 같이 센다, 그릴 수 있는 것만) — 넘으면 "그리기" 단추
+    // 이 말풍선 · 곁칸 문서에서 바로 그릴 차례인지 (차트 · 슬라이드 · 도표를 같이 센다, 그릴 수 있는 것만) — 넘으면 "그리기" 단추
     function autoDrawSlot(box) {
-        const msg = box.closest(".msg");
-        const nth = Number(msg.dataset.sheets || 0) + 1;
-        msg.dataset.sheets = String(nth);
+        const scope = box.closest(".msg, .docs-body"); // 말풍선 하나 · 곁칸 문서 하나마다 센다
+        const nth = Number(scope.dataset.sheets || 0) + 1;
+        scope.dataset.sheets = String(nth);
         return nth <= ChartAutoMax;
     }
     // <script> 안에 넣을 JSON: 글이 </script>나 <!--로 틀을 깨지 못하게 < > & 와 줄 구분 문자를 \u 이스케이프 (JSON.parse로는 같은 값)
@@ -190,7 +190,7 @@
         document.documentElement.classList.add("print-one");
     }
     function charts(container) {
-        container.querySelectorAll(".msg.conductor .body pre > code.language-chart").forEach(code => {
+        container.querySelectorAll(".msg.conductor .body pre > code.language-chart, .docs-body pre > code.language-chart").forEach(code => {
             const pre = code.parentElement;
             if (pre.closest(".widget")) return;
             const box = el("div", "widget chart");
@@ -348,7 +348,7 @@
         });
     }
     // ---- Mermaid 도표 ----
-    // 지휘자 말풍선의 ```mermaid(Mermaid 문법 글)를 앱이 넣어 둔 Mermaid 12.3.0(wwwroot/lib)으로 그린다.
+    // 지휘자 말풍선 · 곁칸 문서 본문의 ```mermaid(Mermaid 문법 글)를 앱이 넣어 둔 Mermaid 12.3.0(wwwroot/lib)으로 그린다.
     // Mermaid가 5.5MB라 도표마다 틀에 넣지 않는다: 페이지에 하나뿐인 그리기 틀(allow-scripts, 같은 문서 CSP)이 SVG를 만들고,
     // 말풍선에는 스크립트 없는 틀(sandbox="")에 그 SVG만 넣는다. 그리기 틀은 display:none이면 글자 크기를 못 재 도표가 쪼그라든다 (실측)
     // — 슬라이드 인쇄용 틀처럼 화면 안에 투명하게 둔다.
@@ -471,7 +471,7 @@
     // 서버 Markdig(UseAdvancedExtensions의 diagrams)는 ```mermaid를 pre > code가 아니라 code 없는 <pre class="mermaid">(이스케이프된 글)로 낸다
     // — 그 글을 읽고, 코드 보기 · 오류 때 보일 코드 블록은 여기서 만든다 (다른 코드 블록처럼 복사 단추가 붙는다)
     function mermaids(container) {
-        container.querySelectorAll(".msg.conductor .body pre.mermaid").forEach(raw => {
+        container.querySelectorAll(".msg.conductor .body pre.mermaid, .docs-body pre.mermaid").forEach(raw => {
             if (raw.closest(".widget")) return;
             const source = raw.textContent;
             const pre = el("pre"), code = el("code", "language-mermaid");
