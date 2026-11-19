@@ -25,8 +25,10 @@ internal static class LintHarness
 
     private static readonly CSharpCompilationOptions Options = new(OutputKind.DynamicallyLinkedLibrary);
 
+    // 시험 프로세스의 어셈블리 목록에는 시험 프로젝트가 참조한 HBLint.* 가 섞여 있다 — 빼야 "참조 안 함" 시험이 정말 참조 없이 돈다
     private static readonly IReadOnlyList<MetadataReference> Bcl =
         ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator)
+        .Where(p => !Path.GetFileName(p).StartsWith("HBLint.", StringComparison.Ordinal))
         .Select(p => (MetadataReference)MetadataReference.CreateFromFile(p))
         .ToList();
 

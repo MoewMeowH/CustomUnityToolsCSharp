@@ -142,6 +142,32 @@ public class BanNullOperatorAnalyzerTests
     }
 
     [Fact]
+    public void 어트리뷰트_어셈블리를_참조하지_않아도_Severity_enum이_든_규칙이_동작()
+    {
+        // 생성물은 Severity(enum)를 늘 쓴다. Unity에서 규칙 asmdef만 참조한 asmdef는 HBLint.Attributes를 받지 못한다
+        const string rule =
+            """[assembly: HBLint.BanNullOperatorRule("UnityEngine.Object", "m", Requires = new[] { "UnityEngine.CoreModule" }, Severity = HBLint.LintSeverity.Error)]""";
+        var rules = Emit(Rules(rule));
+
+        var diagnostics = Analyze(Compile("Game", FiveViolations, Unity, rules));
+
+        Assert.Equal(5, diagnostics.Length);
+        Assert.All(diagnostics, d => Assert.Equal(DiagnosticSeverity.Error, d.Severity));
+    }
+
+    [Fact]
+    public void 규칙_어셈블리가_컴파일_참조이고_어트리뷰트_어셈블리를_참조하지_않아도_동작()
+    {
+        // IDE에서 Unity asmdef 참조는 프로젝트(컴파일) 참조로 들어온다
+        var rules = Rules(UnityRule + "\n" + """[assembly: HBLint.BanNullOperatorRule("UnityEngine.Component", "c", Severity = HBLint.LintSeverity.Error)]""").ToMetadataReference();
+
+        var diagnostics = Analyze(Compile("Game", FiveViolations, Unity, rules));
+
+        Assert.Equal(10, diagnostics.Length);
+        Assert.Equal(5, diagnostics.Count(d => d.Severity == DiagnosticSeverity.Error));
+    }
+
+    [Fact]
     public void 같은_어셈블리_안의_규칙도_동작()
     {
         var compilation = Compile("Game", new[] { ("LintRules.cs", UnityRule), ("Foo.cs", FiveViolations) }, Unity, Attributes);

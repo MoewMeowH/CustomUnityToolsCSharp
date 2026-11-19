@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -17,12 +18,13 @@ namespace HBLint.Generator
     /// <summary>규칙 종류의 칸 하나 (생성자 매개변수 = 필수, 설정 가능한 속성 = 선택).</summary>
     public sealed class RuleField
     {
-        internal RuleField(string clrName, RuleValueKind kind, bool required, Type? enumType)
+        internal RuleField(string clrName, RuleValueKind kind, bool required, Type? enumType, bool isTypeName = false)
         {
             ClrName = clrName;
             JsonName = char.ToLowerInvariant(clrName[0]) + clrName.Substring(1);
             Kind = kind;
             Required = required;
+            IsTypeName = isTypeName;
             if (enumType != null)
             {
                 EnumTypeName = enumType.FullName!.Replace('+', '.');
@@ -39,6 +41,9 @@ namespace HBLint.Generator
         public RuleValueKind Kind { get; }
 
         public bool Required { get; }
+
+        /// <summary>생성자 매개변수에 [HBLint.TypeName]이 붙어 값이 타입 메타데이터 이름이다.</summary>
+        public bool IsTypeName { get; }
 
         public string? EnumTypeName { get; }
 
@@ -125,7 +130,7 @@ namespace HBLint.Generator
                 throw new RuleCatalogException($"{type.FullName}: public 생성자가 하나여야 합니다 (지금 {constructors.Length}개)");
 
             var parameters = constructors[0].GetParameters()
-                .Select(p => new RuleField(p.Name!, ValueKind(type, p.Name!, p.ParameterType), required: true, EnumOf(p.ParameterType)))
+                .Select(p => new RuleField(p.Name!, ValueKind(type, p.Name!, p.ParameterType), required: true, EnumOf(p.ParameterType), IsTypeName(p)))
                 .ToList();
             var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
                 .Where(p => p.CanWrite && p.SetMethod!.IsPublic)
@@ -158,5 +163,9 @@ namespace HBLint.Generator
         }
 
         private static Type? EnumOf(Type type) => type.IsEnum ? type : null;
+
+        /// <summary>[HBLint.TypeName]이 붙었나 — 이름으로 본다 (어트리뷰트 어셈블리를 참조하지 않으므로).</summary>
+        private static bool IsTypeName(ParameterInfo parameter) =>
+            parameter.GetCustomAttributes(inherit: false).Any(a => a.GetType().FullName == Namespace + ".TypeNameAttribute");
     }
 }

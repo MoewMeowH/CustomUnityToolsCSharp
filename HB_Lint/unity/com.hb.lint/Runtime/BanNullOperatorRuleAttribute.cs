@@ -14,7 +14,7 @@ namespace HBLint
     {
         /// <param name="type">대상 타입 메타데이터 이름 (예 "UnityEngine.Object", 중첩은 "Outer+Inner"). typeof 대신 문자열이라 규칙 어셈블리가 그 타입의 어셈블리를 참조하지 않아도 된다.</param>
         /// <param name="message">진단 메시지 그대로.</param>
-        public BanNullOperatorRuleAttribute(string type, string message)
+        public BanNullOperatorRuleAttribute([TypeName] string type, string message)
         {
             Type = type;
             Message = message;

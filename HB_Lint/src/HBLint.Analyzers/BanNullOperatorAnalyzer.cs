@@ -35,22 +35,22 @@ namespace HBLint.Analyzers
 
             foreach (var source in LintRuleReader.Read(compilation, AttributeFullName))
             {
-                if (!LintRuleReader.RequirementsMet(compilation, source.Data))
+                if (!LintRuleReader.RequirementsMet(compilation, source))
                     continue;
 
-                var typeName = LintRuleReader.GetConstructorString(source.Data, 0);
+                var typeName = source.GetConstructorString(0);
                 var type = string.IsNullOrEmpty(typeName) ? null : compilation.GetTypeByMetadataName(typeName!);
                 if (type == null)
                 {
                     notFound.Add(Diagnostic.Create(Descriptors.RuleTypeNotFound, Location.None,
-                        source.Data.AttributeClass?.Name, source.Owner.Name, typeName ?? string.Empty));
+                        source.AttributeName, source.Owner.Name, typeName ?? string.Empty));
                     continue;
                 }
 
-                var message = LintRuleReader.GetConstructorString(source.Data, 1);
+                var message = source.GetConstructorString(1);
                 if (string.IsNullOrEmpty(message))
                     message = $"'{typeName}' 계열에는 null 연산자(?. · ?? · ??= · is null)를 쓰지 않습니다";
-                rules.Add(new Rule(type, message!, LintRuleReader.GetSeverity(source.Data)));
+                rules.Add(new Rule(type, message!, LintRuleReader.GetSeverity(source)));
             }
 
             if (notFound.Count > 0)

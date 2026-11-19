@@ -15,53 +15,37 @@ namespace HBLint.Analyzers
         public static List<LintRule> Read(Compilation compilation, string attributeFullName)
         {
             var result = new List<LintRule>();
-            Collect(compilation.Assembly, attributeFullName, result);
+            Collect(compilation, compilation.Assembly, attributeFullName, result);
             foreach (var assembly in compilation.SourceModule.ReferencedAssemblySymbols)
             {
                 // Unity 컴파일은 참조가 수백 개라 어트리뷰트 어셈블리를 참조하는 것만 본다.
                 if (ReferencesAttributes(assembly))
-                    Collect(assembly, attributeFullName, result);
+                    Collect(compilation, assembly, attributeFullName, result);
             }
             return result;
         }
 
         /// <summary>규칙의 Requires 어셈블리를 검사 중인 컴파일이 모두 참조하는가.</summary>
-        public static bool RequirementsMet(Compilation compilation, AttributeData rule)
+        public static bool RequirementsMet(Compilation compilation, LintRule rule)
         {
-            var requires = GetNamedArgument(rule, "Requires");
-            if (requires.IsNull || requires.Kind != TypedConstantKind.Array)
+            var requires = rule.GetNamed("Requires") as object?[];
+            if (requires == null)
                 return true;
 
             var referenced = new HashSet<string>(compilation.ReferencedAssemblyNames.Select(n => n.Name));
-            foreach (var value in requires.Values)
+            foreach (var value in requires)
             {
-                if (value.Value is string name && !referenced.Contains(name))
+                if (value is string name && !referenced.Contains(name))
                     return false;
             }
             return true;
         }
 
-        public static DiagnosticSeverity GetSeverity(AttributeData rule)
+        public static DiagnosticSeverity GetSeverity(LintRule rule)
         {
-            var severity = GetNamedArgument(rule, "Severity");
-            return severity.Value is int value
+            return rule.GetNamed("Severity") is int value
                 ? LintSeverityValues.ToDiagnosticSeverity(value)
                 : DiagnosticSeverity.Warning;
-        }
-
-        public static string? GetConstructorString(AttributeData rule, int index)
-        {
-            return rule.ConstructorArguments.Length > index ? rule.ConstructorArguments[index].Value as string : null;
-        }
-
-        private static TypedConstant GetNamedArgument(AttributeData rule, string name)
-        {
-            foreach (var pair in rule.NamedArguments)
-            {
-                if (pair.Key == name)
-                    return pair.Value;
-            }
-            return default;
         }
 
         private static bool ReferencesAttributes(IAssemblySymbol assembly)
@@ -77,27 +61,81 @@ namespace HBLint.Analyzers
             return false;
         }
 
-        private static void Collect(IAssemblySymbol assembly, string attributeFullName, List<LintRule> result)
+        private static void Collect(Compilation compilation, IAssemblySymbol assembly, string attributeFullName, List<LintRule> result)
         {
-            foreach (var attribute in assembly.GetAttributes())
+            var resolved = FromAttributes(assembly.GetAttributes(), assembly, attributeFullName, out var unresolved);
+            if (!unresolved)
             {
-                if (attribute.AttributeClass?.ToDisplayString() == attributeFullName)
-                    result.Add(new LintRule(attribute, assembly));
+                result.AddRange(resolved);
+                return;
             }
+
+            // 검사 중인 컴파일이 HBLint.Attributes를 참조하지 않으면(Unity asmdef 참조는 간접으로 이어지지 않는다)
+            // 어트리뷰트 타입을 못 찾아 인자가 비어 읽힌다. 그 어셈블리의 규칙은 한 경로로만 읽는다 (섞으면 같은 규칙이 두 번 들어간다):
+            // IDE의 프로젝트 참조면 원래 컴파일(어트리뷰트가 풀린 곳)에서, DLL이면 메타데이터에서 직접.
+            if (compilation.GetMetadataReference(assembly) is CompilationReference source)
+                result.AddRange(FromAttributes(source.Compilation.Assembly.GetAttributes(), assembly, attributeFullName, out _));
+            else
+                result.AddRange(MetadataRuleReader.Read(compilation, assembly, attributeFullName));
+        }
+
+        private static List<LintRule> FromAttributes(IEnumerable<AttributeData> attributes, IAssemblySymbol owner, string attributeFullName, out bool unresolved)
+        {
+            var rules = new List<LintRule>();
+            unresolved = false;
+            foreach (var attribute in attributes)
+            {
+                if (attribute.AttributeClass?.ToDisplayString() != attributeFullName)
+                    continue;
+                if (attribute.AttributeConstructor == null)
+                {
+                    unresolved = true;
+                    continue;
+                }
+                rules.Add(new LintRule(
+                    attribute.AttributeClass.Name,
+                    owner,
+                    attribute.ConstructorArguments.Select(Convert).ToArray(),
+                    attribute.NamedArguments.ToDictionary(p => p.Key, p => Convert(p.Value))));
+            }
+            return rules;
+        }
+
+        /// <summary>문자열 · 정수(enum은 기반 값) · 배열(object?[])로.</summary>
+        private static object? Convert(TypedConstant constant)
+        {
+            if (constant.Kind != TypedConstantKind.Array)
+                return constant.Value;
+            return constant.IsNull ? null : constant.Values.Select(Convert).ToArray();
         }
     }
 
-    /// <summary>규칙 어트리뷰트 하나와 그것이 붙은 어셈블리 (메타데이터 참조면 어트리뷰트에 소스 위치가 없어 진단에 어셈블리 이름을 쓴다).</summary>
-    internal readonly struct LintRule
+    /// <summary>
+    /// 규칙 어트리뷰트 하나 — 인자를 문자열 · 정수 · 배열로 고른 것. 어트리뷰트 타입을 찾았든(AttributeData)
+    /// 못 찾아 메타데이터에서 읽었든 같은 모양이다. Owner는 규칙이 붙은 어셈블리 (진단 메시지에 이름을 쓴다).
+    /// </summary>
+    internal sealed class LintRule
     {
-        public LintRule(AttributeData data, IAssemblySymbol owner)
+        private readonly IReadOnlyList<object?> _constructorArguments;
+        private readonly IReadOnlyDictionary<string, object?> _namedArguments;
+
+        public LintRule(string attributeName, IAssemblySymbol owner, IReadOnlyList<object?> constructorArguments, IReadOnlyDictionary<string, object?> namedArguments)
         {
-            Data = data;
+            AttributeName = attributeName;
             Owner = owner;
+            _constructorArguments = constructorArguments;
+            _namedArguments = namedArguments;
         }
 
-        public AttributeData Data { get; }
+        /// <summary>예 "BanNullOperatorRuleAttribute".</summary>
+        public string AttributeName { get; }
 
         public IAssemblySymbol Owner { get; }
+
+        public string? GetConstructorString(int index) =>
+            index < _constructorArguments.Count ? _constructorArguments[index] as string : null;
+
+        public object? GetNamed(string name) =>
+            _namedArguments.TryGetValue(name, out var value) ? value : null;
     }
 }

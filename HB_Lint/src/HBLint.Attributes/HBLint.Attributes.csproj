@@ -1,11 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- 규칙 어트리뷰트 정의. 의존 없는 순수 C#이라 .cs를 Unity asmdef(noEngineReferences)로 그대로 옮겨 쓸 수 있다.
+  <!-- 규칙 어트리뷰트 정의. 원본은 Unity 패키지 Runtime/ 소스이고 여기서는 링크해 컴파일만 한다 (사본을 두지 않으려고).
        분석기는 이 어셈블리를 참조하지 않고 어셈블리 이름 "HBLint.Attributes"와 어트리뷰트 전체 이름으로 찾는다. -->
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
     <RootNamespace>HBLint</RootNamespace>
     <AssemblyName>HBLint.Attributes</AssemblyName>
+    <!-- Unity 6.3 컴파일러와 같은 문법만 쓰게 -->
+    <LangVersion>9.0</LangVersion>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\unity\com.hb.lint\Runtime\**\*.cs" LinkBase="Runtime" />
+  </ItemGroup>
 
 </Project>

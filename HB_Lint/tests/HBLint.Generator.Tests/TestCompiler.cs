@@ -11,8 +11,10 @@ internal static class TestCompiler
 {
     private static readonly CSharpCompilationOptions Options = new(OutputKind.DynamicallyLinkedLibrary);
 
+    // 시험 프로세스의 어셈블리 목록에서 HBLint.* 는 뺀다 — 필요한 곳에서만 Attributes를 명시해 넘긴다
     private static readonly IReadOnlyList<MetadataReference> Bcl =
         ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator)
+        .Where(p => !Path.GetFileName(p).StartsWith("HBLint.", StringComparison.Ordinal))
         .Select(p => (MetadataReference)MetadataReference.CreateFromFile(p))
         .ToList();
 

@@ -1,3 +1,4 @@
+#nullable enable
 using System.Linq;
 using HBLint.Generator.Json;
 
