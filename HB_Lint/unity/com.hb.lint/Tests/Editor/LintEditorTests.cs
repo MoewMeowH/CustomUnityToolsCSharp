@@ -92,6 +92,42 @@ namespace HBLint.Editor.Tests
         }
 
         [Test]
+        public void 금지_멤버_이름이_없으면_생성하지_않고_줄과_함께_남김()
+        {
+            LintInstaller.Install(RulesPath, OutputPath, SchemaPath, "CLL.Test");
+            var before = File.ReadAllText(OutputPath);
+            const string rules = "{\"rules\":[{\"id\":\"typo\",\"kind\":\"BanCallInMethod\",\"methods\":[\"Update\"],"
+                + "\"members\":[\"UnityEngine.Component.GetComponent\",\"UnityEngine.Component.GetComponnent\"],"
+                + "\"ownerType\":\"UnityEngine.MonoBehaviour\",\"message\":\"m\"}]}";
+            File.WriteAllText(RulesPath, rules);
+
+            LogAssert.Expect(LogType.Error, new Regex(@"\[HB Lint\] .*\[typo\] .*GetComponnent"));
+            LogAssert.Expect(LogType.Error, new Regex(@"\[HB Lint\] 오류 1개"));
+            var ok = LintGenerator.Generate(RulesPath, OutputPath, SchemaPath);
+
+            Assert.IsFalse(ok);
+            Assert.AreEqual(before, File.ReadAllText(OutputPath));
+        }
+
+        [Test]
+        public void 부모에_선언된_멤버를_자식_이름으로_적으면_선언_타입을_알려_주고_생성하지_않음()
+        {
+            LintInstaller.Install(RulesPath, OutputPath, SchemaPath, "CLL.Test");
+            var before = File.ReadAllText(OutputPath);
+            const string rules = "{\"rules\":[{\"id\":\"inherited\",\"kind\":\"BanCallInMethod\",\"methods\":[\"Update\"],"
+                + "\"members\":[\"UnityEngine.MonoBehaviour.GetComponent\",\"UnityEngine.Component.transform\"],"
+                + "\"ownerType\":\"UnityEngine.MonoBehaviour\",\"message\":\"m\"}]}";
+            File.WriteAllText(RulesPath, rules);
+
+            LogAssert.Expect(LogType.Error, new Regex(@"\[HB Lint\] .*\[inherited\] .*'UnityEngine\.Component\.GetComponent'\(으\)로 적으세요"));
+            LogAssert.Expect(LogType.Error, new Regex(@"\[HB Lint\] 오류 1개"));
+            var ok = LintGenerator.Generate(RulesPath, OutputPath, SchemaPath);
+
+            Assert.IsFalse(ok);
+            Assert.AreEqual(before, File.ReadAllText(OutputPath));
+        }
+
+        [Test]
         public void asmdef_이름을_바꿔_다시_설치해도_asmdef가_둘이_되지_않음()
         {
             LintInstaller.Install(RulesPath, OutputPath, SchemaPath, "CLL.Test");

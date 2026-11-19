@@ -15,11 +15,19 @@ internal static class LintHarness
         namespace UnityEngine
         {
             public class Object { }
-            public class Component : Object { public Transform transform => null; }
+            public class Component : Object
+            {
+                public Transform transform => null;
+                public GameObject gameObject => null;
+                public T GetComponent<T>() => default;
+                public Component GetComponent(System.Type type) => null;
+            }
+            public class GameObject : Object { public T GetComponent<T>() => default; }
             public class Behaviour : Component { }
             public class MonoBehaviour : Behaviour { }
             public class Transform : Component { }
             public class ScriptableObject : Object { }
+            public class Camera : Behaviour { public static Camera main => null; }
         }
         """;
 
@@ -36,6 +44,33 @@ internal static class LintHarness
         MetadataReference.CreateFromFile(typeof(HBLint.LintSeverity).Assembly.Location);
 
     public static readonly MetadataReference Unity = Emit(Compile("UnityEngine.CoreModule", UnitySource));
+
+    private const string UnityEditorSource = """
+        namespace UnityEditor
+        {
+            public static class AssetDatabase { public static void Refresh() { } }
+            public class EditorWindow { public void Show() { } }
+        }
+        namespace UnityEditor.Build
+        {
+            public static class BuildHelper { public static void Run() { } }
+        }
+        """;
+
+    public static readonly MetadataReference UnityEditor = Emit(Compile("UnityEditor", UnityEditorSource));
+
+    /// <summary>전처리 기호를 넣어 컴파일 (Unity 에디터 컴파일은 UNITY_EDITOR가 정의돼 있다).</summary>
+    public static CSharpCompilation CompileWithDefines(string assemblyName, string source, string[] defines, params MetadataReference[] references)
+    {
+        return CompileWithDefines(assemblyName, new[] { (assemblyName + ".cs", source) }, defines, references);
+    }
+
+    public static CSharpCompilation CompileWithDefines(string assemblyName, (string Path, string Source)[] files, string[] defines, params MetadataReference[] references)
+    {
+        var options = new CSharpParseOptions(preprocessorSymbols: defines);
+        var trees = files.Select(f => CSharpSyntaxTree.ParseText(f.Source, options, path: f.Path));
+        return CSharpCompilation.Create(assemblyName, trees, Bcl.Concat(references), Options);
+    }
 
     public static CSharpCompilation Compile(string assemblyName, string source, params MetadataReference[] references)
     {
@@ -68,7 +103,7 @@ internal static class LintHarness
         var errors = compilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
         Assert.True(errors.Count == 0, "컴파일 에러: " + string.Join("\n", errors));
         return compilation
-            .WithAnalyzers(ImmutableArray.Create<DiagnosticAnalyzer>(new BanNullOperatorAnalyzer()))
+            .WithAnalyzers(ImmutableArray.Create<DiagnosticAnalyzer>(new BanNullOperatorAnalyzer(), new BanCallInMethodAnalyzer(), new RequireDefineAnalyzer()))
             .GetAnalyzerDiagnosticsAsync().Result
             .OrderBy(d => d.Location.SourceSpan.Start)
             .ToImmutableArray();

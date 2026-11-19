@@ -13,10 +13,22 @@ namespace HBLint.Analyzers
             "{0}",
             Category, DiagnosticSeverity.Warning, isEnabledByDefault: true);
 
+        public static readonly DiagnosticDescriptor BanCallInMethod = new DiagnosticDescriptor(
+            "CLL0002",
+            "이 메서드 안에서는 이 멤버를 쓰지 않습니다",
+            "{0}",
+            Category, DiagnosticSeverity.Warning, isEnabledByDefault: true);
+
+        public static readonly DiagnosticDescriptor RequireDefine = new DiagnosticDescriptor(
+            "CLL0003",
+            "디파인 밖에서 쓸 수 없는 코드입니다",
+            "{0}",
+            Category, DiagnosticSeverity.Warning, isEnabledByDefault: true);
+
         public static readonly DiagnosticDescriptor RuleTypeNotFound = new DiagnosticDescriptor(
             "CLL9001",
-            "규칙의 대상 타입을 찾을 수 없습니다",
-            "규칙 {0}(어셈블리 {1})의 대상 타입 '{2}'을(를) 찾을 수 없거나 여러 어셈블리에 있어 이 규칙이 적용되지 않습니다. 타입 전체 이름과 Requires를 확인하세요.",
+            "규칙의 대상 타입 · 멤버를 찾을 수 없습니다",
+            "규칙 {0}(어셈블리 {1})의 대상 '{2}'을(를) 찾을 수 없거나 여러 어셈블리에 있어 그 대상은 적용되지 않습니다. 타입 · 멤버 전체 이름과 Requires를 확인하세요.",
             Category, DiagnosticSeverity.Warning, isEnabledByDefault: true,
             customTags: WellKnownDiagnosticTags.CompilationEnd);
     }

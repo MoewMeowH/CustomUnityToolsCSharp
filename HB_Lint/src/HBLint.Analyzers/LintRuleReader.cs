@@ -135,7 +135,16 @@ namespace HBLint.Analyzers
         public string? GetConstructorString(int index) =>
             index < _constructorArguments.Count ? _constructorArguments[index] as string : null;
 
+        /// <summary>문자열 배열 생성자 인자 (null 항목은 뺀다). 없거나 배열이 아니면 빈 배열.</summary>
+        public string[] GetConstructorStrings(int index) =>
+            index < _constructorArguments.Count ? Strings(_constructorArguments[index]) : new string[0];
+
         public object? GetNamed(string name) =>
             _namedArguments.TryGetValue(name, out var value) ? value : null;
+
+        public string[] GetNamedStrings(string name) => Strings(GetNamed(name));
+
+        private static string[] Strings(object? value) =>
+            value is object?[] array ? array.OfType<string>().ToArray() : new string[0];
     }
 }

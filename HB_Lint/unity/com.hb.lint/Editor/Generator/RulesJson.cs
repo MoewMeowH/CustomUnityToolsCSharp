@@ -234,6 +234,12 @@ namespace HBLint.Generator
                             }
                             items.Add(StringLiteral(elementString.Value));
                         }
+                        // 필수 배열이 비면 규칙이 아무것도 검사하지 않는다 — 분석기는 알리지 않으므로 여기서 막는다
+                        if (items.Count == 0 && field.Required)
+                        {
+                            errors.Add(Error(value, $"필수 칸 '{field.JsonName}'이(가) 비어 있습니다 — 항목을 하나 이상 적으세요", id));
+                            return null;
+                        }
                         return items.Count == 0 ? "new string[0]" : "new string[] { " + string.Join(", ", items) + " }";
                     }
                     break;

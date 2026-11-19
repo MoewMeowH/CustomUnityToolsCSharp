@@ -33,7 +33,9 @@
         },
         "kind": {
           "enum": [
-            "BanNullOperator"
+            "BanCallInMethod",
+            "BanNullOperator",
+            "RequireDefine"
           ],
           "description": "규칙 종류 = HBLint.{kind}RuleAttribute"
         },
@@ -43,6 +45,21 @@
         }
       },
       "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "BanCallInMethod"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/kind-BanCallInMethod"
+          }
+        },
         {
           "if": {
             "properties": {
@@ -57,8 +74,73 @@
           "then": {
             "$ref": "#/$defs/kind-BanNullOperator"
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "RequireDefine"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/kind-RequireDefine"
+          }
         }
       ]
+    },
+    "kind-BanCallInMethod": {
+      "required": [
+        "methods",
+        "members",
+        "ownerType",
+        "message"
+      ],
+      "properties": {
+        "id": true,
+        "kind": true,
+        "description": true,
+        "methods": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "ownerType": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "followDepth": {
+          "type": "integer",
+          "minimum": -2147483648,
+          "maximum": 2147483647
+        },
+        "requires": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "severity": {
+          "enum": [
+            "Info",
+            "Warning",
+            "Error"
+          ]
+        }
+      },
+      "additionalProperties": false
     },
     "kind-BanNullOperator": {
       "required": [
@@ -74,6 +156,52 @@
         },
         "message": {
           "type": "string"
+        },
+        "requires": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "severity": {
+          "enum": [
+            "Info",
+            "Warning",
+            "Error"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "kind-RequireDefine": {
+      "required": [
+        "define",
+        "message"
+      ],
+      "properties": {
+        "id": true,
+        "kind": true,
+        "description": true,
+        "define": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "declaredInDefine": {
+          "type": "boolean"
+        },
+        "ignoreAssemblies": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "namespaces": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "requires": {
           "type": "array",

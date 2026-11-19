@@ -70,24 +70,60 @@ namespace HBLint.Editor
             return true;
         }
 
-        /// <summary>[TypeName] 칸의 타입이 불려 있는 어셈블리에 있는가 (requires의 어셈블리가 불려 있을 때만 본다).</summary>
+        /// <summary>[TypeName] · [MemberName] 칸의 타입 · 멤버가 불려 있는 어셈블리에 있는가 (requires의 어셈블리가 불려 있을 때만 본다).</summary>
         internal static IReadOnlyList<RulesError> CheckTypeNames(string json, RuleCatalog catalog)
         {
             var assemblies = AppDomain.CurrentDomain.GetAssemblies();
             var names = new HashSet<string>(assemblies.Select(a => a.GetName().Name), StringComparer.Ordinal);
-            return TypeNameCheck.Check(json, catalog, typeName => assemblies.Any(a => HasType(a, typeName)), names.Contains);
+            return TypeNameCheck.Check(json, catalog,
+                typeName => FindType(assemblies, typeName) != null,
+                names.Contains,
+                (typeName, memberName) => MemberOwner(FindType(assemblies, typeName), memberName));
+        }
+
+        private const System.Reflection.BindingFlags DeclaredMembers =
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic |
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Static |
+            System.Reflection.BindingFlags.DeclaredOnly;
+
+        /// <summary>
+        /// 그 이름의 메서드 · 속성(인덱서 제외) · 필드를 선언한 타입 — 그 타입 자신, 없으면 가장 가까운 부모 (분석기는 선언된 타입에서만 찾는다).
+        /// </summary>
+        private static string? MemberOwner(Type? type, string memberName)
+        {
+            const System.Reflection.MemberTypes kinds =
+                System.Reflection.MemberTypes.Method | System.Reflection.MemberTypes.Property | System.Reflection.MemberTypes.Field;
+            for (var current = type; current != null; current = current.BaseType)
+            {
+                var declared = current.GetMember(memberName, kinds, DeclaredMembers)
+                    .Any(m => !(m is System.Reflection.PropertyInfo property && property.GetIndexParameters().Length > 0));
+                if (declared)
+                    return current.IsGenericType ? current.GetGenericTypeDefinition().FullName : current.FullName;
+            }
+            return null;
+        }
+
+        private static Type? FindType(System.Reflection.Assembly[] assemblies, string typeName)
+        {
+            foreach (var assembly in assemblies)
+            {
+                var type = GetTypeOrNull(assembly, typeName);
+                if (type != null)
+                    return type;
+            }
+            return null;
         }
 
         /// <summary>이름 문법이 틀리면 throwOnError: false여도 런타임에 따라 ArgumentException이 난다 — "없음"으로 본다 (rules.json 입력).</summary>
-        private static bool HasType(System.Reflection.Assembly assembly, string typeName)
+        private static Type? GetTypeOrNull(System.Reflection.Assembly assembly, string typeName)
         {
             try
             {
-                return assembly.GetType(typeName, throwOnError: false) != null;
+                return assembly.GetType(typeName, throwOnError: false);
             }
             catch (ArgumentException)
             {
-                return false;
+                return null;
             }
         }
 

@@ -49,7 +49,9 @@ namespace HBLint.Editor
             LintGenerator.Generate(rulesPath, outputPath, schemaPath);
         }
 
-        /// <summary>예시 규칙 하나 — Unity 오브젝트에 null 연산자 금지.</summary>
+        private const string EditorOnlyRuleId = "editor-only-code";
+
+        /// <summary>예시 규칙 둘 — Unity 오브젝트에 null 연산자 금지 · UNITY_EDITOR 밖 에디터 전용 코드 금지.</summary>
         internal static RulesDocument ExampleRules()
         {
             var document = new RulesDocument { Schema = "./rules.schema.json" };
@@ -62,6 +64,20 @@ namespace HBLint.Editor
             entry.Values["requires"] = new JsonArray().Add(new JsonString("UnityEngine.CoreModule"));
             entry.Values["severity"] = new JsonString("Warning");
             document.Rules.Add(entry);
+
+            var editorOnly = new RuleEntry(EditorOnlyRuleId, "RequireDefine")
+            {
+                Description = "UnityEditor API와 #if UNITY_EDITOR 안에 선언된 코드는 플레이어 빌드에 없다.",
+            };
+            editorOnly.Values["define"] = new JsonString("UNITY_EDITOR");
+            editorOnly.Values["message"] = new JsonString("에디터 전용 코드입니다 — #if UNITY_EDITOR 안에서만 쓰세요. 플레이어 빌드가 깨집니다.");
+            editorOnly.Values["namespaces"] = new JsonArray().Add(new JsonString("UnityEditor"));
+            editorOnly.Values["declaredInDefine"] = new JsonBool(true);
+            var ignore = new JsonArray();
+            foreach (var pattern in new[] { "Assembly-CSharp-Editor*", "*.Editor", "*.Editor.*", "*.Tests", "*.Tests.*" })
+                ignore.Add(new JsonString(pattern));
+            editorOnly.Values["ignoreAssemblies"] = ignore;
+            document.Rules.Add(editorOnly);
             return document;
         }
 

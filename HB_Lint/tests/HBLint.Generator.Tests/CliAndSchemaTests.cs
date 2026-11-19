@@ -154,7 +154,8 @@ public sealed class CliAndSchemaTests : IDisposable
         JsonReader.Parse(text);
         using var document = JsonDocument.Parse(text);
         var defs = document.RootElement.GetProperty("$defs");
-        Assert.Equal("BanNullOperator", defs.GetProperty("rule").GetProperty("properties").GetProperty("kind").GetProperty("enum")[0].GetString());
+        Assert.Equal(new[] { "BanCallInMethod", "BanNullOperator", "RequireDefine" },
+            defs.GetProperty("rule").GetProperty("properties").GetProperty("kind").GetProperty("enum").EnumerateArray().Select(e => e.GetString()));
         var kind = defs.GetProperty("kind-BanNullOperator");
         Assert.Equal(new[] { "type", "message" }, kind.GetProperty("required").EnumerateArray().Select(e => e.GetString()));
         Assert.Equal(new[] { "Info", "Warning", "Error" },

@@ -3,6 +3,14 @@
 //     직접 고치지 말고 rules.json을 고친 뒤 다시 생성하세요.
 // </auto-generated>
 
+// editor-only-code
+//   UnityEditor API와 #if UNITY_EDITOR 안에 선언된 코드는 플레이어 빌드에 없다.
+[assembly: global::HBLint.RequireDefineRule("UNITY_EDITOR", "에디터 전용 코드입니다 — #if UNITY_EDITOR 안에서만 쓰세요. 플레이어 빌드가 깨집니다.", DeclaredInDefine = true, IgnoreAssemblies = new string[] { "Assembly-CSharp-Editor*", "*.Editor", "*.Editor.*", "*.Tests", "*.Tests.*" }, Namespaces = new string[] { "UnityEditor" })]
+
+// no-getcomponent-in-update
+//   매 프레임 GetComponent는 비싸다.
+[assembly: global::HBLint.BanCallInMethodRule(new string[] { "Update", "LateUpdate", "FixedUpdate" }, new string[] { "UnityEngine.Component.GetComponent", "UnityEngine.GameObject.GetComponent" }, "UnityEngine.MonoBehaviour", "Update 계열에서 GetComponent를 부르지 마세요 — Awake에서 필드에 캐싱하세요.", Requires = new string[] { "UnityEngine.CoreModule" })]
+
 // unity-null-operator
 //   파괴된 Unity 오브젝트는 C# null이 아니라서 ?. · ?? · ??= · is null이 통과시킨다.
 [assembly: global::HBLint.BanNullOperatorRule("UnityEngine.Object", "Unity 오브젝트는 ?. · ?? · ??= · is null이 파괴된 오브젝트를 null로 보지 않습니다. '== null' 또는 'if (obj)'로 확인하세요.", Requires = new string[] { "UnityEngine.CoreModule" }, Severity = global::HBLint.LintSeverity.Warning)]

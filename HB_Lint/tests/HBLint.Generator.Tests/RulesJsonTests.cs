@@ -156,7 +156,7 @@ public class RulesJsonTests
         var error = Assert.Single(twice.Errors);
         Assert.Equal("b", error.RuleId);
         Assert.Contains("한 번만", error.Message);
-        Assert.True(TestCompiler.RealCatalog.Kinds.Single().AllowMultiple);
+        Assert.All(TestCompiler.RealCatalog.Kinds, k => Assert.True(k.AllowMultiple));
     }
 
     [Fact]
@@ -245,6 +245,17 @@ public class RulesJsonTests
 
         Assert.False(result.Success);
         Assert.Contains("int 범위의 정수", Assert.Single(result.Errors).Message);
+    }
+
+    [Fact]
+    public void 필수_배열_칸이_비면_오류_선택_칸은_비어도_됨()
+    {
+        var empty = Generate("""{"rules":[{"id":"b","kind":"BanCallInMethod","methods":[],"members":["UnityEngine.Component.GetComponent"],"ownerType":"UnityEngine.MonoBehaviour","message":"m"}]}""");
+        var optional = Generate("""{"rules":[{"id":"r","kind":"RequireDefine","define":"UNITY_EDITOR","message":"m","namespaces":[]}]}""");
+
+        Assert.False(empty.Success);
+        Assert.Contains("필수 칸 'methods'이(가) 비어 있습니다", Assert.Single(empty.Errors).Message);
+        Assert.True(optional.Success, string.Join("\n", optional.Errors));
     }
 
     [Fact]

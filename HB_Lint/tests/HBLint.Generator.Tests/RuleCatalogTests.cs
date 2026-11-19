@@ -3,9 +3,31 @@ namespace HBLint.Generator.Tests;
 public class RuleCatalogTests
 {
     [Fact]
+    public void 실제_어트리뷰트의_규칙_종류_셋()
+    {
+        Assert.Equal(new[] { "BanCallInMethod", "BanNullOperator", "RequireDefine" }, TestCompiler.RealCatalog.Kinds.Select(k => k.Name));
+    }
+
+    [Fact]
+    public void 실제_어트리뷰트에서_BanCallInMethod_RequireDefine_칸을_읽음()
+    {
+        var banCall = TestCompiler.RealCatalog.Find("BanCallInMethod")!;
+        var requireDefine = TestCompiler.RealCatalog.Find("RequireDefine")!;
+
+        Assert.Equal(new[] { "methods", "members", "ownerType", "message" }, banCall.Parameters.Select(p => p.JsonName));
+        Assert.Equal(new[] { RuleValueKind.StringArray, RuleValueKind.StringArray, RuleValueKind.String, RuleValueKind.String }, banCall.Parameters.Select(p => p.Kind));
+        Assert.Equal(new[] { "followDepth", "requires", "severity" }, banCall.Properties.Select(p => p.JsonName));
+        Assert.Equal(RuleValueKind.Int, banCall.Properties[0].Kind);
+
+        Assert.Equal(new[] { "define", "message" }, requireDefine.Parameters.Select(p => p.JsonName));
+        Assert.Equal(new[] { "declaredInDefine", "ignoreAssemblies", "namespaces", "requires", "severity" }, requireDefine.Properties.Select(p => p.JsonName));
+        Assert.Equal(RuleValueKind.Bool, requireDefine.Properties[0].Kind);
+    }
+
+    [Fact]
     public void 실제_어트리뷰트에서_BanNullOperator를_읽음()
     {
-        var kind = Assert.Single(TestCompiler.RealCatalog.Kinds);
+        var kind = TestCompiler.RealCatalog.Find("BanNullOperator")!;
 
         Assert.Equal("BanNullOperator", kind.Name);
         Assert.Equal("HBLint.BanNullOperatorRuleAttribute", kind.AttributeFullName);
