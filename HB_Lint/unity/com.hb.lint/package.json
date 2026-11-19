@@ -4,5 +4,9 @@
   "displayName": "HB Lint",
   "description": "rules.json에 적은 규칙을 Roslyn 분석기로 강제한다. rules.json → LintRules.g.cs([assembly:] 규칙 어트리뷰트) 자동 생성과 규칙 편집 창 포함.",
   "unity": "6000.3",
-  "keywords": ["lint", "analyzer", "roslyn"]
+  "keywords": ["lint", "analyzer", "roslyn"],
+  "author": {
+    "name": "HoBeenH",
+    "email": "whdmstlsk@gmail.com"
+  }
 }
