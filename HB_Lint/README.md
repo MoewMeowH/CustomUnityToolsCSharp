@@ -109,7 +109,11 @@ dotnet run --project src/HBLint.Generator.Cli -- schema <hblint.schema.json> [--
 
 CLL9001 · CLL9002는 위치 없는 진단이라 Unity 콘솔에 보이지 않는다 — 규칙을 고치면 `hblint-gen validate` · `generate`로 먼저 확인한다.
 
-규칙 하나를 끄기: 코드 한 곳은 `#pragma warning disable CLL0002` · `[SuppressMessage]`, 프로젝트 단위는 `.editorconfig`의 `dotnet_diagnostic.CLL0002.severity = none` (.NET SDK 프로젝트). Unity에서 ruleset · .editorconfig로 끄는 것은 아직 확인하지 않았다.
+규칙 하나를 끄기:
+
+- 코드 한 곳: `#pragma warning disable CLL0002` · `[SuppressMessage]`.
+- Unity 프로젝트 전체: `Assets/Default.ruleset`에 `<Rule Id="CLL0002" Action="None" />` (`<Rules AnalyzerId="HBLint.Analyzers" RuleNamespace="HBLint.Analyzers">` 안). Unity 6.3에서 확인. `.editorconfig`는 프로젝트 루트 · `Assets/` 어느 쪽에 둬도 Unity가 쓰지 않는다 (6.3에서 확인).
+- .NET SDK 프로젝트: `.editorconfig`의 `dotnet_diagnostic.CLL0002.severity = none`.
 
 ## 규칙을 어디서 읽나
 
