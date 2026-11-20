@@ -29,7 +29,8 @@
 
     -All: 이 스크립트 옆의 sync-targets.local.txt(한 줄에 프로젝트 폴더 하나, # 주석, git 제외)에 적힌 모든 대상을 비교만 하고 요약한다.
     원본(project-files)을 바꾸는 커밋을 할 때마다 돌려 뒤처진 대상을 찾는다 (2026-10-22: 세 프로젝트가 옛 훅으로 이틀 돈 일).
-    -Apply와 같이 쓸 수 없다 (맞추는 것은 대상마다 확인한 뒤 따로). 종료 코드는 대상들 중 가장 나쁜 값 (2 > 1 > 0).
+    -All -Apply [-Force]: 비교 결과를 사용자가 확인한 뒤 모든 대상을 한 번에 맞춘다 — 대상마다 -UnityProject -Apply [-Force]와 같고,
+    한 대상이 멈추거나 실패해도 다음 대상으로 간다. 종료 코드는 대상들 중 가장 나쁜 값 (2 > 1 > 0).
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File tools\Sync-ProjectFiles.ps1 -UnityProject F:\MyGame
@@ -37,6 +38,8 @@
     powershell -ExecutionPolicy Bypass -File tools\Sync-ProjectFiles.ps1 -UnityProject F:\MyGame -Apply
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File tools\Sync-ProjectFiles.ps1 -All
+.EXAMPLE
+    powershell -ExecutionPolicy Bypass -File tools\Sync-ProjectFiles.ps1 -All -Apply -Force
 #>
 [CmdletBinding()]
 param(
@@ -108,7 +111,6 @@ if ($Force -and -not $Apply) { Fail '-Force는 -Apply와 함께 써야 합니다
 
 # --- 모든 대상 비교 (-All) ---------------------------------------------------
 if ($All) {
-    if ($Apply) { Fail '-All은 비교만 합니다. 맞추는 것은 대상마다 -UnityProject로 따로 하세요.' }
     if (-not [string]::IsNullOrWhiteSpace($UnityProject)) { Fail '-All과 -UnityProject는 같이 쓸 수 없습니다.' }
     if ([string]::IsNullOrWhiteSpace($TargetsFile)) { $TargetsFile = Join-Path $PSScriptRoot 'sync-targets.local.txt' }
     if (-not (Test-Path -LiteralPath $TargetsFile -PathType Leaf)) {
@@ -135,6 +137,8 @@ if ($All) {
         foreach ($t in $targets) {
             $childArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath, '-UnityProject', $t)
             if ($childSource) { $childArgs += @('-Source', $childSource) }
+            if ($Apply) { $childArgs += '-Apply' }
+            if ($Force) { $childArgs += '-Force' }
             # 자식이 stderr에 써도(5.1 NativeCommandError) -All 전체가 멈추지 않게 이 호출만 Continue + 대상마다 잡는다
             $prevPref = $ErrorActionPreference
             $ErrorActionPreference = 'Continue'
@@ -147,9 +151,11 @@ if ($All) {
             if ($code -notin @(0, 1, 2)) { $code = 2 }   # 구문 오류 등 예상 밖 종료 코드는 오류로
             if ($code -gt $worst) { $worst = $code }
             $machine = @($out | Where-Object { $_.StartsWith('##SYNC|') } | ForEach-Object { $f = $_.Split('|'); [pscustomobject]@{ Kind = $f[1]; Code = $f[2]; Path = $f[3] } })
-            $result = ($out | Where-Object { $_ -match '^(결과:|\[오류\])' } | Select-Object -Last 1)
+            # -Apply가 멈추면 '결과:' 줄 없이 '멈춤:'으로 끝난다
+            $result = ($out | Where-Object { $_ -match '^(결과:|멈춤:|\[오류\])' } | Select-Object -Last 1)
+            $backupLine = ($out | Where-Object { $_.StartsWith('백업: ') } | Select-Object -Last 1)
             $summary += [pscustomobject]@{
-                Target = $t; Code = $code; Result = $result
+                Target = $t; Code = $code; Result = $result; Backup = $backupLine
                 Behind = @($machine | Where-Object { $_.Kind -eq 'pending' })
                 Notes  = @($machine | Where-Object { $_.Kind -eq 'note' })
             }
@@ -160,19 +166,37 @@ if ($All) {
         Remove-Item Env:\SYNC_PROJECTFILES_MACHINE -ErrorAction SilentlyContinue
     }
     Write-Host ''
-    Write-Host '=== 모든 동기화 대상 비교 (비교만) ==='
+    $title = if (-not $Apply) { '비교만' } elseif ($Force) { '-Apply -Force' } else { '-Apply' }
+    Write-Host "=== 모든 동기화 대상 $(if ($Apply) { '맞추기' } else { '비교' }) ($title) ==="
+    # -Apply의 종료 1은 복사 전 멈춤('멈춤:' 줄)과 복사 후에도 다름(복사는 함) 두 가지
+    foreach ($s in $summary) { $s | Add-Member -NotePropertyName Stopped -NotePropertyValue ($s.Code -eq 1 -and "$($s.Result)".StartsWith('멈춤:')) }
     foreach ($s in $summary) {
-        $mark = switch ($s.Code) { 0 { '같음  ' } 1 { '뒤처짐' } default { '오류  ' } }
+        $mark = if ($Apply) { switch ($s.Code) { 0 { '맞춤  ' } 1 { if ($s.Stopped) { '멈춤  ' } else { '복사 후 다름' } } default { '오류  ' } } }
+                else { switch ($s.Code) { 0 { '같음  ' } 1 { '뒤처짐' } default { '오류  ' } } }
         $notes = if ($s.Notes.Count -gt 0) { " · 참고 $($s.Notes.Count)건" } else { '' }
         Write-Host ("[{0}] {1} — {2}{3}" -f $mark, $s.Target, $s.Result, $notes)
-        foreach ($b in $s.Behind) { Write-Host "         맞출 것: $($b.Path) ($($b.Code))" }
+        # 기계용 줄은 복사 전 비교에서 나온다: 맞췄으면 복사한 것, 멈췄으면 아직 맞출 것
+        $label = if ($Apply -and $s.Code -eq 0) { '복사:    ' } else { '맞출 것: ' }
+        foreach ($b in $s.Behind) { Write-Host "         $label$($b.Path) ($($b.Code))" }
+        if ($s.Backup) { Write-Host "         $($s.Backup)" }
         foreach ($n in $s.Notes) { Write-Host "         참고:    $($n.Path) ($($n.Code))" }
     }
     $late = @($summary | Where-Object { $_.Code -ne 0 })
     $noted = @($summary | Where-Object { $_.Code -eq 0 -and $_.Notes.Count -gt 0 })
     Write-Host ''
-    if ($late.Count -eq 0) { Write-Host "결과: 대상 $($summary.Count)개 모두 동기화 대상이 원본과 같습니다." }
-    else { Write-Host "결과: 대상 $($summary.Count)개 중 $($late.Count)개가 뒤처졌거나 오류입니다. 사용자에게 보고하고, 맞추기(-Apply/-Force)는 확인 뒤 대상마다 따로." }
+    if ($Apply) {
+        if ($late.Count -eq 0) { Write-Host "결과: 대상 $($summary.Count)개 모두 맞췄습니다 (복사한 대상은 복사 후 SHA-256이 원본과 같음)." }
+        else {
+            $stopped = @($summary | Where-Object { $_.Stopped })
+            $mismatch = @($summary | Where-Object { $_.Code -eq 1 -and -not $_.Stopped })
+            $failed = @($summary | Where-Object { $_.Code -eq 2 })
+            Write-Host "결과: 대상 $($summary.Count)개 중 멈춤 $($stopped.Count) · 복사 후 다름 $($mismatch.Count) · 오류 $($failed.Count)."
+            if ($stopped.Count -gt 0) { Write-Host '  멈춘 대상은 아무것도 복사하지 않았습니다 — 대상에서 고친 내용을 원본에 먼저 합치거나, 버려도 되면 -Force (덮기 전 백업).' }
+            if ($mismatch.Count -gt 0) { Write-Host '  복사 후 다름인 대상은 복사는 했지만 복사 뒤 비교에서 원본과 다른 파일이 남았습니다 — 그 대상을 -UnityProject로 다시 비교하세요.' }
+        }
+    }
+    elseif ($late.Count -eq 0) { Write-Host "결과: 대상 $($summary.Count)개 모두 동기화 대상이 원본과 같습니다." }
+    else { Write-Host "결과: 대상 $($summary.Count)개 중 $($late.Count)개가 뒤처졌거나 오류입니다. 사용자에게 보고하고, 맞추기는 확인 뒤 -All -Apply(다름이 있으면 -Force, 사람이 직접) 또는 대상마다." }
     if ($noted.Count -gt 0 -or @($summary | Where-Object { $_.Notes.Count -gt 0 }).Count -gt 0) {
         Write-Host '참고 항목(설정 · 프로젝트 지침 · 대상에만 있는 파일)은 종료 코드에 넣지 않지만 함께 보고한다 — 특히 settings.json 다름은 훅 등록이 다를 수 있다.'
     }

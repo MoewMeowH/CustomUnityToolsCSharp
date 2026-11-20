@@ -41,6 +41,9 @@ powershell -ExecutionPolicy Bypass -File tools\Sync-ProjectFiles.ps1 -UnityProje
 # 모든 대상 비교만 (대상 목록은 tools\sync-targets.local.txt)
 powershell -ExecutionPolicy Bypass -File tools\Sync-ProjectFiles.ps1 -All
 
+# 비교 결과를 확인한 뒤 모든 대상을 한 번에 맞춤 (대상 쪽 '다름'은 -Force로 덮음, 덮기 전 대상마다 백업)
+powershell -ExecutionPolicy Bypass -File tools\Sync-ProjectFiles.ps1 -All -Apply -Force
+
 # 스크립트 시험 (임시 폴더만)
 powershell -ExecutionPolicy Bypass -File tools\Test-SyncProjectFiles.ps1
 ```
@@ -68,7 +71,7 @@ powershell -ExecutionPolicy Bypass -File tools\Test-SyncProjectFiles.ps1
 
 **`-All`**
 
-- 비교만 합니다. `-Apply`와 같이 쓸 수 없습니다.
+- 기본은 비교만 합니다. 비교 결과를 확인한 뒤 `-All -Apply`(대상 쪽 '다름'이 있으면 `-Force`)로 모든 대상을 한 번에 맞출 수 있습니다 — 한 대상이 멈추거나 실패해도 다음 대상으로 갑니다.
 - **원본을 바꾸는 커밋마다 `-All`로 모든 대상을 비교**해 뒤처진 곳을 보고합니다.
   - 까닭: 사본이 다르면 `-Apply`가 멈추기만 하고 알려 주지 않아서, 비교를 빼먹으면 옛 훅이 그대로 돕니다.
 - 요약은 "맞출 것"과 별도로 참고 항목도 보여 줍니다 (종료 코드에는 넣지 않음): settings.json 다름 · 프로젝트 지침 · 대상에만 있는 파일.

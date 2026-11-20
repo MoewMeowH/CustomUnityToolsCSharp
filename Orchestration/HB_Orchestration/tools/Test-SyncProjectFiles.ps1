@@ -1,5 +1,5 @@
 ﻿# Sync-ProjectFiles.ps1 시험 (외부 호출 없음, 임시 폴더만). 사용: powershell -ExecutionPolicy Bypass -File tools\Test-SyncProjectFiles.ps1
-# 2026-10-22: REVIEW_GUIDELINES.md "없으면 만듦" · -All 비교
+# 2026-10-22: REVIEW_GUIDELINES.md "없으면 만듦" · -All 비교 · 2026-11-20: -All -Apply
 $ErrorActionPreference = 'Stop'
 $sync = Join-Path $PSScriptRoot 'Sync-ProjectFiles.ps1'
 $orig = (Resolve-Path (Join-Path $PSScriptRoot '..\project-files')).ProviderPath
@@ -105,9 +105,26 @@ try {
     $r = Run @('-UnityProject', $t3, '-Source', $src)
     Check '하나만 다를 때 개수 1' ($r.Out -match '동기화 대상 1개가') $r.Out
 
+    # 4-4. -All -Apply: 없음만 있는 대상은 맞추고, '다름'이 있는 대상은 멈춤(손대지 않음) → -Force면 둘 다 맞추고 백업
+    $t5 = Join-Path $root 't5'; New-Item -ItemType Directory -Path $t5 | Out-Null
+    $t6 = Join-Path $root 't6'; New-Item -ItemType Directory -Path $t6 | Out-Null
+    $r = Run @('-UnityProject', $t6, '-Source', $src, '-Apply')
+    Check '-All -Apply 시험 준비(0)' ($r.Code -eq 0) $r.Out
+    [System.IO.File]::WriteAllText((Join-Path $t6 'CLAUDE.md'), "# 옛 판`n")
+    $list2 = Join-Path $root 'targets2.txt'
+    [System.IO.File]::WriteAllLines($list2, @($t5, $t6))
+    $r = Run @('-All', '-Apply', '-Source', $src, '-TargetsFile', $list2)
+    Check '-All -Apply 멈춘 대상이 있으면 1' ($r.Code -eq 1) $r.Out
+    Check '-All -Apply 요약: 맞춤 · 멈춤' ($r.Out -match "\[맞춤\s*\] $([regex]::Escape($t5)) " -and $r.Out -match "\[멈춤\s*\] $([regex]::Escape($t6)) " -and $r.Out -match '맞출 것: CLAUDE\.md \(differ\)' -and $r.Out -match '멈춤 1 · 복사 후 다름 0 · 오류 0' -and $r.Out -notmatch '\[복사 후 다름\]') $r.Out
+    Check '-All -Apply 없음만 있던 대상은 맞춰짐' ((Run @('-UnityProject', $t5, '-Source', $src)).Code -eq 0)
+    Check '-All -Apply 멈춘 대상은 그대로' ((Read (Join-Path $t6 'CLAUDE.md')) -eq "# 옛 판`n")
+    $r = Run @('-All', '-Apply', '-Force', '-Source', $src, '-TargetsFile', $list2)
+    Check '-All -Apply -Force는 0' ($r.Code -eq 0) $r.Out
+    Check '-All -Apply -Force 덮고 백업' ((Read (Join-Path $t6 'CLAUDE.md')) -eq (Read (Join-Path $src 'CLAUDE.md')) -and (Test-Path -LiteralPath (Join-Path $t6 'review_tmp\sync-backup')) -and $r.Out -match '백업: ') $r.Out
+
     # 5. 잘못된 조합
-    $r = Run @('-All', '-Apply', '-Source', $src, '-TargetsFile', $list)
-    Check '-All -Apply 거절(2)' ($r.Code -eq 2) $r.Out
+    $r = Run @('-All', '-Force', '-Source', $src, '-TargetsFile', $list)
+    Check '-All -Force(-Apply 없음) 거절(2)' ($r.Code -eq 2) $r.Out
     $r = Run @('-Source', $src)
     Check '대상 없음 거절(2)' ($r.Code -eq 2) $r.Out
 }

@@ -15,6 +15,6 @@
 
 * 원본을 바꾸는 커밋을 할 때마다 **모든 동기화 대상을 비교만** 한다: ToolWithCS 루트에서 `powershell -ExecutionPolicy Bypass -File Orchestration\HB_Orchestration\tools\Sync-ProjectFiles.ps1 -All` (대상 목록은 그 옆 `sync-targets.local.txt`, 이 PC의 경로라 git 제외). 요약의 "맞출 것"과 함께 "참고"(settings.json 다름 = 훅 등록 차이일 수 있음, 프로젝트 지침, 대상에만 있는 파일)도 보고한다.
   * 사본이 다르면 `-Apply`는 멈추기만 하고 알려 주지 않으므로, 비교를 빼먹으면 옛 훅이 그대로 돈다.
-* 뒤처진 대상이 있으면 대상 · 파일 목록을 사용자에게 보고한다. 맞추는 것(`-Apply`, 다른 파일이 있으면 `-Force` — 덮기 전 백업)은 사용자 확인 뒤 대상마다 따로 한다.
+* 뒤처진 대상이 있으면 대상 · 파일 목록을 사용자에게 보고한다. 맞추는 것(`-Apply`, 다른 파일이 있으면 `-Force` — 덮기 전 백업)은 사용자 확인 뒤 `-All -Apply`로 한 번에 하거나 대상마다 한다 (`-Force`는 사용자가 `!`로).
 * 리뷰 지침(`REVIEW_GUIDELINES.md`)은 Sync가 없을 때만 만들고 덮지 않는다 (단 원본의 옛 판 그대로면 '기본 지침 옛 판'으로 갱신 대상).
 * 이 파일(PROJECT.md)은 이 저장소 전용이라 동기화 대상이 아니다 (Sync는 없을 때만 빈 틀을 만든다).
