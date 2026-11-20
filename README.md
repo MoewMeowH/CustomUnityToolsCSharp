@@ -10,7 +10,7 @@ AI 에 익숙해지고 익숙해지는 김에 평소 필요하다 느꼈던 툴�
 |---|---|---|---|
 | [`EString/`](EString/README.md) | Roslyn 소스 생성기 | `[E2String]`이 붙은 enum에 박싱·할당 없는 문자열/정수 변환 확장 메서드를 생성 | Unity (dll 복사) |
 | [`UnityTestFrameWorkChecker/`](UnityTestFrameWorkChecker/README.md) | Roslyn 분석기 + 코드 수정 | `[NeedSlotNullCheck]` 슬롯 필드의 타입과 `[SerializeField]` 누락을 컴파일 단계에서 검사 | Unity (dll 복사) / Rider |
-| [`HB_Lint/`](HB_Lint/README.md) | Roslyn 분석기 + 규칙 생성기 + Unity 패키지 | `rules.json`에 적은 팀 규칙(예: Unity 오브젝트에 `?.` 금지)을 컴파일 경고 · 에러로 강제. Unity 에디터에서 규칙 편집 창 · 자동 생성 | Unity (UPM git URL) / .NET |
+| [`HB_Lint/`](HB_Lint/README.md) | Roslyn 분석기 + 규칙 생성기 + Unity 패키지 | 노드 그래프로 조립한 팀 규칙(`*.hblint.json`, 예: Unity 오브젝트에 `?.` 금지)을 컴파일 경고 · 에러로 강제. 생성기 CLI `hblint-gen` | Unity (UPM git URL) / .NET |
 | [`Orchestration/HB_Orchestration/`](Orchestration/HB_Orchestration/README.md) | MCP 서버 + 대시보드 | Claude Code를 지휘자로 두고 GPT · Gemini · DeepSeek · Codex를 모드 단위로 호출 (리뷰 · 설계 검토 · 조사) | Claude Code (Unity 프로젝트에서 실행) |
 | [`Orchestration/HB_Chat/`](Orchestration/HB_Chat/README.md) | 웹 채팅 앱 + 데스크톱 앱 | Claude Code를 브라우저 · 데스크톱 창에서 방 단위로 쓰는 채팅 화면 (단톡방 · 승인 카드 · 곁칸) | 로컬 PC |
 
@@ -26,8 +26,8 @@ ToolWithCS/
 │  └─ HB_TestFrameworkHelper/    ← 분석기 · 코드 수정 소스 (.sln, .csproj)
 │     └─ bin/Release/netstandard2.0/HB_TestFrameworkHelper.dll     ← Unity에 넣는 dll
 ├─ HB_Lint/                      ← 솔루션 HB_Lint.slnx (자세한 설명은 이 폴더의 README)
-│  ├─ unity/com.hb.lint/         ← Unity 패키지 (UPM) — 분석기 dll · 어트리뷰트 · 생성기 · 에디터 소스 원본
-│  ├─ src/ · tests/              ← 분석기 · 생성기 CLI, dotnet 테스트
+│  ├─ unity/com.hb.lint/         ← Unity 패키지 (UPM) — 분석기 dll · 어트리뷰트 (어트리뷰트 소스 원본)
+│  ├─ src/ · tests/              ← 규칙 IR 코어 · 분석기 · 생성기 CLI, dotnet 테스트
 │  └─ tools/Build-UnityPackage.ps1 ← 분석기를 빌드해 패키지에 넣음
 ├─ Orchestration/
 │  ├─ HB_Orchestration/          ← 솔루션 · 배치 (자세한 설명은 이 폴더의 README · manual/)

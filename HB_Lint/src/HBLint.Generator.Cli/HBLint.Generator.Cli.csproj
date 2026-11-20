@@ -9,12 +9,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\HBLint.Generator\HBLint.Generator.csproj" />
-    <ProjectReference Include="..\HBLint.Attributes\HBLint.Attributes.csproj" />
+    <ProjectReference Include="..\HBLint.Core\HBLint.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="HBLint.Generator.Tests" />
+    <InternalsVisibleTo Include="HBLint.Core.Tests" />
   </ItemGroup>
 
 </Project>

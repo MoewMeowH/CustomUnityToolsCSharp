@@ -5,15 +5,15 @@ namespace HBLint.Analyzers.Tests;
 
 public class RequireDefineAnalyzerTests
 {
-    private const string EditorRule =
-        """[assembly: HBLint.RequireDefineRule("UNITY_EDITOR", "editor-only", Namespaces = new[] { "UnityEditor" }, DeclaredInDefine = true, IgnoreAssemblies = new[] { "*.Editor", "Assembly-CSharp-Editor*" })]""";
+    private static readonly string EditorRule = Presets.Attributes(Presets.RequireDefine(
+        "UNITY_EDITOR", "editor-only", new[] { "UnityEditor" }, declaredInDefine: true, ignoreAssemblies: new[] { "*.Editor", "Assembly-CSharp-Editor*" }));
 
     private static readonly string[] EditorDefines = { "UNITY_EDITOR" };
 
     /// <summary>Unity 에디터 컴파일처럼 UNITY_EDITOR를 정의하고 규칙 어셈블리를 DLL로 참조해 분석한다.</summary>
-    private static Diagnostic[] Run(string source, string assemblyName = "Game", string[]? defines = null, string rule = EditorRule, bool withAttributes = true)
+    private static Diagnostic[] Run(string source, string assemblyName = "Game", string[]? defines = null, string? rule = null, bool withAttributes = true)
     {
-        var rules = Emit(Rules(rule));
+        var rules = Emit(Rules(rule ?? EditorRule));
         var references = withAttributes ? new[] { Unity, UnityEditor, Attributes, rules } : new[] { Unity, UnityEditor, rules };
         return Analyze(CompileWithDefines(assemblyName, source, defines ?? EditorDefines, references))
             .Where(d => d.Id == "CLL0003")
@@ -227,7 +227,7 @@ public class RequireDefineAnalyzerTests
     [Fact]
     public void 네임스페이스가_없는_파일은_검사하지_않고_선언_규칙도_없으면_비용이_없음()
     {
-        const string rule = """[assembly: HBLint.RequireDefineRule("UNITY_EDITOR", "m", Namespaces = new[] { "UnityEditor" })]""";
+        var rule = Presets.Attributes(Presets.RequireDefine("UNITY_EDITOR", "m", new[] { "UnityEditor" }, declaredInDefine: false));
         const string source = "public class Plain { void M() { System.Console.WriteLine(); } }";
 
         Assert.Empty(Run(source, rule: rule));

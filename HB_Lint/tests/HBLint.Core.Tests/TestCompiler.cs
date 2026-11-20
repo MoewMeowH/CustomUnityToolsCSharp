@@ -1,12 +1,11 @@
 using System.Collections.Immutable;
-using System.Reflection;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Diagnostics;
 
-namespace HBLint.Generator.Tests;
+namespace HBLint.Core.Tests;
 
-/// <summary>생성물을 Roslyn으로 컴파일 · 분석기 실행 · 어셈블리로 불러오기.</summary>
+/// <summary>생성물을 Roslyn으로 컴파일 · 분석기 실행.</summary>
 internal static class TestCompiler
 {
     private static readonly CSharpCompilationOptions Options = new(OutputKind.DynamicallyLinkedLibrary);
@@ -19,9 +18,7 @@ internal static class TestCompiler
         .ToList();
 
     public static readonly MetadataReference Attributes =
-        MetadataReference.CreateFromFile(typeof(HBLint.LintSeverity).Assembly.Location);
-
-    public static RuleCatalog RealCatalog => RuleCatalog.FromAssembly(typeof(HBLint.LintSeverity).Assembly);
+        MetadataReference.CreateFromFile(typeof(HBLint.RuleAttribute).Assembly.Location);
 
     public static CSharpCompilation Compile(string assemblyName, string source, params MetadataReference[] references)
     {
@@ -36,35 +33,29 @@ internal static class TestCompiler
         Assert.True(errors.Count == 0, "컴파일 에러:\n" + string.Join("\n", errors));
     }
 
-    public static byte[] EmitBytes(CSharpCompilation compilation)
+    public static MetadataReference Emit(CSharpCompilation compilation)
     {
         using var stream = new MemoryStream();
         var result = compilation.Emit(stream);
         Assert.True(result.Success, compilation.AssemblyName + ": " + string.Join("\n", result.Diagnostics));
-        return stream.ToArray();
-    }
-
-    public static MetadataReference Emit(CSharpCompilation compilation) => MetadataReference.CreateFromImage(EmitBytes(compilation));
-
-    /// <summary>소스로 만든 어트리뷰트 어셈블리를 불러온다 (새 규칙 종류 · 잘못된 어트리뷰트 시험용).</summary>
-    public static Assembly LoadAttributes(string source)
-    {
-        return Assembly.Load(EmitBytes(Compile("HBLint.Attributes.Test" + Guid.NewGuid().ToString("N"), source)));
+        return MetadataReference.CreateFromImage(stream.ToArray());
     }
 
     public static ImmutableArray<Diagnostic> RunAnalyzer(CSharpCompilation compilation)
     {
         AssertNoErrors(compilation);
         return compilation
-            .WithAnalyzers(ImmutableArray.Create<DiagnosticAnalyzer>(new HBLint.Analyzers.BanNullOperatorAnalyzer()))
+            .WithAnalyzers(ImmutableArray.Create<DiagnosticAnalyzer>(new HBLint.Analyzers.GraphRuleAnalyzer()))
             .GetAnalyzerDiagnosticsAsync().Result;
     }
 
-    /// <summary>assembly-level 어트리뷰트를 (이름, 생성자 인자, 이름 붙은 인자)로.</summary>
-    public static List<AttributeData> AssemblyAttributes(Compilation compilation, string attributeFullName)
+    /// <summary>HB_Lint 폴더 (HB_Lint.slnx가 있는 곳).</summary>
+    public static string RepoRoot()
     {
-        return compilation.Assembly.GetAttributes()
-            .Where(a => a.AttributeClass?.ToDisplayString() == attributeFullName)
-            .ToList();
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory != null && !File.Exists(Path.Combine(directory.FullName, "HB_Lint.slnx")))
+            directory = directory.Parent;
+        Assert.NotNull(directory);
+        return directory!.FullName;
     }
 }

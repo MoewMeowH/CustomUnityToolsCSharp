@@ -14,7 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\HBLint.Generator\HBLint.Generator.csproj" />
+    <ProjectReference Include="..\..\src\HBLint.Core\HBLint.Core.csproj" />
     <ProjectReference Include="..\..\src\HBLint.Generator.Cli\HBLint.Generator.Cli.csproj" />
     <ProjectReference Include="..\..\src\HBLint.Attributes\HBLint.Attributes.csproj" />
     <ProjectReference Include="..\..\src\HBLint.Analyzers\HBLint.Analyzers.csproj" />

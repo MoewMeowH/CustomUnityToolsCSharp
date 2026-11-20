@@ -5,8 +5,8 @@ namespace HBLint.Analyzers.Tests;
 
 public class BanCallInMethodAnalyzerTests
 {
-    private const string GetComponentRule =
-        """[assembly: HBLint.BanCallInMethodRule(new[] { "Update", "LateUpdate" }, new[] { "UnityEngine.Component.GetComponent", "UnityEngine.GameObject.GetComponent", "UnityEngine.Camera.main" }, "UnityEngine.MonoBehaviour", "no-getcomponent", Requires = new[] { "UnityEngine.CoreModule" })]""";
+    private static readonly string GetComponentRule = Presets.Attributes(Presets.CallInMethod(
+        new[] { "Update", "LateUpdate" }, new[] { "UnityEngine.Component.GetComponent", "UnityEngine.GameObject.GetComponent", "UnityEngine.Camera.main" }, "UnityEngine.MonoBehaviour", "no-getcomponent", requires: new[] { "UnityEngine.CoreModule" }));
 
     private static Diagnostic[] Cll0002(IEnumerable<Diagnostic> diagnostics) => diagnostics.Where(d => d.Id == "CLL0002").ToArray();
 
@@ -67,8 +67,7 @@ public class BanCallInMethodAnalyzerTests
     [Fact]
     public void 프로젝트_메서드와_오버라이드를_잡고_new로_가린_것은_안_잡음()
     {
-        const string rule =
-            """[assembly: HBLint.BanCallInMethodRule(new[] { "Update" }, new[] { "MyGame.UI.UIBase.RefreshUI", "MyGame.UI.UIBase.Plain" }, "MyGame.UI.UIBase", "no-refresh")]""";
+        var rule = Presets.Attributes(Presets.CallInMethod(new[] { "Update" }, new[] { "MyGame.UI.UIBase.RefreshUI", "MyGame.UI.UIBase.Plain" }, "MyGame.UI.UIBase", "no-refresh"));
 
         var diagnostics = Cll0002(AnalyzeGame(rule, UiSource));
 
@@ -79,8 +78,7 @@ public class BanCallInMethodAnalyzerTests
     [Fact]
     public void ownerType을_MonoBehaviour로_두면_다른_클래스에서_부르는_것도_잡음()
     {
-        const string rule =
-            """[assembly: HBLint.BanCallInMethodRule(new[] { "Update" }, new[] { "MyGame.UI.UIBase.RefreshUI" }, "UnityEngine.MonoBehaviour", "no-refresh")]""";
+        var rule = Presets.Attributes(Presets.CallInMethod(new[] { "Update" }, new[] { "MyGame.UI.UIBase.RefreshUI" }, "UnityEngine.MonoBehaviour", "no-refresh"));
 
         var diagnostics = Cll0002(AnalyzeGame(rule, UiSource));
 
@@ -91,10 +89,9 @@ public class BanCallInMethodAnalyzerTests
     [InlineData(0, new int[0], "")]
     [InlineData(1, new[] { 6 }, "no (Update → A)")]
     [InlineData(2, new[] { 6, 9 }, "no (Update → A)|no (Update → A → B)")]
-    [InlineData(5, new[] { 6, 9 }, "no (Update → A)|no (Update → A → B)")]
     public void FollowDepth만큼_같은_클래스_헬퍼를_따라가고_경로를_붙임(int depth, int[] lines, string messages)
     {
-        var rule = $$"""[assembly: HBLint.BanCallInMethodRule(new[] { "Update" }, new[] { "UnityEngine.Component.GetComponent" }, "UnityEngine.MonoBehaviour", "no", FollowDepth = {{depth}})]""";
+        var rule = Presets.Attributes(Presets.CallInMethod(new[] { "Update" }, new[] { "UnityEngine.Component.GetComponent" }, "UnityEngine.MonoBehaviour", "no", depth));
         const string source = """
             using UnityEngine;
             public class Foo : MonoBehaviour
@@ -117,10 +114,21 @@ public class BanCallInMethodAnalyzerTests
     }
 
     [Fact]
+    public void 따라가기_깊이가_범위를_넘으면_규칙을_빼고_CLL9002()
+    {
+        var rule = Presets.Attributes(Presets.CallInMethod(new[] { "Update" }, new[] { "UnityEngine.Component.GetComponent" }, "UnityEngine.MonoBehaviour", "no", 5));
+        const string source = "using UnityEngine; public class Foo : MonoBehaviour { void Update() { GetComponent<Transform>(); } }";
+
+        var diagnostic = Assert.Single(AnalyzeGame(rule, source));
+
+        Assert.Equal("CLL9002", diagnostic.Id);
+        Assert.Contains("depth", diagnostic.GetMessage());
+    }
+
+    [Fact]
     public void 없는_멤버는_CLL9001이고_나머지_멤버는_그대로_동작()
     {
-        const string rule =
-            """[assembly: HBLint.BanCallInMethodRule(new[] { "Update" }, new[] { "UnityEngine.Component.GetComponnent", "UnityEngine.Component.GetComponent" }, "UnityEngine.MonoBehaviour", "no")]""";
+        var rule = Presets.Attributes(Presets.CallInMethod(new[] { "Update" }, new[] { "UnityEngine.Component.GetComponnent", "UnityEngine.Component.GetComponent" }, "UnityEngine.MonoBehaviour", "no"));
         const string source = "using UnityEngine; public class Foo : MonoBehaviour { void Update() { GetComponent<Transform>(); } }";
 
         var diagnostics = AnalyzeGame(rule, source);
@@ -132,8 +140,7 @@ public class BanCallInMethodAnalyzerTests
     [Fact]
     public void 어트리뷰트_어셈블리를_참조하지_않아도_배열_정수_칸을_읽음()
     {
-        const string rule =
-            """[assembly: HBLint.BanCallInMethodRule(new[] { "Update" }, new[] { "UnityEngine.Component.GetComponent" }, "UnityEngine.MonoBehaviour", "no", FollowDepth = 1, Severity = HBLint.LintSeverity.Error)]""";
+        var rule = Presets.Attributes(Presets.CallInMethod(new[] { "Update" }, new[] { "UnityEngine.Component.GetComponent" }, "UnityEngine.MonoBehaviour", "no", 1, "error"));
         const string source = "using UnityEngine; public class Foo : MonoBehaviour { void Update() { A(); } void A() { GetComponent<Transform>(); } }";
         var rules = Emit(Rules(rule));
 
@@ -147,8 +154,7 @@ public class BanCallInMethodAnalyzerTests
     [Fact]
     public void partial_메서드_구현부도_보고_따라감()
     {
-        const string rule =
-            """[assembly: HBLint.BanCallInMethodRule(new[] { "Update" }, new[] { "UnityEngine.Component.GetComponent" }, "UnityEngine.MonoBehaviour", "no", FollowDepth = 1)]""";
+        var rule = Presets.Attributes(Presets.CallInMethod(new[] { "Update" }, new[] { "UnityEngine.Component.GetComponent" }, "UnityEngine.MonoBehaviour", "no", 1));
         const string source = """
             using UnityEngine;
             public partial class Foo : MonoBehaviour

@@ -1,0 +1,371 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HB_Lint 규칙 (규칙 하나 = 그래프 하나)",
+  "type": "object",
+  "required": [
+    "version",
+    "id",
+    "nodes"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^CLL[0-9]{4}$",
+      "description": "진단 id — CLL0001~CLL0200. 지운 규칙의 id는 다시 쓰지 않는다."
+    },
+    "title": {
+      "type": "string",
+      "description": "규칙 설명 (생성물 주석)"
+    },
+    "severity": {
+      "enum": [
+        "error",
+        "warning",
+        "info"
+      ],
+      "description": "기본 warning. Unity 콘솔에는 info가 보이지 않는다."
+    },
+    "requires": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "검사 중인 어셈블리가 이것들을 모두 참조할 때만 규칙을 쓴다"
+    },
+    "ignoreAssemblies": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "* 와일드카드 어셈블리 이름 — 맞으면 검사하지 않는다"
+    },
+    "nodes": {
+      "type": "object",
+      "description": "노드 이름 → 노드. 입력에 \"scope\"을 쓰면 규칙 시작(전체 범위).",
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "title": "types.derived — 타입 계열 (→ Types)",
+            "type": "object",
+            "required": [
+              "kind",
+              "from",
+              "type"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "types.derived"
+              },
+              "from": {
+                "type": "string",
+                "description": "받는 소켓: Scope · Types"
+              },
+              "type": {
+                "type": "string",
+                "minLength": 1,
+                "description": "기준 타입 메타데이터 이름 (그 타입과 자식, 인터페이스면 구현 타입)"
+              }
+            }
+          },
+          {
+            "title": "methods.named — 메서드 이름 (→ Methods)",
+            "type": "object",
+            "required": [
+              "kind",
+              "from",
+              "names"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "methods.named"
+              },
+              "from": {
+                "type": "string",
+                "description": "받는 소켓: Types"
+              },
+              "names": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "description": "메서드 이름 (그 타입에 선언된 것)"
+              }
+            }
+          },
+          {
+            "title": "methods.follow — 호출 따라가기 (→ Methods)",
+            "type": "object",
+            "required": [
+              "kind",
+              "from",
+              "depth"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "methods.follow"
+              },
+              "from": {
+                "type": "string",
+                "description": "받는 소켓: Methods"
+              },
+              "depth": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2,
+                "description": "같은 클래스 일반 메서드를 몇 단계까지 따라갈지"
+              }
+            }
+          },
+          {
+            "title": "sites.member — 멤버 사용 (→ Sites)",
+            "type": "object",
+            "required": [
+              "kind",
+              "from",
+              "members"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "sites.member"
+              },
+              "from": {
+                "type": "string",
+                "description": "받는 소켓: Scope · Types · Methods"
+              },
+              "members": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "description": "\"타입 메타데이터 이름.멤버 이름\" (오버로드 · 오버라이드 포함)"
+              },
+              "uses": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "enum": [
+                    "call",
+                    "read",
+                    "write"
+                  ]
+                },
+                "description": "쓰임 (없으면 전부)"
+              }
+            }
+          },
+          {
+            "title": "sites.namespace — 네임스페이스 사용 (→ Sites)",
+            "type": "object",
+            "required": [
+              "kind",
+              "from",
+              "namespaces"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "sites.namespace"
+              },
+              "from": {
+                "type": "string",
+                "description": "받는 소켓: Scope · Types · Methods"
+              },
+              "namespaces": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "description": "네임스페이스 (하위 포함)"
+              },
+              "usings": {
+                "type": "boolean",
+                "description": "using 지시문도 (기본 true)"
+              }
+            }
+          },
+          {
+            "title": "sites.declaredInDefine — 디파인 안 선언 사용 (→ Sites)",
+            "type": "object",
+            "required": [
+              "kind",
+              "from",
+              "define"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "sites.declaredInDefine"
+              },
+              "from": {
+                "type": "string",
+                "description": "받는 소켓: Scope · Types · Methods"
+              },
+              "define": {
+                "type": "string",
+                "minLength": 1,
+                "description": "이 디파인 안에만 선언된 것(같은 어셈블리)을 쓰는 곳"
+              }
+            }
+          },
+          {
+            "title": "sites.nullOperator — null 연산자 (→ Sites)",
+            "type": "object",
+            "required": [
+              "kind",
+              "from"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "sites.nullOperator"
+              },
+              "from": {
+                "type": "string",
+                "description": "받는 소켓: Scope · Types · Methods"
+              },
+              "operators": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "enum": [
+                    "?.",
+                    "??",
+                    "??=",
+                    "is null"
+                  ]
+                },
+                "description": "연산자 (없으면 전부, is null은 is not null · 복합 패턴 포함)"
+              }
+            }
+          },
+          {
+            "title": "filter.targetType — 대상 타입 (→ Sites)",
+            "type": "object",
+            "required": [
+              "kind",
+              "from",
+              "type"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "filter.targetType"
+              },
+              "from": {
+                "type": "string",
+                "description": "받는 소켓: Sites"
+              },
+              "type": {
+                "type": "string",
+                "minLength": 1,
+                "description": "사이트가 다루는 식의 정적 타입이 이 타입 계열인 것만 (null 연산자 · 멤버 사용 사이트에만 대상 타입이 있음)"
+              }
+            }
+          },
+          {
+            "title": "filter.define — 디파인 가드 (→ Sites)",
+            "type": "object",
+            "required": [
+              "kind",
+              "from",
+              "define",
+              "where"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "filter.define"
+              },
+              "from": {
+                "type": "string",
+                "description": "받는 소켓: Sites"
+              },
+              "define": {
+                "type": "string",
+                "minLength": 1,
+                "description": "디파인"
+              },
+              "where": {
+                "enum": [
+                  "inside",
+                  "outside"
+                ],
+                "description": "그 디파인이 없으면 꺼지는 구간 안(inside) · 밖(outside)"
+              }
+            }
+          },
+          {
+            "title": "sites.union — 합치기 (→ Sites)",
+            "type": "object",
+            "required": [
+              "kind",
+              "from"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "sites.union"
+              },
+              "from": {
+                "type": "array",
+                "minItems": 2,
+                "items": {
+                  "type": "string"
+                },
+                "description": "받는 소켓: Sites"
+              }
+            }
+          },
+          {
+            "title": "report — 보고",
+            "type": "object",
+            "required": [
+              "kind",
+              "from",
+              "message"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "report"
+              },
+              "from": {
+                "type": "string",
+                "description": "받는 소켓: Sites"
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "description": "진단 메시지"
+              },
+              "appendPath": {
+                "type": "boolean",
+                "description": "따라가서 닿은 곳이면 메시지 끝에 (Update → A) 경로를 붙임 (기본 true)"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "layout": {
+      "description": "편집기용 노드 위치 · 메모 (분석기에는 넘기지 않음)"
+    }
+  }
+}

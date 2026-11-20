@@ -7,8 +7,8 @@ public class BanNullOperatorAnalyzerTests
 {
     private const string Message = "Unity 오브젝트는 '== null'로 확인하세요";
 
-    private const string UnityRule =
-        """[assembly: HBLint.BanNullOperatorRule("UnityEngine.Object", "Unity 오브젝트는 '== null'로 확인하세요", Requires = new[] { "UnityEngine.CoreModule" })]""";
+    private static readonly string UnityRule =
+        Presets.Attributes(Presets.NullOperator("UnityEngine.Object", Message, new[] { "UnityEngine.CoreModule" }));
 
     // 줄 7~11이 위반 다섯 개
     private const string FiveViolations = """
@@ -142,11 +142,10 @@ public class BanNullOperatorAnalyzerTests
     }
 
     [Fact]
-    public void 어트리뷰트_어셈블리를_참조하지_않아도_Severity_enum이_든_규칙이_동작()
+    public void 어트리뷰트_어셈블리를_참조하지_않아도_심각도가_든_규칙이_동작()
     {
-        // 생성물은 Severity(enum)를 늘 쓴다. Unity에서 규칙 asmdef만 참조한 asmdef는 HBLint.Attributes를 받지 못한다
-        const string rule =
-            """[assembly: HBLint.BanNullOperatorRule("UnityEngine.Object", "m", Requires = new[] { "UnityEngine.CoreModule" }, Severity = HBLint.LintSeverity.Error)]""";
+        // Unity에서 규칙 asmdef만 참조한 asmdef는 HBLint.Attributes를 받지 못한다
+        var rule = Presets.Attributes(Presets.NullOperator("UnityEngine.Object", "m", new[] { "UnityEngine.CoreModule" }, "error"));
         var rules = Emit(Rules(rule));
 
         var diagnostics = Analyze(Compile("Game", FiveViolations, Unity, rules));
@@ -159,7 +158,7 @@ public class BanNullOperatorAnalyzerTests
     public void 규칙_어셈블리가_컴파일_참조이고_어트리뷰트_어셈블리를_참조하지_않아도_동작()
     {
         // IDE에서 Unity asmdef 참조는 프로젝트(컴파일) 참조로 들어온다
-        var rules = Rules(UnityRule + "\n" + """[assembly: HBLint.BanNullOperatorRule("UnityEngine.Component", "c", Severity = HBLint.LintSeverity.Error)]""").ToMetadataReference();
+        var rules = Rules(UnityRule + "\n" + Presets.Attributes(Presets.NullOperator("UnityEngine.Component", "c", severity: "error", id: "CLL0004"))).ToMetadataReference();
 
         var diagnostics = Analyze(Compile("Game", FiveViolations, Unity, rules));
 
@@ -191,8 +190,7 @@ public class BanNullOperatorAnalyzerTests
     [Fact]
     public void Requires를_채웠는데_타입이_없으면_CLL9001()
     {
-        const string typo =
-            """[assembly: HBLint.BanNullOperatorRule("UnityEngine.Objekt", "x", Requires = new[] { "UnityEngine.CoreModule" })]""";
+        var typo = Presets.Attributes(Presets.NullOperator("UnityEngine.Objekt", "x", new[] { "UnityEngine.CoreModule" }));
 
         var diagnostics = AnalyzeGame(typo, FiveViolations);
 
@@ -203,12 +201,12 @@ public class BanNullOperatorAnalyzerTests
     }
 
     [Theory]
-    [InlineData("HBLint.LintSeverity.Error", DiagnosticSeverity.Error)]
-    [InlineData("HBLint.LintSeverity.Info", DiagnosticSeverity.Info)]
-    [InlineData("HBLint.LintSeverity.Warning", DiagnosticSeverity.Warning)]
+    [InlineData("error", DiagnosticSeverity.Error)]
+    [InlineData("info", DiagnosticSeverity.Info)]
+    [InlineData("warning", DiagnosticSeverity.Warning)]
     public void Severity가_진단_심각도에_반영(string severity, DiagnosticSeverity expected)
     {
-        var rule = $"""[assembly: HBLint.BanNullOperatorRule("UnityEngine.Object", "m", Severity = {severity})]""";
+        var rule = Presets.Attributes(Presets.NullOperator("UnityEngine.Object", "m", severity: severity));
 
         var diagnostics = AnalyzeGame(rule, FiveViolations);
 
@@ -217,21 +215,19 @@ public class BanNullOperatorAnalyzerTests
     }
 
     [Fact]
-    public void 메시지가_비면_기본_메시지()
+    public void 메시지가_비면_규칙을_빼고_CLL9002()
     {
-        var diagnostics = AnalyzeGame("""[assembly: HBLint.BanNullOperatorRule("UnityEngine.Object", "")]""", FiveViolations);
+        var diagnostics = AnalyzeGame(Presets.Attributes(Presets.NullOperator("UnityEngine.Object", "")), FiveViolations);
 
-        Assert.Equal(5, diagnostics.Length);
-        Assert.All(diagnostics, d => Assert.Contains("UnityEngine.Object", d.GetMessage()));
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal("CLL9002", diagnostic.Id);
+        Assert.Contains("message", diagnostic.GetMessage());
     }
 
     [Fact]
     public void 규칙이_둘이면_각각_진단()
     {
-        const string rules = """
-            [assembly: HBLint.BanNullOperatorRule("UnityEngine.Object", "A")]
-            [assembly: HBLint.BanNullOperatorRule("UnityEngine.Component", "B")]
-            """;
+        var rules = Presets.Attributes(Presets.NullOperator("UnityEngine.Object", "A"), Presets.NullOperator("UnityEngine.Component", "B", id: "CLL0004"));
         const string source = """
             public class Foo
             {
@@ -257,12 +253,9 @@ public class BanNullOperatorAnalyzerTests
     }
 
     [Fact]
-    public void LintSeverity_값이_분석기_상수와_같음()
+    public void 어트리뷰트_이름이_분석기가_찾는_이름과_같음()
     {
-        Assert.Equal(LintSeverityValues.Info, (int)HBLint.LintSeverity.Info);
-        Assert.Equal(LintSeverityValues.Warning, (int)HBLint.LintSeverity.Warning);
-        Assert.Equal(LintSeverityValues.Error, (int)HBLint.LintSeverity.Error);
-        Assert.Equal(LintRuleReader.AttributesAssemblyName, typeof(HBLint.LintSeverity).Assembly.GetName().Name);
-        Assert.Equal(BanNullOperatorAnalyzer.AttributeFullName, typeof(HBLint.BanNullOperatorRuleAttribute).FullName);
+        Assert.Equal(LintRuleReader.AttributesAssemblyName, typeof(HBLint.RuleAttribute).Assembly.GetName().Name);
+        Assert.Equal(GraphRuleAnalyzer.AttributeFullName, typeof(HBLint.RuleAttribute).FullName);
     }
 }

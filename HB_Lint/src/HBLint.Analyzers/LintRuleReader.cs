@@ -25,29 +25,6 @@ namespace HBLint.Analyzers
             return result;
         }
 
-        /// <summary>규칙의 Requires 어셈블리를 검사 중인 컴파일이 모두 참조하는가.</summary>
-        public static bool RequirementsMet(Compilation compilation, LintRule rule)
-        {
-            var requires = rule.GetNamed("Requires") as object?[];
-            if (requires == null)
-                return true;
-
-            var referenced = new HashSet<string>(compilation.ReferencedAssemblyNames.Select(n => n.Name));
-            foreach (var value in requires)
-            {
-                if (value is string name && !referenced.Contains(name))
-                    return false;
-            }
-            return true;
-        }
-
-        public static DiagnosticSeverity GetSeverity(LintRule rule)
-        {
-            return rule.GetNamed("Severity") is int value
-                ? LintSeverityValues.ToDiagnosticSeverity(value)
-                : DiagnosticSeverity.Warning;
-        }
-
         private static bool ReferencesAttributes(IAssemblySymbol assembly)
         {
             foreach (var module in assembly.Modules)

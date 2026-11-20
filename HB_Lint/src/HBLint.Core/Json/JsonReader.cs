@@ -4,9 +4,9 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 
-namespace HBLint.Generator.Json
+namespace HBLint.Core.Json
 {
-    public sealed class JsonParseException : Exception
+    internal sealed class JsonParseException : Exception
     {
         public JsonParseException(string message, int line, int column)
             : base(message)
@@ -21,7 +21,7 @@ namespace HBLint.Generator.Json
     }
 
     /// <summary>RFC 8259 JSON 읽기 (주석 · 끝 쉼표 없음). 같은 객체 안 이름 중복은 오류. 맨 앞 BOM은 건너뛴다.</summary>
-    public sealed class JsonReader
+    internal sealed class JsonReader
     {
         public const int MaxDepth = 64;
 

@@ -25,6 +25,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- 규칙 IR 읽기 · 검증은 HBLint.Core와 같은 소스를 함께 컴파일한다 (DLL 의존을 두지 않으려고) -->
+    <Compile Include="..\HBLint.Core\Json\*.cs" LinkBase="Core\Json" />
+    <Compile Include="..\HBLint.Core\Ir\*.cs" LinkBase="Core\Ir" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="HBLint.Analyzers.Tests" />
   </ItemGroup>
 

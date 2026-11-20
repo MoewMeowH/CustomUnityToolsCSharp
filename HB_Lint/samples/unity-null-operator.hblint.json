@@ -1,0 +1,26 @@
+{
+  "$schema": "./hblint.schema.json",
+  "version": 1,
+  "id": "CLL0001",
+  "title": "Unity 오브젝트에 null 연산자 금지 — 파괴된 Unity 오브젝트는 C# null이 아니라서 ?. · ?? · ??= · is null이 통과시킨다.",
+  "severity": "warning",
+  "requires": [
+    "UnityEngine.CoreModule"
+  ],
+  "nodes": {
+    "nullOperators": {
+      "kind": "sites.nullOperator",
+      "from": "scope"
+    },
+    "unityObject": {
+      "kind": "filter.targetType",
+      "from": "nullOperators",
+      "type": "UnityEngine.Object"
+    },
+    "report": {
+      "kind": "report",
+      "from": "unityObject",
+      "message": "Unity 오브젝트는 ?. · ?? · ??= · is null이 파괴된 오브젝트를 null로 보지 않습니다. '== null' 또는 'if (obj)'로 확인하세요."
+    }
+  }
+}

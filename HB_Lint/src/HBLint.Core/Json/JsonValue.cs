@@ -1,10 +1,10 @@
 #nullable enable
 using System.Collections.Generic;
 
-namespace HBLint.Generator.Json
+namespace HBLint.Core.Json
 {
     /// <summary>JSON 값. Line · Column은 원문 위치(1부터, 만든 값이면 0)로 오류 메시지에 쓴다.</summary>
-    public abstract class JsonValue
+    internal abstract class JsonValue
     {
         /// <summary>종류는 아래 여섯 개로 닫는다.</summary>
         internal JsonValue()
@@ -18,7 +18,7 @@ namespace HBLint.Generator.Json
         public abstract string KindName { get; }
     }
 
-    public sealed class JsonObject : JsonValue
+    internal sealed class JsonObject : JsonValue
     {
         private readonly List<KeyValuePair<string, JsonValue>> _members = new List<KeyValuePair<string, JsonValue>>();
 
@@ -46,7 +46,7 @@ namespace HBLint.Generator.Json
         }
     }
 
-    public sealed class JsonArray : JsonValue
+    internal sealed class JsonArray : JsonValue
     {
         private readonly List<JsonValue> _items = new List<JsonValue>();
 
@@ -61,7 +61,7 @@ namespace HBLint.Generator.Json
         }
     }
 
-    public sealed class JsonString : JsonValue
+    internal sealed class JsonString : JsonValue
     {
         public JsonString(string value) => Value = value;
 
@@ -71,7 +71,7 @@ namespace HBLint.Generator.Json
     }
 
     /// <summary>숫자는 원문 그대로 둔다 (정수 · 범위 판단은 쓰는 쪽).</summary>
-    public sealed class JsonNumber : JsonValue
+    internal sealed class JsonNumber : JsonValue
     {
         public JsonNumber(string raw) => Raw = raw;
 
@@ -80,7 +80,7 @@ namespace HBLint.Generator.Json
         public override string KindName => "숫자";
     }
 
-    public sealed class JsonBool : JsonValue
+    internal sealed class JsonBool : JsonValue
     {
         public JsonBool(bool value) => Value = value;
 
@@ -89,7 +89,7 @@ namespace HBLint.Generator.Json
         public override string KindName => "bool";
     }
 
-    public sealed class JsonNull : JsonValue
+    internal sealed class JsonNull : JsonValue
     {
         public override string KindName => "null";
     }

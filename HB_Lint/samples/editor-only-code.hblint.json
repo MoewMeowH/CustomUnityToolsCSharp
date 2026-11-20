@@ -1,0 +1,46 @@
+{
+  "$schema": "./hblint.schema.json",
+  "version": 1,
+  "id": "CLL0003",
+  "title": "에디터 전용 코드 — UnityEditor API와 #if UNITY_EDITOR 안에 선언된 코드는 플레이어 빌드에 없다.",
+  "severity": "warning",
+  "ignoreAssemblies": [
+    "Assembly-CSharp-Editor*",
+    "*.Editor",
+    "*.Editor.*",
+    "*.Tests",
+    "*.Tests.*"
+  ],
+  "nodes": {
+    "unityEditor": {
+      "kind": "sites.namespace",
+      "from": "scope",
+      "namespaces": [
+        "UnityEditor"
+      ]
+    },
+    "editorOnly": {
+      "kind": "sites.declaredInDefine",
+      "from": "scope",
+      "define": "UNITY_EDITOR"
+    },
+    "both": {
+      "kind": "sites.union",
+      "from": [
+        "unityEditor",
+        "editorOnly"
+      ]
+    },
+    "outsideGuard": {
+      "kind": "filter.define",
+      "from": "both",
+      "define": "UNITY_EDITOR",
+      "where": "outside"
+    },
+    "report": {
+      "kind": "report",
+      "from": "outsideGuard",
+      "message": "에디터 전용 코드입니다 — #if UNITY_EDITOR 안에서만 쓰세요. 플레이어 빌드가 깨집니다."
+    }
+  }
+}

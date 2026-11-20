@@ -41,7 +41,7 @@ internal static class LintHarness
         .ToList();
 
     public static readonly MetadataReference Attributes =
-        MetadataReference.CreateFromFile(typeof(HBLint.LintSeverity).Assembly.Location);
+        MetadataReference.CreateFromFile(typeof(HBLint.RuleAttribute).Assembly.Location);
 
     public static readonly MetadataReference Unity = Emit(Compile("UnityEngine.CoreModule", UnitySource));
 
@@ -103,7 +103,7 @@ internal static class LintHarness
         var errors = compilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
         Assert.True(errors.Count == 0, "컴파일 에러: " + string.Join("\n", errors));
         return compilation
-            .WithAnalyzers(ImmutableArray.Create<DiagnosticAnalyzer>(new BanNullOperatorAnalyzer(), new BanCallInMethodAnalyzer(), new RequireDefineAnalyzer()))
+            .WithAnalyzers(ImmutableArray.Create<DiagnosticAnalyzer>(new GraphRuleAnalyzer()))
             .GetAnalyzerDiagnosticsAsync().Result
             .OrderBy(d => d.Location.SourceSpan.Start)
             .ToImmutableArray();

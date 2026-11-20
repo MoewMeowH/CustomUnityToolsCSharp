@@ -1,31 +1,57 @@
+using HBLint.Core.Generation;
+using HBLint.Core.Json;
+
 namespace HBLint.Generator.Cli;
 
 /// <summary>
-/// hblint-gen generate &lt;rules.json&gt; &lt;LintRules.g.cs&gt; [--check]
-/// hblint-gen schema &lt;rules.schema.json&gt; [--check]
+/// hblint-gen — 규칙 파일(*.hblint.json, 규칙 하나 = 파일 하나) → LintRules.g.cs. Unity · 일반 .NET 공통.
 /// 종료 코드: 0 성공 · 1 오류 또는 --check 다름 · 2 사용법.
 /// </summary>
 internal static class GeneratorCli
 {
     private const string Usage = """
         사용법:
-          hblint-gen generate <rules.json> <LintRules.g.cs> [--check]
-          hblint-gen schema <rules.schema.json> [--check]
+          hblint-gen init <규칙 폴더> <LintRules.g.cs> [--asmdef <규칙 어셈블리 이름>]
+          hblint-gen validate <규칙 폴더>
+          hblint-gen generate <규칙 폴더> <LintRules.g.cs> [--check]
+          hblint-gen schema <hblint.schema.json> [--check]
 
-        --check  쓰지 않고 기존 파일과 비교만 한다 (다르면 종료 코드 1)
+        init      규칙 폴더가 비었으면 예시 규칙, (--asmdef) 생성물 폴더에 asmdef가 없으면 Unity 규칙 asmdef를 만들고,
+                  규칙 폴더의 스키마는 늘 최신으로 쓴다. 그 뒤 generate.
+        규칙 폴더  그 폴더 바로 아래의 *.hblint.json (하위 폴더는 보지 않음)
+        --check   쓰지 않고 기존 파일과 비교만 한다 (다르면 종료 코드 1)
         """;
 
     public static int Run(string[] args, TextWriter output, TextWriter error)
     {
         var check = args.Contains("--check");
-        var positional = args.Where(a => a != "--check").ToArray();
+        string? asmdef = null;
+        var positional = new List<string>();
+        for (var i = 0; i < args.Length; i++)
+        {
+            if (args[i] == "--check")
+                continue;
+            if (args[i] == "--asmdef" && i + 1 < args.Length)
+            {
+                asmdef = args[++i];
+                continue;
+            }
+            positional.Add(args[i]);
+        }
 
         try
         {
-            if (positional.Length == 3 && positional[0] == "generate")
-                return Generate(positional[1], positional[2], check, output, error);
-            if (positional.Length == 2 && positional[0] == "schema")
-                return Schema(positional[1], check, output, error);
+            switch (positional.Count > 0 ? positional[0] : "")
+            {
+                case "init" when positional.Count == 3 && !check:
+                    return Init(positional[1], positional[2], asmdef, output, error);
+                case "validate" when positional.Count == 2 && !check && asmdef == null:
+                    return Validate(positional[1], output, error);
+                case "generate" when positional.Count == 3 && asmdef == null:
+                    return Generate(positional[1], positional[2], check, output, error);
+                case "schema" when positional.Count == 2 && asmdef == null:
+                    return Finish(positional[1], IrSchema.Generate(), check, output, error);
+            }
         }
         catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
         {
@@ -37,32 +63,79 @@ internal static class GeneratorCli
         return 2;
     }
 
-    private static int Generate(string rulesPath, string outputPath, bool check, TextWriter output, TextWriter error)
+    private static int Init(string folder, string outputPath, string? asmdef, TextWriter output, TextWriter error)
     {
-        if (!File.Exists(rulesPath))
+        Directory.CreateDirectory(folder);
+        if (Directory.GetFiles(folder, RuleSet.FilePattern, SearchOption.TopDirectoryOnly).Length == 0)
         {
-            error.WriteLine($"{rulesPath}: 파일이 없습니다");
-            return 1;
+            foreach (var preset in Presets.Files())
+                WriteNew(Path.Combine(folder, preset.Key), preset.Value, output);
         }
-        if (!TryCatalog(error, out var catalog))
-            return 1;
+        Finish(Path.Combine(folder, IrSchema.FileName), IrSchema.Generate(), false, output, error);
 
-        var result = RulesJson.Generate(File.ReadAllText(rulesPath), catalog);
-        if (!result.Success)
+        if (asmdef != null)
         {
-            foreach (var e in result.Errors)
-                error.WriteLine(rulesPath + e);
-            error.WriteLine($"오류 {result.Errors.Count}개 — {outputPath}는 바꾸지 않았습니다");
-            return 1;
+            // 한 폴더에 asmdef가 둘이면 Unity가 컴파일을 막는다 — 이미 있으면 그대로 둔다
+            var outputFolder = Path.GetDirectoryName(Path.GetFullPath(outputPath))!;
+            var existing = Directory.Exists(outputFolder) ? Directory.GetFiles(outputFolder, "*.asmdef") : Array.Empty<string>();
+            if (existing.Length == 0)
+                WriteNew(Path.Combine(outputFolder, asmdef + ".asmdef"), RulesAsmdef(asmdef), output);
+            else if (existing.All(p => Path.GetFileNameWithoutExtension(p) != asmdef))
+                output.WriteLine($"{outputFolder}에 이미 asmdef({Path.GetFileName(existing[0])})가 있어 {asmdef}.asmdef를 만들지 않았습니다");
         }
-        return Finish(outputPath, result.Text!, check, output, error);
+        return Generate(folder, outputPath, false, output, error);
     }
 
-    private static int Schema(string outputPath, bool check, TextWriter output, TextWriter error)
+    /// <summary>규칙 asmdef — HBLint.Attributes 참조, Auto Referenced(그래서 Assembly-CSharp는 자동 검사), 엔진 참조 없음.</summary>
+    internal static string RulesAsmdef(string name) => JsonWriter.Write(new JsonObject()
+        .Add("name", new JsonString(name))
+        .Add("references", new JsonArray().Add(new JsonString("HBLint.Attributes")))
+        .Add("autoReferenced", new JsonBool(true))
+        .Add("noEngineReferences", new JsonBool(true)));
+
+    private static int Validate(string folder, TextWriter output, TextWriter error)
     {
-        if (!TryCatalog(error, out var catalog))
+        if (!TryRead(folder, error, out var set))
             return 1;
-        return Finish(outputPath, RulesSchema.Generate(catalog), check, output, error);
+        foreach (var warning in set.Warnings)
+            output.WriteLine("경고 " + warning);
+        foreach (var e in set.Errors)
+            error.WriteLine(e);
+        if (set.Errors.Count > 0)
+        {
+            error.WriteLine($"오류 {set.Errors.Count}개");
+            return 1;
+        }
+        output.WriteLine($"규칙 {set.Count}개: 오류 없음");
+        return 0;
+    }
+
+    private static int Generate(string folder, string outputPath, bool check, TextWriter output, TextWriter error)
+    {
+        if (!TryRead(folder, error, out var set))
+            return 1;
+        foreach (var warning in set.Warnings)
+            output.WriteLine("경고 " + warning);
+        if (set.Text == null)
+        {
+            foreach (var e in set.Errors)
+                error.WriteLine(e);
+            error.WriteLine($"오류 {set.Errors.Count}개 — {outputPath}는 바꾸지 않았습니다");
+            return 1;
+        }
+        return Finish(outputPath, set.Text, check, output, error);
+    }
+
+    private static bool TryRead(string folder, TextWriter error, out RuleSet set)
+    {
+        if (!Directory.Exists(folder))
+        {
+            error.WriteLine($"{folder}: 폴더가 없습니다");
+            set = null!;
+            return false;
+        }
+        set = RuleSet.Build(RuleSet.ReadFolder(folder));
+        return true;
     }
 
     private static int Finish(string outputPath, string text, bool check, TextWriter output, TextWriter error)
@@ -81,18 +154,9 @@ internal static class GeneratorCli
         return 0;
     }
 
-    private static bool TryCatalog(TextWriter error, out RuleCatalog catalog)
+    private static void WriteNew(string path, string text, TextWriter output)
     {
-        try
-        {
-            catalog = RuleCatalog.FromAssembly(typeof(HBLint.LintSeverity).Assembly);
-            return true;
-        }
-        catch (RuleCatalogException e)
-        {
-            error.WriteLine("규칙 어트리뷰트 오류: " + e.Message);
-            catalog = null!;
-            return false;
-        }
+        OutputFile.WriteIfChanged(path, text);
+        output.WriteLine($"{path}: 만들었습니다");
     }
 }

@@ -3,10 +3,10 @@ using System;
 using System.IO;
 using System.Text;
 
-namespace HBLint.Generator
+namespace HBLint.Core.Generation
 {
     /// <summary>생성물 파일 쓰기 · 비교. UTF-8(BOM 없음).</summary>
-    public static class OutputFile
+    internal static class OutputFile
     {
         private static readonly Encoding Utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 

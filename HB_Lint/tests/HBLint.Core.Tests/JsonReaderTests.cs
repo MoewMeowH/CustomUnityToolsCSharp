@@ -1,6 +1,6 @@
-using HBLint.Generator.Json;
+using HBLint.Core.Json;
 
-namespace HBLint.Generator.Tests;
+namespace HBLint.Core.Tests;
 
 public class JsonReaderTests
 {

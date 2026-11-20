@@ -1,10 +1,10 @@
 #nullable enable
 using System.Text;
 
-namespace HBLint.Generator.Json
+namespace HBLint.Core.Json
 {
-    /// <summary>들여쓰기 2칸 · LF · 칸 순서 그대로. ASCII 밖 글자는 그대로 둔다 (파일은 UTF-8).</summary>
-    public static class JsonWriter
+    /// <summary>들여쓰기 2칸 · LF · 칸 순서 그대로. ASCII 밖 글자는 그대로 둔다 (파일은 UTF-8). Compact는 공백 · 줄바꿈 없이.</summary>
+    internal static class JsonWriter
     {
         public static string Write(JsonValue value)
         {
@@ -14,8 +14,18 @@ namespace HBLint.Generator.Json
             return sb.ToString();
         }
 
+        public static string WriteCompact(JsonValue value)
+        {
+            var sb = new StringBuilder();
+            WriteValue(sb, value, -1);
+            return sb.ToString();
+        }
+
+        /// <summary>indent가 음수면 한 줄로 쓴다.</summary>
         private static void WriteValue(StringBuilder sb, JsonValue value, int indent)
         {
+            var compact = indent < 0;
+            var inner = compact ? -1 : indent + 1;
             switch (value)
             {
                 case JsonObject obj:
@@ -24,14 +34,14 @@ namespace HBLint.Generator.Json
                         sb.Append("{}");
                         return;
                     }
-                    sb.Append("{\n");
+                    sb.Append(compact ? "{" : "{\n");
                     for (var i = 0; i < obj.Members.Count; i++)
                     {
-                        Indent(sb, indent + 1);
+                        Indent(sb, inner);
                         WriteString(sb, obj.Members[i].Key);
-                        sb.Append(": ");
-                        WriteValue(sb, obj.Members[i].Value, indent + 1);
-                        sb.Append(i + 1 < obj.Members.Count ? ",\n" : "\n");
+                        sb.Append(compact ? ":" : ": ");
+                        WriteValue(sb, obj.Members[i].Value, inner);
+                        sb.Append(i + 1 < obj.Members.Count ? (compact ? "," : ",\n") : (compact ? "" : "\n"));
                     }
                     Indent(sb, indent);
                     sb.Append('}');
@@ -42,12 +52,12 @@ namespace HBLint.Generator.Json
                         sb.Append("[]");
                         return;
                     }
-                    sb.Append("[\n");
+                    sb.Append(compact ? "[" : "[\n");
                     for (var i = 0; i < array.Items.Count; i++)
                     {
-                        Indent(sb, indent + 1);
-                        WriteValue(sb, array.Items[i], indent + 1);
-                        sb.Append(i + 1 < array.Items.Count ? ",\n" : "\n");
+                        Indent(sb, inner);
+                        WriteValue(sb, array.Items[i], inner);
+                        sb.Append(i + 1 < array.Items.Count ? (compact ? "," : ",\n") : (compact ? "" : "\n"));
                     }
                     Indent(sb, indent);
                     sb.Append(']');
@@ -92,6 +102,10 @@ namespace HBLint.Generator.Json
             sb.Append('"');
         }
 
-        private static void Indent(StringBuilder sb, int level) => sb.Append(' ', level * 2);
+        private static void Indent(StringBuilder sb, int level)
+        {
+            if (level > 0)
+                sb.Append(' ', level * 2);
+        }
     }
 }

@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- 규칙 IR · 노드 카탈로그 · 검증기 · JSON · 생성기. 의존 없는 netstandard2.0.
+       분석기는 Json/ · Ir/ 소스를 링크해 함께 컴파일한다 (Unity는 분석기의 의존 DLL을 불러오지 못할 수 있어서) — 그래서 형은 모두 internal. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <RootNamespace>HBLint.Core</RootNamespace>
+    <AssemblyName>HBLint.Core</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="hblint-gen" />
+    <InternalsVisibleTo Include="HBLint.Core.Tests" />
+  </ItemGroup>
+</Project>
