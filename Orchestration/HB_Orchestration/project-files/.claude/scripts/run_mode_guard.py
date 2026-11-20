@@ -21,6 +21,8 @@
   있으면 막는다 (share_guard.outbound_hits). 작업 경로(F:\\AI\\…) · %LOCALAPPDATA% 같은 변수 꼴은 통과.
 - diff는 파일로 (review_* · sub_self · sub_perf · sub_security · perf_*): input에 diff 덩어리(줄 머리 'diff --git ' · '@@ -n +m')가 있거나,
   context에 .diff 파일이 있는데 첫 항목이 아니면 막는다.
+- 결함 리뷰 원문 (review · review_* · perf_* · sub_self · sub_perf · sub_security): context에 docs/plans/ · docs/worklog/ · request.md가 있으면
+  **경고만** (hook_warnings.jsonl에 기록 · additionalContext). preflight_* · design_* · sub_direction 등은 원문을 정당하게 넣으므로 보지 않는다.
 - 실패하면 막는다: 통과 판정일 때만 exit 0.
 
 입력: stdin JSON {"tool_name": "mcp__hb-orchestration__run_mode", "tool_input": {"mode", "reason", "ownReview", "input", "context", ...}}.
@@ -35,6 +37,7 @@ import unicodedata
 sys.dont_write_bytecode = True  # 훅 폴더에 __pycache__를 남기지 않는다 (저장소에 섞이지 않게)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # -I는 스크립트 폴더를 경로에 넣지 않는다
 from share_guard import outbound_hits  # noqa: E402
+from hook_common import warn  # noqa: E402
 
 PLAN_MODES = {'review_main', 'review_high'}
 # ownReview를 쓸 수 있는 검토형 서브에이전트. 둘 이상이면 '+'로 잇고, 결과 원문도 이어 붙인다.
@@ -56,6 +59,8 @@ PLAN_TAG = re.compile(r'\[plan:([^\]\\/:\s][^\]\\/:]*?\.md)\]', re.IGNORECASE)
 PLAN_TAG_START = re.compile(r'\[plan:', re.IGNORECASE)
 # input에 붙인 diff 덩어리 (줄 머리)
 DIFF_BODY = re.compile(r'(?m)^(?:diff --git |@@ -\d+(?:,\d+)? \+\d+)')
+# 결함 리뷰 context의 요청 · 계획서 · 작업 로그 경로 (경고만 — 오탐을 센 뒤 막기로 올린다)
+ORIGIN_PATH = re.compile(r'(?:^|/)docs/(?:plans|worklog)/|(?:^|/)request\.md(?::|$)', re.IGNORECASE)
 
 
 def deny(reason: str) -> None:
@@ -255,6 +260,19 @@ def check(data: dict, today: datetime.date | None = None) -> None:
             deny(f"'{mode}' 전에 계획서가 필요하다: 프로젝트 안 docs/plans/에 최근 {PLAN_DAYS}일 안의 날짜 이름이거나 {PLAN_DAYS}일 안에 고친 계획서가 없다. "
                  "그보다 오래된 작업이면 reason에 [plan:<계획서 파일 이름>.md]를 붙인다. "
                  "CLAUDE.md '계획서와 작업 로그': 계획서 없이 진행하던 작업이면 리뷰 전에 만들고 맨 위에 '사후 작성'이라고 표시한다.")
+
+    if mode == 'review' or mode.startswith(('review_', 'perf_')) or mode in API_REVIEWERS:
+        try:  # 경고만 하는 검사 — 여기서 실패해도 막지 않는다 (이 훅의 다른 검사는 실패하면 막는다)
+            ctx = by_key.get('context') or []
+            if isinstance(ctx, str):
+                ctx = json.loads(ctx)
+            paths = [str(c.get('path') or '') for c in ctx if isinstance(c, dict)]
+            if origin := [p for p in paths if ORIGIN_PATH.search(p.replace('\\', '/'))]:
+                warn('H3', 'review-origin-context', f"결함 리뷰 '{mode}'의 context에 요청 · 계획서 · 작업 로그가 있다: {', '.join(origin[:3])} — "
+                     'CLAUDE.md "input — 독립성": 결함 리뷰에는 요청 · 계획서 원문을 넣지 않는다 (원문 자료는 방향 리뷰에만). '
+                     '꼭 함께 줘야 하면 input 첫 줄에 "코드 결함 찾기가 먼저, 원문은 결함인가 의도인가를 가를 때만 참고"를 쓴다.', 'PreToolUse')
+        except Exception:
+            pass
 
 
 def main() -> None:

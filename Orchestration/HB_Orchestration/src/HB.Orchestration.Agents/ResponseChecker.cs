@@ -252,4 +252,58 @@ public static partial class ResponseChecker
 
     [GeneratedRegex(@"^(\d{1,3})[.)]\s+(.*)$")]
     private static partial Regex PlainSection();
+
+    /// <summary>
+    /// API 리뷰(sub_*) 결과의 '## 읽은 파일' 줄 중 작업 폴더 기준 상대 경로가 아닌 것(절대 경로 · 드라이브 · UNC · '~' · '..')이 있으면 경고 문구, 없으면 null.
+    /// 지휘자 훅(run_mode_guard H4)이 ownReview에서 막는 것과 같은 기준 — 결과를 받는 자리에서 먼저 알린다.
+    /// 'Grep: …' · 'Glob: …' 검색 기록 줄은 경로 모양 토큰('/' · '\' 포함)만 본다.
+    /// </summary>
+    public static string? ReadFilesWarning(string text)
+    {
+        var lines = text.Replace("\r\n", "\n").Split('\n');
+        var bad = new List<string>();
+        for (var i = 0; i < lines.Length; i++)
+        {
+            if (!ReadFilesHead().IsMatch(lines[i])) continue;
+            for (var j = i + 1; j < lines.Length && !AnyHead().IsMatch(lines[j]); j++)
+            {
+                // '- ' 말고 '* ' · '1. ' · 맨 경로 줄도 경로로 본다 (지휘자 훅 H4는 그런 줄을 막는다)
+                var item = ListMarker().Replace(lines[j].Trim(), "").Trim();
+                if (item.Length == 0) continue;
+                var search = SearchLine().Match(item);
+                var paths = search.Success
+                    ? item[search.Length..].Split((char[])[' ', '\t'], StringSplitOptions.RemoveEmptyEntries)
+                        .Select(t => t.Trim('`', '\'', '"', ',', ';', '(', ')')).Where(t => t.Contains('/') || t.Contains('\\'))
+                    : [item.Split(" (", 2)[0].Trim().Trim('`')];
+                if (paths.Any(p => !IsWorkRelative(LineRange().Replace(p, "")))) bad.Add(item);
+            }
+        }
+        return bad.Count == 0 ? null
+            : $"[경고] 읽은 파일에 작업 폴더 기준 상대 경로가 아닌 줄 {bad.Count}개 (예: \"{Clip(bad[0], 80)}\"). 폴더 밖을 읽었거나 경로를 지어냈을 수 있습니다 — 결과를 그대로 쓰지 말고 사용자에게 알린다.";
+    }
+
+    private static bool IsWorkRelative(string path)
+    {
+        if (path.Length == 0 || path[0] is '/' or '\\' or '~' || DrivePrefix().IsMatch(path)) return false;
+        var parts = path.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries).Where(p => p != ".").ToList();
+        return parts.Count > 0 && !parts.Contains("..");
+    }
+
+    [GeneratedRegex(@"^[ \t]{0,3}#{2,}[ \t]+읽은[ \t]*파일")]
+    private static partial Regex ReadFilesHead();
+
+    [GeneratedRegex(@"^[ \t]{0,3}#{1,6}[ \t]")]
+    private static partial Regex AnyHead();
+
+    [GeneratedRegex(@"^(grep|glob)\s*:", RegexOptions.IgnoreCase)]
+    private static partial Regex SearchLine();
+
+    [GeneratedRegex(@":\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*$")]
+    private static partial Regex LineRange();
+
+    [GeneratedRegex(@"^[A-Za-z]:")]
+    private static partial Regex DrivePrefix();
+
+    [GeneratedRegex(@"^(?:[-*+]|\d{1,3}[.)])\s+")]
+    private static partial Regex ListMarker();
 }

@@ -921,6 +921,10 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
                 return (map, $"교체 대상 '{parts[1]}' 사용 불가: {catalog.WhyUnavailable(parts[1])}");
             map[parts[0]] = parts[1];
         }
+        // 단계마다 다른 에이전트를 쓰는 모드(*_high 비교 · 단계별 분담)에 '*'를 쓰면 모든 단계가 한 모델이 된다 — 바꿀 에이전트만 지정하게 한다
+        if (map.ContainsKey("*") && used.Count > 1)
+            return (map, $"'*=…'은 단계마다 다른 에이전트({used.Count}개)를 쓰는 모드에서 쓸 수 없습니다 (모든 단계가 한 모델이 되어 모델 비교 · 단계별 분담이 사라짐). " +
+                         $"바꿀 에이전트만 'from=to'로 지정하세요. 사용 중: {string.Join(", ", used)}");
         return (map, null);
     }
 

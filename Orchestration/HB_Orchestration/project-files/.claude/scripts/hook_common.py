@@ -6,6 +6,7 @@
 따옴표 짝 · 주석 · heredoc 경계는 한 해석기(_Lexer)가 셸과 같게 맞춘다: bash $'…' · 낱말 시작의 # · 따옴표 안의 << ·
 PowerShell 굽은 따옴표를 몰라 뒤 명령이 따옴표 안으로 숨던 빈틈 (실측 exit 0).
 """
+import datetime
 import json
 import os
 import re
@@ -634,3 +635,65 @@ def same_or_inside(child: str, parent: str) -> bool:
     c = os.path.normcase(os.path.abspath(child)).rstrip('\\/')
     p = os.path.normcase(os.path.abspath(parent)).rstrip('\\/')
     return c == p or c.startswith(p + os.sep)
+
+
+def state_dir() -> str:
+    """경고 기록 · 훅 상태 파일 폴더. 시험은 HB_ORCH_HOOK_STATE_DIR로 바꾼다."""
+    return os.environ.get('HB_ORCH_HOOK_STATE_DIR') or os.path.join(
+        os.environ.get('LOCALAPPDATA') or os.path.expanduser('~'), 'HB_Orchestration')
+
+
+def log_warning(hook: str, kind: str, detail: str) -> None:
+    """경고 훅이 낸 경고를 hook_warnings.jsonl에 한 줄씩 남긴다 — 막기로 올리기 전에 종류별 오탐을 센다.
+    기록 실패는 넘긴다 (경고 훅은 막지 않는다)."""
+    try:
+        os.makedirs(state_dir(), exist_ok=True)
+        row = {'time': datetime.datetime.now().astimezone().isoformat(timespec='seconds'), 'hook': hook, 'kind': kind,
+               'project': os.path.basename((os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd()).rstrip('\\/')), 'detail': detail[:500]}
+        with open(os.path.join(state_dir(), 'hook_warnings.jsonl'), 'a', encoding='utf-8') as f:
+            f.write(json.dumps(row, ensure_ascii=False) + '\n')
+    except OSError:
+        pass
+
+
+def warn(hook: str, kind: str, detail: str, event: str) -> None:
+    """막지 않는 경고: 기록하고 그 사건(PreToolUse · PostToolUse)의 additionalContext로 지휘자에게 알린다
+    (실측 2026-11-20 claude 2.1.329: PreToolUse도 막지 않고 글만 모델에 닿는다)."""
+    log_warning(hook, kind, detail)
+    notify(event, f'[{hook} 경고] {detail}')
+
+
+def notify(event: str, text: str) -> None:
+    """그 사건의 additionalContext로 글을 낸다 (훅 한 번에 한 번만 부른다 — stdout JSON은 하나여야 한다)."""
+    sys.stdout.reconfigure(encoding='utf-8')
+    print(json.dumps({'hookSpecificOutput': {'hookEventName': event, 'additionalContext': text}}, ensure_ascii=False))
+
+
+def session_file(session: str, suffix: str) -> str:
+    """세션별 훅 상태 파일 (state_dir()/hook_state/<세션>.<suffix>)."""
+    safe = re.sub(r'[^A-Za-z0-9_-]', '_', session or 'unknown')[:80]
+    return os.path.join(state_dir(), 'hook_state', f'{safe}.{suffix}')
+
+
+def add_pending(session: str, text: str) -> None:
+    """다음 턴 끝(Stop 훅)에 지휘자에게 알릴 글을 한 줄 덧붙인다 (SubagentStop처럼 지휘자에게 바로 닿지 않는 사건용).
+    덧붙이기만 하므로 서브에이전트 여럿이 함께 끝나도 줄이 섞이지 않는다 (한 줄 = write 한 번)."""
+    path = session_file(session, 'pending.jsonl')
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'a', encoding='utf-8') as f:
+        f.write(json.dumps(text, ensure_ascii=False) + '\n')
+
+
+def take_pending(session: str) -> list[str]:
+    """쌓인 글을 꺼내고 비운다 (이름을 바꾼 뒤 읽어, 읽는 사이 덧붙인 줄은 다음 번에 남는다)."""
+    path = session_file(session, 'pending.jsonl')
+    taken = path + f'.{os.getpid()}'
+    try:
+        os.replace(path, taken)
+    except OSError:
+        return []
+    try:
+        with open(taken, encoding='utf-8') as f:
+            return [json.loads(l) for l in f if l.strip()]
+    finally:
+        os.remove(taken)

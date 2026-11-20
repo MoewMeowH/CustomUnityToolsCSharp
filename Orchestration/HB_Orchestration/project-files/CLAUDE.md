@@ -29,7 +29,7 @@
 
 ## 서브에이전트 (Claude Code)
 
-외부 에이전트를 대신하지 않는다 (교차 리뷰의 가치는 다른 회사 모델의 시선). 사용자가 `/self-review`를 고른 경우만 외부 리뷰 없이 끝낸다.
+외부 에이전트를 대신하지 않는다 (교차 리뷰의 가치는 다른 회사 모델의 시선). 사용자가 `/self-review`를 고른 경우만 교차 리뷰(`review_*`) 없이 끝낸다.
 * 검토형(self · perf · security · direction)은 기본이 API 리뷰(`sub_*` — Codex CLI 구독, 한도 소진이면 서버가 Claude API로 대신). 서브에이전트는 `/self-review sub …`로 고르거나 `[실패] Quota` 때 대신 쓴다. `/cross-review`에서는 외부 `review_main`도 Codex라 지휘자 쪽 리뷰어는 서브에이전트로 한다.
 * **서브에이전트를 부르기 전에 `/self-review` 명령 파일의 "서브에이전트 공통 규칙"을 읽는다** — 정의 · `subagent_in/` 입력 복사 · 실수 목록 · 결과 형식 검사.
 * 서브에이전트 결과를 판정·승인으로 쓰지 않는다.

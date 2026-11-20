@@ -329,6 +329,8 @@ public sealed class AgentRunner
             var warnings = CheckWarnings(call, text, response.FinishReason, outTokens);
             if (structuredWarning is not null) warnings = [.. warnings, structuredWarning];
             if (Providers.ClaudeCliChatClient.DenialWarning(usageRaw) is { } denied) warnings = [.. warnings, denied];
+            if (call.Mode.StartsWith("sub_", StringComparison.OrdinalIgnoreCase) && ResponseChecker.ReadFilesWarning(text) is { } readFiles)
+                warnings = [.. warnings, readFiles];
             if (webSearch is { Unverified.Count: > 0 } searched)
             {
                 // 출처 대조 경고: 응답은 그대로 전달하고 결과에 한 줄 붙인다 (지휘자가 해당 URL을 근거로 쓰지 않도록).

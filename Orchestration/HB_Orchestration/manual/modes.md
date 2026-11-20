@@ -324,7 +324,7 @@ agents: "deepseek_main_flash=gemini_high_argon"
 | 값 | 뜻 |
 |---|---|
 | `"gpt_main_sol=gpt_high_astra"` | 그 에이전트만 교체 |
-| `"*=gpt_high_astra"` | 모든 단계를 교체. `review_high`처럼 두 회사 비교가 목적인 모드에는 쓰지 않습니다 |
+| `"*=gpt_high_astra"` | 모든 단계를 교체. 단계마다 다른 에이전트를 쓰는 모드(`review_high` 같은 비교 · 단계별 분담)에서는 서버가 거절합니다 — 바꿀 에이전트만 지정 |
 
 - 교체 대상은 appsettings에 등록 · 활성화된 에이전트여야 합니다. 잘못되면 토큰 없이 거절됩니다.
 - 결과 끝에 `(에이전트 교체: a→b)`가 붙고, 대시보드에는 실제 실행한 에이전트로 기록됩니다.

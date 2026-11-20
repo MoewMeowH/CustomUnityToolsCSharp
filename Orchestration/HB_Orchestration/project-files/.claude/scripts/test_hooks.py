@@ -1,4 +1,5 @@
-"""cleanup_guard · push_guard · run_mode_guard · share_guard · subagent_input_guard · habit_guard · commit_notice · plan_ref_guard 회귀 시험 (/cross-review 10bfc8de41 반영).
+"""cleanup_guard · push_guard · run_mode_guard · share_guard · subagent_input_guard · habit_guard · commit_notice · plan_ref_guard ·
+text_guard · subagent_result_check · stop_check · record_check 회귀 시험 (/cross-review 10bfc8de41 반영).
 사용: python -I .claude/scripts/test_hooks.py  → 마지막 줄 'ALL True'면 통과 (exit 0), 아니면 exit 1.
 H2는 임시 폴더에 저장소와 bare 원격을 만들어 시험한다 (실제 원격·실제 저장소는 건드리지 않는다).
 입력은 UTF-8 바이트로 보낸다 (Claude Code가 보내는 것과 같게 — 한글 깨짐 회귀 시험).
@@ -1129,6 +1130,259 @@ expect('H8 이미 있던 경로를 고침', h8('Edit', {'file_path': at('src', '
 expect('H8 경로 없는 글', h8('Write', {'file_path': at('src', 'a.py'), 'content': 'print(1)'}), 0)
 expect('H8 다른 도구는 무시', h8('Read', {'file_path': at('src', 'a.py')}), 0)
 expect('H8 깨진 입력은 막음', (lambda r: (r.returncode, r.stderr.decode('utf-8', 'replace')))(subprocess.run([sys.executable, '-I', os.path.join(HERE, 'plan_ref_guard.py')], input=b'{', capture_output=True, env=env8)), 2)
+
+
+# ── 경고 훅 공통: 상태 · 기록은 임시 폴더로 ──
+STATE = tempfile.mkdtemp(prefix='hb-hookstate-')
+
+
+def run_out(script: str, payload: dict, env: dict | None = None) -> tuple[int, str]:
+    """(종료 코드, stdout) — 경고 훅은 stdout JSON으로 알린다."""
+    r = subprocess.run([sys.executable, '-I', os.path.join(HERE, script)], input=json.dumps(payload, ensure_ascii=False).encode('utf-8'),
+                       capture_output=True, env=env)
+    return r.returncode, r.stdout.decode('utf-8', 'replace').strip()
+
+
+def warned(kind: str) -> int:
+    try:
+        with open(os.path.join(STATE, 'hook_warnings.jsonl'), encoding='utf-8') as f:
+            return sum(1 for l in f if json.loads(l)['kind'] == kind)
+    except OSError:
+        return 0
+
+
+def expect_true(name: str, cond: bool, detail: str = '') -> None:
+    global ok
+    ok &= cond
+    print(('PASS' if cond else 'FAIL'), name, detail[:140])
+
+
+try:
+    # ── H9 text_guard ──
+    LS, PS2 = chr(0x2028), chr(0x2029)
+
+    def h9(tool: str, ti: dict) -> tuple[int, str]:
+        return run('text_guard.py', {'tool_name': tool, 'tool_input': ti})
+
+    expect('H9 Write에 U+2028', h9('Write', {'file_path': 'a.cs', 'content': f'var s = "a{LS}b";'}), 2, '[글자 차단]')
+    expect('H9 Edit에 U+2029', h9('Edit', {'file_path': 'a.md', 'old_string': 'a', 'new_string': f'a{PS2}'}), 2)
+    expect('H9 MultiEdit 둘째', h9('MultiEdit', {'file_path': 'a.md', 'edits': [{'old_string': 'a', 'new_string': 'b'}, {'old_string': 'c', 'new_string': LS}]}), 2)
+    expect('H9 NotebookEdit', h9('NotebookEdit', {'notebook_path': 'n.ipynb', 'new_source': LS}), 2)
+    expect('H9 Bash 명령', h9('Bash', {'command': f"printf '{LS}' > x"}), 2)
+    expect('H9 PowerShell 명령', h9('PowerShell', {'command': f"Set-Content x '{LS}'"}), 2)
+    expect('H9 이미 있던 문자를 지우는 Edit', h9('Edit', {'file_path': 'a.md', 'old_string': f'a{LS}b', 'new_string': 'ab'}), 0)
+    expect('H9 이미 있던 문자를 그대로 두는 Edit', h9('Edit', {'file_path': 'a.md', 'old_string': f'a{LS}b', 'new_string': f'a{LS}c'}), 0)
+    expect('H9 MultiEdit 한쪽은 지우고 다른 쪽은 넣음', h9('MultiEdit', {'file_path': 'a.md', 'edits': [
+        {'old_string': f'x{LS}', 'new_string': 'x'}, {'old_string': 'y', 'new_string': f'y{LS}'}]}), 2)
+    BOM9 = chr(0xFEFF)
+    expect('H9 Write 글 중간 U+FEFF', h9('Write', {'file_path': 'a.py', 'content': f"x = s.lstrip('{BOM9}')\n"}), 2, '[글자 차단]')
+    expect('H9 Edit 새 U+FEFF', h9('Edit', {'file_path': 'a.py', 'old_string': 'a', 'new_string': f'a{BOM9}'}), 2)
+    expect('H9 Bash 명령 U+FEFF', h9('Bash', {'command': f'echo {BOM9}x'}), 2)
+    expect('H9 Write 파일 맨 앞 BOM은 통과', h9('Write', {'file_path': 'a.cs', 'content': f'{BOM9}using System;\n'}), 0)
+    expect('H9 Edit 맨 앞이어도 새 U+FEFF는 막음', h9('Edit', {'file_path': 'a.cs', 'old_string': 'a', 'new_string': f'{BOM9}a'}), 2)
+    expect('H9 "chr(0xFEFF)" 글자는 통과', h9('Write', {'file_path': 'a.py', 'content': 'BOM = chr(0xFEFF)  # U+FEFF'}), 0)
+    expect('H9 "U+2028" 글자는 통과', h9('Write', {'file_path': 'a.md', 'content': 'U+2028 · (char)0x2028 · chr(0x2028)'}), 0)
+    expect('H9 다른 도구는 무시', h9('Read', {'file_path': LS}), 0)
+    expect('H9 깨진 입력은 막음', (lambda r: (r.returncode, r.stderr.decode('utf-8', 'replace')))(subprocess.run([sys.executable, '-I', os.path.join(HERE, 'text_guard.py')], input=b'{', capture_output=True)), 2)
+
+    # ── H3 확장: 결함 리뷰 context의 요청 · 계획서 (경고만) ──
+    proj3 = tempfile.mkdtemp(prefix='hb-h3ctx-')
+    env3 = dict(os.environ, CLAUDE_PROJECT_DIR=proj3, HB_ORCH_HOOK_STATE_DIR=STATE)
+
+    def h3c(mode: str, paths: list[str]) -> tuple[int, str]:
+        return run_out('run_mode_guard.py', {'tool_name': 'mcp__hb-orchestration__run_mode', 'tool_input': {
+            'mode': mode, 'input': 'x', 'reason': '이유', 'context': [{'path': p, 'startLine': 1, 'endLine': 9} for p in paths]}}, env3)
+
+    before = warned('review-origin-context')
+    code, out = h3c('sub_self', ['src/a.cs', 'Orchestration/X/docs/plans/2026-11-20_x.md'])
+    expect_true('H3 sub_self context에 계획서 → 경고 · 통과', code == 0 and '[H3 경고]' in out and 'additionalContext' in out, out)
+    code, out = h3c('perf_main', ['docs\\worklog\\2026-11-20_x.md'])
+    expect_true('H3 perf_main 역슬래시 작업 로그 → 경고', code == 0 and '[H3 경고]' in out, out)
+    code, out = h3c('review', ['docs/preflight/x/request.md'])
+    expect_true('H3 review request.md → 경고', code == 0 and '[H3 경고]' in out, out)
+    expect_true('H3 경고 기록 3줄', warned('review-origin-context') == before + 3, str(warned('review-origin-context')))
+    for mode in ('design_main', 'preflight_p1', 'sub_direction', 'work_order_main'):
+        code, out = h3c(mode, ['docs/plans/2026-11-20_x.md'])
+        expect_true(f'H3 {mode}는 원문 넣어도 조용', code == 0 and out == '', out)
+    code, out = h3c('sub_self', ['src/request.md.bak', 'src/myrequest.md', 'docs/plansX/a.md'])
+    expect_true('H3 비슷한 이름은 조용', code == 0 and out == '', out)
+    code, out = run_out('run_mode_guard.py', {'tool_name': 'mcp__hb-orchestration__run_mode', 'tool_input': {
+        'mode': 'review', 'input': 'x', 'reason': '이유', 'context': '{깨진'}}, env3)
+    expect_true('H3 경고 검사가 실패해도 막지 않음 (review · 깨진 context)', code == 0, out)
+
+    # ── H10 subagent_result_check · H11 stop_check ──
+    proj11 = tempfile.mkdtemp(prefix='hb-h11-')
+    verdicts = os.path.join(STATE, 'verdicts.jsonl')
+    env11 = dict(os.environ, CLAUDE_PROJECT_DIR=proj11, HB_ORCH_HOOK_STATE_DIR=STATE, HB_ORCH_VERDICTS_PATH=verdicts)
+    GOOD = '## 지적\n문제 없음\n\n## 자료 부족\n\n## 읽은 파일\n- subagent_in/r/a.cs:1-9\n\n## 비고\n'
+
+    def h10(agent: str, text: str, session: str = 's1') -> tuple[int, str]:
+        return run_out('subagent_result_check.py', {'hook_event_name': 'SubagentStop', 'session_id': session, 'agent_type': agent,
+                                                    'agent_id': 'a1', 'last_assistant_message': text}, env11)
+
+    def h11(session: str = 's1', active: bool = False, bg: list | None = None, transcript: str = '') -> tuple[int, str]:
+        return run_out('stop_check.py', {'hook_event_name': 'Stop', 'session_id': session, 'stop_hook_active': active,
+                                         'background_tasks': bg or [], 'transcript_path': transcript, 'cwd': proj11}, env11)
+
+    expect('H10 형식 맞음은 조용', h10('self-reviewer', GOOD), 0)
+    expect_true('H11 알릴 것 없으면 조용', h11() == (0, ''), str(h11()))
+    expect('H10 요약만 (## 읽은 파일 없음)', h10('perf-reviewer', '## 지적\n- C1 x'), 0)
+    code, out = h11()
+    expect_true('H11 형식 위반을 턴 끝에 알림', code == 0 and '"decision": "block"' in out and 'perf-reviewer' in out, out)
+    expect_true('H11 같은 위반은 한 번만 (쌓인 것 비움)', h11() == (0, ''), str(h11()))
+    expect('H10 폴더 밖 읽기', h10('direction-reviewer', GOOD.replace('subagent_in/r/a.cs', 'F:/AI/x.cs')), 0)
+    expect('H10 evidence 요약 절 없음', h10('evidence-collector', '| R1 | 있음 |\n\n## 읽은 파일\n- subagent_in/r/a.cs:1\n'), 0)
+    expect('H10 evidence 맞음', h10('evidence-collector', '| R1 | 있음 |\n\n## 읽은 파일\n- subagent_in/r/a.cs:1\n\n## 요약\n있음 1', 's9'), 0)
+    expect('H10 대상 아닌 서브에이전트', h10('web-searcher', '아무거나', 's9'), 0)
+    code, out = h11(active=True)
+    expect_true('H11 stop_hook_active면 조용 (고리 없음)', (code, out) == (0, ''), out)
+    code, out = h11()
+    expect_true('H11 위반 둘을 한 번에', code == 0 and 'direction-reviewer' in out and 'evidence-collector' in out, out)
+    expect_true('H11 대상 아님 · 맞음은 쌓이지 않음', h11('s9') == (0, ''), str(h11('s9')))
+    expect_true('H10 · H11 경고 기록', warned('subagent-format') == 3, str(warned('subagent-format')))
+
+    trdir = tempfile.mkdtemp(prefix='hb-h11tr-')
+
+    def transcript(rows: list[dict], started: float | None = None) -> str:
+        """세션 기록. 첫 줄은 세션 시작 시각(기본: 1분 전)."""
+        path = os.path.join(trdir, f'tr{len(os.listdir(trdir))}.jsonl')
+        when = datetime.datetime.fromtimestamp(started if started is not None else datetime.datetime.now().timestamp() - 60,
+                                               datetime.timezone.utc)
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(json.dumps({'type': 'user', 'timestamp': when.isoformat().replace('+00:00', 'Z')}) + '\n')
+            for r in rows:
+                f.write(json.dumps(r, ensure_ascii=False) + '\n')
+        return path
+
+    old_dir = os.path.join(proj11, 'review_tmp', 'old-probe')
+    os.makedirs(old_dir)
+    os.utime(old_dir, (0, 0))  # 세션보다 오래된 것 (다른 세션 · 오래 둔 실측)
+    tr0 = transcript([])
+    expect_true('H11 세션 전부터 있던 것은 말 안 함', h11('s2', transcript=tr0) == (0, ''), str(h11('s2', transcript=tr0)))
+    os.makedirs(os.path.join(proj11, 'review_tmp', 'x'))
+    open(os.path.join(proj11, 'review_tmp', 'x', 'a.diff'), 'w').close()
+    code, out = h11('s2', bg=[{'id': 'b1'}], transcript=tr0)
+    expect_true('H11 백그라운드가 돌면 남은 폴더는 말 안 함', (code, out) == (0, ''), out)
+    code, out = h11('s2', transcript=tr0)
+    expect_true('H11 이 세션에서 만든 review_tmp 남음', code == 0 and 'review_tmp/에 x' in out and 'old-probe' not in out, out)
+    expect_true('H11 같은 남음은 세션에 한 번만', h11('s2', transcript=tr0) == (0, ''), str(h11('s2', transcript=tr0)))
+    code, out = h11('s3', transcript=tr0)
+    expect_true('H11 다른 세션은 다시 알림', code == 0 and 'review_tmp/' in out, out)
+    expect_true('H11 세션 시작을 모르면 남은 폴더는 말 안 함', h11('s3b') == (0, ''), str(h11('s3b')))
+
+    def use(i: str, name: str, inp: dict) -> dict:
+        return {'type': 'assistant', 'message': {'role': 'assistant', 'content': [{'type': 'tool_use', 'id': i, 'name': name, 'input': inp}]}}
+
+    def res(i: str, text: str, as_list: bool = False) -> dict:
+        content = [{'type': 'text', 'text': text}] if as_list else text
+        return {'type': 'user', 'message': {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': i, 'content': content}]}}
+
+    def note(text: str) -> dict:
+        return {'type': 'user', 'message': {'role': 'user', 'content': text}}
+
+    RM, RV = 'mcp__hb-orchestration__run_mode', 'mcp__hb-orchestration__record_verdicts'
+    shutil.rmtree(os.path.join(proj11, 'review_tmp'))
+    A, B, C, D, E, F, G, H = (f'{c * 9}{i}' for i, c in enumerate('abcdefab', 1))
+    BG = 'MCP tool "mcp__hb-orchestration__run_mode" is still running after 120s. It was moved to the background as task {}.'
+    tr = transcript([use('t1', RM, {'mode': 'review_main'}), res('t1', f'runId: {A}\n### 1. x\n1-F1 [high] a.cs:3 문제', True),
+                     use('t2', RM, {'mode': 'design_lite'}), res('t2', f'runId: {B}\n### 1. x\n의견만'),
+                     use('t3', RM, {'mode': 'sub_self'}), res('t3', f'runId: {C}\n자료 요청 1-N1: 호출부'),
+                     use('t4', RM, {'mode': 'sub_self'}), res('t4', f'runId: {D}\n1-F2 x'),
+                     use('t5', RV, {'runId': D, 'items': []}), res('t5', '기록 2건'),
+                     # 백그라운드로 넘어간 실행 — 결과는 나중 user 문자열의 task-notification
+                     use('t6', RM, {'mode': 'review_high'}), res('t6', BG.format('bgtask1')),
+                     note(f'<task-notification>\n<task-id>bgtask1</task-id>\n<status>completed</status>\n<result>\nrunId: {E}\n### 1. x\n1-F3 y\n</result>\n</task-notification>'),
+                     # 큰 결과 — persisted 미리보기
+                     use('t7', RM, {'mode': 'perf_high'}), res('t7', f'<persisted-output>\nOutput too large. Full output saved to: x.txt\n\nPreview (first 2KB):\nrunId: {F}\n### 1. x\n1-F1 z'),
+                     # 판정 기록이 실패한 실행 — 판정으로 세지 않는다
+                     use('t8', RM, {'mode': 'sub_security'}), res('t8', f'runId: {G}\n1-F1 w'),
+                     use('t9', RV, {'runId': G, 'items': []}), res('t9', '[판정 기록 불가] verdict 값이 틀림'),
+                     # 머리말이 첫 줄이 아닌 결과는 실행으로 보지 않는다 (본문에 인용된 runId)
+                     use('t10', RM, {'mode': 'sub_self'}), res('t10', f'[reason 필요] … runId: {H}\n1-F1')])
+    with open(verdicts, 'w', encoding='utf-8') as f:
+        f.write(json.dumps({'runId': C, 'verdict': 'supplied'}) + '\n')
+    code, out = h11('s4', transcript=tr)
+    expect_true('H11 판정 없는 지적 실행만 알림', code == 0 and f'{A}(review_main)' in out and B not in out
+                and C not in out and D not in out and H not in out, out)
+    expect_true('H11 백그라운드 알림으로 온 실행', f'{E}(review_high)' in out, out)
+    expect_true('H11 큰 결과 미리보기 실행', f'{F}(perf_high)' in out, out)
+    expect_true('H11 판정 기록이 실패한 실행은 판정 없음', f'{G}(sub_security)' in out, out)
+    expect_true('H11 판정 알림도 세션에 한 번', h11('s4', transcript=tr) == (0, ''), str(h11('s4', transcript=tr)))
+    expect_true('H11 기록 없는 transcript는 조용', h11('s5', transcript=os.path.join(proj11, 'none.jsonl')) == (0, ''), '')
+    with open(tr, 'ab') as f:
+        f.write(bytes([0xFF, 0xFE]) + b'\n')  # 깨진 바이트 줄이 있어도 앞 계산 · H10 pending을 잃지 않는다
+    h10('perf-reviewer', '요약만', 's6')
+    code, out = h11('s6', transcript=tr)
+    expect_true('H11 깨진 기록 줄이 있어도 pending 알림', code == 0 and 'perf-reviewer' in out and A in out, out)
+
+    # H10: HB_Chat(Agent SDK)은 보고를 SubagentHandback 도구로 넘긴다 — last_assistant_message가 빔
+    def agent_tr(message: str) -> str:
+        return transcript([{'type': 'assistant', 'message': {'role': 'assistant', 'content': [
+            {'type': 'tool_use', 'id': 'h1', 'name': 'SubagentHandback', 'input': {'message': message}}]}}])
+
+    before = warned('subagent-format')
+    run_out('subagent_result_check.py', {'hook_event_name': 'SubagentStop', 'session_id': 's7', 'agent_type': 'self-reviewer', 'agent_id': 'a2',
+                                         'last_assistant_message': '', 'agent_transcript_path': agent_tr(GOOD)}, env11)
+    expect_true('H10 도구로 넘긴 보고가 맞으면 조용', warned('subagent-format') == before, str(warned('subagent-format')))
+    run_out('subagent_result_check.py', {'hook_event_name': 'SubagentStop', 'session_id': 's7', 'agent_type': 'self-reviewer', 'agent_id': 'a3',
+                                         'last_assistant_message': '', 'agent_transcript_path': agent_tr('## 지적\n- C1 요약')}, env11)
+    expect_true('H10 도구로 넘긴 보고의 형식 위반', warned('subagent-format') == before + 1, str(warned('subagent-format')))
+
+    # ── H12 · H13 record_check ──
+    proj12 = tempfile.mkdtemp(prefix='hb-h12-')
+    env12 = dict(os.environ, CLAUDE_PROJECT_DIR=proj12, HB_ORCH_HOOK_STATE_DIR=STATE)
+
+    def h12(tool: str, ti: dict) -> tuple[int, str]:
+        return run_out('record_check.py', {'tool_name': tool, 'tool_input': ti, 'cwd': proj12}, env12)
+
+    FULL = '\n'.join(f'## {s}\n내용\n' for s in ['요약', '배경', '계획', '버린 대안과 이유', '위험', '테스트', '실제 확인', '사용자에게 물을 것 (없음)'])
+    plan12 = os.path.join(proj12, 'docs', 'plans', '2026-11-20_x.md')
+    expect_true('H12 계획서 절 다 있음은 조용', h12('Write', {'file_path': plan12, 'content': '# x\n\n' + FULL}) == (0, ''), '')
+    code, out = h12('Write', {'file_path': plan12, 'content': FULL.replace('## 위험', '## 위험하지 않음').replace('## 테스트\n', '')})
+    expect_true('H12 계획서 절 빠짐 (테스트)', code == 0 and '[H12 경고]' in out and '테스트' in out, out)
+    expect_true('H12 계획서 Edit은 보지 않음', h12('Edit', {'file_path': plan12, 'old_string': 'a', 'new_string': '## 결정\n'}) == (0, ''), '')
+    log12 = os.path.join(proj12, 'docs', 'worklog', '2026-11-20_x.md')
+    expect_true('H12 로그 첫 줄 링크', h12('Write', {'file_path': log12, 'content': '계획서: [x](../plans/2026-11-20_x.md)\n'}) == (0, ''), '')
+    code, out = h12('Write', {'file_path': log12, 'content': '# 작업 로그\n계획서: [x](../plans/x.md)'})
+    expect_true('H12 로그 첫 줄에 링크 없음', code == 0 and '[H12 경고]' in out and '첫 줄' in out, out)
+    expect_true('H12 _archive_ 로그는 조용', h12('Write', {'file_path': os.path.join(proj12, 'docs', 'worklog', '_archive_~1.md'), 'content': '# x'}) == (0, ''), '')
+    def written(path: str, tool: str, ti: dict, disk: str) -> tuple[int, str]:
+        """PostToolUse: 도구가 쓴 뒤의 디스크 내용을 만들어 두고 부른다."""
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(disk)
+        return h12(tool, dict(ti, file_path=path))
+
+    mist = os.path.join(proj12, 'MISTAKES.md')
+    HEAD12 = '# x\n\n<!--\n서식: 한 줄에 하나\n- 예시 줄은 항목이 아니다 (YYYY-MM-DD, 출처)\n-->\n\n'
+    good = '- 하지 말 것 → 대신 할 것 (2026-11-20, 사용자 지적)'
+    expect_true('H12 실수 서식 맞음', written(mist, 'Edit', {'old_string': 'a', 'new_string': good}, HEAD12 + good + '\n') == (0, ''), '')
+    expect_true('H12 주석 안 예시 줄은 항목 아님 (Write)', written(mist, 'Write', {'content': HEAD12 + good + '\n'}, HEAD12 + good + '\n') == (0, ''), '')
+    code, out = written(mist, 'Edit', {'old_string': 'a', 'new_string': '- 날짜 없는 실수 → 고침'}, HEAD12 + '- 날짜 없는 실수 → 고침\n')
+    expect_true('H12 실수 서식 틀림', code == 0 and '실수 목록' in out, out)
+    sub_m = os.path.join(proj12, '.claude', 'mistakes', 'self-reviewer.md')
+    body = '# x\n\n<!--\n서식\n-->\n- 화살표 없음 (2026-11-20, x)\n'
+    code, out = written(sub_m, 'Write', {'content': body}, body)
+    expect_true('H12 서브에이전트 실수 서식 틀림', code == 0 and '실수 목록' in out, out)
+    expect_true('H12 다른 md는 조용', h12('Write', {'file_path': os.path.join(proj12, 'README.md'), 'content': '- 아무 줄'}) == (0, ''), '')
+
+    agents12 = os.path.join(proj12, '.claude', 'agents')
+    os.makedirs(agents12)
+    bad_agent = os.path.join(agents12, 'x-reviewer.md')
+    open(bad_agent, 'w', encoding='utf-8').write('---\nname: x-reviewer\ndescription: x\n---\n본문\n')
+    code, out = h12('Write', {'file_path': bad_agent, 'content': '…'})
+    expect_true('H13 tools 없는 정의 → 경고', code == 0 and '[H13 경고]' in out, out)
+    open(bad_agent, 'w', encoding='utf-8').write('---\nname: x-reviewer\ndescription: x\ntools: Read, Grep, Glob\nmodel: sonnet\n---\n본문\n')
+    expect_true('H13 맞는 정의는 조용', h12('Edit', {'file_path': bad_agent, 'old_string': 'a', 'new_string': 'b'}) == (0, ''), '')
+    expect_true('H12 · H13 경고 기록', warned('plan-sections') == 1 and warned('worklog-link') == 1 and warned('mistake-format') == 2
+                and warned('agents-check') == 1, '')
+    expect_true('경고 훅 깨진 입력은 조용히 통과', all(subprocess.run([sys.executable, '-I', os.path.join(HERE, s)], input=b'{', capture_output=True, env=env12).returncode == 0
+                                         for s in ('record_check.py', 'subagent_result_check.py', 'stop_check.py')), '')
+finally:
+    shutil.rmtree(STATE, ignore_errors=True)
+    for d in ('proj3', 'proj11', 'proj12', 'trdir'):
+        if d in globals():
+            shutil.rmtree(globals()[d], ignore_errors=True)
 
 print('ALL', ok)
 sys.exit(0 if ok else 1)

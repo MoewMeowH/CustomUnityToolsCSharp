@@ -36,6 +36,11 @@
             "type": "command",
             "command": "python -I \"$CLAUDE_PROJECT_DIR/.claude/scripts/habit_guard.py\" || exit 2",
             "onFailure": "block"
+          },
+          {
+            "type": "command",
+            "command": "python -I \"$CLAUDE_PROJECT_DIR/.claude/scripts/text_guard.py\" || exit 2",
+            "onFailure": "block"
           }
         ]
       },
@@ -66,6 +71,11 @@
             "type": "command",
             "command": "python -I \"$CLAUDE_PROJECT_DIR/.claude/scripts/plan_ref_guard.py\" || exit 2",
             "onFailure": "block"
+          },
+          {
+            "type": "command",
+            "command": "python -I \"$CLAUDE_PROJECT_DIR/.claude/scripts/text_guard.py\" || exit 2",
+            "onFailure": "block"
           }
         ]
       }
@@ -77,6 +87,35 @@
           {
             "type": "command",
             "command": "python -I \"$CLAUDE_PROJECT_DIR/.claude/scripts/commit_notice.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -I \"$CLAUDE_PROJECT_DIR/.claude/scripts/record_check.py\""
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -I \"$CLAUDE_PROJECT_DIR/.claude/scripts/subagent_result_check.py\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -I \"$CLAUDE_PROJECT_DIR/.claude/scripts/stop_check.py\""
           }
         ]
       }
