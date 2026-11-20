@@ -365,8 +365,61 @@ def brace_var_end(s: str, i: int) -> int:
 
 def join_continuations(cmd: str, shell: str) -> str:
     """줄 이음(bash \\ · PowerShell 백틱 + 줄바꿈)을 공백으로 — 명령 이름과 옵션이 다른 줄에 있어도 한 줄로 찾게
-    (/self-review security 625b223591 C3: `rm \\⏎ -rf` · `Remove-Item x `⏎ -Recurse`가 거친 탐지를 피했다)."""
-    return re.sub(r'\\\r?\n' if shell == BASH else r'`\r?\n', ' ', cmd)
+    (/self-review security 625b223591 C3: `rm \\⏎ -rf` · `Remove-Item x `⏎ -Recurse`가 거친 탐지를 피했다).
+    따옴표 밖 주석(낱말 시작의 # · PowerShell <# #>) 안의 줄 끝 \\ · 백틱은 잇지 않는다 — 두 셸 모두 주석은 줄 끝에서 끝난다.
+    이어 붙이면 `# \\⏎rm -rf x`의 rm(실제로 실행됨)이 주석 속으로 숨었다 (셸 퍼징이 찾음).
+    따옴표 안은 작은따옴표여도 잇는다 — iex '…' · bash -c '…'처럼 문자열이 코드로 실행되면 그 안의 줄 이음이 이어진다 (셸 퍼징이 찾음)."""
+    esc = '\\' if shell == BASH else '`'
+    out: list[str] = []
+    i, n = 0, len(cmd)
+    quote = None
+    comment = block = False
+    while i < n:
+        c = cmd[i]
+        if comment:
+            comment = c != '\n'
+            out.append(c)
+            i += 1
+        elif block:
+            if cmd.startswith('#>', i):
+                block = False
+                out.append('#>')
+                i += 2
+            else:
+                out.append(c)
+                i += 1
+        elif quote == "'":
+            # 작은따옴표 안의 \ · 백틱은 이스케이프가 아니다 ('\' 는 닫힌 문자열 — 리뷰 f17e01ce58 C1). 줄 이음만 공백으로
+            # (문자열이 bash -c · iex로 코드가 되면 그 안의 줄 이음이 이어진다)
+            nl = 0 if c != esc else 2 if cmd.startswith('\n', i + 1) else 3 if cmd.startswith('\r\n', i + 1) else 0
+            if nl:
+                out.append(' ')
+                i += nl
+                continue
+            quote = None if c == "'" else quote
+            out.append(c)
+            i += 1
+        elif c == esc and i + 1 < n:
+            nl = 2 if cmd[i + 1] == '\n' else 3 if cmd.startswith('\r\n', i + 1) else 0
+            out.append(' ' if nl else cmd[i:i + 2])  # 줄 이음은 공백, 그 밖의 이스케이프는 두 글자 그대로
+            i += nl or 2
+        elif quote:
+            quote = None if c == quote else quote
+            out.append(c)
+            i += 1
+        else:
+            if c in ('"', "'"):
+                quote = c
+            elif shell != BASH and cmd.startswith('<#', i):
+                block = True
+                out.append('<#')
+                i += 2
+                continue
+            elif c == '#' and (i == 0 or cmd[i - 1] in ' \t\r\n;&|()'):
+                comment = True
+            out.append(c)
+            i += 1
+    return ''.join(out)
 
 
 def lex(cmd: str, shell: str) -> Lexed:

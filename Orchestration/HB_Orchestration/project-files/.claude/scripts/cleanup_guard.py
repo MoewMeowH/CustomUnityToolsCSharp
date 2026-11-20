@@ -27,6 +27,17 @@ from hook_common import BASH, CD, CHAIN, NESTED, chain_pieces, data_only, has_su
 RULE = 'CLAUDE.md "명령 실행": 폴더 삭제는 절대 경로로, 셸의 현재 폴더 밖에서 실행한다 (다른 명령과는 읽기 확인 · 절대 경로 cd만 묶는다).'
 
 
+def hidden_delete(text: str) -> bool:
+    """실행되는 삭제 명령의 인자를 볼 수 없는 꼴에 재귀 옵션 모양이 있는지: 한 파이프라인 안의 xargs rm + 재귀 옵션(입력은 앞 조각에서 온다),
+    한 명령 안의 변수 명령 이름 + 재귀 옵션. 다른 명령 조각의 옵션은 엮지 않는다 (& $py x.py --report 오탐 — 리뷰 f17e01ce58 · 지휘자 O2)."""
+    for stmt in STATEMENT.split(text):
+        if XARGS_DELETE.search(stmt) and RECURSIVE_WORD.search(stmt):
+            return True
+        if any(DYNAMIC_NAME.search(part) and RECURSIVE_WORD.search(part) for part in stmt.split('|')):
+            return True
+    return False
+
+
 def deny(reason: str) -> None:
     print(f'[정리 명령 차단] {reason} {RULE}', file=sys.stderr)
     sys.exit(2)
@@ -40,6 +51,14 @@ ROUGH = re.compile(
     # PowerShell splatting (Remove-Item @p — 해시 테이블 안의 Recurse는 볼 수 없다)
     r'|(?:^|[\s;&|(])(?:Remove-Item|rm|del|erase|ri|rd|rmdir)\b[^\n;&|]*\s@[A-Za-z_]',
     re.IGNORECASE)
+
+# 훅이 인자를 볼 수 없는 삭제 (xargs 입력 · 변수 명령 이름)와 함께 보는 재귀 옵션: rm 짧은 옵션 글자만의 묶음(-r · -rf · -R),
+# --recursive의 앞부분(GNU 줄인 긴 옵션), PowerShell -Recurse의 앞부분, rd /s. -rA · --report · -Force는 아니다 (오탐 — 리뷰 f17e01ce58 O2)
+RECURSIVE_WORD = re.compile(r'(?:^|\s)(?:-[fidv]*r[rfidv]*|--r(?:e(?:c(?:u(?:r(?:s(?:i(?:v(?:e)?)?)?)?)?)?)?)?'
+                            r'|-r(?:e(?:c(?:u(?:r(?:s(?:e)?)?)?)?)?)?(?::\$?\w+)?|/s)(?=[\s;&|)}]|$)', re.IGNORECASE)
+XARGS_DELETE = re.compile(r'\bxargs\b[^\n;&|]*?\s\\?(?:rm|Remove-Item|del|erase|ri|rd|rmdir)(?=[\s;&|)}]|$)', re.IGNORECASE)
+DYNAMIC_NAME = re.compile(r'(?:^|[;&|(){}\n])\s*(?:&\s*|\.\s+)?\$\{?[A-Za-z_]\w*\}?(?=[ \t]+[^\s=])')
+STATEMENT = re.compile(r'&&|\|\||;|\n')  # 파이프(|)는 나누지 않는다 — xargs 입력이 앞 조각에서 온다
 
 # 재귀 삭제와 묶어도 되는 읽기 확인 (리다이렉트 없이) — 지난 기록에서 되풀이된 '삭제 뒤 확인' 모양 (2026-11-07 집계: 묶임 차단 28건 중 18건)
 CHECKS = {'test-path', 'ls', 'dir', 'get-childitem', 'gci', 'echo', 'printf', 'write-host', 'write-output', 'pwd', 'get-location', 'gl',
@@ -209,9 +228,16 @@ def check(data: dict) -> None:
     # 본문을 셸 · 실행기에 넘기면 본문이 곧 명령이다 — 본문(따옴표 heredoc · @'…'@ · 따옴표 없는 heredoc · @"…"@)에 재귀 삭제가 있으면
     # 데이터 전용 명령만 받는다 (본문은 무슨 언어인지 모르므로 따옴표를 공백으로 바꿔 본다 — python os.system('rm -rf …') 등)
     lx = lex(raw, shell)
-    if any(ROUGH.search(re.sub(r'[\'"`]', ' ', body)) for body in lx.bodies) and not data_only(stripped, inner, shell):
+    # 따옴표는 공백으로 바꾼 판(os.system('rm -rf …'))과 지운 판(쪼갠 이름 r""m) 둘 다 본다
+    if any(ROUGH.search(re.sub(r'[\'"`]', ' ', body)) or ROUGH.search(re.sub(r'[\'"`]', '', body)) or hidden_delete(body)
+           for body in lx.bodies) and not data_only(stripped, inner, shell):
         deny('heredoc · here-string 본문에 재귀 삭제가 있는데 받는 명령이 데이터 전용(cat · tee · git commit · Set-Content 등)이 아니다 — '
              '훅이 그 본문을 명령으로 검사하지 못한다. 스크립트는 Write로 파일을 만든 뒤 따로 실행하라.')
+    # 실행 대상을 훅이 볼 수 없는 꼴 (셸 퍼징이 찾음): 옵션 · 대상이 xargs 입력으로 들어가는 삭제 명령, 변수에 담은 명령 이름.
+    # 따옴표를 지운 글 어디든 재귀 옵션 모양이 있으면 막는다 (재귀 옵션 없는 xargs rm은 받는다)
+    # 글을 실행하지 않는 명령(echo 'xargs rm -rf x' · git commit -m …)은 받는다 (리뷰 f17e01ce58 C2)
+    if hidden_delete(lx.unquoted(raw)) and not data_only(stripped, inner, shell, readers=True):
+        deny('xargs로 삭제 명령을 돌리거나 명령 이름을 변수($c · ${c})로 쓰면 실제로 실행되는 옵션 · 대상을 훅이 볼 수 없다 — 삭제 명령과 절대 경로를 직접 적어라.')
     rough = ROUGH.search(stripped + '\n' + '\n'.join(inner))
     if rough and has_substitution(stripped, inner, shell):  # 따옴표 검사보다 먼저 — 이쪽 안내가 더 정확하다
         deny('재귀 삭제가 명령 치환($( ) · 백틱) 안이나 함께 있다.')

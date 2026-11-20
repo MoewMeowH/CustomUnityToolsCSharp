@@ -1,0 +1,36 @@
+{
+  "$comment": "커밋 게이트(.claude/scripts/commit_gate.py) 설정. 스테이지된 파일 경로가 paths 중 하나로 시작하면 그 스위트의 run 명령을 인덱스 사본(저장소 루트 기준)에서 차례로 돌린다.",
+  "suites": [
+    {
+      "name": "hooks",
+      "paths": ["Orchestration/HB_Orchestration/project-files/.claude/"],
+      "run": [
+        ["python", "-I", "Orchestration/HB_Orchestration/project-files/.claude/scripts/test_hooks.py"],
+        ["python", "-I", "Orchestration/HB_Orchestration/project-files/.claude/scripts/test_subagent_copy.py"],
+        ["python", "-I", "Orchestration/HB_Orchestration/project-files/.claude/scripts/test_subagent_copy_tracked.py"],
+        ["python", "-I", "Orchestration/HB_Orchestration/project-files/.claude/scripts/test_subagent_read_guard.py"],
+        ["python", "-I", "Orchestration/HB_Orchestration/project-files/.claude/scripts/test_shell_fuzz.py"],
+        ["python", "-I", "Orchestration/HB_Orchestration/project-files/.claude/scripts/check_agents.py"]
+      ]
+    },
+    {
+      "name": "HB_Orchestration",
+      "paths": ["Orchestration/HB_Orchestration/src/", "Orchestration/HB_Orchestration/tests/"],
+      "run": [["dotnet", "test", "Orchestration/HB_Orchestration/tests/HB.Orchestration.Tests", "-c", "Debug"]]
+    },
+    {
+      "name": "HB_Chat",
+      "paths": ["Orchestration/HB_Chat/src/", "Orchestration/HB_Chat/tests/"],
+      "run": [["dotnet", "test", "Orchestration/HB_Chat/HB_Chat.slnx", "-c", "Debug"]]
+    },
+    {
+      "name": "HB_Lint",
+      "paths": ["HB_Lint/"],
+      "run": [
+        ["dotnet", "test", "HB_Lint/HB_Lint.slnx", "-c", "Debug"],
+        ["dotnet", "run", "--project", "HB_Lint/src/HBLint.Generator.Cli", "-c", "Debug", "--", "generate", "HB_Lint/samples", "HB_Lint/samples/LintRules.g.cs", "--check"],
+        ["dotnet", "run", "--project", "HB_Lint/src/HBLint.Generator.Cli", "-c", "Debug", "--", "schema", "HB_Lint/samples/hblint.schema.json", "--check"]
+      ]
+    }
+  ]
+}

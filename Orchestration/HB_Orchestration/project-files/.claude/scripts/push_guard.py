@@ -43,6 +43,11 @@ LOCAL_FILE = os.path.join('.claude', 'push_guard.local.txt')
 ALLOWED_PUSH_OPTIONS = {'--dry-run', '-n', '-u', '--set-upstream', '-v', '--verbose', '-q', '--quiet', '--porcelain'}
 
 ROUGH = re.compile(r'\bgit(?:\.exe)?\b[^\n;&|]*?\bpush\b', re.IGNORECASE)
+PUSH_WORD = re.compile(r'\bpush\b', re.IGNORECASE)
+XARGS_GIT = re.compile(r'\bxargs\b[^\n;&|]*?\bgit(?:\.exe)?(?=[\s;&|)}]|$)', re.IGNORECASE)
+# 명령 자리의 변수 확장 ($c · ${c} · PowerShell & $c) — 대입($x = …)은 아니다
+DYNAMIC_NAME = re.compile(r'(?:^|[;&|(){}\n])\s*(?:&\s*|\.\s+)?\$\{?[A-Za-z_]\w*\}?(?=[ \t]+[^\s=])')
+STATEMENT = re.compile(r'&&|\|\||;|\n')  # 파이프(|)는 나누지 않는다 — xargs 입력이 앞 조각에서 온다
 # push와 묶어도 되는 조각: 앞에는 저장소를 바꾸지 않는 git 읽기, 뒤에는 출력 줄이기 (2026-11-07 집계: 묶음 오탐 5건이 이 모양)
 GIT_LOOK = {'log', 'status', 'diff', 'show'}
 AFTER_PUSH = {'tail', 'head', 'select-object', 'select', 'grep', 'select-string', 'sls'}
@@ -51,6 +56,17 @@ TEXT_GIT = GIT_LOOK | {'add', 'commit'}
 OUT_REDIRECT = re.compile(r'2>(?:&1|/dev/null|\$null)')
 BUNDLED = ('git push가 다른 명령과 묶여 있다 — 훅은 명령이 실행되기 전에 돌아서, 같은 명령 안의 commit은 검사하지 못한다 '
            '(앞에 git log · status · diff · show, 뒤에 tail · head · Select-Object 같은 출력 줄이기만 받는다). ')
+
+
+def hidden_push(text: str) -> bool:
+    """실행되는 하위 명령을 볼 수 없는 꼴에 push가 있는지: 한 파이프라인 안의 xargs git + push 낱말(입력은 앞 조각에서 온다),
+    한 명령 안의 변수 명령 이름 + push 낱말. 다른 명령 조각의 push는 엮지 않는다 (오탐 — 리뷰 f17e01ce58 · 지휘자 O2)."""
+    for stmt in STATEMENT.split(text):
+        if XARGS_GIT.search(stmt) and PUSH_WORD.search(stmt):
+            return True
+        if any(DYNAMIC_NAME.search(part) and PUSH_WORD.search(part) for part in stmt.split('|')):
+            return True
+    return False
 
 
 def deny(reason: str) -> None:
@@ -269,9 +285,16 @@ def check(data: dict) -> None:
     stripped, inner = scan(cmd, shell)
     # 본문을 셸 · 실행기에 넘기면 본문이 곧 명령이다 — 본문(따옴표 있든 없든)에 git push가 있으면 데이터 전용 명령만 받는다
     lx = lex(raw, shell)
-    if any(ROUGH.search(body) for body in lx.bodies) and not data_only(stripped, inner, shell):
+    # 따옴표를 지운 판도 본다 (쪼갠 이름 gi""t push)
+    if any(ROUGH.search(body) or ROUGH.search(re.sub(r'[\'"`]', '', body)) or hidden_push(body)
+           for body in lx.bodies) and not data_only(stripped, inner, shell):
         deny('heredoc · here-string 본문에 git push가 있는데 받는 명령이 데이터 전용(cat · tee · git commit · Set-Content 등)이 아니다 — '
              '훅이 그 본문을 명령으로 검사하지 못한다. ' + SIMPLE)
+    # 실행 대상을 훅이 볼 수 없는 꼴 (셸 퍼징이 찾음): 하위 명령이 xargs 입력으로 들어가는 git, 변수에 담은 명령 이름.
+    # 따옴표를 지운 글 어디든 push 낱말이 있으면 막는다 (push 없는 xargs git log · $c status는 받는다)
+    # 글을 실행하지 않는 명령(echo 'xargs git push' · git commit -m …)은 받는다 (리뷰 f17e01ce58 C2)
+    if hidden_push(lx.unquoted(raw)) and not data_only(stripped, inner, shell, readers=True):
+        deny('xargs로 git을 돌리거나 명령 이름을 변수($c · ${c})로 쓰면 실제로 실행되는 하위 명령을 훅이 볼 수 없다 — git push를 직접 적어라. ' + SIMPLE)
     rough = ROUGH.search(stripped + '\n' + '\n'.join(inner))
     if rough and has_substitution(stripped, inner, shell):  # 따옴표 검사보다 먼저 — 이쪽 안내가 더 정확하다
         deny('git push가 명령 치환($( ) · 백틱) 안이나 함께 있다. ' + SIMPLE)

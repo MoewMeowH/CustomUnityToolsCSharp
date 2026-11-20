@@ -1,0 +1,2 @@
+# 받은 그대로 두는 공급 파일 — 줄바꿈 변환을 하지 않는다 (autocrlf=true인 PC에서 새로 받으면 x6.min.js가 1바이트 늘어 길이 시험이 깨졌다)
+Orchestration/HB_Orchestration/src/HB.Orchestration.Dashboard/Lib/** -text

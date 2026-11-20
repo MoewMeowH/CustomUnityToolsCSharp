@@ -199,6 +199,7 @@ if ($All) {
     else { Write-Host "결과: 대상 $($summary.Count)개 중 $($late.Count)개가 뒤처졌거나 오류입니다. 사용자에게 보고하고, 맞추기는 확인 뒤 -All -Apply(다름이 있으면 -Force, 사람이 직접) 또는 대상마다." }
     if ($noted.Count -gt 0 -or @($summary | Where-Object { $_.Notes.Count -gt 0 }).Count -gt 0) {
         Write-Host '참고 항목(설정 · 프로젝트 지침 · 대상에만 있는 파일)은 종료 코드에 넣지 않지만 함께 보고한다 — 특히 settings.json 다름은 훅 등록이 다를 수 있다.'
+        Write-Host '  빠진 새 훅 등록은 스크립트를 먼저 맞춘 뒤(-Apply) python -I tools\add_hooks.py -All (빠진 것만 더함 · 백업, 스크립트가 없는 대상은 건너뜀).'
     }
     exit $worst
 }

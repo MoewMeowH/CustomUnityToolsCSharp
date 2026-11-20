@@ -1,5 +1,5 @@
 """cleanup_guard · push_guard · run_mode_guard · share_guard · subagent_input_guard · habit_guard · commit_notice · plan_ref_guard ·
-text_guard · subagent_result_check · stop_check · record_check 회귀 시험 (/cross-review 10bfc8de41 반영).
+text_guard · subagent_result_check · stop_check · record_check · commit_gate 회귀 시험 (셸 파서 무작위 시험은 test_shell_fuzz.py) (/cross-review 10bfc8de41 반영).
 사용: python -I .claude/scripts/test_hooks.py  → 마지막 줄 'ALL True'면 통과 (exit 0), 아니면 exit 1.
 H2는 임시 폴더에 저장소와 bare 원격을 만들어 시험한다 (실제 원격·실제 저장소는 건드리지 않는다).
 입력은 UTF-8 바이트로 보낸다 (Claude Code가 보내는 것과 같게 — 한글 깨짐 회귀 시험).
@@ -39,6 +39,26 @@ def h1(cmd: str, tool: str = 'Bash', cwd: str = OUT) -> tuple[int, str]:
     return run('cleanup_guard.py', {'tool_name': tool, 'tool_input': {'command': cmd}, 'cwd': cwd})
 
 expect('H1 절대 경로 단독 rm -rf', h1('rm -rf /f/AI/ToolWithCS/subagent_in/x'), 0)
+# 셸 퍼징(test_shell_fuzz)이 찾은 우회: 재귀 옵션 · 대상이 xargs 입력으로 들어가 실제로 rm -r -f가 실행되는데 훅이 알아채지 못했다
+expect('H1 xargs rm (재귀 옵션이 입력에)', h1('echo -r -f victim | xargs rm'), 2, '훅이 볼 수 없다')
+expect('H1 xargs -n rm --recursive', h1('echo --recursive x | xargs -n 9 rm'), 2, '훅이 볼 수 없다')
+expect('H1 변수 명령 이름 재귀 삭제', h1('c=rm; $c -rf victim'), 2)
+expect('H1 xargs rm 재귀 옵션 없음은 통과', h1('git ls-files -z | xargs -0 rm'), 0)
+expect('H1 { … | xargs rm; } (rm 뒤에 ;)', h1('{ echo -r -f victim | xargs rm; }'), 2, '훅이 볼 수 없다')
+# 주석 끝의 \ 는 줄을 잇지 않는다 — 다음 줄 rm은 실제로 실행된다
+expect('H1 주석 끝 \\ 다음 줄 재귀 삭제', h1('# 메모 \\\nrm --recursive victim'), 2)
+expect('H1 PowerShell 주석 끝 백틱 다음 줄 재귀 삭제', h1('# 메모 `\nRemove-Item -Recurse victim', 'PowerShell'), 2)
+expect('H1 줄 이음은 여전히 이음 (rm \\ ⏎ -rf)', h1('rm \\\n -rf victim'), 2)
+expect('H1 작은따옴표 안 \\ ⏎ (글자) 통과', h1("echo 'a \\\nb'"), 0)
+expect('H1 bash heredoc 본문의 쪼갠 이름 r""m', h1("bash <<'EOF'\nr\"\"m --recursive victim\nEOF"), 2)
+# 리뷰 f17e01ce58: C1 작은따옴표 안 \ 는 이스케이프가 아니다 ('\' 뒤 주석 끝 \ 는 다음 줄을 잇지 않는다) · C2 / O2 오탐
+expect("H1 '\\' 뒤 주석 끝 \\ 다음 줄 재귀 삭제 (C1)", h1("echo '\\'; # 메모 \\\nrm --recursive victim"), 2)
+expect("H1 echo 'xargs rm -rf victim'은 통과 (C2)", h1("echo 'xargs rm -rf victim'"), 0)
+expect('H1 변수 명령 이름 + 재귀가 아닌 r 옵션 -rA는 통과 (O2)', h1('$PY -m pytest -rA'), 0)
+expect('H1 PowerShell & $python … --report는 통과 (O2)', h1('& $python x.py --report', 'PowerShell'), 0)
+expect('H1 다른 조각의 재귀 옵션과 변수 명령 이름을 엮지 않음', h1('ls -R; $PY x.py'), 0)
+expect('H1 xargs \\rm (역슬래시 이름)', h1('echo --recursive victim | xargs \\rm'), 2, '훅이 볼 수 없다')
+expect('H1 변수 명령 이름 PowerShell -Recurse', h1('& $c -Recurse victim', 'PowerShell'), 2)
 expect('H1 Windows 절대 경로', h1('rm -rf "F:\\AI\\ToolWithCS\\subagent_in\\x"'), 0)
 expect('H1 PowerShell 절대 경로', h1('Remove-Item -LiteralPath "F:\\AI\\x" -Recurse -Force -Confirm:$false', 'PowerShell'), 0)
 expect('H1 PowerShell -ErrorAction 값은 경로 아님', h1('Remove-Item -LiteralPath "F:\\AI\\x" -Recurse -Force -ErrorAction SilentlyContinue', 'PowerShell'), 0)
@@ -369,6 +389,22 @@ try:
     expect('H2 쪼갠 이름 gi""t push', h2("bash -c 'gi\"\"t push origin main'"), 2, '따옴표 문자열')
     expect('H2 없는 원격', h2('git push nowhere main'), 2, '원격')
     expect('H2 저장소가 아닌 곳', run('push_guard.py', {'tool_name': 'Bash', 'tool_input': {'command': 'git push'}, 'cwd': tmp}, env), 2, '검사 중 오류')
+    # 셸 퍼징(test_shell_fuzz)이 찾은 우회: 실제로 git push가 실행되는데 훅이 알아채지 못했다
+    for name, cmd in [('xargs가 git을 실행', 'echo push --force | xargs git'), ('xargs 옵션 뒤 git', 'echo push | xargs -n 9 git'),
+                      ('변수 명령 이름 ${c}', 'c=git; ${c} push origin main'), ('변수 명령 이름 $c', 'c=git; $c push'),
+                      ('따옴표 변수 명령 이름', 'c=git; "$c" push')]:
+        expect(f'H2 {name}', run('push_guard.py', {'tool_name': 'Bash', 'tool_input': {'command': cmd}, 'cwd': tmp}, env), 2, '훅이 볼 수 없다')
+    for name, cmd, tool in [('bash heredoc 본문의 변수 명령 이름', "bash <<'EOF'\nc=git; $c -c core.x=y push\nEOF", 'Bash'),
+                            ('bash heredoc 본문의 쪼갠 이름', "bash <<'EOF'\ngi\"\"t push\nEOF", 'Bash'),
+                            ('iex 작은따옴표 안 백틱 줄 이음', "Invoke-Expression 'git `\npush origin main'", 'PowerShell'),
+                            ("bash -c '…' 안 \\ 줄 이음", "bash -c 'git \\\npush'", 'Bash')]:
+        expect(f'H2 {name}', run('push_guard.py', {'tool_name': tool, 'tool_input': {'command': cmd}, 'cwd': tmp}, env), 2)
+    expect('H2 xargs git이지만 push 없음은 통과', run('push_guard.py', {'tool_name': 'Bash', 'tool_input': {'command': 'git ls-files | xargs git log -1'}, 'cwd': tmp}, env), 0)
+    expect('H2 변수 이름 명령이지만 push 없음은 통과', run('push_guard.py', {'tool_name': 'Bash', 'tool_input': {'command': 'c=git; $c status'}, 'cwd': tmp}, env), 0)
+    # 리뷰 f17e01ce58 C1 · C2
+    expect("H2 '\\' 뒤 주석 끝 \\ 다음 줄 git push (C1)", run('push_guard.py', {'tool_name': 'Bash', 'tool_input': {'command': "echo '\\'; # 메모 \\\ngit push"}, 'cwd': tmp}, env), 2)
+    expect("H2 echo 'xargs git push'는 통과 (C2)", run('push_guard.py', {'tool_name': 'Bash', 'tool_input': {'command': "echo 'xargs git push'"}, 'cwd': tmp}, env), 0)
+    expect('H2 커밋 메시지 속 $c push는 통과 (C2)', run('push_guard.py', {'tool_name': 'Bash', 'tool_input': {'command': 'git commit -m "c=git; $c push"'}, 'cwd': tmp}, env), 0)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
@@ -1377,7 +1413,83 @@ try:
     expect_true('H12 · H13 경고 기록', warned('plan-sections') == 1 and warned('worklog-link') == 1 and warned('mistake-format') == 2
                 and warned('agents-check') == 1, '')
     expect_true('경고 훅 깨진 입력은 조용히 통과', all(subprocess.run([sys.executable, '-I', os.path.join(HERE, s)], input=b'{', capture_output=True, env=env12).returncode == 0
-                                         for s in ('record_check.py', 'subagent_result_check.py', 'stop_check.py')), '')
+                                         for s in ('record_check.py', 'subagent_result_check.py', 'stop_check.py', 'commit_gate.py')), '')
+
+    # ── H14 commit_gate ──
+    repo14 = tempfile.mkdtemp(prefix='hb-gate-')
+    env14 = dict(os.environ, CLAUDE_PROJECT_DIR=repo14, HB_ORCH_HOOK_STATE_DIR=STATE, GIT_AUTHOR_NAME='t', GIT_AUTHOR_EMAIL='t@t',
+                 GIT_COMMITTER_NAME='t', GIT_COMMITTER_EMAIL='t@t')
+
+    def g14(*args: str) -> None:
+        subprocess.run(['git', '-C', repo14, *args], check=True, capture_output=True, env=env14)
+
+    def put14(rel: str, text: str) -> None:
+        os.makedirs(os.path.dirname(os.path.join(repo14, rel)) or repo14, exist_ok=True)
+        with open(os.path.join(repo14, rel), 'w', encoding='utf-8', newline='\n') as f:
+            f.write(text)
+
+    def h14(cmd: str, tool: str = 'Bash', cwd: str | None = None) -> tuple[int, str]:
+        return run_out('commit_gate.py', {'tool_name': tool, 'tool_input': {'command': cmd}, 'cwd': cwd or repo14}, env14)
+
+    g14('init', '-q')
+    g14('config', 'core.autocrlf', 'true')  # 커밋은 CRLF를 LF로 정규화한다 (이 PC의 Git 기본값과 같게)
+    # 스위트 시험: 사본 안 app/value.txt가 줄바꿈까지 'good\n'이면 통과, 아니면 FAIL 줄을 내고 실패
+    put14('check.py', "import sys\nb = open('app/value.txt', 'rb').read()\nok = b == b'good\\n'\nprint('FAIL value=' + repr(b)) if not ok else None\nsys.exit(0 if ok else 1)\n")
+    put14('app/value.txt', 'good\n')
+    put14('docs/x.md', 'x\n')
+    g14('add', '-A')
+    g14('commit', '-q', '-m', 'init')
+    expect_true('H14 설정 없음은 조용', h14('git commit -m x') == (0, ''), '')
+    put14('commit-gate.json', json.dumps({'suites': [{'name': 'app', 'paths': ['app/', 'check.py'], 'run': [[sys.executable, '-I', 'check.py']]}]}))
+    g14('add', 'commit-gate.json')
+    g14('commit', '-q', '-m', 'gate')
+    expect_true('H14 commit 아닌 명령은 조용', h14('git status') == (0, ''), '')
+    put14('docs/x.md', 'y\n')
+    g14('add', 'docs/x.md')
+    expect_true('H14 스위트 밖 파일만이면 조용', h14('git commit -m docs') == (0, ''), '')
+    g14('commit', '-q', '-m', 'docs')
+    put14('app/other.txt', 'o\n')
+    g14('add', 'app/other.txt')
+    code, out = h14('git commit -m "app"')
+    expect_true('H14 스테이지된 스위트 파일 → 시험 통과 알림', code == 0 and '[H14 커밋 게이트]' in out and '통과' in out and 'app' in out, out)
+    code, out = h14('git commit -m "app again"')
+    expect_true('H14 같은 인덱스는 다시 안 돌림', code == 0 and '이미 통과' in out, out)
+    put14('app/value.txt', 'bad\n')  # 작업 트리만 바꿈 (스테이지 안 함)
+    code, out = h14('git commit -m "staged only"')
+    expect_true('H14 작업 트리의 안 올린 변경은 보지 않음', code == 0 and '이미 통과' in out, out)
+    before = warned('commit-gate-fail')
+    code, out = h14('git commit -am "all"')
+    expect_true('H14 commit -a는 작업 트리 판으로 → 실패 경고 (막지 않음)', code == 0 and '[H14 커밋 게이트 경고]' in out and "FAIL value=b'bad" in out, out)
+    expect_true('H14 실패는 경고 기록', warned('commit-gate-fail') == before + 1, str(warned('commit-gate-fail')))
+    code, out = h14('git commit -m x -- app/value.txt')
+    expect_true('H14 경로를 준 commit도 작업 트리 판', code == 0 and "FAIL value=b'bad" in out, out)
+    # 리뷰(f17e01ce58)가 찾은 것
+    code, out = h14('git commit -m x -- "app/value.txt"')
+    expect_true('H14 따옴표 경로 (C3)', code == 0 and "FAIL value=b'bad" in out, out)
+    code, out = h14('git add app/value.txt && git commit -m x')
+    expect_true('H14 같은 호출의 git add를 반영 (C5)', code == 0 and "FAIL value=b'bad" in out, out)
+    code, out = h14('git -C app commit -m x -- value.txt')
+    expect_true('H14 -C 하위 폴더 기준 경로 (C7)', code == 0 and "FAIL value=b'bad" in out, out)
+    code, out = h14('git commit -m x -- value.txt', cwd=os.path.join(repo14, 'app'))
+    expect_true('H14 하위 폴더 cwd 기준 경로 (C7)', code == 0 and "FAIL value=b'bad" in out, out)
+    g14('add', 'app/value.txt')  # 나쁜 값을 스테이지 — 경로를 준 commit에는 안 들어간다
+    put14('app/other.txt', 'o2\n')
+    code, out = h14('git commit -m x -- app/other.txt')
+    expect_true('H14 경로를 준 commit은 다른 스테이지 변경을 빼고 시험 (C4)', code == 0 and '통과' in out and 'FAIL' not in out, out)
+    code, out = h14('git commit -sm "app/other.txt"')
+    expect_true('H14 -sm 메시지는 경로가 아님 (O1)', code == 0 and "FAIL value=b'bad" in out, out)
+    code, out = h14('git commit -m x', 'PowerShell')
+    expect_true('H14 PowerShell git commit', code == 0 and '[H14 커밋 게이트 경고]' in out, out)
+    code, out = h14("git commit -m \"$(cat <<'EOF'\n제목\n\n본문에 git push 글자\nEOF\n)\"")
+    expect_true('H14 heredoc 메시지 commit', code == 0 and 'H14' in out, out)
+    code, out = h14(f'git -C "{repo14}" commit -m x')
+    expect_true('H14 git -C 저장소', code == 0 and 'H14' in out, out)
+    with open(os.path.join(repo14, 'app', 'value.txt'), 'wb') as f:
+        f.write(b'good\r\n')  # 작업 트리는 CRLF — 커밋은 LF로 정규화된다
+    code, out = h14('git commit -am crlf')
+    expect_true('H14 작업 트리 판도 커밋과 같은 정규화 (C8)', code == 0 and '통과' in out and 'FAIL' not in out, out)
+    expect_true('H14 git log --grep commit은 조용 (commit 명령 아님)', h14('git log --grep commit') == (0, ''), '')
+    shutil.rmtree(repo14, ignore_errors=True)
 finally:
     shutil.rmtree(STATE, ignore_errors=True)
     for d in ('proj3', 'proj11', 'proj12', 'trdir'):
