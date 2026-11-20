@@ -88,6 +88,8 @@ powershell -ExecutionPolicy Bypass -File tools\Test-SyncProjectFiles.ps1
 
 프로젝트 전용 규칙은 그 프로젝트의 `PROJECT.md`에, 지휘자 실수 목록은 `MISTAKES.md`에 둡니다. 공통 `CLAUDE.md` 끝의 `@PROJECT.md` · `@MISTAKES.md`가 불러오고, 파일이 없으면 오류 없이 건너뜁니다. Sync는 두 파일이 없을 때만 빈 틀을 만들고, 있으면 덮지 않습니다.
 
+게임 프로젝트면 `project-files/PROJECT_DIRECTION.md` 틀을 프로젝트 루트에 복사해 게임 방향성 요약을 짧게 씁니다. 공통 `CLAUDE.md` 끝의 `@PROJECT_DIRECTION.md`가 매 세션 불러오고, 파일이 없으면 건너뜁니다. 상세 문서는 `docs/direction/`에 두고 요약의 목록에 "언제 읽나"를 적으면 관련 작업일 때만 엽니다. Sync는 이 파일을 만들지 않습니다 (게임이 아닌 저장소에는 필요 없음).
+
 **확인만 하는 파일** (만들거나 덮지 않음, 종료 코드와 무관)
 
 - `.claude/settings.json`: `settings.example.json`과 해시를 비교합니다.
