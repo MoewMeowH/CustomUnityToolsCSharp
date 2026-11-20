@@ -10,7 +10,7 @@ argument-hint: <모드 이름> <요청>
    - `research_main` · `crash_main` · `design_high`면 아래 "모드별 절차"의 해당 절을 따른다 (research_main 웹 수집은 **web-searcher** 서브에이전트에 맡기고 지휘자가 확인한다).
    - `parallel_main`이면 작업 명세를 구체적으로 쓴다 (입출력, 제약, 대상 파일의 관련 부분).
 2. 네 판단이 필요한 모드(design_* 등)면 너의 의견을 먼저 정리해두되 input에는 넣지 않는다.
-   - `perf_main` · `perf_high`이고 대상이 디스크에 있는 코드면 ownReview는 검토형 리뷰어가 쓴다. 기본은 **API 리뷰 `sub_perf`**(`/self-review` "API 리뷰"와 같다), 서브에이전트일 때는 **perf-reviewer**. 순서는 두 갈래 공통으로 `/cross-review` 2-1~2-4와 같다:
+   - `perf_main` · `perf_high`이고 대상이 디스크에 있는 코드면 ownReview는 검토형 리뷰어가 쓴다. `perf_main`이면 기본은 **perf-reviewer** 서브에이전트 — API 리뷰(`sub_perf`)도 Codex sol이라 외부 perf_main과 같은 모델 둘이 된다. `perf_high`(sol · DeepSeek API)면 기본은 **API 리뷰 `sub_perf`**(`/self-review` "API 리뷰"와 같다). 사용자가 다른 쪽을 고르면 그쪽. 순서는 두 갈래 공통으로 `/cross-review` 2-1~2-4와 같다:
      1. 지휘자 검토를 먼저 작업 로그에 저장한다.
      2. API: `run_mode("sub_perf")`를 context로 부른다. / 서브에이전트: `subagent_in/<날짜>_<주제>/`에 명령으로 복사·SHA-256 확인(`.claude/mistakes/perf-reviewer.md`에 항목이 있으면 `_SUBAGENT_MISTAKES.md`로 함께) → perf-reviewer 호출.
      3. 형식을 어겼거나 중단됐으면(API는 `## 읽은 파일`에 절대 경로 · `..`가 있어도) 멈추고 사용자에게 알린다.
