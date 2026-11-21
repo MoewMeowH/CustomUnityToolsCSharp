@@ -1,0 +1,14 @@
+{
+  "$schema": "./hblint.schema.json",
+  "version": 1,
+  "id": "CLL0008",
+  "title": "Update 계열에서 캡처하는 람다 금지 — 지역 · 매개변수 · this를 캡처하면 만들 때마다 델리게이트(와 클로저) 할당.",
+  "severity": "warning",
+  "requires": ["UnityEngine.CoreModule"],
+  "nodes": {
+    "monoBehaviour": { "kind": "types.derived", "from": "scope", "type": "UnityEngine.MonoBehaviour" },
+    "updates": { "kind": "methods.named", "from": "monoBehaviour", "names": ["Update", "LateUpdate", "FixedUpdate"] },
+    "lambdas": { "kind": "sites.lambda", "from": "updates", "capturingOnly": true },
+    "report": { "kind": "report", "from": "lambdas", "message": "Update 계열에서 캡처하는 람다를 만들지 마세요 — 매 프레임 델리게이트를 할당합니다. 필드에 캐싱하세요." }
+  }
+}

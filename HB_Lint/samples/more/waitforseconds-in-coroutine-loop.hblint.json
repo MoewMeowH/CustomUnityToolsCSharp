@@ -1,0 +1,16 @@
+{
+  "$schema": "./hblint.schema.json",
+  "version": 1,
+  "id": "CLL0009",
+  "title": "코루틴 루프 안 new WaitForSeconds 금지 — 돌 때마다 할당.",
+  "severity": "warning",
+  "requires": ["UnityEngine.CoreModule"],
+  "nodes": {
+    "monoBehaviour": { "kind": "types.derived", "from": "scope", "type": "UnityEngine.MonoBehaviour" },
+    "coroutines": { "kind": "methods.coroutine", "from": "monoBehaviour" },
+    "news": { "kind": "sites.new", "from": "coroutines" },
+    "waitForSeconds": { "kind": "filter.targetType", "from": "news", "type": "UnityEngine.WaitForSeconds" },
+    "inLoop": { "kind": "filter.context", "from": "waitForSeconds", "context": "loop", "where": "inside" },
+    "report": { "kind": "report", "from": "inLoop", "message": "코루틴 루프 안에서 new WaitForSeconds를 하지 마세요 — 돌 때마다 할당합니다. 루프 밖에서 한 번 만들어 다시 쓰세요." }
+  }
+}

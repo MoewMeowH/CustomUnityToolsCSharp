@@ -84,15 +84,15 @@ namespace HBLint.Analyzers
     {
         public List<INamedTypeSymbol> Types { get; } = new List<INamedTypeSymbol>();
 
-        /// <summary>null이면 메서드로 좁히지 않음.</summary>
-        public HashSet<string>? MethodNames { get; set; }
+        /// <summary>출발 메서드 판정 (methods.named · methods.coroutine). null이면 메서드로 좁히지 않음.</summary>
+        public Func<IMethodSymbol, bool>? Entry { get; set; }
 
         public int Depth { get; set; }
 
-        public bool IsScope => Types.Count == 0 && MethodNames == null;
+        public bool IsScope => Types.Count == 0 && Entry == null;
     }
 
-    /// <summary>사이트 노드 하나와 그 범위, 그래프에서의 자리 (report까지 가는 길 하나라도 필터를 통과하면 보고).</summary>
+    /// <summary>사이트 노드 하나와 그 범위, 그래프에서의 자리 (끝 자리까지 가는 길 하나라도 필터를 통과하면 닿음).</summary>
     internal sealed class ProducerPlan
     {
         private readonly SiteGraph _graph;
@@ -110,54 +110,74 @@ namespace HBLint.Analyzers
 
         public SiteContext Context { get; }
 
-        public bool Passes(Site site, System.Threading.CancellationToken cancellationToken) => _graph.Passes(_index, site, cancellationToken);
+        /// <summary>slot: 끝 자리 번호 (report이면 0, 짝 묶기면 a 0 · b 1).</summary>
+        public bool Passes(Site site, int slot, System.Threading.CancellationToken cancellationToken) => _graph.Passes(_index, slot, site, cancellationToken);
     }
 
     /// <summary>
-    /// 사이트가 흐르는 노드들(사이트 노드 · 필터 · 합치기 · report)을 번호로 편 것.
+    /// 사이트가 흐르는 노드들(사이트 노드 · 필터 · 합치기)과 끝 자리(report 또는 묶기 노드의 입력)를 번호로 편 것.
     /// 경로를 펼쳐 두지 않고 사이트마다 따라가 판정한다 — 합치기가 겹겹이면 경로 수가 지수로 늘어서.
     /// 한 노드를 여러 노드가 받는 그래프에서만 노드마다 결과를 기억한다.
     /// </summary>
     internal sealed class SiteGraph
     {
         private readonly SiteFilter?[] _filters;
-        private readonly bool[] _isReport;
         private readonly int[][] _consumers;
+        private readonly int _firstSlot;
         private readonly bool _fanOut;
 
-        public SiteGraph(SiteFilter?[] filters, bool[] isReport, int[][] consumers)
+        /// <summary>번호 firstSlot부터가 끝 자리 (필터 없음 · 소비자 없음).</summary>
+        public SiteGraph(SiteFilter?[] filters, int[][] consumers, int firstSlot)
         {
             _filters = filters;
-            _isReport = isReport;
             _consumers = consumers;
+            _firstSlot = firstSlot;
             _fanOut = consumers.Any(c => c.Length > 1);
         }
 
-        public bool Passes(int from, Site site, System.Threading.CancellationToken cancellationToken) =>
-            AnyConsumer(from, site, _fanOut ? new sbyte[_filters.Length] : null, cancellationToken);
+        public bool Passes(int from, int slot, Site site, System.Threading.CancellationToken cancellationToken) =>
+            AnyConsumer(from, _firstSlot + slot, site, _fanOut ? new sbyte[_filters.Length] : null, cancellationToken);
 
-        private bool AnyConsumer(int node, Site site, sbyte[]? memo, System.Threading.CancellationToken cancellationToken)
+        private bool AnyConsumer(int node, int target, Site site, sbyte[]? memo, System.Threading.CancellationToken cancellationToken)
         {
             foreach (var next in _consumers[node])
             {
-                if (Reaches(next, site, memo, cancellationToken))
+                if (Reaches(next, target, site, memo, cancellationToken))
                     return true;
             }
             return false;
         }
 
         /// <summary>memo: 0 모름 · 1 닿음 · 2 안 닿음.</summary>
-        private bool Reaches(int node, Site site, sbyte[]? memo, System.Threading.CancellationToken cancellationToken)
+        private bool Reaches(int node, int target, Site site, sbyte[]? memo, System.Threading.CancellationToken cancellationToken)
         {
-            if (_isReport[node])
-                return true;
+            if (node >= _firstSlot)
+                return node == target;
             if (memo != null && memo[node] != 0)
                 return memo[node] == 1;
-            var reaches = (_filters[node]?.Passes(site, cancellationToken) ?? true) && AnyConsumer(node, site, memo, cancellationToken);
+            var reaches = (_filters[node]?.Passes(site, cancellationToken) ?? true) && AnyConsumer(node, target, site, memo, cancellationToken);
             if (memo != null)
                 memo[node] = (sbyte)(reaches ? 1 : 2);
             return reaches;
         }
+    }
+
+    /// <summary>Groups 끝 — 묶기(by) · 짝 묶기(pair) 하나와 그 뒤 개수 사슬.</summary>
+    internal sealed class GroupSpec
+    {
+        public GroupSpec(bool pair, bool byTarget, int min)
+        {
+            Pair = pair;
+            ByTarget = byTarget;
+            Min = min;
+        }
+
+        public bool Pair { get; }
+
+        public bool ByTarget { get; }
+
+        /// <summary>묶음의 사이트가 이 수 이상이어야 (개수 노드가 없으면 1).</summary>
+        public int Min { get; }
     }
 
     /// <summary>규칙 하나의 실행 계획.</summary>
@@ -168,14 +188,16 @@ namespace HBLint.Analyzers
         private readonly string _message;
         private readonly bool _appendPath;
         private readonly List<ProducerPlan> _producers;
+        private readonly GroupSpec? _group;
 
-        private RulePlan(RuleIr rule, List<ProducerPlan> producers)
+        private RulePlan(RuleIr rule, List<ProducerPlan> producers, GroupSpec? group)
         {
             _descriptor = RuleDescriptors.Rules[rule.Id];
             _severity = rule.Severity == "error" ? DiagnosticSeverity.Error : rule.Severity == "info" ? DiagnosticSeverity.Info : DiagnosticSeverity.Warning;
             _message = rule.Report.GetString("message")!;
             _appendPath = rule.Report.GetBool("appendPath") ?? true;
             _producers = producers;
+            _group = group;
         }
 
         /// <summary>대상 타입을 못 찾으면 규칙째 빼고 null (멤버는 못 찾은 것만 뺀다).</summary>
@@ -211,35 +233,60 @@ namespace HBLint.Analyzers
                 }
             }
 
-            // 사이트가 흐르는 노드(Sites를 내보내는 노드 · report)를 번호로 편다
-            var flow = rule.Nodes.Where(n => reached.Contains(n.Name) && (n.Spec.Output == Socket.Sites || n.Kind == NodeCatalog.ReportKind)).ToList();
+            // 사이트가 닿아야 하는 끝 자리: report의 입력, 또는 Groups면 개수 사슬을 거슬러 묶기 노드의 입력(by: from, pair: a · b)
+            GroupSpec? group = null;
+            var head = rule.Find(rule.Report.Inputs["from"][0])!;
+            string[] slotInputs;
+            if (head.Spec.Output == Socket.Groups)
+            {
+                var min = 1;
+                for (; head.Kind == "groups.count"; head = rule.Find(head.Inputs["from"][0])!)
+                    min = Math.Max(min, head.GetInt("min") ?? 1);
+                var pair = head.Kind == "groups.pair";
+                group = new GroupSpec(pair, head.GetString("key") == "methodAndTarget", min);
+                slotInputs = pair ? new[] { head.Inputs["a"][0], head.Inputs["b"][0] } : new[] { head.Inputs["from"][0] };
+            }
+            else
+            {
+                slotInputs = new[] { head.Name };
+            }
+
+            // 사이트가 흐르는 노드(Sites를 내보내는 노드)와 끝 자리를 번호로 편다
+            var flow = rule.Nodes.Where(n => reached.Contains(n.Name) && n.Spec.Output == Socket.Sites).ToList();
             var index = flow.Select((n, i) => (n.Name, i)).ToDictionary(x => x.Name, x => x.i);
-            var filters = new SiteFilter?[flow.Count];
+            var filters = new SiteFilter?[flow.Count + slotInputs.Length];
             for (var i = 0; i < flow.Count; i++)
             {
                 switch (flow[i].Kind)
                 {
                     case "filter.targetType":
-                        var type = Type(flow[i].GetString("type")!);
-                        if (type == null)
+                        INamedTypeSymbol? type = null;
+                        var typeName = flow[i].GetString("type");
+                        if (typeName != null && (type = Type(typeName)) == null)
                             return null;
-                        filters[i] = new TargetTypeFilter(type);
+                        filters[i] = new TargetTypeFilter(type, flow[i].GetString("category"));
                         break;
                     case "filter.define":
                         filters[i] = new DefineFilter(flow[i].GetString("define")!, flow[i].GetString("where") == "inside", guards);
                         break;
+                    case "filter.context":
+                        filters[i] = new ContextFilter(flow[i].GetString("context") == "loop", flow[i].GetString("where") == "inside");
+                        break;
                 }
             }
             var consumers = flow
-                .Select(n => flow.Where(c => c.AllInputs.Contains(n.Name)).Select(c => index[c.Name]).ToArray())
+                .Select(n => flow.Where(c => c.AllInputs.Contains(n.Name)).Select(c => index[c.Name])
+                    .Concat(Enumerable.Range(0, slotInputs.Length).Where(slot => slotInputs[slot] == n.Name).Select(slot => flow.Count + slot))
+                    .ToArray())
+                .Concat(slotInputs.Select(_ => new int[0]))
                 .ToArray();
-            var graph = new SiteGraph(filters, flow.Select(n => n.Kind == NodeCatalog.ReportKind).ToArray(), consumers);
+            var graph = new SiteGraph(filters, consumers, flow.Count);
 
             var producers = new List<ProducerPlan>();
             foreach (var node in flow)
             {
                 // 사이트를 만드는 노드만 (필터 · 합치기는 그래프에서 지나간다)
-                if (node.Kind == NodeCatalog.ReportKind || node.Kind == "sites.union" || node.Kind.StartsWith("filter.", StringComparison.Ordinal))
+                if (node.Kind == "sites.union" || node.Kind.StartsWith("filter.", StringComparison.Ordinal))
                     continue;
 
                 var context = new SiteContext();
@@ -252,7 +299,16 @@ namespace HBLint.Analyzers
                             context.Depth += upstream.GetInt("depth") ?? 0;
                             break;
                         case "methods.named":
-                            context.MethodNames = new HashSet<string>(upstream.GetStrings("names"), StringComparer.Ordinal);
+                            var names = new HashSet<string>(upstream.GetStrings("names"), StringComparer.Ordinal);
+                            context.Entry = method => names.Contains(method.Name);
+                            break;
+                        case "methods.coroutine":
+                            // 반환형만 본다 (IEnumerator · IEnumerator<T>)
+                            var enumerator = compilation.GetSpecialType(SpecialType.System_Collections_IEnumerator);
+                            var genericEnumerator = compilation.GetSpecialType(SpecialType.System_Collections_Generic_IEnumerator_T);
+                            context.Entry = method => method.MethodKind == MethodKind.Ordinary
+                                && (SymbolEqualityComparer.Default.Equals(method.ReturnType, enumerator)
+                                    || SymbolEqualityComparer.Default.Equals(method.ReturnType.OriginalDefinition, genericEnumerator));
                             break;
                         case "types.derived":
                             var type = Type(upstream.GetString("type")!);
@@ -268,7 +324,7 @@ namespace HBLint.Analyzers
                 if (producer != null)
                     producers.Add(new ProducerPlan(producer, context, graph, index[node.Name]));
             }
-            return producers.Count == 0 ? null : new RulePlan(rule, producers);
+            return producers.Count == 0 ? null : new RulePlan(rule, producers, group);
         }
 
         private static SiteProducer? CreateProducer(IrNode node, Compilation compilation, GuardCache guards, Action<string> notFound)
@@ -293,6 +349,14 @@ namespace HBLint.Analyzers
                 case "sites.nullOperator":
                     var operators = node.GetStrings("operators");
                     return new NullOperatorProducer(operators.Length == 0 ? NodeCatalog.NullOperators : operators);
+                case "sites.new":
+                    return new NewProducer();
+                case "sites.boxing":
+                    return new BoxingProducer();
+                case "sites.stringConcat":
+                    return new StringConcatProducer();
+                case "sites.lambda":
+                    return new LambdaProducer(node.GetBool("capturingOnly") ?? true);
                 default:
                     return null;
             }
@@ -300,6 +364,12 @@ namespace HBLint.Analyzers
 
         public void Register(CompilationStartAnalysisContext start)
         {
+            if (_group != null)
+            {
+                start.RegisterSymbolStartAction(OnGroupTypeStart, SymbolKind.NamedType);
+                return;
+            }
+
             // 컴파일 전체 범위 사이트 노드는 한 콜백에 모아 같은 위치를 한 번만 알린다 (합치기로 겹칠 수 있어서)
             var scoped = _producers.Where(p => p.Context.IsScope).ToList();
             var operationKinds = scoped.SelectMany(p => p.Producer.OperationKinds).Distinct().ToArray();
@@ -348,7 +418,7 @@ namespace HBLint.Analyzers
                 return;
             var producer = plan.Producer;
 
-            if (plan.Context.MethodNames == null)
+            if (plan.Context.Entry == null)
             {
                 void InType(Site? site, Action<Diagnostic> report, System.Threading.CancellationToken cancellationToken)
                 {
@@ -378,18 +448,7 @@ namespace HBLint.Analyzers
             if (producer.SyntaxKinds.Length > 0)
                 context.RegisterSyntaxNodeAction(c => Collect(producer.OnSyntax(c.Node, c.SemanticModel, c.CancellationToken), c.CancellationToken), producer.SyntaxKinds);
             if (plan.Context.Depth > 0)
-            {
-                context.RegisterOperationAction(c =>
-                {
-                    var invocation = (IInvocationOperation)c.Operation;
-                    var callee = invocation.TargetMethod.OriginalDefinition;
-                    if (callee.MethodKind != MethodKind.Ordinary || !SymbolEqualityComparer.Default.Equals(callee.ContainingType?.OriginalDefinition, type) || c.Operation.SemanticModel == null)
-                        return;
-                    var caller = SymbolUtil.ContainingMethod(c.Operation.Syntax, c.Operation.SemanticModel, c.CancellationToken);
-                    if (caller != null && SymbolEqualityComparer.Default.Equals(caller.ContainingType?.OriginalDefinition, type))
-                        calls.Enqueue((caller, callee));
-                }, OperationKind.Invocation);
-            }
+                CollectCalls(context, type, calls);
             context.RegisterSymbolEndAction(end =>
             {
                 var paths = FollowPaths(type, plan.Context, calls);
@@ -400,6 +459,138 @@ namespace HBLint.Analyzers
                         Report(plan, hit.Site, path, ref seen, end.ReportDiagnostic, end.CancellationToken);
                 }
             });
+        }
+
+        /// <summary>같은 클래스 일반 메서드 호출 (따라가기용).</summary>
+        private static void CollectCalls(SymbolStartAnalysisContext context, INamedTypeSymbol type, ConcurrentQueue<(IMethodSymbol Caller, IMethodSymbol Callee)> calls)
+        {
+            context.RegisterOperationAction(c =>
+            {
+                var invocation = (IInvocationOperation)c.Operation;
+                var callee = invocation.TargetMethod.OriginalDefinition;
+                if (callee.MethodKind != MethodKind.Ordinary || !SymbolEqualityComparer.Default.Equals(callee.ContainingType?.OriginalDefinition, type) || c.Operation.SemanticModel == null)
+                    return;
+                var caller = SymbolUtil.ContainingMethod(c.Operation.Syntax, c.Operation.SemanticModel, c.CancellationToken);
+                if (caller != null && SymbolEqualityComparer.Default.Equals(caller.ContainingType?.OriginalDefinition, type))
+                    calls.Enqueue((caller, callee));
+            }, OperationKind.Invocation);
+        }
+
+        /// <summary>
+        /// Groups 규칙: 규칙의 사이트 노드 전부를 타입 하나 안에서 모아 두고, 타입 끝에서 메서드(와 대상)마다 묶어 판정한다.
+        /// 짝 묶기는 a · b 사이트를 같은 타입 끝에서 함께 봐야 해서 규칙마다 SymbolStart를 한 번만 등록한다.
+        /// </summary>
+        private void OnGroupTypeStart(SymbolStartAnalysisContext context)
+        {
+            var type = (INamedTypeSymbol)context.Symbol;
+            var plans = _producers.Where(p => p.Context.Types.All(target => SymbolUtil.IsOrDerivesFrom(type, target))).ToList();
+            if (plans.Count == 0)
+                return;
+
+            var hits = new ConcurrentQueue<(ProducerPlan Plan, IMethodSymbol? Container, Site Site)>();
+            var calls = new ConcurrentQueue<(IMethodSymbol Caller, IMethodSymbol Callee)>();
+            foreach (var plan in plans)
+            {
+                var producer = plan.Producer;
+                void Collect(Site? site, System.Threading.CancellationToken cancellationToken)
+                {
+                    if (site == null)
+                        return;
+                    if (plan.Context.Entry == null)
+                    {
+                        if (SymbolEqualityComparer.Default.Equals(SymbolUtil.ContainingType(site.Node, site.Model, cancellationToken), type))
+                            hits.Enqueue((plan, null, site));
+                        return;
+                    }
+                    var container = SymbolUtil.ContainingMethod(site.Node, site.Model, cancellationToken);
+                    if (container != null && SymbolEqualityComparer.Default.Equals(container.ContainingType?.OriginalDefinition, type))
+                        hits.Enqueue((plan, container, site));
+                }
+                if (producer.OperationKinds.Length > 0)
+                    context.RegisterOperationAction(c => Collect(producer.OnOperation(c.Operation), c.CancellationToken), producer.OperationKinds);
+                if (producer.SyntaxKinds.Length > 0)
+                    context.RegisterSyntaxNodeAction(c => Collect(producer.OnSyntax(c.Node, c.SemanticModel, c.CancellationToken), c.CancellationToken), producer.SyntaxKinds);
+            }
+            if (plans.Any(p => p.Context.Depth > 0))
+                CollectCalls(context, type, calls);
+            context.RegisterSymbolEndAction(end => ReportGroups(type, hits, calls, end.ReportDiagnostic, end.CancellationToken));
+        }
+
+        private void ReportGroups(
+            INamedTypeSymbol type,
+            IEnumerable<(ProducerPlan Plan, IMethodSymbol? Container, Site Site)> hits,
+            IEnumerable<(IMethodSymbol Caller, IMethodSymbol Callee)> calls,
+            Action<Diagnostic> report,
+            System.Threading.CancellationToken cancellationToken)
+        {
+            var group = _group!;
+            var paths = new Dictionary<SiteContext, Dictionary<IMethodSymbol, string>>();
+            var groups = new Dictionary<(SyntaxNode Body, string? Target), Dictionary<TextSpan, GroupMember>>();
+            foreach (var hit in hits)
+            {
+                string? path = null;
+                if (hit.Container != null)
+                {
+                    if (!paths.TryGetValue(hit.Plan.Context, out var map))
+                        paths[hit.Plan.Context] = map = FollowPaths(type, hit.Plan.Context, calls);
+                    if (!map.TryGetValue(hit.Container, out path))
+                        continue;
+                }
+                var inA = hit.Plan.Passes(hit.Site, 0, cancellationToken);
+                var inB = group.Pair && hit.Plan.Passes(hit.Site, 1, cancellationToken);
+                if ((!inA && !inB) || !hit.Plan.Producer.Confirm(hit.Site, cancellationToken))
+                    continue;
+                var body = SymbolUtil.EnclosingBody(hit.Site.Node);
+                var target = group.ByTarget ? SymbolUtil.TargetKey(hit.Site.Instance) : null;
+                if (body == null || (group.ByTarget && target == null))
+                    continue;
+
+                if (!groups.TryGetValue((body, target), out var members))
+                    groups[(body, target)] = members = new Dictionary<TextSpan, GroupMember>();
+                // 합치기로 같은 위치가 두 번 오면 하나로 (a · b 표시는 합친다)
+                if (members.TryGetValue(hit.Site.Location.SourceSpan, out var existing))
+                    members[hit.Site.Location.SourceSpan] = new GroupMember(existing.Site, existing.Path, existing.InA || inA, existing.InB || inB);
+                else
+                    members[hit.Site.Location.SourceSpan] = new GroupMember(hit.Site, path, inA, inB);
+            }
+
+            var reports = new List<GroupMember[]>();
+            foreach (var members in groups.Values)
+            {
+                // 짝은 서로 다른 사이트 둘 이상 (a · b 둘 다에 걸린 사이트 하나만으로는 짝이 아니다)
+                if (members.Count < group.Min || (group.Pair && (members.Count < 2 || !(members.Values.Any(m => m.InA) && members.Values.Any(m => m.InB)))))
+                    continue;
+                reports.Add(members.Values
+                    .OrderBy(m => m.Site.Location.SourceTree?.FilePath, StringComparer.Ordinal)
+                    .ThenBy(m => m.Site.Location.SourceSpan.Start)
+                    .ToArray());
+            }
+            // 묶음마다 하나 — 첫 사이트 위치, 나머지는 추가 위치
+            foreach (var members in reports.OrderBy(m => m[0].Site.Location.SourceTree?.FilePath, StringComparer.Ordinal).ThenBy(m => m[0].Site.Location.SourceSpan.Start))
+            {
+                var first = members[0];
+                var message = _appendPath && first.Path != null && first.Path.Contains(" → ") ? _message + " (" + first.Path + ")" : _message;
+                report(Diagnostic.Create(_descriptor, first.Site.Location, _severity, members.Skip(1).Select(m => m.Site.Location), properties: null, message));
+            }
+        }
+
+        private readonly struct GroupMember
+        {
+            public GroupMember(Site site, string? path, bool inA, bool inB)
+            {
+                Site = site;
+                Path = path;
+                InA = inA;
+                InB = inB;
+            }
+
+            public Site Site { get; }
+
+            public string? Path { get; }
+
+            public bool InA { get; }
+
+            public bool InB { get; }
         }
 
         /// <summary>규칙의 메서드에서 출발해 같은 클래스 메서드를 Depth만큼 따라간 경로 (먼저 닿은 경로 하나).</summary>
@@ -414,7 +605,7 @@ namespace HBLint.Analyzers
             }
 
             var paths = new Dictionary<IMethodSymbol, string>(SymbolEqualityComparer.Default);
-            var frontier = type.GetMembers().OfType<IMethodSymbol>().Where(m => context.MethodNames!.Contains(m.Name)).ToList();
+            var frontier = type.GetMembers().OfType<IMethodSymbol>().Where(context.Entry!).ToList();
             foreach (var entry in frontier)
                 paths[entry] = entry.Name;
             for (var level = 0; level < context.Depth; level++)
@@ -443,7 +634,7 @@ namespace HBLint.Analyzers
         /// </summary>
         private void Report(ProducerPlan plan, Site site, string? path, ref HashSet<TextSpan>? seen, Action<Diagnostic> report, System.Threading.CancellationToken cancellationToken)
         {
-            if (!plan.Passes(site, cancellationToken))
+            if (!plan.Passes(site, 0, cancellationToken) || !plan.Producer.Confirm(site, cancellationToken))
                 return;
             seen ??= new HashSet<TextSpan>();
             if (!seen.Add(site.Location.SourceSpan))

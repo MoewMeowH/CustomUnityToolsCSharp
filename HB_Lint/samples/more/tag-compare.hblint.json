@@ -1,0 +1,12 @@
+{
+  "$schema": "./hblint.schema.json",
+  "version": 1,
+  "id": "CLL0010",
+  "title": "tag를 == · != 로 비교 금지 — tag 읽기는 문자열을 할당한다. CompareTag로.",
+  "severity": "warning",
+  "requires": ["UnityEngine.CoreModule"],
+  "nodes": {
+    "tagCompare": { "kind": "sites.member", "from": "scope", "members": ["UnityEngine.Component.tag", "UnityEngine.GameObject.tag"], "uses": ["compare"] },
+    "report": { "kind": "report", "from": "tagCompare", "message": "tag를 == · != 로 비교하지 마세요 — 문자열을 할당합니다. CompareTag를 쓰세요." }
+  }
+}

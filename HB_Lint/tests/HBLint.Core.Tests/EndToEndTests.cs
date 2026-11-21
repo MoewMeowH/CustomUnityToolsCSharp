@@ -43,6 +43,71 @@ public class EndToEndTests
         Assert.EndsWith("(Update → Helper)", diagnostics.Single(d => d.Id == "CLL0002").GetMessage());
     }
 
+    private const string MoreUnity = """
+        namespace UnityEngine
+        {
+            public class Object { }
+            public class Component : Object { public Transform transform => null; public string tag { get => null; set { } } }
+            public class GameObject : Object { public Transform transform => null; public string tag { get => null; set { } } }
+            public class Behaviour : Component { }
+            public class MonoBehaviour : Behaviour { }
+            public class Transform : Component { public Vector3 position { get => default; set { } } public Quaternion rotation { get => default; set { } } }
+            public struct Vector3 { public static Vector3 zero => default; }
+            public struct Quaternion { public static Quaternion identity => default; }
+            public class YieldInstruction { }
+            public sealed class WaitForSeconds : YieldInstruction { public WaitForSeconds(float seconds) { } }
+        }
+        """;
+
+    private const string MoreGame = """
+        using System;
+        using System.Collections;
+        using System.Collections.Generic;
+        using System.Linq;
+        using UnityEngine;
+        public class Foo : MonoBehaviour
+        {
+            List<int> list = new List<int>();
+            int hp; string label;
+            void Log(object o) { }
+            void Update()
+            {
+                var a = new List<int>();
+                Log(hp);
+                var b = list.Any();
+                label = "hp " + hp;
+                Action c = () => hp++;
+                if (tag == "Player") { }
+                transform.position = Vector3.zero;
+                transform.rotation = Quaternion.identity;
+                var d = transform; var e = transform;
+            }
+            IEnumerator Co()
+            {
+                while (true) { yield return new WaitForSeconds(1); }
+            }
+        }
+        """;
+
+    [Fact]
+    public void 새_규칙_예시_셋이_각각_걸림()
+    {
+        var set = RuleSet.Build(RuleSet.ReadFolder(Path.Combine(Samples, "more")));
+        Assert.Empty(set.Errors);
+        Assert.Empty(set.Warnings);
+
+        var unity = TestCompiler.Emit(TestCompiler.Compile("UnityEngine.CoreModule", MoreUnity));
+        var rules = TestCompiler.Emit(TestCompiler.Compile("Game.LintRules", set.Text!, TestCompiler.Attributes));
+        var diagnostics = TestCompiler.RunAnalyzer(TestCompiler.Compile("Game", MoreGame, unity, TestCompiler.Attributes, rules));
+
+        var found = diagnostics.Select(d => d.Id + "@" + (d.Location.GetLineSpan().StartLinePosition.Line + 1)).OrderBy(s => s, StringComparer.Ordinal);
+        Assert.Equal(new[]
+        {
+            "CLL0004@13", "CLL0005@14", "CLL0006@15", "CLL0007@16", "CLL0008@17",
+            "CLL0009@25", "CLL0010@18", "CLL0011@19", "CLL0012@19",
+        }, found);
+    }
+
     [Fact]
     public void 저장소의_예시가_프리셋_생성물_스키마와_같음()
     {

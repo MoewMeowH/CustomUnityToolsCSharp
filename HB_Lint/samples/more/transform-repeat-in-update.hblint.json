@@ -1,0 +1,16 @@
+{
+  "$schema": "./hblint.schema.json",
+  "version": 1,
+  "id": "CLL0012",
+  "title": "Update 계열에서 같은 대상의 transform을 4번 이상 가져옴 — 필드에 캐싱.",
+  "severity": "warning",
+  "requires": ["UnityEngine.CoreModule"],
+  "nodes": {
+    "monoBehaviour": { "kind": "types.derived", "from": "scope", "type": "UnityEngine.MonoBehaviour" },
+    "updates": { "kind": "methods.named", "from": "monoBehaviour", "names": ["Update", "LateUpdate", "FixedUpdate"] },
+    "transformReads": { "kind": "sites.member", "from": "updates", "members": ["UnityEngine.Component.transform", "UnityEngine.GameObject.transform"], "uses": ["read"] },
+    "perTarget": { "kind": "groups.by", "from": "transformReads", "key": "methodAndTarget" },
+    "fourOrMore": { "kind": "groups.count", "from": "perTarget", "min": 4 },
+    "report": { "kind": "report", "from": "fourOrMore", "message": "Update 계열에서 같은 transform을 여러 번 가져옵니다 — Awake에서 필드에 캐싱하세요." }
+  }
+}

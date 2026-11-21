@@ -59,12 +59,20 @@ namespace HBLint.Core.Generation
                 if (field.Required)
                     required.Add(S(field.Name));
             }
-            return new JsonObject()
+            var node = new JsonObject()
                 .Add("title", S($"{spec.Kind} — {spec.Title}" + (spec.Output == null ? "" : $" (→ {spec.Output})")))
                 .Add("type", S("object"))
                 .Add("required", required)
                 .Add("additionalProperties", new JsonBool(false))
                 .Add("properties", properties);
+            if (spec.RequireOneOf.Length > 0)
+            {
+                var anyOf = new JsonArray();
+                foreach (var name in spec.RequireOneOf)
+                    anyOf.Add(new JsonObject().Add("required", Strings(name)));
+                node.Add("anyOf", anyOf);
+            }
+            return node;
         }
 
         private static JsonObject Field(FieldSpec field)

@@ -1,0 +1,15 @@
+{
+  "$schema": "./hblint.schema.json",
+  "version": 1,
+  "id": "CLL0004",
+  "title": "Update 계열에서 참조 형식 new 금지 — 매 프레임 GC 할당. struct new는 할당이 아니라 뺀다.",
+  "severity": "warning",
+  "requires": ["UnityEngine.CoreModule"],
+  "nodes": {
+    "monoBehaviour": { "kind": "types.derived", "from": "scope", "type": "UnityEngine.MonoBehaviour" },
+    "updates": { "kind": "methods.named", "from": "monoBehaviour", "names": ["Update", "LateUpdate", "FixedUpdate"] },
+    "news": { "kind": "sites.new", "from": "updates" },
+    "referenceTypes": { "kind": "filter.targetType", "from": "news", "category": "reference" },
+    "report": { "kind": "report", "from": "referenceTypes", "message": "Update 계열에서 참조 형식을 new 하지 마세요 — 매 프레임 GC 할당입니다. 필드에 만들어 두고 다시 쓰세요." }
+  }
+}

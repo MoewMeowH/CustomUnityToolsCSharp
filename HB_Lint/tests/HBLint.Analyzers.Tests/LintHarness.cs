@@ -21,11 +21,27 @@ internal static class LintHarness
                 public GameObject gameObject => null;
                 public T GetComponent<T>() => default;
                 public Component GetComponent(System.Type type) => null;
+                public string tag { get => null; set { } }
+                public bool CompareTag(string tag) => false;
             }
-            public class GameObject : Object { public T GetComponent<T>() => default; }
+            public class GameObject : Object
+            {
+                public T GetComponent<T>() => default;
+                public Transform transform => null;
+                public string tag { get => null; set { } }
+            }
             public class Behaviour : Component { }
             public class MonoBehaviour : Behaviour { }
-            public class Transform : Component { }
+            public class Transform : Component
+            {
+                public Vector3 position { get => default; set { } }
+                public Quaternion rotation { get => default; set { } }
+                public void SetPositionAndRotation(Vector3 position, Quaternion rotation) { }
+            }
+            public struct Vector3 { public float x, y, z; public Vector3(float x, float y, float z) { this.x = x; this.y = y; this.z = z; } public static Vector3 zero => default; }
+            public struct Quaternion { public static Quaternion identity => default; }
+            public class YieldInstruction { }
+            public sealed class WaitForSeconds : YieldInstruction { public WaitForSeconds(float seconds) { } }
             public class ScriptableObject : Object { }
             public class Camera : Behaviour { public static Camera main => null; }
         }

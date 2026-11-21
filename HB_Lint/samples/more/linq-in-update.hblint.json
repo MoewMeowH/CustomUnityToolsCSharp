@@ -1,0 +1,14 @@
+{
+  "$schema": "./hblint.schema.json",
+  "version": 1,
+  "id": "CLL0006",
+  "title": "Update 계열에서 LINQ 금지 — 열거자 · 델리게이트 할당. 쿼리 식도 포함.",
+  "severity": "warning",
+  "requires": ["UnityEngine.CoreModule"],
+  "nodes": {
+    "monoBehaviour": { "kind": "types.derived", "from": "scope", "type": "UnityEngine.MonoBehaviour" },
+    "updates": { "kind": "methods.named", "from": "monoBehaviour", "names": ["Update", "LateUpdate", "FixedUpdate"] },
+    "linq": { "kind": "sites.member", "from": "updates", "members": ["System.Linq.Enumerable.*"] },
+    "report": { "kind": "report", "from": "linq", "message": "Update 계열에서 LINQ를 쓰지 마세요 — 매 프레임 열거자 · 델리게이트를 할당합니다. for 루프로 바꾸세요." }
+  }
+}

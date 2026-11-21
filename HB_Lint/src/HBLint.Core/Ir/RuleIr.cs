@@ -303,6 +303,8 @@ namespace HBLint.Core.Ir
 
             foreach (var field in spec.Fields)
                 CheckField(at, field, json.Get(field.Name), json, errors);
+            if (spec.RequireOneOf.Length > 0 && spec.RequireOneOf.All(f => json.Get(f) == null))
+                errors.Add(Error(json, $"{at}: {string.Join(" · ", spec.RequireOneOf)} 가운데 하나 이상 있어야 합니다"));
 
             return errors.Count == errorCount ? new IrNode(name, spec, json, inputs) : null;
         }

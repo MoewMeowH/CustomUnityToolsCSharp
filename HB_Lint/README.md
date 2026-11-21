@@ -20,6 +20,7 @@ src/HBLint.Generator.Cli/     생성기 CLI hblint-gen (net10.0)
 tests/                        dotnet test
 tools/Build-UnityPackage.ps1  분석기를 Release로 빌드해 패키지 Analyzers/로 복사
 samples/                      예시 규칙 파일 셋 · 스키마 · 생성물 (hblint-gen init이 만드는 것과 같음)
+samples/more/                 예시 규칙 더 (CLL0004~0012 — 할당 · Unity 성능 9종, init은 넣지 않음, 필요한 것만 규칙 폴더에 복사)
 ```
 
 분석기 코드를 바꿨으면 `tools/Build-UnityPackage.ps1`을 돌려 패키지 DLL을 갱신한다.
@@ -61,23 +62,46 @@ samples/                      예시 규칙 파일 셋 · 스키마 · 생성물
 
 ### 노드와 소켓
 
-노드는 `from`으로 앞 노드를 받는다. `"from": "scope"`는 규칙 시작(컴파일 전체). 선의 종류(소켓)는 왼쪽에서 오른쪽으로 좁아진다 — **Scope → Types → Methods → Sites → Report**. 받을 수 없는 소켓끼리 이으면 검증 오류다. 값(이름 · 숫자 · 메시지)은 선이 아니라 노드 안 칸이다. report는 규칙마다 하나.
+노드는 `from`으로 앞 노드를 받는다. `"from": "scope"`는 규칙 시작(컴파일 전체). 선의 종류(소켓)는 왼쪽에서 오른쪽으로 좁아진다 — **Scope → Types → Methods → Sites → Groups → Report**. 받을 수 없는 소켓끼리 이으면 검증 오류다. 값(이름 · 숫자 · 메시지)은 선이 아니라 노드 안 칸이다. report는 규칙마다 하나.
 
 | 노드 (`kind`) | 받음 → 내보냄 | 칸 · 동작 |
 |---|---|---|
 | `types.derived` | Scope · Types → Types | `type`: 기준 타입과 그 자식 (인터페이스면 그것을 구현한 타입) |
 | `methods.named` | Types → Methods | `names`: 그 타입에 선언된 메서드. 메서드 안 로컬 함수는 그 메서드로 보고, 람다 · 접근자 안은 보지 않는다 (나중에 도는 콜백일 수 있어서) |
+| `methods.coroutine` | Types → Methods | 그 타입에 선언된 `IEnumerator` · `IEnumerator<T>` 반환 일반 메서드 (칸 없음). 반환형만 보므로 `IEnumerable` 구현의 `GetEnumerator`처럼 코루틴이 아닌 것도 들어간다 |
 | `methods.follow` | Methods → Methods | `depth`(0~2): 그 메서드가 부르는 **같은 클래스** 메서드를 그만큼 따라간다. 따라가서 찾으면 메시지 끝에 `(Update → Helper)` 경로가 붙는다 |
-| `sites.member` | Scope · Types · Methods → Sites | `members`: `타입 메타데이터 이름.멤버 이름` — 오버로드 · 제네릭 전부, 그것을 **오버라이드한 멤버**까지 (`new`로 가린 같은 이름은 아님). 속성 · 필드도. 타입은 멤버가 **선언된 타입**으로 (`UnityEngine.Component.GetComponent`). `uses`: `call` · `read` · `write` (없으면 전부) |
+| `sites.member` | Scope · Types · Methods → Sites | `members`: `타입 메타데이터 이름.멤버 이름` — 오버로드 · 제네릭 전부, 그것을 **오버라이드한 멤버**까지 (`new`로 가린 같은 이름은 아님). 속성 · 필드도. 타입은 멤버가 **선언된 타입**으로 (`UnityEngine.Component.GetComponent`). `타입.*`은 그 타입에 선언된 메서드 · 속성 · 필드 전부 (`System.Linq.Enumerable.*` — 쿼리 식 포함). `uses`: `call` · `read` · `write` · `compare`(속성 · 필드가 `==` · `!=`의 한쪽 — 암시적 변환은 지나감(`count == maybe`), `(object)x == y`처럼 명시적 변환이 끼거나 `Equals` · `switch` · `is "x"`는 아님. 비교도 읽기라서 `read`에 들어감) (없으면 전부) |
 | `sites.namespace` | 〃 | `namespaces`: 그 네임스페이스와 그 아래의 타입 · 멤버 · `using` (`usings: false`면 using 지시문은 뺌). `UnityEditor.AssetDatabase.Refresh()`처럼 왼쪽 타입이 이미 걸리면 오른쪽 멤버는 다시 걸지 않는다 |
 | `sites.declaredInDefine` | 〃 | `define`: **같은 어셈블리에서** 그 디파인 안에만 선언된 메서드 · 필드 · 속성 · 타입을 쓴 곳 (partial이면 선언이 모두 안일 때만). `#if D … #else …(같은 이름) #endif`처럼 디파인 없이 켜지는 갈래에 같은 이름이 낱말로 있으면 걸지 않는다. 다른 어셈블리의 `#if`는 알 수 없다 |
 | `sites.nullOperator` | 〃 | `?.` · `??` · `??=` · `is null`(`is not null` · `and`/`or` 패턴 안 포함). `operators`로 고를 수 있다. 잡지 않는 것: `is {}` · `ReferenceEquals` · `switch`의 `null` 갈래 |
-| `filter.targetType` | Sites → Sites | `type`: 사이트가 다루는 식의 정적 타입이 이 계열인 것만 (null 연산자 왼쪽 식 · 멤버의 인스턴스). 타입 매개변수는 제약으로 본다. 정적 타입이 인터페이스 · `object`면 걸리지 않는다. 대상 타입은 `sites.nullOperator` · `sites.member` 사이트에만 있다 — `sites.namespace` · `sites.declaredInDefine` 뒤에 이으면 늘 0건 |
+| `sites.new` | 〃 | `new X()` · `new()` · `new T()` · `new X[n]` · `new[] { }` · 배열 초기화 `{ … }` · 무명 `new { }` · `new Action(M)`. 대상 타입 = 만드는 형. params 인자 배열 · 메서드 그룹 · 람다의 암시적 델리게이트 변환은 잡지 않는다 (소스에 new가 없음) |
+| `sites.boxing` | 〃 | 박싱 변환 (대입 · 인자 · params · 인터페이스로 · nullable · 캐스트). 대상 타입 = 박싱되는 값의 형. **잡지 않는 것**: `string + 값` · `+=` (컴파일러가 `값.ToString()`으로 바꿔 박싱하지 않음 — 연결은 `sites.stringConcat`), 보간 `$"{i}"`(대상 BCL에 따라 박싱될 수 있음) · 오버라이드 없는 struct의 `ToString` · `GetHashCode` · `Equals` 호출 · `HasFlag`의 인스턴스 · `foreach (object x in List<int>)` (변환으로 보이지 않는 박싱) |
+| `sites.stringConcat` | 〃 | string `+` · `+=` · 보간. 식 하나에 한 번(`a + b + c`, 연결 안 보간은 바깥 하나), 상수끼리는 뺀다. `string.Concat` · `Format` 직접 호출은 잡지 않는다 |
+| `sites.lambda` | 〃 | 람다 · 무명 메서드를 **만드는 자리**. `capturingOnly`(기본 true): 지역 · 매개변수 · `this`를 캡처하는 것만 (안쪽 람다가 캡처한 것은 안쪽 람다 몫). 쿼리 식 안 암시적 람다 · 메서드 그룹 → 델리게이트는 잡지 않는다 |
+| `filter.targetType` | Sites → Sites | `type`: 사이트가 다루는 식의 정적 타입이 이 계열인 것만. `category`: `reference` · `value` — 참조 · 값 형식인 것만 (타입 매개변수는 `class` · `struct` 제약으로, 제약이 없으면 어느 쪽도 아님). 둘 중 하나 이상, 둘 다면 둘 다 맞아야. 타입 매개변수의 계열은 제약으로 본다. 정적 타입이 인터페이스 · `object`면 `type`에 걸리지 않는다. 대상 타입은 `sites.nullOperator`(왼쪽 식) · `sites.member`(인스턴스) · `sites.new` · `sites.boxing` 사이트에만 있다 — 다른 사이트 뒤에 이으면 늘 0건 |
+| `filter.context` | Sites → Sites | `context` · `where`(`inside` · `outside`). `loop`: for · foreach · while · do의 본문 · 조건 · for 증감식 (for 초기화 · foreach 컬렉션 식은 한 번만 돌아서 밖, 람다 · 로컬 함수 경계에서 멈춤). `lambda`: 람다 · 무명 메서드 몸통 (Methods에서 받은 사이트는 원래 람다 몸통을 빼므로 Scope · Types에서 뜻이 있음) |
 | `filter.define` | Sites → Sites | `define` · `where`(`inside` · `outside`): **그 디파인이 없으면 다른 기호가 무엇이든 꺼지는 구간** 안 · 밖. `#if` · `#elif` · `#else` · 중첩 · `!` `&&` `\|\|` `==` `!=`를 읽는다. `#if UNITY_EDITOR \|\| DEVELOPMENT_BUILD`는 개발 빌드에서 켜지므로 구간이 아니다 |
 | `sites.union` | Sites 여럿 → Sites | `from`: 노드 이름 배열(둘 이상). 같은 종류의 사이트(구문끼리 · 멤버 사용끼리)가 같은 위치면 한 번만 알린다. `sites.member`와 구문 사이트(`sites.namespace` 등)가 같은 이름을 함께 잡으면 두 번 나올 수 있다 |
-| `report` | Sites → 끝 | `message`(필수), `appendPath`(기본 true — 따라가기 경로 붙이기) |
+| `groups.by` | Sites → Groups | `key`: `method` = 사이트를 직접 감싸는 몸통(메서드 · 접근자 · 람다 · 로컬 함수 각각 따로)마다, `methodAndTarget` = 그 안에서 같은 대상마다 — 대상은 멤버 사용의 인스턴스 (`transform`과 `this.transform`은 같음, 지역 · 매개변수 · 필드 사슬로 가름 — 지역 변수는 선언으로 가르므로 중간에 다른 값을 다시 대입해도 같은 대상, `GetComponent<T>()` 같은 호출 결과는 매번 다른 대상, 대상이 없는 사이트는 빠짐) |
+| `groups.pair` | Sites `a` + Sites `b` → Groups | `key`는 위와 같음. a · b 사이트가 둘 다 있고 서로 다른 사이트가 둘 이상인 묶음만 (같은 메서드의 if · else 갈래도 한 묶음) |
+| `groups.count` | Groups → Groups | `min`(2~100): 사이트가 그 수 이상인 묶음만 |
+| `report` | Sites · Groups → 끝 | `message`(필수), `appendPath`(기본 true — 따라가기 경로 붙이기). Groups를 받으면 **묶음마다 하나** — 첫 사이트 위치에 내고 나머지 사이트는 추가 위치 |
 
-어느 노드에서 시작하느냐가 범위다: `sites.*`를 `scope`에서 받으면 컴파일 전체, Types에서 받으면 그 타입 계열 안, Methods에서 받으면 그 메서드(따라가기 포함) 안.
+어느 노드에서 시작하느냐가 범위다: `sites.*`를 `scope`에서 받으면 컴파일 전체, Types에서 받으면 그 타입 계열 안, Methods에서 받으면 그 메서드(따라가기 포함) 안. Groups가 있는 규칙은 타입 하나의 사이트를 다 모은 뒤 판정하므로 타입 밖 코드(최상위 문)는 묶이지 않는다.
+
+예시 규칙 더 (`samples/more/`, 쓰려면 규칙 폴더에 복사 — `$schema`가 규칙 폴더의 `./hblint.schema.json`을 가리키므로 `samples/more/` 안에서는 편집기 자동 완성이 안 되고 복사한 뒤에 된다):
+
+| id | 파일 | 그래프 |
+|---|---|---|
+| CLL0004 | `new-in-update` | MonoBehaviour → Update 계열 → `sites.new` → 대상 타입(`reference`) |
+| CLL0005 | `boxing-in-update` | MonoBehaviour → Update 계열 → `sites.boxing` |
+| CLL0006 | `linq-in-update` | MonoBehaviour → Update 계열 → `sites.member`(`System.Linq.Enumerable.*`) |
+| CLL0007 | `string-concat-in-update` | MonoBehaviour → Update 계열 → `sites.stringConcat` |
+| CLL0008 | `capturing-lambda-in-update` | MonoBehaviour → Update 계열 → `sites.lambda` |
+| CLL0009 | `waitforseconds-in-coroutine-loop` | MonoBehaviour → `methods.coroutine` → `sites.new` → 대상 타입(`WaitForSeconds`) → 맥락(루프 안) |
+| CLL0010 | `tag-compare` | `sites.member`(`Component.tag` · `GameObject.tag`, `compare`) |
+| CLL0011 | `position-rotation-pair` | MonoBehaviour → 짝 묶기(a: `Transform.position` 쓰기, b: `rotation` 쓰기, `methodAndTarget`) |
+| CLL0012 | `transform-repeat-in-update` | MonoBehaviour → Update 계열 → `sites.member`(`transform` 읽기) → 묶기(`methodAndTarget`) → 개수(4) |
 
 검증(`hblint-gen validate`, 분석기도 같은 검사): JSON 형식 · 모르는 칸 · kind · 필수 칸 · 값 범위 · 노드 수(256개까지) · 없는 노드 · 소켓 · 고리 · report 하나 · 규칙 사이 id 중복(분석기는 먼저 읽은 규칙만 쓰고 나머지를 CLL9002로). report에 닿지 않는 노드는 경고이고 분석기는 그 노드를 무시한다.
 

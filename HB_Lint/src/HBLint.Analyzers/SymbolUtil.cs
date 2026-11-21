@@ -2,6 +2,7 @@ using System.Linq;
 using System.Threading;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Operations;
 
 namespace HBLint.Analyzers
 {
@@ -63,6 +64,46 @@ namespace HBLint.Analyzers
                 }
             }
             return null;
+        }
+
+        /// <summary>묶기의 "같은 메서드" — 코드를 직접 감싸는 몸통 (메서드 · 접근자 · 람다 · 로컬 함수 · 그 밖의 멤버 각각 따로).</summary>
+        public static SyntaxNode? EnclosingBody(SyntaxNode syntax)
+        {
+            for (var node = syntax; node != null; node = node.Parent)
+            {
+                if (node is AnonymousFunctionExpressionSyntax || node is LocalFunctionStatementSyntax || node is AccessorDeclarationSyntax || node is MemberDeclarationSyntax)
+                    return node;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// 묶기의 "같은 대상" — 멤버 사용의 인스턴스 식을 키로. this(암시적 · 명시적 같음) · 지역 · 매개변수 · 그것들의 필드/속성 사슬 · 정적 멤버.
+        /// 호출 결과(GetComponent&lt;T&gt;()) · 인덱서 · 그 밖의 식은 매번 다른 대상으로 보고 null.
+        /// </summary>
+        public static string? TargetKey(IOperation? instance)
+        {
+            switch (instance)
+            {
+                case IInstanceReferenceOperation _:
+                    return "this";
+                case ILocalReferenceOperation local:
+                    return "local:" + local.Local.Name + "@" + (local.Local.Locations.FirstOrDefault()?.SourceSpan.Start ?? -1);
+                case IParameterReferenceOperation parameter:
+                    return "param:" + parameter.Parameter.Name;
+                case IFieldReferenceOperation field:
+                    return MemberKey(field.Instance, field.Field);
+                case IPropertyReferenceOperation property when property.Arguments.Length == 0:
+                    return MemberKey(property.Instance, property.Property);
+                default:
+                    return null;
+            }
+        }
+
+        private static string? MemberKey(IOperation? instance, ISymbol member)
+        {
+            var left = instance == null ? member.ContainingType.ToDisplayString() : TargetKey(instance);
+            return left == null ? null : left + "." + member.Name;
         }
 
         /// <summary>코드를 직접 감싸는 타입 선언의 타입 (중첩 타입이면 안쪽).</summary>

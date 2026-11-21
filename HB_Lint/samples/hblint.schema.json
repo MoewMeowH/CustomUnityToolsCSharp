@@ -104,6 +104,24 @@
             }
           },
           {
+            "title": "methods.coroutine — 코루틴 (IEnumerator · IEnumerator<T> 반환 일반 메서드) (→ Methods)",
+            "type": "object",
+            "required": [
+              "kind",
+              "from"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "methods.coroutine"
+              },
+              "from": {
+                "type": "string",
+                "description": "받는 소켓: Types"
+              }
+            }
+          },
+          {
             "title": "methods.follow — 호출 따라가기 (→ Methods)",
             "type": "object",
             "required": [
@@ -152,7 +170,7 @@
                   "type": "string",
                   "minLength": 1
                 },
-                "description": "\"타입 메타데이터 이름.멤버 이름\" (오버로드 · 오버라이드 포함)"
+                "description": "\"타입 메타데이터 이름.멤버 이름\" (오버로드 · 오버라이드 포함) 또는 \"타입 메타데이터 이름.*\" (그 타입에 선언된 메서드 · 속성 · 필드 전부)"
               },
               "uses": {
                 "type": "array",
@@ -161,10 +179,11 @@
                   "enum": [
                     "call",
                     "read",
-                    "write"
+                    "write",
+                    "compare"
                   ]
                 },
-                "description": "쓰임 (없으면 전부)"
+                "description": "쓰임 (없으면 전부). compare = == · != 의 한쪽 (비교도 읽기라서 read를 고르면 비교도 들어감)"
               }
             }
           },
@@ -256,12 +275,87 @@
             }
           },
           {
+            "title": "sites.new — 객체 생성 (→ Sites)",
+            "type": "object",
+            "required": [
+              "kind",
+              "from"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "sites.new"
+              },
+              "from": {
+                "type": "string",
+                "description": "받는 소켓: Scope · Types · Methods"
+              }
+            }
+          },
+          {
+            "title": "sites.boxing — 박싱 변환 (→ Sites)",
+            "type": "object",
+            "required": [
+              "kind",
+              "from"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "sites.boxing"
+              },
+              "from": {
+                "type": "string",
+                "description": "받는 소켓: Scope · Types · Methods"
+              }
+            }
+          },
+          {
+            "title": "sites.stringConcat — 문자열 연결 · 보간 (→ Sites)",
+            "type": "object",
+            "required": [
+              "kind",
+              "from"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "sites.stringConcat"
+              },
+              "from": {
+                "type": "string",
+                "description": "받는 소켓: Scope · Types · Methods"
+              }
+            }
+          },
+          {
+            "title": "sites.lambda — 람다 (→ Sites)",
+            "type": "object",
+            "required": [
+              "kind",
+              "from"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "sites.lambda"
+              },
+              "from": {
+                "type": "string",
+                "description": "받는 소켓: Scope · Types · Methods"
+              },
+              "capturingOnly": {
+                "type": "boolean",
+                "description": "지역 · 매개변수 · this를 캡처하는 람다만 (기본 true)"
+              }
+            }
+          },
+          {
             "title": "filter.targetType — 대상 타입 (→ Sites)",
             "type": "object",
             "required": [
               "kind",
-              "from",
-              "type"
+              "from"
             ],
             "additionalProperties": false,
             "properties": {
@@ -275,7 +369,60 @@
               "type": {
                 "type": "string",
                 "minLength": 1,
-                "description": "사이트가 다루는 식의 정적 타입이 이 타입 계열인 것만 (null 연산자 · 멤버 사용 사이트에만 대상 타입이 있음)"
+                "description": "사이트가 다루는 식의 정적 타입이 이 타입 계열인 것만 (대상 타입이 있는 사이트: null 연산자 · 멤버 사용 · 객체 생성 · 박싱)"
+              },
+              "category": {
+                "enum": [
+                  "reference",
+                  "value"
+                ],
+                "description": "대상 타입이 참조 형식(reference) · 값 형식(value)인 것만 (타입 매개변수는 class · struct 제약으로)"
+              }
+            },
+            "anyOf": [
+              {
+                "required": [
+                  "type"
+                ]
+              },
+              {
+                "required": [
+                  "category"
+                ]
+              }
+            ]
+          },
+          {
+            "title": "filter.context — 맥락 (→ Sites)",
+            "type": "object",
+            "required": [
+              "kind",
+              "from",
+              "context",
+              "where"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "filter.context"
+              },
+              "from": {
+                "type": "string",
+                "description": "받는 소켓: Sites"
+              },
+              "context": {
+                "enum": [
+                  "loop",
+                  "lambda"
+                ],
+                "description": "loop = 반복문 본문 · 조건 · 증감식, lambda = 람다 · 무명 메서드 몸통"
+              },
+              "where": {
+                "enum": [
+                  "inside",
+                  "outside"
+                ],
+                "description": "그 맥락 안(inside) · 밖(outside)"
               }
             }
           },
@@ -334,6 +481,88 @@
             }
           },
           {
+            "title": "groups.by — 묶기 (→ Groups)",
+            "type": "object",
+            "required": [
+              "kind",
+              "from",
+              "key"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "groups.by"
+              },
+              "from": {
+                "type": "string",
+                "description": "받는 소켓: Sites"
+              },
+              "key": {
+                "enum": [
+                  "method",
+                  "methodAndTarget"
+                ],
+                "description": "method = 같은 메서드 · 접근자 · 람다 몸통, methodAndTarget = 그 안에서 같은 대상(멤버 사용의 인스턴스)"
+              }
+            }
+          },
+          {
+            "title": "groups.pair — 짝 묶기 (→ Groups)",
+            "type": "object",
+            "required": [
+              "kind",
+              "a",
+              "b",
+              "key"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "groups.pair"
+              },
+              "a": {
+                "type": "string",
+                "description": "받는 소켓: Sites"
+              },
+              "b": {
+                "type": "string",
+                "description": "받는 소켓: Sites"
+              },
+              "key": {
+                "enum": [
+                  "method",
+                  "methodAndTarget"
+                ],
+                "description": "groups.by와 같은 기준. a · b가 둘 다 있는 묶음만"
+              }
+            }
+          },
+          {
+            "title": "groups.count — 개수 (→ Groups)",
+            "type": "object",
+            "required": [
+              "kind",
+              "from",
+              "min"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "groups.count"
+              },
+              "from": {
+                "type": "string",
+                "description": "받는 소켓: Groups"
+              },
+              "min": {
+                "type": "integer",
+                "minimum": 2,
+                "maximum": 100,
+                "description": "사이트가 이 수 이상인 묶음만"
+              }
+            }
+          },
+          {
             "title": "report — 보고",
             "type": "object",
             "required": [
@@ -348,12 +577,12 @@
               },
               "from": {
                 "type": "string",
-                "description": "받는 소켓: Sites"
+                "description": "받는 소켓: Sites · Groups"
               },
               "message": {
                 "type": "string",
                 "minLength": 1,
-                "description": "진단 메시지"
+                "description": "진단 메시지 (Groups를 받으면 묶음마다 하나 — 첫 사이트 위치, 나머지는 추가 위치)"
               },
               "appendPath": {
                 "type": "boolean",

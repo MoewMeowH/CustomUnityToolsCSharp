@@ -1,0 +1,15 @@
+{
+  "$schema": "./hblint.schema.json",
+  "version": 1,
+  "id": "CLL0011",
+  "title": "같은 메서드에서 같은 Transform의 position과 rotation을 따로 대입 — SetPositionAndRotation 한 번으로.",
+  "severity": "warning",
+  "requires": ["UnityEngine.CoreModule"],
+  "nodes": {
+    "monoBehaviour": { "kind": "types.derived", "from": "scope", "type": "UnityEngine.MonoBehaviour" },
+    "positionWrites": { "kind": "sites.member", "from": "monoBehaviour", "members": ["UnityEngine.Transform.position"], "uses": ["write"] },
+    "rotationWrites": { "kind": "sites.member", "from": "monoBehaviour", "members": ["UnityEngine.Transform.rotation"], "uses": ["write"] },
+    "sameTransform": { "kind": "groups.pair", "a": "positionWrites", "b": "rotationWrites", "key": "methodAndTarget" },
+    "report": { "kind": "report", "from": "sameTransform", "message": "position과 rotation을 따로 대입하지 마세요 — SetPositionAndRotation 한 번으로 바꾸세요." }
+  }
+}

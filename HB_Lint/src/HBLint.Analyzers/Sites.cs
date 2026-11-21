@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
+using HBLint.Core.Ir;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -12,19 +13,23 @@ using Microsoft.CodeAnalysis.Text;
 namespace HBLint.Analyzers
 {
     /// <summary>
-    /// 사이트 — 규칙이 걸 수 있는 코드 위치 하나. Node는 속한 메서드 · 타입을 찾을 때,
+    /// 사이트 — 규칙이 걸 수 있는 코드 위치 하나. Node는 속한 메서드 · 타입 · 맥락을 찾을 때,
     /// Anchor는 디파인 가드 판정에, TargetType은 "대상 타입" 필터에 쓴다 (사이트가 다루는 식의 정적 타입, 없으면 null).
+    /// Instance는 멤버 사용의 인스턴스 식 — "같은 대상"으로 묶을 때만 키로 바꾼다. 람다 사이트는 람다 연산(대상 아님 — 키는 null).
     /// </summary>
     internal sealed class Site
     {
-        public Site(SyntaxNode node, SemanticModel model, Location location, int anchor, ITypeSymbol? targetType)
+        public Site(SyntaxNode node, SemanticModel model, Location location, int anchor, ITypeSymbol? targetType, IOperation? instance = null)
         {
             Node = node;
             Model = model;
             Location = location;
             Anchor = anchor;
             TargetType = targetType;
+            Instance = instance;
         }
+
+        public IOperation? Instance { get; }
 
         public SyntaxNode Node { get; }
 
@@ -53,15 +58,19 @@ namespace HBLint.Analyzers
         public virtual Site? OnOperation(IOperation operation) => null;
 
         public virtual Site? OnSyntax(SyntaxNode node, SemanticModel model, CancellationToken cancellationToken) => null;
+
+        /// <summary>비싼 판정 — 범위(메서드 · 따라가기 경로)와 필터를 통과한 사이트에만, 보고 직전에 부른다.</summary>
+        public virtual bool Confirm(Site site, CancellationToken cancellationToken) => true;
     }
 
-    /// <summary>sites.member — 멤버(메서드 오버로드 · 오버라이드 · 속성 · 필드)를 호출 · 읽기 · 쓰기로 쓴 곳.</summary>
+    /// <summary>sites.member — 멤버(메서드 오버로드 · 오버라이드 · 속성 · 필드)를 호출 · 읽기 · 쓰기 · 비교로 쓴 곳.</summary>
     internal sealed class MemberProducer : SiteProducer
     {
         private readonly HashSet<ISymbol> _members;
         private readonly bool _call;
         private readonly bool _read;
         private readonly bool _write;
+        private readonly bool _compare;
 
         public MemberProducer(HashSet<ISymbol> members, string[] uses)
             : base(Kinds(uses), new SyntaxKind[0])
@@ -70,11 +79,12 @@ namespace HBLint.Analyzers
             _call = uses.Contains("call");
             _read = uses.Contains("read");
             _write = uses.Contains("write");
+            _compare = uses.Contains("compare");
         }
 
         private static OperationKind[] Kinds(string[] uses) =>
             (uses.Contains("call") ? new[] { OperationKind.Invocation } : new OperationKind[0])
-            .Concat(uses.Contains("read") || uses.Contains("write") ? new[] { OperationKind.PropertyReference, OperationKind.FieldReference } : new OperationKind[0])
+            .Concat(uses.Contains("read") || uses.Contains("write") || uses.Contains("compare") ? new[] { OperationKind.PropertyReference, OperationKind.FieldReference } : new OperationKind[0])
             .ToArray();
 
         public override Site? OnOperation(IOperation operation)
@@ -89,7 +99,13 @@ namespace HBLint.Analyzers
                     break;
                 case IMemberReferenceOperation reference when (reference is IPropertyReferenceOperation || reference is IFieldReferenceOperation):
                     var (read, written) = Uses(operation);
-                    if (!(read && _read) && !(written && _write))
+                    // 비교 = == · != 의 한쪽 피연산자. 암시적 변환(count == maybe의 nullable 등)은 지나가고, (object)x == y처럼 명시적 변환이 끼면 아님
+                    var parent = operation.Parent;
+                    while (parent is IConversionOperation implicitConversion && implicitConversion.IsImplicit)
+                        parent = parent.Parent;
+                    var compared = read && parent is IBinaryOperation binary
+                        && (binary.OperatorKind == BinaryOperatorKind.Equals || binary.OperatorKind == BinaryOperatorKind.NotEquals);
+                    if (!(read && _read) && !(written && _write) && !(compared && _compare))
                         return null;
                     target = reference.Member;
                     instance = reference.Instance;
@@ -100,7 +116,7 @@ namespace HBLint.Analyzers
             if (!Matches(target, _members) || operation.SemanticModel == null)
                 return null;
             var location = NameLocation(operation.Syntax);
-            return new Site(operation.Syntax, operation.SemanticModel, location, location.SourceSpan.Start, instance?.Type ?? target.ContainingType);
+            return new Site(operation.Syntax, operation.SemanticModel, location, location.SourceSpan.Start, instance?.Type ?? target.ContainingType, instance);
         }
 
         /// <summary>
@@ -132,7 +148,7 @@ namespace HBLint.Analyzers
             }
         }
 
-        /// <summary>"타입 메타데이터 이름.멤버 이름" → 그 이름의 메서드(오버로드 · 제네릭 전부) · 속성 · 필드.</summary>
+        /// <summary>"타입 메타데이터 이름.멤버 이름" → 그 이름의 메서드(오버로드 · 제네릭 전부) · 속성 · 필드. "타입.*"이면 그 타입에 선언된 것 전부.</summary>
         public static List<ISymbol> Resolve(Compilation compilation, string member)
         {
             var separator = member.LastIndexOf('.');
@@ -141,7 +157,8 @@ namespace HBLint.Analyzers
             var type = compilation.GetTypeByMetadataName(member.Substring(0, separator));
             if (type == null)
                 return new List<ISymbol>();
-            return type.GetMembers(member.Substring(separator + 1))
+            var name = member.Substring(separator + 1);
+            return (name == NodeCatalog.AllMembers ? type.GetMembers() : type.GetMembers(name))
                 .Where(m => m is IMethodSymbol || m is IPropertySymbol || m is IFieldSymbol)
                 .ToList();
         }
@@ -246,6 +263,126 @@ namespace HBLint.Analyzers
                 default:
                     return false;
             }
+        }
+    }
+
+    /// <summary>
+    /// sites.new — new X() · new() · new T() · new X[n] · 배열 초기화 { … } · 무명 new { } · new Action(M). TargetType은 만드는 형.
+    /// params 인자 배열 · 메서드 그룹 · 람다의 암시적 델리게이트 변환은 소스에 new가 없어서 뺀다.
+    /// </summary>
+    internal sealed class NewProducer : SiteProducer
+    {
+        public NewProducer()
+            : base(new[] { OperationKind.ObjectCreation, OperationKind.TypeParameterObjectCreation, OperationKind.ArrayCreation, OperationKind.AnonymousObjectCreation, OperationKind.DelegateCreation }, new SyntaxKind[0])
+        {
+        }
+
+        public override Site? OnOperation(IOperation operation)
+        {
+            if (operation.SemanticModel == null || operation.Type == null)
+                return null;
+            if (operation.IsImplicit && operation.Parent is IArgumentOperation argument && argument.ArgumentKind == ArgumentKind.ParamArray)
+                return null;
+            if (operation is IDelegateCreationOperation && !(operation.Syntax is ObjectCreationExpressionSyntax))
+                return null;
+            var syntax = operation.Syntax;
+            var span = syntax switch
+            {
+                ObjectCreationExpressionSyntax o => TextSpan.FromBounds(o.NewKeyword.SpanStart, o.Type.Span.End),
+                ArrayCreationExpressionSyntax a => TextSpan.FromBounds(a.NewKeyword.SpanStart, a.Type.Span.End),
+                ImplicitArrayCreationExpressionSyntax ia => TextSpan.FromBounds(ia.NewKeyword.SpanStart, ia.CloseBracketToken.Span.End),
+                ImplicitObjectCreationExpressionSyntax implicitNew => implicitNew.NewKeyword.Span,
+                AnonymousObjectCreationExpressionSyntax an => an.NewKeyword.Span,
+                InitializerExpressionSyntax init => init.OpenBraceToken.Span,
+                _ => syntax.Span,
+            };
+            return new Site(syntax, operation.SemanticModel, Location.Create(syntax.SyntaxTree, span), span.Start, operation.Type);
+        }
+    }
+
+    /// <summary>
+    /// sites.boxing — 박싱 변환 (암시적 · 명시적 캐스트, C# 변환의 IsBoxing). TargetType은 박싱되는 값의 형.
+    /// 변환으로 보이지 않는 박싱(보간 · 오버라이드 없는 struct의 ToString 등 호출 · foreach 변수)은 잡지 않는다.
+    /// string + · += 의 피연산자는 연산 트리에 박싱 변환이 있어도 컴파일러가 ToString 호출로 바꿔 박싱하지 않으므로 뺀다.
+    /// </summary>
+    internal sealed class BoxingProducer : SiteProducer
+    {
+        public BoxingProducer()
+            : base(new[] { OperationKind.Conversion }, new SyntaxKind[0])
+        {
+        }
+
+        public override Site? OnOperation(IOperation operation)
+        {
+            var conversion = (IConversionOperation)operation;
+            if (operation.SemanticModel == null || !conversion.GetConversion().IsBoxing || StringConcatProducer.IsConcat(operation.Parent))
+                return null;
+            var syntax = conversion.Operand.Syntax;
+            return new Site(syntax, operation.SemanticModel, syntax.GetLocation(), syntax.SpanStart, conversion.Operand.Type);
+        }
+    }
+
+    /// <summary>
+    /// sites.stringConcat — string + · += · 보간. 바깥 식 하나만 (a + b + c · 연결 안 보간은 한 번), 상수는 뺀다.
+    /// string.Concat · Format 직접 호출은 잡지 않는다.
+    /// </summary>
+    internal sealed class StringConcatProducer : SiteProducer
+    {
+        public StringConcatProducer()
+            : base(new[] { OperationKind.Binary, OperationKind.CompoundAssignment, OperationKind.InterpolatedString }, new SyntaxKind[0])
+        {
+        }
+
+        public override Site? OnOperation(IOperation operation)
+        {
+            if (operation.SemanticModel == null || operation.ConstantValue.HasValue)
+                return null;
+            var concat = operation is IInterpolatedStringOperation
+                ? !IsConcat(operation.Parent)
+                : IsConcat(operation) && !(operation is IBinaryOperation && IsConcat(operation.Parent));
+            if (!concat)
+                return null;
+            var syntax = operation.Syntax;
+            return new Site(syntax, operation.SemanticModel, syntax.GetLocation(), syntax.SpanStart, null);
+        }
+
+        /// <summary>string + 이항 · += 복합 대입인가.</summary>
+        public static bool IsConcat(IOperation? operation) =>
+            operation is IBinaryOperation binary ? binary.OperatorKind == BinaryOperatorKind.Add && binary.Type?.SpecialType == SpecialType.System_String
+            : operation is ICompoundAssignmentOperation compound && compound.OperatorKind == BinaryOperatorKind.Add && compound.Type?.SpecialType == SpecialType.System_String;
+    }
+
+    /// <summary>
+    /// sites.lambda — 람다 · 무명 메서드를 만드는 자리. capturingOnly면 지역 · 매개변수 · this를 캡처하는 것만
+    /// (데이터 흐름의 CapturedInside에서 람다 안에 선언한 것 — 안쪽 람다 몫 — 을 뺀다). 쿼리 식 안 암시적 람다는 뺀다.
+    /// Node는 람다의 부모다 (속한 메서드 · 맥락을 람다 바깥에서 찾게). 데이터 흐름은 비싸서 Confirm(범위 통과 뒤)에서 한다.
+    /// </summary>
+    internal sealed class LambdaProducer : SiteProducer
+    {
+        private readonly bool _capturingOnly;
+
+        public LambdaProducer(bool capturingOnly)
+            : base(new[] { OperationKind.AnonymousFunction }, new SyntaxKind[0])
+        {
+            _capturingOnly = capturingOnly;
+        }
+
+        public override Site? OnOperation(IOperation operation)
+        {
+            if (operation.IsImplicit || operation.SemanticModel == null || !(operation.Syntax is AnonymousFunctionExpressionSyntax lambda) || lambda.Parent == null)
+                return null;
+            var span = lambda is LambdaExpressionSyntax arrow
+                ? TextSpan.FromBounds(lambda.SpanStart, arrow.ArrowToken.Span.End)
+                : ((AnonymousMethodExpressionSyntax)lambda).DelegateKeyword.Span;
+            return new Site(lambda.Parent, operation.SemanticModel, Location.Create(lambda.SyntaxTree, span), span.Start, null, operation);
+        }
+
+        public override bool Confirm(Site site, CancellationToken cancellationToken)
+        {
+            if (!_capturingOnly)
+                return true;
+            var flow = site.Model.AnalyzeDataFlow(site.Instance!.Syntax);
+            return flow != null && flow.Succeeded && flow.CapturedInside.Except(flow.VariablesDeclared, SymbolEqualityComparer.Default).Any();
         }
     }
 
@@ -436,14 +573,81 @@ namespace HBLint.Analyzers
         public abstract bool Passes(Site site, CancellationToken cancellationToken);
     }
 
-    /// <summary>filter.targetType — 사이트가 다루는 식의 정적 타입이 이 타입 계열인 것만 (대상 타입은 null 연산자 · 멤버 사이트에만 있다).</summary>
+    /// <summary>
+    /// filter.targetType — 사이트가 다루는 식의 정적 타입이 이 타입 계열 · 참조/값 형식인 것만 (둘 다 주면 둘 다).
+    /// 대상 타입은 null 연산자 · 멤버 · 객체 생성 · 박싱 사이트에만 있다. 타입 매개변수의 참조/값은 제약으로 (제약이 없으면 어느 쪽도 아님).
+    /// </summary>
     internal sealed class TargetTypeFilter : SiteFilter
     {
-        private readonly INamedTypeSymbol _type;
+        private readonly INamedTypeSymbol? _type;
+        private readonly string? _category;
 
-        public TargetTypeFilter(INamedTypeSymbol type) => _type = type;
+        public TargetTypeFilter(INamedTypeSymbol? type, string? category)
+        {
+            _type = type;
+            _category = category;
+        }
 
-        public override bool Passes(Site site, CancellationToken cancellationToken) => site.TargetType != null && SymbolUtil.IsOrDerivesFrom(site.TargetType, _type);
+        public override bool Passes(Site site, CancellationToken cancellationToken)
+        {
+            var target = site.TargetType;
+            if (target == null || (_type != null && !SymbolUtil.IsOrDerivesFrom(target, _type)))
+                return false;
+            return _category == null || (_category == "reference" ? target.IsReferenceType : target.IsValueType);
+        }
+    }
+
+    /// <summary>
+    /// filter.context — 루프 안 · 람다 안 (또는 밖).
+    /// 루프 안 = for · foreach · while · do의 본문 · 조건 · for 증감식 (for 초기화 · foreach 컬렉션 식은 한 번만 돌아서 밖). 람다 · 로컬 함수 · 멤버 경계에서 멈춘다.
+    /// 람다 안 = 람다 · 무명 메서드 몸통 안 (멤버 경계까지).
+    /// </summary>
+    internal sealed class ContextFilter : SiteFilter
+    {
+        private readonly bool _loop;
+        private readonly bool _inside;
+
+        public ContextFilter(bool loop, bool inside)
+        {
+            _loop = loop;
+            _inside = inside;
+        }
+
+        public override bool Passes(Site site, CancellationToken cancellationToken) => (_loop ? InLoop(site.Node) : InLambda(site.Node)) == _inside;
+
+        private static bool InLoop(SyntaxNode syntax)
+        {
+            var child = syntax;
+            for (var node = syntax.Parent; node != null; child = node, node = node.Parent)
+            {
+                switch (node)
+                {
+                    case AnonymousFunctionExpressionSyntax _:
+                    case LocalFunctionStatementSyntax _:
+                    case AccessorDeclarationSyntax _:
+                    case MemberDeclarationSyntax _:
+                        return false;
+                    case ForStatementSyntax forLoop when child == forLoop.Statement || child == forLoop.Condition || forLoop.Incrementors.Any(i => i == child):
+                    case CommonForEachStatementSyntax forEach when child == forEach.Statement:
+                    case WhileStatementSyntax whileLoop when child == whileLoop.Statement || child == whileLoop.Condition:
+                    case DoStatementSyntax doLoop when child == doLoop.Statement || child == doLoop.Condition:
+                        return true;
+                }
+            }
+            return false;
+        }
+
+        private static bool InLambda(SyntaxNode syntax)
+        {
+            for (var node = syntax; node != null; node = node.Parent)
+            {
+                if (node is AnonymousFunctionExpressionSyntax)
+                    return true;
+                if (node is AccessorDeclarationSyntax || node is MemberDeclarationSyntax)
+                    return false;
+            }
+            return false;
+        }
     }
 
     /// <summary>filter.define — define이 없으면 꺼지는 구간 안 · 밖.</summary>

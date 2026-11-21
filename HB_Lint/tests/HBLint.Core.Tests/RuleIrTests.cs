@@ -86,6 +86,58 @@ public class RuleIrTests
     }
 
     [Fact]
+    public void 대상_타입은_type_category_가운데_하나_이상()
+    {
+        Assert.Contains(Errors(Rule("""
+            "n": { "kind": "sites.new", "from": "scope" },
+            "t": { "kind": "filter.targetType", "from": "n" },
+            "r": { "kind": "report", "from": "t", "message": "x" }
+            """)), e => e.Message.Contains("nodes.t: type · category 가운데 하나 이상"));
+        Assert.Contains(Errors(Rule("""
+            "n": { "kind": "sites.new", "from": "scope" },
+            "t": { "kind": "filter.targetType", "from": "n", "category": "struct" },
+            "r": { "kind": "report", "from": "t", "message": "x" }
+            """)), e => e.Message.Contains("nodes.t.category: reference · value"));
+
+        Assert.True(RuleIr.Parse(Rule("""
+            "n": { "kind": "sites.new", "from": "scope" },
+            "t": { "kind": "filter.targetType", "from": "n", "category": "reference" },
+            "r": { "kind": "report", "from": "t", "message": "x" }
+            """)).Success);
+    }
+
+    [Fact]
+    public void 묶음_소켓()
+    {
+        var parsed = RuleIr.Parse(Rule("""
+            "a": { "kind": "sites.member", "from": "scope", "members": ["T.a"], "uses": ["write"] },
+            "b": { "kind": "sites.member", "from": "scope", "members": ["T.b"], "uses": ["write"] },
+            "p": { "kind": "groups.pair", "a": "a", "b": "b", "key": "methodAndTarget" },
+            "c": { "kind": "groups.count", "from": "p", "min": 3 },
+            "r": { "kind": "report", "from": "c", "message": "x" }
+            """));
+        Assert.True(parsed.Success, string.Join("\n", parsed.Errors));
+
+        var sockets = Errors(Rule("""
+            "n": { "kind": "sites.new", "from": "scope" },
+            "c": { "kind": "groups.count", "from": "n", "min": 2 },
+            "g": { "kind": "groups.by", "from": "c", "key": "method" },
+            "r": { "kind": "report", "from": "g", "message": "x" }
+            """));
+        Assert.Contains(sockets, e => e.Message.Contains("nodes.c.from: 'n'(Sites)는 이을 수 없습니다"));
+        Assert.Contains(sockets, e => e.Message.Contains("nodes.g.from: 'c'(Groups)는 이을 수 없습니다"));
+
+        var fields = Errors(Rule("""
+            "n": { "kind": "sites.new", "from": "scope" },
+            "g": { "kind": "groups.by", "from": "n", "key": "type" },
+            "c": { "kind": "groups.count", "from": "g", "min": 1 },
+            "r": { "kind": "report", "from": "c", "message": "x" }
+            """));
+        Assert.Contains(fields, e => e.Message.Contains("nodes.c.min: 2~100"));
+        Assert.Contains(fields, e => e.Message.Contains("nodes.g.key: method · methodAndTarget"));
+    }
+
+    [Fact]
     public void 없는_노드_고리_report_수()
     {
         Assert.Contains(Errors(Rule("""

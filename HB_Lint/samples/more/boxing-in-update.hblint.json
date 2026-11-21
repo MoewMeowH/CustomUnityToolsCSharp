@@ -1,0 +1,14 @@
+{
+  "$schema": "./hblint.schema.json",
+  "version": 1,
+  "id": "CLL0005",
+  "title": "Update 계열에서 박싱 변환 금지 — 값 형식이 object · 인터페이스로 바뀔 때마다 할당.",
+  "severity": "warning",
+  "requires": ["UnityEngine.CoreModule"],
+  "nodes": {
+    "monoBehaviour": { "kind": "types.derived", "from": "scope", "type": "UnityEngine.MonoBehaviour" },
+    "updates": { "kind": "methods.named", "from": "monoBehaviour", "names": ["Update", "LateUpdate", "FixedUpdate"] },
+    "boxing": { "kind": "sites.boxing", "from": "updates" },
+    "report": { "kind": "report", "from": "boxing", "message": "Update 계열에서 박싱 — 값 형식을 object · 인터페이스로 넘기면 매 프레임 할당됩니다. 제네릭 · 형에 맞는 오버로드를 쓰세요." }
+  }
+}

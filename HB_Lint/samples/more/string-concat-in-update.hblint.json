@@ -1,0 +1,14 @@
+{
+  "$schema": "./hblint.schema.json",
+  "version": 1,
+  "id": "CLL0007",
+  "title": "Update 계열에서 문자열 연결 · 보간 금지 — 매 프레임 새 문자열. 상수끼리 연결은 뺀다.",
+  "severity": "warning",
+  "requires": ["UnityEngine.CoreModule"],
+  "nodes": {
+    "monoBehaviour": { "kind": "types.derived", "from": "scope", "type": "UnityEngine.MonoBehaviour" },
+    "updates": { "kind": "methods.named", "from": "monoBehaviour", "names": ["Update", "LateUpdate", "FixedUpdate"] },
+    "concat": { "kind": "sites.stringConcat", "from": "updates" },
+    "report": { "kind": "report", "from": "concat", "message": "Update 계열에서 문자열을 잇지 마세요 — 매 프레임 새 문자열을 할당합니다. 값이 바뀔 때만 만들거나 StringBuilder를 다시 쓰세요." }
+  }
+}

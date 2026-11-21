@@ -1,6 +1,6 @@
 {
   "name": "com.hb.lint",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "displayName": "HB Lint",
   "description": "노드 그래프로 조립한 규칙(*.hblint.json)을 Roslyn 분석기로 강제한다. 분석기 DLL과 규칙 어트리뷰트(HBLint.Rule)만 들어 있다 — 생성물 LintRules.g.cs는 hblint-gen CLI로 만든다.",
   "unity": "6000.3",
