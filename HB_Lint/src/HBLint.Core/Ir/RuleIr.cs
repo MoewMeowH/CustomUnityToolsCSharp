@@ -31,13 +31,17 @@ namespace HBLint.Core.Ir
 
     internal sealed class IrError
     {
-        public IrError(string message, int line, int column, bool isWarning = false)
+        public IrError(string message, int line, int column, bool isWarning = false, string? node = null)
         {
             Message = message;
             Line = line;
             Column = column;
             IsWarning = isWarning;
+            Node = node;
         }
+
+        /// <summary>그 노드에서 난 오류면 노드 이름 (편집 앱이 노드에 표시).</summary>
+        public string? Node { get; }
 
         public string Message { get; }
 
@@ -46,6 +50,8 @@ namespace HBLint.Core.Ir
         public int Column { get; }
 
         public bool IsWarning { get; }
+
+        public IrError WithNode(string node) => new IrError(Message, Line, Column, IsWarning, node);
 
         public override string ToString() => Line > 0 ? $"({Line},{Column}): {Message}" : ": " + Message;
     }
@@ -227,7 +233,10 @@ namespace HBLint.Core.Ir
 
             foreach (var member in nodesJson.Members)
             {
+                var before = errors.Count;
                 var node = ParseNode(member.Key, member.Value, errors);
+                for (var i = before; i < errors.Count; i++)
+                    errors[i] = errors[i].WithNode(member.Key);
                 if (node != null)
                     nodes.Add(node);
             }
@@ -381,11 +390,11 @@ namespace HBLint.Core.Ir
                         else
                         {
                             if (nodesJson.Get(source) == null)
-                                errors.Add(Error(Pos(node), $"nodes.{node.Name}.{input.Name}: 없는 노드 '{source}'"));
+                                errors.Add(Error(Pos(node), $"nodes.{node.Name}.{input.Name}: 없는 노드 '{source}'", node: node.Name));
                             continue; // 있는데 잘못된 노드는 그 노드에서 이미 오류
                         }
                         if (socket == null || Array.IndexOf(input.Accepts, socket.Value) < 0)
-                            errors.Add(Error(Pos(node), $"nodes.{node.Name}.{input.Name}: '{source}'({(socket?.ToString() ?? "끝 노드")})는 이을 수 없습니다 — {string.Join(" · ", input.Accepts)}만 받습니다"));
+                            errors.Add(Error(Pos(node), $"nodes.{node.Name}.{input.Name}: '{source}'({(socket?.ToString() ?? "끝 노드")})는 이을 수 없습니다 — {string.Join(" · ", input.Accepts)}만 받습니다", node: node.Name));
                     }
                 }
             }
@@ -413,7 +422,7 @@ namespace HBLint.Core.Ir
             {
                 if (color[node.Name] == 0 && Cycle(node))
                 {
-                    errors.Add(Error(Pos(node), $"nodes.{node.Name}: 입력이 고리를 이룹니다"));
+                    errors.Add(Error(Pos(node), $"nodes.{node.Name}: 입력이 고리를 이룹니다", node: node.Name));
                     return;
                 }
             }
@@ -431,7 +440,7 @@ namespace HBLint.Core.Ir
                         stack.Push(source);
                 }
                 foreach (var node in nodes.Where(n => !reached.Contains(n.Name)))
-                    errors.Add(Error(Pos(node), $"nodes.{node.Name}: report에 닿지 않아 쓰이지 않습니다", isWarning: true));
+                    errors.Add(Error(Pos(node), $"nodes.{node.Name}: report에 닿지 않아 쓰이지 않습니다", isWarning: true, node: node.Name));
             }
         }
 
@@ -468,6 +477,6 @@ namespace HBLint.Core.Ir
             return new string[0];
         }
 
-        private static IrError Error(JsonValue at, string message, bool isWarning = false) => new IrError(message, at.Line, at.Column, isWarning);
+        private static IrError Error(JsonValue at, string message, bool isWarning = false, string? node = null) => new IrError(message, at.Line, at.Column, isWarning, node);
     }
 }

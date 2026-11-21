@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!-- 그래프 편집 앱 hblint-app: 로컬 서버(127.0.0.1 · 토큰) + 웹 UI(web/ → wwwroot/) + Roslyn 사이드카(대상 프로젝트 자동 완성 · 이름 확인 · 미리 보기).
+       웹 UI는 이 프로젝트 빌드에 묶지 않는다 (dotnet test가 node를 요구하지 않게) — tools/Run-App.ps1이 npm 빌드 뒤 실행한다. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>HBLint.App</RootNamespace>
+    <AssemblyName>hblint-app</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HBLint.Core\HBLint.Core.csproj" />
+    <!-- 미리 보기가 대상 소스에 엔진 분석기를 그대로 돌린다 (Roslyn 4.3으로 빌드한 분석기가 이 앱의 Roslyn 위에서 돈다) -->
+    <ProjectReference Include="..\HBLint.Analyzers\HBLint.Analyzers.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- web/는 npm 프로젝트 — C# 빌드 · 게시에 넣지 않는다 -->
+    <Compile Remove="web\**" />
+    <Content Remove="web\**" />
+    <None Remove="web\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- npm run build가 낸 웹 UI — 실행 파일 옆 wwwroot/에서 준다 (git 밖) -->
+    <Content Update="wwwroot\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="HBLint.App.Tests" />
+  </ItemGroup>
+
+</Project>

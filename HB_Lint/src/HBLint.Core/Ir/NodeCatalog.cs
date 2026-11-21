@@ -27,6 +27,18 @@ namespace HBLint.Core.Ir
         ChoiceArray,
     }
 
+    /// <summary>칸 값의 뜻 — 편집 앱이 자동 완성 · 이름 확인할 칸을 고른다 (검증 · 스키마는 보지 않음).</summary>
+    internal enum FieldHint
+    {
+        None,
+        /// <summary>타입 메타데이터 이름.</summary>
+        Type,
+        /// <summary>"타입 메타데이터 이름.멤버 이름" 또는 "타입.*".</summary>
+        Member,
+        Namespace,
+        Define,
+    }
+
     /// <summary>노드 안 입력칸.</summary>
     internal sealed class FieldSpec
     {
@@ -51,6 +63,8 @@ namespace HBLint.Core.Ir
         public int Min { get; set; } = int.MinValue;
 
         public int Max { get; set; } = int.MaxValue;
+
+        public FieldHint Hint { get; set; }
     }
 
     /// <summary>입력 소켓. Many면 노드 이름 배열(둘 이상)을 받는다.</summary>
@@ -122,7 +136,7 @@ namespace HBLint.Core.Ir
         {
             new NodeSpec("types.derived", "타입 계열", Socket.Types,
                 new[] { new InputSpec("from", false, Socket.Scope, Socket.Types) },
-                new[] { new FieldSpec("type", FieldType.String, true, "기준 타입 메타데이터 이름 (그 타입과 자식, 인터페이스면 구현 타입)") }),
+                new[] { new FieldSpec("type", FieldType.String, true, "기준 타입 메타데이터 이름 (그 타입과 자식, 인터페이스면 구현 타입)") { Hint = FieldHint.Type } }),
             new NodeSpec("methods.named", "메서드 이름", Socket.Methods,
                 new[] { new InputSpec("from", false, Socket.Types) },
                 new[] { new FieldSpec("names", FieldType.StringArray, true, "메서드 이름 (그 타입에 선언된 것)") }),
@@ -137,19 +151,19 @@ namespace HBLint.Core.Ir
                 new[] { new InputSpec("from", false, SiteSources) },
                 new[]
                 {
-                    new FieldSpec("members", FieldType.StringArray, true, "\"타입 메타데이터 이름.멤버 이름\" (오버로드 · 오버라이드 포함) 또는 \"타입 메타데이터 이름.*\" (그 타입에 선언된 메서드 · 속성 · 필드 전부)"),
+                    new FieldSpec("members", FieldType.StringArray, true, "\"타입 메타데이터 이름.멤버 이름\" (오버로드 · 오버라이드 포함) 또는 \"타입 메타데이터 이름.*\" (그 타입에 선언된 메서드 · 속성 · 필드 전부)") { Hint = FieldHint.Member },
                     new FieldSpec("uses", FieldType.ChoiceArray, false, "쓰임 (없으면 전부). compare = == · != 의 한쪽 (비교도 읽기라서 read를 고르면 비교도 들어감)") { Choices = MemberUses },
                 }),
             new NodeSpec("sites.namespace", "네임스페이스 사용", Socket.Sites,
                 new[] { new InputSpec("from", false, SiteSources) },
                 new[]
                 {
-                    new FieldSpec("namespaces", FieldType.StringArray, true, "네임스페이스 (하위 포함)"),
+                    new FieldSpec("namespaces", FieldType.StringArray, true, "네임스페이스 (하위 포함)") { Hint = FieldHint.Namespace },
                     new FieldSpec("usings", FieldType.Bool, false, "using 지시문도 (기본 true)"),
                 }),
             new NodeSpec("sites.declaredInDefine", "디파인 안 선언 사용", Socket.Sites,
                 new[] { new InputSpec("from", false, SiteSources) },
-                new[] { new FieldSpec("define", FieldType.String, true, "이 디파인 안에만 선언된 것(같은 어셈블리)을 쓰는 곳") }),
+                new[] { new FieldSpec("define", FieldType.String, true, "이 디파인 안에만 선언된 것(같은 어셈블리)을 쓰는 곳") { Hint = FieldHint.Define } }),
             new NodeSpec("sites.nullOperator", "null 연산자", Socket.Sites,
                 new[] { new InputSpec("from", false, SiteSources) },
                 new[] { new FieldSpec("operators", FieldType.ChoiceArray, false, "연산자 (없으면 전부, is null은 is not null · 복합 패턴 포함)") { Choices = NullOperators } }),
@@ -169,7 +183,7 @@ namespace HBLint.Core.Ir
                 new[] { new InputSpec("from", false, Socket.Sites) },
                 new[]
                 {
-                    new FieldSpec("type", FieldType.String, false, "사이트가 다루는 식의 정적 타입이 이 타입 계열인 것만 (대상 타입이 있는 사이트: null 연산자 · 멤버 사용 · 객체 생성 · 박싱)"),
+                    new FieldSpec("type", FieldType.String, false, "사이트가 다루는 식의 정적 타입이 이 타입 계열인 것만 (대상 타입이 있는 사이트: null 연산자 · 멤버 사용 · 객체 생성 · 박싱)") { Hint = FieldHint.Type },
                     new FieldSpec("category", FieldType.Choice, false, "대상 타입이 참조 형식(reference) · 값 형식(value)인 것만 (타입 매개변수는 class · struct 제약으로)") { Choices = TypeCategories },
                 },
                 requireOneOf: new[] { "type", "category" }),
@@ -184,7 +198,7 @@ namespace HBLint.Core.Ir
                 new[] { new InputSpec("from", false, Socket.Sites) },
                 new[]
                 {
-                    new FieldSpec("define", FieldType.String, true, "디파인"),
+                    new FieldSpec("define", FieldType.String, true, "디파인") { Hint = FieldHint.Define },
                     new FieldSpec("where", FieldType.Choice, true, "그 디파인이 없으면 꺼지는 구간 안(inside) · 밖(outside)") { Choices = GuardPositions },
                 }),
             new NodeSpec("sites.union", "합치기", Socket.Sites,

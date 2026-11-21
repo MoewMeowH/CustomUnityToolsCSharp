@@ -9,5 +9,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="hblint-gen" />
     <InternalsVisibleTo Include="HBLint.Core.Tests" />
+    <InternalsVisibleTo Include="hblint-app" />
+    <InternalsVisibleTo Include="HBLint.App.Tests" />
   </ItemGroup>
 </Project>

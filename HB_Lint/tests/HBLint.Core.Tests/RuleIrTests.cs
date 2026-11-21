@@ -196,6 +196,40 @@ public class RuleIrTests
     }
 
     [Fact]
+    public void 오류에_노드_이름이_붙음()
+    {
+        var parsed = RuleIr.Parse(Rule("""
+            "a": { "kind": "sites.member", "from": "scope" },
+            "b": { "kind": "sites.nullOperator", "from": "nope" },
+            "c": { "kind": "types.derived", "from": "scope", "type": "T" },
+            "r": { "kind": "report", "from": "b", "message": "m" }
+            """));
+
+        Assert.Contains(parsed.Errors, e => e.Node == "a" && e.Message.Contains("members"));
+        Assert.Contains(parsed.Errors, e => e.Node == "b" && e.Message.Contains("없는 노드"));
+        Assert.Contains(parsed.Errors, e => e.Node == "c" && e.IsWarning);
+        Assert.Contains(RuleIr.Parse(Rule("\"n\": { \"kind\": \"sites.nullOperator\", \"from\": \"scope\" }")).Errors, e => e.Node == null && e.Message.Contains("report 노드는 하나"));
+    }
+
+    [Fact]
+    public void 칸_뜻은_타입_멤버_네임스페이스_디파인_칸에만()
+    {
+        var hinted = NodeCatalog.All
+            .SelectMany(n => n.Fields.Where(f => f.Hint != FieldHint.None).Select(f => $"{n.Kind}.{f.Name}={f.Hint}"))
+            .OrderBy(s => s, StringComparer.Ordinal);
+
+        Assert.Equal(new[]
+        {
+            "filter.define.define=Define",
+            "filter.targetType.type=Type",
+            "sites.declaredInDefine.define=Define",
+            "sites.member.members=Member",
+            "sites.namespace.namespaces=Namespace",
+            "types.derived.type=Type",
+        }, hinted);
+    }
+
+    [Fact]
     public void 분석기에_넘기는_JSON은_편집용_칸을_뺌()
     {
         var rule = RuleIr.Parse(Rule(Valid, "\"$schema\": \"./hblint.schema.json\", \"version\": 1, \"id\": \"CLL0005\", \"layout\": { \"n\": [10, 20] }")).Rule!;

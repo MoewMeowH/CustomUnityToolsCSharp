@@ -1,12 +1,14 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/HBLint.Analyzers/HBLint.Analyzers.csproj" />
+    <Project Path="src/HBLint.App/HBLint.App.csproj" />
     <Project Path="src/HBLint.Attributes/HBLint.Attributes.csproj" />
     <Project Path="src/HBLint.Core/HBLint.Core.csproj" />
     <Project Path="src/HBLint.Generator.Cli/HBLint.Generator.Cli.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/HBLint.Analyzers.Tests/HBLint.Analyzers.Tests.csproj" />
+    <Project Path="tests/HBLint.App.Tests/HBLint.App.Tests.csproj" />
     <Project Path="tests/HBLint.Core.Tests/HBLint.Core.Tests.csproj" />
   </Folder>
 </Solution>
