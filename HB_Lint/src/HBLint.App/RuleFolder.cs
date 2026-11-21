@@ -96,7 +96,8 @@ internal sealed partial class RuleFolder
         return (set, null);
     }
 
-    private static bool IsGeneratedFile(string path)
+    /// <summary>hblint-gen이 쓴 생성물인가 (첫 줄 머리 + 도구 이름).</summary>
+    public static bool IsGeneratedFile(string path)
     {
         // StreamReader가 BOM을 떼고 읽는다
         using var reader = new StreamReader(path);

@@ -33,6 +33,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="HBLint.App.Tests" />
+    <InternalsVisibleTo Include="hblint-app-desktop" />
+    <InternalsVisibleTo Include="HBLint.App.Desktop.Tests" />
   </ItemGroup>
 
 </Project>

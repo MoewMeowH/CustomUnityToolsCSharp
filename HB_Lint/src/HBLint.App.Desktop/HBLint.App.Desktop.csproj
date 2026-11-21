@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- hblint-app-desktop: 그래프 편집 앱(HBLint.App 서버)을 같은 프로세스에서 띄우고 WebView2 창으로 보인다. 창을 닫으면 서버도 끝. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWindowsForms>true</UseWindowsForms>
+    <!-- WebView2 패키지의 Wpf DLL이 WindowsBase 판과 부딪치는 경고(MSB3277)를 없앤다 — 대신 암시적 using이 WPF 목록으로 바뀌어 System.IO가 빠진다 -->
+    <UseWPF>true</UseWPF>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <RootNamespace>HBLint.App.Desktop</RootNamespace>
+    <AssemblyName>hblint-app-desktop</AssemblyName>
+    <Product>HB_Lint 규칙 편집</Product>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Using Include="System.IO" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
+    <ProjectReference Include="..\HBLint.App\HBLint.App.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="HBLint.App.Desktop.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -1,5 +1,4 @@
 using HBLint.Core.Generation;
-using HBLint.Core.Json;
 
 namespace HBLint.Generator.Cli;
 
@@ -65,33 +64,10 @@ internal static class GeneratorCli
 
     private static int Init(string folder, string outputPath, string? asmdef, TextWriter output, TextWriter error)
     {
-        Directory.CreateDirectory(folder);
-        if (Directory.GetFiles(folder, RuleSet.FilePattern, SearchOption.TopDirectoryOnly).Length == 0)
-        {
-            foreach (var preset in Presets.Files())
-                WriteNew(Path.Combine(folder, preset.Key), preset.Value, output);
-        }
-        Finish(Path.Combine(folder, IrSchema.FileName), IrSchema.Generate(), false, output, error);
-
-        if (asmdef != null)
-        {
-            // 한 폴더에 asmdef가 둘이면 Unity가 컴파일을 막는다 — 이미 있으면 그대로 둔다
-            var outputFolder = Path.GetDirectoryName(Path.GetFullPath(outputPath))!;
-            var existing = Directory.Exists(outputFolder) ? Directory.GetFiles(outputFolder, "*.asmdef") : Array.Empty<string>();
-            if (existing.Length == 0)
-                WriteNew(Path.Combine(outputFolder, asmdef + ".asmdef"), RulesAsmdef(asmdef), output);
-            else if (existing.All(p => Path.GetFileNameWithoutExtension(p) != asmdef))
-                output.WriteLine($"{outputFolder}에 이미 asmdef({Path.GetFileName(existing[0])})가 있어 {asmdef}.asmdef를 만들지 않았습니다");
-        }
+        foreach (var line in RuleFolderSetup.Prepare(folder, outputPath, asmdef))
+            output.WriteLine(line);
         return Generate(folder, outputPath, false, output, error);
     }
-
-    /// <summary>규칙 asmdef — HBLint.Attributes 참조, Auto Referenced(그래서 Assembly-CSharp는 자동 검사), 엔진 참조 없음.</summary>
-    internal static string RulesAsmdef(string name) => JsonWriter.Write(new JsonObject()
-        .Add("name", new JsonString(name))
-        .Add("references", new JsonArray().Add(new JsonString("HBLint.Attributes")))
-        .Add("autoReferenced", new JsonBool(true))
-        .Add("noEngineReferences", new JsonBool(true)));
 
     private static int Validate(string folder, TextWriter output, TextWriter error)
     {
@@ -152,11 +128,5 @@ internal static class GeneratorCli
         }
         output.WriteLine(OutputFile.WriteIfChanged(outputPath, text) ? $"{outputPath}: 만들었습니다" : $"{outputPath}: 바뀐 것 없음");
         return 0;
-    }
-
-    private static void WriteNew(string path, string text, TextWriter output)
-    {
-        OutputFile.WriteIfChanged(path, text);
-        output.WriteLine($"{path}: 만들었습니다");
     }
 }

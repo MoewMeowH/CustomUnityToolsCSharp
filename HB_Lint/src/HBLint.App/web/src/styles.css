@@ -111,3 +111,16 @@ header > strong { white-space: nowrap; padding-top: 5px; }
 .problems-body li { padding: 2px 0; cursor: pointer; font-family: Consolas, 'Malgun Gothic', monospace; font-size: 12px; }
 .problems-body li b { margin-right: 6px; }
 .problems-body li.hit { color: var(--text); }
+
+header { flex-direction: column; align-items: stretch; }
+.header-top { display: flex; gap: 10px; align-items: center; }
+.header-top .project-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+button.primary { background: #2f5d86; border-color: var(--accent); padding: 8px 18px; font-size: 14px; }
+button.link { background: none; border: none; color: var(--accent); padding: 0; margin-top: 18px; }
+.start { max-width: 640px; margin: 80px auto 0; display: flex; flex-direction: column; gap: 12px; }
+.start h2 { margin: 0; }
+.start .row { display: flex; gap: 8px; }
+.start .recent { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.start .recent button { width: 100%; text-align: left; display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; }
+.start .recent small { color: var(--muted); }
+.start-status { max-width: 640px; margin: 12px auto; }

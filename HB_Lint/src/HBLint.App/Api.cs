@@ -8,6 +8,8 @@ internal sealed record WorkspaceRequest(string? Rules, string? Out);
 
 internal sealed record ProjectRequest(string? Path, string? Csproj);
 
+internal sealed record UnityRequest(string? Path, bool? Setup, bool? Probe);
+
 internal sealed record IrErrorDto(string Message, int Line, int Column, bool Warning, string? Node);
 
 /// <summary>/api — 모두 토큰이 있어야 닿는다 (LocalGuard). 규칙 본문은 글 그대로 주고받는다 (키 순서를 지키려고 Core JSON으로 읽고 씀).</summary>
@@ -33,6 +35,31 @@ internal static class Api
                 return Error("생성물은 .cs 파일이어야 합니다");
             state.OpenFolder(new RuleFolder(rules, output));
             return Results.Ok(StateDto(state));
+        });
+
+        // Unity 프로젝트 폴더 하나로 규칙 폴더 · 생성물을 정한다. 처음이면 needsSetup으로 묻고, setup: true면 init처럼 준비한 뒤 연다.
+        // probe: true는 자리만 알려 주고 아무것도 열거나 바꾸지 않는다 (최근 목록이 Unity 열기로 갈지 볼 때).
+        api.MapPost("/unity", (UnityRequest request, AppState state) =>
+        {
+            var path = CleanPath(request.Path);
+            if (path == null)
+                return Error("Unity 프로젝트 폴더가 있어야 합니다");
+            try
+            {
+                if (UnityProject.Find(path) is not { } layout)
+                    return Error($"{path}: Unity 프로젝트 폴더가 아닙니다 (Assets · ProjectSettings가 있는 폴더)");
+                if (request.Probe == true || (layout.NeedsSetup && request.Setup != true))
+                    return Results.Ok(new { layout.NeedsSetup, layout.Rules, @out = layout.Output, layout.HasPackage });
+                var created = layout.NeedsSetup ? UnityProject.Setup(layout) : [];
+                state.OpenFolder(new RuleFolder(layout.Rules, layout.Output));
+                // 대상 프로젝트 읽기가 실패해도(csproj 없음 등) 최근 목록에 프로젝트가 남게
+                state.SetProject(layout.Project, null, null);
+                return Results.Ok(new { needsSetup = false, created, state = StateDto(state) });
+            }
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException || e is ArgumentException)
+            {
+                return Error(e.Message);
+            }
         });
 
         api.MapGet("/rules", (AppState state) =>

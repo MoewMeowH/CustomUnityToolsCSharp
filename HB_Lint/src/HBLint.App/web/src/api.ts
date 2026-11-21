@@ -135,6 +135,16 @@ export interface PreviewResult {
   elapsedMs: number;
 }
 
+/** POST /unity — 처음이면 needsSetup(+ 만들 자리 · 패키지 있는지), 열었으면 state · 만든 파일. */
+export interface UnityOpen {
+  needsSetup: boolean;
+  rules?: string;
+  out?: string;
+  hasPackage?: boolean;
+  created?: string[];
+  state?: AppStateDto;
+}
+
 export interface GenerateResult {
   ok: boolean;
   output: string;
@@ -150,6 +160,9 @@ export const api = {
   catalog: () => call<Catalog>('GET', '/catalog'),
   state: () => call<AppStateDto>('GET', '/state'),
   openWorkspace: (rules: string, out: string) => call<AppStateDto>('POST', '/workspace', { rules, out }),
+  openUnity: (path: string, setup: boolean) => call<UnityOpen>('POST', '/unity', { path, setup }),
+  /** 자리만 알아봄 — 서버 상태를 바꾸지 않는다. */
+  probeUnity: (path: string) => call<UnityOpen>('POST', '/unity', { path, probe: true }),
   loadProject: (path: string, csproj: string | null) => call<AppStateDto>('POST', '/project', { path, csproj }),
   rules: () => call<{ rules: RuleSummary[]; nextId: string | null }>('GET', '/rules'),
   rule: (file: string) => call<{ file: string; text: string; validation: Validation }>('GET', '/rules/' + q(file)),

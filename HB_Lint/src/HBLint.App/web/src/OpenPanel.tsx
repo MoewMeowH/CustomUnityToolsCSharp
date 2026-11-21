@@ -1,5 +1,17 @@
 import { useEffect, useState } from 'react';
 import type { AppStateDto } from './api';
+import { inHost, pick, type PickField } from './host';
+
+/** 창(hblint-app-desktop) 안에서만 보이는 "찾아보기" — 고르기 창의 경로로 칸을 채운다. */
+function Browse(props: { field: PickField; current: string; onPicked: (path: string) => void }) {
+  if (!inHost()) return null;
+  return (
+    <button className="small" title="찾아보기" onClick={async () => {
+      const path = await pick(props.field, props.current);
+      if (path) props.onPicked(path);
+    }}>…</button>
+  );
+}
 
 interface Props {
   state: AppStateDto;
@@ -10,7 +22,7 @@ interface Props {
   onProject: (path: string, csproj: string | null) => void;
 }
 
-/** 위 칸 — 규칙 폴더 · 생성물 · 대상 프로젝트 경로 (브라우저는 실제 경로를 못 고르므로 붙여 넣기 + 최근 목록). */
+/** 위 칸 — 규칙 폴더 · 생성물 · 대상 프로젝트 경로 (브라우저는 실제 경로를 못 고르므로 붙여 넣기 + 최근 목록, 창 안이면 찾아보기도). */
 export function OpenPanel({ state, busy, candidates, onOpen, onProject }: Props) {
   const recent = state.recent[0];
   const [rules, setRules] = useState(state.rules ?? state.defaults.rules ?? recent?.rules ?? '');
@@ -29,8 +41,10 @@ export function OpenPanel({ state, busy, candidates, onOpen, onProject }: Props)
         <label>규칙 폴더</label>
         <input value={rules} onChange={(e) => setRules(e.target.value)} placeholder="예: D:\Game\Assets\HBLint" list="recent-rules" />
         <datalist id="recent-rules">{state.recent.map((r) => <option key={r.rules} value={r.rules} />)}</datalist>
+        <Browse field="rules" current={rules} onPicked={setRules} />
         <label>생성물</label>
         <input value={out} onChange={(e) => setOut(e.target.value)} placeholder="예: D:\Game\Assets\HBLint\Rules\LintRules.g.cs" />
+        <Browse field="out" current={out} onPicked={setOut} />
         <button
           disabled={busy !== null || rules.trim() === '' || out.trim() === ''}
           onClick={() => {
@@ -45,6 +59,7 @@ export function OpenPanel({ state, busy, candidates, onOpen, onProject }: Props)
       <div className="row">
         <label>대상 프로젝트</label>
         <input value={project} onChange={(e) => setProject(e.target.value)} placeholder="Unity 프로젝트 폴더 또는 .csproj (자동 완성 · 이름 확인 · 미리 보기)" />
+        <Browse field="project" current={project} onPicked={setProject} />
         {candidates.length > 0 && (
           <select value={csproj ?? ''} onChange={(e) => setCsproj(e.target.value || null)} title="읽을 csproj (Unity는 어셈블리마다 하나)">
             <option value="">{candidates.includes('Assembly-CSharp.csproj') ? 'Assembly-CSharp.csproj' : '— csproj 고르기 —'}</option>

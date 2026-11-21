@@ -19,9 +19,11 @@ src/HBLint.Attributes/        unity/…/Runtime 소스를 링크해 컴파일 (N
 src/HBLint.Generator.Cli/     생성기 CLI hblint-gen (net10.0)
 src/HBLint.App/               그래프 편집 앱 hblint-app (ASP.NET Core 로컬 서버 + Roslyn 사이드카, net10.0)
   web/                        웹 UI (Vite + React + React Flow) — npm run build가 ../wwwroot/에 낸다 (git 밖)
+src/HBLint.App.Desktop/       hblint-app-desktop — 같은 프로세스 서버 + WebView2 창 (net10.0-windows)
 tests/                        dotnet test
 tools/Build-UnityPackage.ps1  분석기를 Release로 빌드해 패키지 Analyzers/로 복사
-tools/Run-App.ps1             웹 UI 빌드 + hblint-app 실행
+tools/Run-App.ps1             개발용 — 웹 UI 빌드 + 창(또는 -Browser) 실행
+HB_Lint_App.bat               더블클릭 — 웹 UI · 창 앱 Release 빌드 + 창 실행
 samples/                      예시 규칙 파일 셋 · 스키마 · 생성물 (hblint-gen init이 만드는 것과 같음)
 samples/more/                 예시 규칙 더 (CLL0004~0012 — 할당 · Unity 성능 9종, init은 넣지 않음, 필요한 것만 규칙 폴더에 복사)
 ```
@@ -128,13 +130,17 @@ dotnet run --project src/HBLint.Generator.Cli -- schema <hblint.schema.json> [--
 
 ## 그래프 편집 앱 (hblint-app)
 
-규칙 폴더의 규칙 파일을 노드 그래프로 열어 잇고 · 칸을 채우고 · 저장하고 · `LintRules.g.cs`를 생성한다. 필요한 것: .NET SDK 10 · Node.js(npm).
+규칙 폴더의 규칙 파일을 노드 그래프로 열어 잇고 · 칸을 채우고 · 저장하고 · `LintRules.g.cs`를 생성한다. 필요한 것: .NET SDK 10 · Node.js(npm) · 창은 WebView2 런타임(Windows 10 · 11에 보통 깔려 있음).
 
-```text
-powershell -File tools\Run-App.ps1 --rules <규칙 폴더> --out <LintRules.g.cs> [--project <Unity 프로젝트 폴더 또는 .csproj>] [--port <n>] [--no-browser]
-```
+**`HB_Lint_App.bat`을 더블클릭** — 웹 UI(npm, 처음엔 `npm ci`)와 창 앱(Release)을 빌드하고 **창**(`hblint-app-desktop`, WebView2)을 연다. 한 번 빌드한 뒤에는 `src\HBLint.App.Desktop\bin\Release\net10.0-windows\hblint-app-desktop.exe`를 바로 실행하거나 작업 표시줄에 고정해도 된다 (앱을 고치면 bat로 다시 빌드). 서버는 창과 같은 프로세스에서 돌고 창을 닫으면 끝난다.
 
-- 웹 UI를 빌드한 뒤(처음엔 `npm ci`) 서버를 띄우고 기본 브라우저로 연다. 인자는 화면에 미리 채우는 값이고 화면에서 바꿀 수 있다 (최근 목록 `%LOCALAPPDATA%\HBLint\app.json`).
+- 첫 화면에서 **Unity 프로젝트 열기** → Unity 프로젝트 폴더만 고르면 규칙 폴더 `Assets/HBLint`(다른 자리에 규칙 폴더가 있으면 거기) · 생성물 `Assets/HBLint/Rules/LintRules.g.cs`(규칙 폴더 아래에 있으면 거기) · 대상 프로젝트(Assembly-CSharp)를 앱이 맞춘다.
+  - 처음이면(규칙 폴더 없음) 만들지 묻고 `hblint-gen init`과 같게 준비한다 — 예시 규칙 3개 · 스키마 · 규칙 asmdef `CLL.LintRules` · 생성물. `Packages/manifest.json`에 `com.hb.lint`가 없으면 같이 알린다 (패키지 없이 만들면 asmdef가 HBLint.Attributes를 못 찾아 Unity 컴파일이 깨진다).
+  - 최근 연 프로젝트는 첫 화면 목록에 (`%LOCALAPPDATA%\HBLint\app.json`).
+- **직접 고르기 ▾**: .NET 프로젝트나 다른 자리 — 규칙 폴더 · 생성물 · 대상 프로젝트 경로를 따로 넣는다.
+- 창에서만: 경로 칸 옆 `…`(찾아보기 — 폴더 · `.cs` 고르기 창), 저장 안 한 변경이 있으면 닫을 때 묻기, 창 크기 · 자리 기억(`%LOCALAPPDATA%\HBLint\window.json`). 창 안에서는 앱 주소만 열고, 그 밖의 링크는 누른 것만 기본 브라우저로 연다. F12 = 개발자 도구. WebView2 런타임이 없으면 창이 묻고 기본 브라우저로 연다.
+- 인자(선택, bat · exe 모두): `--project <Unity 프로젝트 폴더>`(Unity 열기와 같음) 또는 `--rules <규칙 폴더> --out <LintRules.g.cs> [--project <폴더 · csproj>]`, `--port <n>`.
+- 개발: `powershell -File tools\Run-App.ps1 [-Browser] [인자]` — 매번 웹 UI를 빌드하고 `dotnet run`. `-Browser`면 서버(`hblint-app`)만 띄우고 기본 브라우저로 연다.
 - 화면: 왼쪽 규칙 목록 · 노드 팔레트(끌어 놓거나 누르기), 가운데 그래프, 오른쪽 고른 노드의 칸, 아래 문제 · 미리 보기 · 생성 결과.
   - 손잡이 색 = 소켓. 받을 수 없는 소켓 · 고리가 되는 선은 이어지지 않는다 (손잡이를 끌거나, 출력 손잡이를 누른 뒤 입력 손잡이를 누른다). 선 · 노드는 Delete로 지운다.
   - 규칙 시작 노드의 칸이 머리 칸(id · title · severity · requires · ignoreAssemblies). 심각도 info를 고르면 Unity 콘솔에 안 보인다고 알린다.

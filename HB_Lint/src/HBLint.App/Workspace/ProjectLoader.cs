@@ -48,7 +48,7 @@ internal static class ProjectLoader
         Directory.Exists(Path.Combine(folder, "Assets")) && Directory.Exists(Path.Combine(folder, "ProjectSettings"));
 
     /// <summary>\\server\share · \\?\ · \\.\ (그리고 // 꼴) — 파일 시스템에 묻지 않는다.</summary>
-    private static bool IsRemoteOrDevice(string path) =>
+    public static bool IsRemoteOrDevice(string path) =>
         path.StartsWith(@"\\", StringComparison.Ordinal) || path.StartsWith("//", StringComparison.Ordinal);
 
     /// <summary>csproj 경로 또는 폴더(Unity 프로젝트 · csproj가 하나인 폴더) → csproj 경로.</summary>

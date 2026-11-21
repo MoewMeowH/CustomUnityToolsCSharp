@@ -3,7 +3,7 @@ import {
   Background, Controls, MiniMap, ReactFlow, useReactFlow,
   type Connection, type Edge as FlowEdge, type EdgeChange, type NodeChange,
 } from '@xyflow/react';
-import { api, ApiError, type AppStateDto, type GenerateResult, type PreviewResult, type RuleSummary, type Validation } from './api';
+import { api, ApiError, type AppStateDto, type GenerateResult, type PreviewResult, type RecentEntry, type RuleSummary, type Validation } from './api';
 import { findSpec, paletteGroup, socketColor, type Catalog } from './catalog';
 import { Inspector } from './Inspector';
 import {
@@ -13,12 +13,16 @@ import {
 import { OpenPanel } from './OpenPanel';
 import { Problems, type Tab } from './Problems';
 import { useHistory } from './history';
+import { inHost, pick, reportDirty } from './host';
+import { StartScreen } from './StartScreen';
 import { RuleNode, type RuleFlowNode } from './RuleNode';
 
 const nodeTypes = { rule: RuleNode };
 // 서버 RuleFolder와 같은 이름 규칙 (글자 · 숫자 · _ . -)
 const ruleFileName = /^[\p{L}\p{N}_.-]+\.hblint\.json$/u;
 const edgeId = (e: Edge) => `${e.source}>${e.target}.${e.input}`;
+const folderOf = (path: string) => path.replace(/[\\/][^\\/]*$/, '');
+const folderName = (path: string) => path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? path;
 
 interface Open {
   file: string;
@@ -49,6 +53,8 @@ export function App() {
   const [busy, setBusy] = useState<string | null>(null);
   /** 대상 프로젝트 폴더의 csproj 후보 (읽기 성공 · 실패 응답에서). */
   const [candidates, setCandidates] = useState<string[]>([]);
+  /** 경로 세 칸(규칙 폴더 · 생성물 · 대상 프로젝트)을 펼쳤는가 — .NET 프로젝트 · 다른 자리용. */
+  const [manual, setManual] = useState(false);
   /** React Flow가 잰 노드 크기 — 통제 모드라 돌려 넣어야 미니맵 · 맞춤 보기가 노드를 안다. */
   const [measured, setMeasured] = useState<Map<string, { width: number; height: number }>>(new Map());
   const flow = useReactFlow();
@@ -78,6 +84,9 @@ export function App() {
         setState(opened);
         await refreshRules();
         if (s.defaults.project) await loadProject(s.defaults.project, null);
+      } else if (s.defaults.project) {
+        // --project만 주면 Unity 프로젝트 열기와 같다
+        await openUnity(s.defaults.project);
       }
     })().catch(fail);
   }, [refreshRules]);
@@ -183,19 +192,73 @@ export function App() {
     }
   };
 
-  const loadProject = async (path: string, csproj: string | null) => {
+  /** Unity 프로젝트 폴더 하나로 열기 — 규칙 폴더 · 생성물은 서버가 정하고, 처음이면 만들지 묻는다. 그다음 대상 프로젝트도 읽는다. */
+  const openUnity = async (path: string, confirmed = false) => {
+    if (!confirmed && !confirmLeave()) return;
+    try {
+      let result = await api.openUnity(path, false);
+      if (result.needsSetup) {
+        const warning = result.hasPackage
+          ? ''
+          : '\n\n주의: Packages/manifest.json에 com.hb.lint가 없습니다. 패키지를 먼저 넣지 않으면 규칙 asmdef(CLL.LintRules)가 HBLint.Attributes를 못 찾아 Unity 컴파일이 깨집니다.';
+        if (!window.confirm(`이 프로젝트에는 HB_Lint 규칙 폴더가 없습니다.\n${result.rules}에 만들까요?\n(예시 규칙 3개 · 스키마 · 규칙 asmdef CLL.LintRules · 생성물 ${result.out})${warning}`)) return;
+        result = await api.openUnity(path, true);
+      }
+      setState(result.state!);
+      history.reset(emptyDoc);
+      setOpen(null);
+      setValidation(null);
+      setGenerate(null);
+      setManual(false);
+      await refreshRules();
+      const made = result.created && result.created.length > 0 ? `규칙 폴더를 만들었습니다 (${result.state!.rules}) · ` : '';
+      info(`${made}${result.state!.rules} 열었음`);
+      await loadProject(path, null, made);
+    } catch (e) {
+      fail(e);
+    }
+  };
+
+  /** 최근 목록 — Unity 열기가 같은 규칙 폴더 · 생성물을 고르는 프로젝트면 Unity 열기, 아니면(직접 고른 경로) 그 경로 그대로. */
+  const openRecent = async (entry: RecentEntry) => {
+    if (!confirmLeave()) return;
+    // 알아보기만 (서버 상태 · 최근 목록을 바꾸지 않는다)
+    const unity = entry.project ? await api.probeUnity(entry.project).catch(() => null) : null;
+    if (entry.project && unity && !unity.needsSetup && unity.rules === entry.rules && unity.out === entry.out) {
+      await openUnity(entry.project, true);
+      return;
+    }
+    // 직접 고른 경로 그대로
+    try {
+      setState(await api.openWorkspace(entry.rules, entry.out));
+      history.reset(emptyDoc);
+      setOpen(null);
+      setValidation(null);
+      setGenerate(null);
+      await refreshRules();
+      if (entry.project) await loadProject(entry.project, entry.csproj);
+    } catch (e) {
+      fail(e);
+    }
+  };
+
+  /** note = 앞 단계 안내(예: 규칙 폴더를 만들었음) — 이 단계 안내 앞에 붙여 덮이지 않게. */
+  const loadProject = async (path: string, csproj: string | null, note = '') => {
     setBusy('프로젝트 읽기');
-    info('대상 프로젝트 읽는 중… (처음엔 몇 초)');
+    info(`${note}대상 프로젝트 읽는 중… (처음엔 몇 초)`);
     try {
       const next = await api.loadProject(path, csproj);
       setState(next);
       setCandidates(next.project?.candidates ?? []);
-      info(next.project ? `${next.project.assemblyName} 읽음 — 타입 ${next.project.types}개` : '대상 프로젝트를 닫았음');
+      info(`${note}${next.project ? `${next.project.assemblyName} 읽음 — 타입 ${next.project.types}개` : '대상 프로젝트를 닫았음'}`);
     } catch (e) {
-      // 고를 csproj가 여럿이면(Assembly-CSharp 없음 등) 서버가 후보를 같이 준다
+      // 고를 csproj가 여럿이면(Assembly-CSharp 없음 등) 서버가 후보를 같이 준다 — 고르기 칸이 있는 직접 고르기를 펼친다
       const found = e instanceof ApiError ? (e.data as { candidates?: string[] } | undefined)?.candidates : undefined;
-      if (found && found.length > 0) setCandidates(found);
-      fail(e);
+      if (found && found.length > 0) {
+        setCandidates(found);
+        setManual(true);
+      }
+      setStatus({ text: `${note}${e instanceof Error ? e.message : String(e)}`, error: true });
     } finally {
       setBusy(null);
     }
@@ -231,6 +294,12 @@ export function App() {
     window.addEventListener('beforeunload', onUnload);
     return () => window.removeEventListener('beforeunload', onUnload);
   }, [dirty]);
+
+  // 창 제목 · 창(hblint-app-desktop)에 저장 안 한 변경 알리기 — 창은 닫힐 때 beforeunload를 보이지 않아 직접 묻는다
+  useEffect(() => {
+    document.title = open ? `${open.file}${dirty ? ' ●' : ''} — HB_Lint 규칙 편집` : 'HB_Lint 규칙 편집';
+    reportDirty(dirty, open?.file ?? null);
+  }, [dirty, open?.file]);
 
   // 문서 → 화면 노드 · 선
   const problemCount = useMemo(() => {
@@ -353,11 +422,36 @@ export function App() {
   const groups = new Map<string, typeof catalog.nodes>();
   for (const spec of catalog.nodes) groups.set(paletteGroup(spec), [...(groups.get(paletteGroup(spec)) ?? []), spec]);
 
+  const statusLine = status && <span className={`status ${status.error ? 'error' : ''}`} onClick={() => setStatus(null)}>{status.text}</span>;
+
+  if (!state.rules && !manual) {
+    return (
+      <div className="app">
+        <StartScreen recent={state.recent} busy={busy !== null} onUnity={(p) => void openUnity(p)} onRecent={(r) => void openRecent(r)} onManual={() => setManual(true)} />
+        <div className="start-status">{statusLine}</div>
+      </div>
+    );
+  }
+
+  /** 다른 Unity 프로젝트 — 창 안이면 폴더 고르기 창, 브라우저면 경로 입력. */
+  const chooseUnity = async () => {
+    const current = state.project ? folderOf(state.project.csproj) : '';
+    const path = inHost() ? await pick('project', current) : window.prompt('Unity 프로젝트 폴더', current);
+    if (path) await openUnity(path.trim());
+  };
+
   return (
     <div className="app">
       <header>
-        <strong>HB_Lint 규칙 편집</strong>
-        <OpenPanel state={state} busy={busy} candidates={candidates} onOpen={openWorkspace} onProject={loadProject} />
+        <div className="header-top">
+          <strong>HB_Lint 규칙 편집</strong>
+          <span className="project-name" title={`규칙 폴더 ${state.rules ?? '-'}\n생성물 ${state.out ?? '-'}`}>
+            {state.project ? `${folderName(folderOf(state.project.csproj))} · ${state.project.assemblyName}` : (state.rules ?? '열린 것 없음')}
+          </span>
+          <button disabled={busy !== null} onClick={() => void chooseUnity()}>Unity 프로젝트 열기…</button>
+          <button className="small" onClick={() => setManual((m) => !m)}>{manual ? '직접 고르기 ▴' : '직접 고르기 ▾'}</button>
+        </div>
+        {manual && <OpenPanel state={state} busy={busy} candidates={candidates} onOpen={openWorkspace} onProject={loadProject} />}
       </header>
       <div className="main">
         <aside className="sidebar">
