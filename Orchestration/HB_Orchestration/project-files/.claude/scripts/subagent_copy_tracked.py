@@ -32,8 +32,8 @@ MAX_FILE = 2_000_000
 SKIP_NAMES = {'claude.md', 'claude.local.md', 'mistakes.md', 'project.md', 'agents.md', 'agents.override.md'}
 # 독립성 · 지시: 경로 조각 (폴더 이름)
 SKIP_DIRS = {'.claude', '.codex', '.agents', '.git', 'review_tmp', 'subagent_in'}
-# 계획서 · 작업 로그 · /work-order 지시서 기본 폴더 (docs/plans/… · docs/worklog/… · docs/worklog.md · docs/work-orders/… — 다른 저장소는 추적할 수 있다)
-SKIP_DOCS = re.compile(r'(^|/)docs/(plans|worklog|work-orders)(/|$)|(^|/)docs/worklog\.md$', re.IGNORECASE)
+# 계획서 · 작업 로그 · /work-order 지시서 기본 폴더 · /preflight 단계 원문 (docs/plans/… · docs/worklog/… · docs/worklog.md · docs/work-orders/… · docs/preflight/… — 다른 저장소는 추적할 수 있다)
+SKIP_DOCS = re.compile(r'(^|/)docs/(plans|worklog|work-orders|preflight)(/|$)|(^|/)docs/worklog\.md$', re.IGNORECASE)
 # 비밀 모양 이름 — 서버 BuiltInDenyPatterns · BuiltInRepoCopyDenyPatterns와 같은 목록 + 로컬 설정 · 서명 키
 SECRET = re.compile(
     r'(^|/)('

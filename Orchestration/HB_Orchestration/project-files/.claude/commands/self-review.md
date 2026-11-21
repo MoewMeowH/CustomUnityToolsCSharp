@@ -83,7 +83,7 @@ disable-model-invocation: true
 
 * 정의: `.claude/agents/`
   * 검토형(Opus, `subagent_in/` 격리 · 같은 출력 형식): `self-reviewer`(코드 리뷰 — `/self-review` · `/cross-review` 2단계), `perf-reviewer`(성능 — `/mode` perf_* ownReview · `/self-review perf`), `security-reviewer`(보안 — `/self-review security` · 보안 영역 `/cross-review`는 사용자에게 묻고 self-reviewer와 함께), `direction-reviewer`(요청 원문 대 계획서 방향 — 계획서를 쓴 뒤 승인 전에 `/self-review direction`을 **제안만**).
-  * 검토형은 기본이 API 리뷰(모드 `sub_self` · `sub_perf` · `sub_security` · `sub_direction` — Codex 구독, 한도 소진이면 Claude API, 위 "API 리뷰"). 서브에이전트는 `/self-review sub …`로 고르거나 `[실패] Quota` 때, `/cross-review` main에서 쓴다.
+  * 검토형은 기본이 API 리뷰(모드 `sub_self` · `sub_perf` · `sub_security` · `sub_direction` — Codex 구독, 한도 소진이면 Claude API, 위 "API 리뷰"). 서브에이전트는 `/self-review sub …`로 고르거나 `[실패] Quota` 때, `/cross-review`(main · high)에서 쓴다.
   * 수집형: `web-searcher`(Sonnet, WebSearch · WebFetch만 — research 2단계 · crash 사전 조사 검색), `evidence-collector`(Opus, `/preflight` P4 근거 수집 · `/self-review trace` 지시서 대조).
   * 모델: 맥락 편향 없이 봐야 하는 자리는 `opus`, 지휘자 컨텍스트 보호·반복 작업(조사·수집·추출)은 `sonnet`.
   * 정의 파일에는 `tools` 허용 목록이 반드시 있어야 한다 (생략하면 MCP 도구까지 상속 → `run_mode`를 부를 수 있음). `python -I .claude/scripts/check_agents.py`로 검사한다. `permissionMode` bypass 계열 금지.

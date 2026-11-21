@@ -60,9 +60,12 @@ public sealed class ModeDefinition
 
     /// <summary>
     /// true면 claude-cli 단계의 작업 폴더에 저장소 추적 파일 사본을 깐다 (코드를 찾아 읽는 리뷰). 없으면 지휘자가 고른 파일만 —
-    /// sub_direction처럼 요청 원문과 계획서만 보는 리뷰는 켜지 않는다. codex-cli는 이 값과 상관없이 늘 사본이다.
+    /// sub_direction처럼 요청 원문과 계획서만 보는 리뷰는 켜지 않는다. codex-cli는 이 값 대신 단계의 <see cref="StepDefinition.CodexMaterial"/>을 따른다.
     /// </summary>
     public bool RepoCopy { get; set; }
+
+    /// <summary>true면 context 없이 부를 수 없다 (검토할 파일이 있어야 하는 리뷰 — sub_*). 없으면 codex-cli 단계는 context 없이 빈 폴더에서 돈다.</summary>
+    public bool RequireContext { get; set; }
 
     /// <summary>
     /// 이 모드의 프롬프트 캐시 방식. 비우면 제공사 설정(Providers.*.PromptCache).
@@ -113,6 +116,22 @@ public sealed class StepDefinition
     /// 웹검색을 켠다 (없으면 끔). 에이전트 제공사가 openai-responses여야 한다 — 일반 모델의 web_search 도구는 Responses API에만 있다.
     /// </summary>
     public WebSearchSettings? WebSearch { get; set; }
+
+    /// <summary>
+    /// codex-cli 단계가 자료를 받는 방식. 비우면 Repository (저장소 사본 + 주목 범위 · diff — 코드를 찾아 읽는 리뷰).
+    /// Prompt는 첨부 본문을 프롬프트에 넣고 빈 폴더에서 돈다 (문서를 다 읽어야 하는 판정 · 설계). 입력을 보지 않는 단계와 context 없는 실행도 빈 폴더다.
+    /// 다른 제공사 에이전트로 바꾼 실행에서는 쓰지 않는다.
+    /// </summary>
+    public CodexMaterial? CodexMaterial { get; set; }
+}
+
+/// <summary>codex-cli 단계의 자료 방식 (<see cref="StepDefinition.CodexMaterial"/>).</summary>
+public enum CodexMaterial
+{
+    /// <summary>저장소 추적 파일 사본 작업 폴더 + 프롬프트에는 주목 범위 · diff 본문만.</summary>
+    Repository,
+    /// <summary>첨부 본문을 프롬프트에 넣고 빈 작업 폴더에서 실행.</summary>
+    Prompt,
 }
 
 /// <summary>단계의 웹검색 설정. 요청 본문에는 WebSearchPolicy가 넣는다 (max_tool_calls, filters.blocked_domains, search_context_size).</summary>

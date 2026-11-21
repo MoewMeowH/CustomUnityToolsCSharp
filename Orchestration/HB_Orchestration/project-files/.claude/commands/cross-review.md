@@ -6,12 +6,12 @@ disable-model-invocation: true
 
 인자: $ARGUMENTS
 - 첫 단어가 `high`면 `review_high`(sol · DeepSeek 동시), `main`이거나 없으면 `review_main`. (예전 인자 `panel`은 `high`로 읽는다.)
-- `review_main`은 Codex CLI(ChatGPT 구독, gpt-6.1-sol)가 서버가 만든 저장소 사본에서 직접 찾아 읽는다 — context의 diff 본문만 프롬프트에 붙고 나머지 context는 "중심" 목록이 된다. 구독 한도 소진이면 서버가 같은 입력으로 API sol(`gpt_main_sol`)에 다시 보내고 결과 끝에 그 줄을 붙인다 — 지휘자가 따로 할 일은 없고, 판정은 결과 맨 위 runId에 단다.
+- `review_main`은 Codex CLI(ChatGPT 구독, gpt-6.1-sol)가 서버가 만든 저장소 사본에서 직접 찾아 읽는다 — context의 diff 본문만 프롬프트에 붙고 나머지 context는 "중심" 목록이 된다. 구독 한도 소진이면 대체 없이 `[실패] Quota`로 끝난다 — 사용자에게 알리고, 다시 부르면 `agents`에 `codex_cli_sol=gpt_main_sol`(API sol)을 넣는다. 판정은 결과 맨 위 runId에 단다.
 - 나머지가 대상. 비어 있으면 `git diff HEAD`의 미커밋 변경.
 
 1. diff가 있으면 대상 diff와 변경 의도를 파악한다. 의도가 불분명하면 커밋 메시지·주변 코드로 추론하고, 그래도 모르면 한 줄로 질문한다. / diff가 없으면(기존 코드 점검) 변경 의도 대신 "이 코드의 역할과 점검 목적"을 쓰고, 파일 전체가 아니라 핵심 클래스·메서드 위주로 추려서 넘긴다.
 2. **자체 검토** — 순서를 바꾸지 않는다.
-   - **`main`(review_main)이면 기본은 서브에이전트** — API 리뷰(`sub_*`)도 Codex라 외부 review_main과 같은 모델 둘이 된다. `high`(review_high, sol · DeepSeek API)면 기본은 API 리뷰(`/self-review` "API 리뷰"와 같다). 2-1 · 2-4 · 2-5는 두 갈래 공통이고, 2-2 · 2-3만 서브에이전트일 때다.
+   - **기본은 서브에이전트** (`main` · `high` 모두) — API 리뷰(`sub_*`)도 Codex라 외부 리뷰의 sol(`review_main` · `review_high` 모두 Codex)과 같은 모델 둘이 된다. 사용자가 API 리뷰를 고르면 아래 API 갈래(`/self-review` "API 리뷰"와 같다). 2-1 · 2-4 · 2-5는 두 갈래 공통이고, 2-2 · 2-3만 서브에이전트일 때다.
      - API 갈래: 2-1 지휘자 검토 저장 → 2-5 보안 영역이면 사용자에게 묻기 → 2-2 · 2-3 대신 `run_mode("sub_self")`(함께 돌리기로 했으면 `sub_security`도 따로)를 context로 → 2-4 형식 검사 (`## 읽은 파일`은 작업 폴더 기준 상대 경로, 절대 경로 · `..`가 있으면 멈춤).
      - 아래 3의 ownReview에는 그 결과의 **응답 본문**(`## 지적`부터 끝까지, 서버가 붙인 `runId:` · `### 1.` 머리 줄과 `[경고]` 줄은 뺀다)을 넣고, reason 태그는 `[ownReview:sub_self]`(둘이면 `[ownReview:sub_self+sub_security]`). H4가 상대 경로로 검사한다.
      - `[실패] Quota`(Codex 한도와 대체 Claude 크레딧이 모두 소진)면 묻지 않고 서브에이전트 본 절차(2-2 · 2-3)로 하고 "한도 소진으로 서브에이전트 사용"을 적는다. 둘을 돌리면 둘 다 서브에이전트로 한다 (태그에 섞으면 H4가 막는다). 사용자가 서브에이전트를 고르면 본 절차.
@@ -21,7 +21,7 @@ disable-model-invocation: true
    - 2-3. **self-reviewer 호출**: 위임 메시지에는 그 폴더 경로, 대상 파일·줄 범위, 변경 의도, 제약(사용자 결정 원문 포함)만 쓴다. 너의 의견·의심 지점·결론은 넣지 않는다 (`run_mode` input 규칙과 같다).
    - 2-4. 결과가 형식(`## 지적` · `## 자료 부족` · `## 읽은 파일`, `## 비고`는 선택)을 어겼거나, 중단됐거나, 비어 있거나, `## 읽은 파일`에 그 폴더 밖 경로가 있으면 **여기서 멈추고** 사용자에게 알린다. 다시 부르거나 네가 대신 쓸지는 사용자가 정한다.
    - 2-5. **보안 영역이면 security-reviewer도**: 변경이 훅 · 경로 · 비밀 값 · 외부 전송 · 권한 검사 · 게임 클라이언트 신뢰(재화 · 세이브 · 패킷)에 걸리면 사용자에게 "security-reviewer도 함께 돌릴지" 한 줄로 묻는다 (자동으로 돌리지 않는다). 함께 돌리면 같은 `subagent_in/` 폴더로 self-reviewer와 **각자 따로** 호출하고 2-4 검사를 둘 다 한다.
-3. `run_mode`를 호출한다. input: 변경 의도 · 제약(CLAUDE.md "독립성" — 검증 결과 · 결론 · 요청/계획서 원문은 넣지 않는다). context: diff 파일(CLAUDE.md "diff는 파일로")을 첫 항목으로 + 판단에 필요한 파일 (`review_main`은 바뀐 파일이면 된다 — 주변은 Codex가 찾고, 한도 소진 대체 때는 이 context가 API sol에 첨부 본문으로 간다). 리뷰는 input에 넣지 않는다.
+3. `run_mode`를 호출한다. input: 변경 의도 · 제약(CLAUDE.md "독립성" — 검증 결과 · 결론 · 요청/계획서 원문은 넣지 않는다). context: diff 파일(CLAUDE.md "diff는 파일로")을 첫 항목으로 + 판단에 필요한 파일 (`review_main`은 바뀐 파일이면 된다 — 주변은 Codex가 찾는다. `review_high`의 DeepSeek와 `agents`로 API sol에 보낼 때는 이 context가 첨부 본문으로 간다). 리뷰는 input에 넣지 않는다.
    - `ownReview`: **서브에이전트 결과 원문만** 넣는다. 둘이면 self-reviewer 결과 뒤에 security-reviewer 결과를 그대로 이어 붙인다 (사이에 구분 줄 · 제목을 넣지 않는다 — H4가 '## 읽은 파일' 절의 '- ' 아닌 줄을 막는다).
    - `reason`: 맨 앞에 `[ownReview:self-reviewer]`(둘이면 `[ownReview:self-reviewer+security-reviewer]`)를 붙이고 부른 이유 한 줄.
      - 그 작업의 계획서가 7일보다 오래됐으면(직접 짠 코드 등) 이유 뒤에 `[plan:<계획서 파일 이름>.md]`를 붙인다 — H3가 날짜 대신 그 파일이 docs/plans/에 있는지 본다. 형식이 틀리면(.md 빠짐 · 경로 · 공백) 막힌다.

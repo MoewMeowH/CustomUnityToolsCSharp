@@ -99,24 +99,25 @@
   "Modes": {
     "review_main": {
       "RequireOwnReview": true,
-      "Description": "코드/diff 교차 리뷰 (sol 단독 — Codex CLI 구독, 저장소 사본에서 직접 찾음. context = diff 파일 먼저 + 중심 파일. 한도 소진이면 API sol로 대체)",
+      "Description": "코드/diff 교차 리뷰 (sol 단독 — Codex CLI 구독, 저장소 사본에서 직접 찾음. context = diff 파일 먼저 + 중심 파일. 한도 소진이면 대체 없이 실패)",
       "Flow": "Sequential",
       "Steps": [
         {
           "Role": "Reviewer",
           "Agent": "codex_cli_sol",
-          "FallbackAgent": "gpt_main_sol"
+          "CodexMaterial": "Repository"
         }
       ]
     },
     "review_high": {
       "RequireOwnReview": true,
-      "Description": "코드/diff 교차 리뷰 (sol · DeepSeek 동시, 비용 큼, 중요한 변경만)",
+      "Description": "코드/diff 교차 리뷰 (sol(Codex 구독, 저장소 사본) · DeepSeek(첨부 본문) 동시, 중요한 변경만)",
       "Flow": "Concurrent",
       "Steps": [
         {
           "Role": "Reviewer",
-          "Agent": "gpt_main_sol"
+          "Agent": "codex_cli_sol",
+          "CodexMaterial": "Repository"
         },
         {
           "Role": "Reviewer",
@@ -126,48 +127,56 @@
     },
     "sub_self": {
       "RepoCopy": true,
+      "RequireContext": true,
       "Description": "/self-review 기본: Codex CLI sol(구독)이 저장소 추적 파일 사본에서 직접 찾아 self-reviewer 형식으로 리뷰. 한도 소진이면 Claude(API 키)로 대체. context 필수 (검토의 중심)",
       "Flow": "Sequential",
       "Steps": [
         {
           "Role": "SubSelf",
           "Agent": "codex_cli_sol",
-          "FallbackAgent": "claude_cli_opus"
+          "FallbackAgent": "claude_cli_opus",
+          "CodexMaterial": "Repository"
         }
       ]
     },
     "sub_perf": {
       "RepoCopy": true,
-      "Description": "/self-review perf · perf_* ownReview 기본: Codex CLI sol(구독) 성능 검토 (self-reviewer 형식), 한도 소진이면 Claude(API 키). context 필수",
+      "RequireContext": true,
+      "Description": "/self-review perf 기본: Codex CLI sol(구독) 성능 검토 (self-reviewer 형식), 한도 소진이면 Claude(API 키). context 필수. perf_*의 ownReview는 perf-reviewer 서브에이전트 (perf_*의 sol도 Codex)",
       "Flow": "Sequential",
       "Steps": [
         {
           "Role": "SubPerf",
           "Agent": "codex_cli_sol",
-          "FallbackAgent": "claude_cli_opus"
+          "FallbackAgent": "claude_cli_opus",
+          "CodexMaterial": "Repository"
         }
       ]
     },
     "sub_security": {
       "RepoCopy": true,
+      "RequireContext": true,
       "Description": "/self-review security 기본: Codex CLI sol(구독) 보안 검토 (self-reviewer 형식), 한도 소진이면 Claude(API 키). context 필수",
       "Flow": "Sequential",
       "Steps": [
         {
           "Role": "SubSecurity",
           "Agent": "codex_cli_sol",
-          "FallbackAgent": "claude_cli_opus"
+          "FallbackAgent": "claude_cli_opus",
+          "CodexMaterial": "Repository"
         }
       ]
     },
     "sub_direction": {
+      "RequireContext": true,
       "Description": "/self-review direction 기본: Codex CLI sol(구독)이 요청 원문 대 계획서 방향 검토, 한도 소진이면 Claude(API 키). context에 request.md · 계획서",
       "Flow": "Sequential",
       "Steps": [
         {
           "Role": "SubDirection",
           "Agent": "codex_cli_sol",
-          "FallbackAgent": "claude_cli_opus"
+          "FallbackAgent": "claude_cli_opus",
+          "CodexMaterial": "Repository"
         }
       ]
     },
@@ -178,18 +187,20 @@
       "Steps": [
         {
           "Role": "PerfReviewer",
-          "Agent": "gpt_main_sol"
+          "Agent": "codex_cli_sol",
+          "CodexMaterial": "Repository"
         }
       ]
     },
     "perf_high": {
-      "Description": "성능 검토 (sol · DeepSeek 동시): 두 회사 모델이 따로 본다. 중요한 핫패스·큰 변경용",
+      "Description": "성능 검토 (sol(Codex 구독) · DeepSeek 동시): 두 회사 모델이 따로 본다. 중요한 핫패스·큰 변경용",
       "RequireOwnReview": true,
       "Flow": "Concurrent",
       "Steps": [
         {
           "Role": "PerfReviewer",
-          "Agent": "gpt_main_sol"
+          "Agent": "codex_cli_sol",
+          "CodexMaterial": "Repository"
         },
         {
           "Role": "PerfReviewer",
@@ -203,7 +214,8 @@
       "Steps": [
         {
           "Role": "Critic",
-          "Agent": "gpt_main_sol"
+          "Agent": "codex_cli_sol",
+          "CodexMaterial": "Prompt"
         }
       ]
     },
@@ -215,7 +227,8 @@
       "Steps": [
         {
           "Role": "Rebuttal",
-          "Agent": "gpt_main_sol"
+          "Agent": "codex_cli_sol",
+          "CodexMaterial": "Prompt"
         },
         {
           "Role": "LogicCheck",
@@ -233,7 +246,8 @@
       "Steps": [
         {
           "Role": "Rebuttal",
-          "Agent": "gpt_main_sol"
+          "Agent": "codex_cli_sol",
+          "CodexMaterial": "Prompt"
         },
         {
           "Role": "Proponent",
@@ -241,7 +255,8 @@
         },
         {
           "Role": "Judge",
-          "Agent": "gpt_main_sol"
+          "Agent": "codex_cli_sol",
+          "CodexMaterial": "Prompt"
         }
       ]
     },
@@ -260,7 +275,8 @@
         },
         {
           "Role": "Feasibility",
-          "Agent": "gpt_main_sol",
+          "Agent": "codex_cli_sol",
+          "CodexMaterial": "Prompt",
           "Sees": "Previous"
         }
       ]
@@ -294,7 +310,8 @@
       "Steps": [
         {
           "Role": "CrashReview",
-          "Agent": "gpt_main_sol"
+          "Agent": "codex_cli_sol",
+          "CodexMaterial": "Prompt"
         }
       ]
     },
@@ -305,7 +322,8 @@
       "Steps": [
         {
           "Role": "Worker",
-          "Agent": "gpt_main_sol"
+          "Agent": "codex_cli_sol",
+          "CodexMaterial": "Prompt"
         },
         {
           "Role": "Worker",
@@ -322,7 +340,8 @@
       "Steps": [
         {
           "Role": "WorkOrderCheck",
-          "Agent": "gpt_mini_luna"
+          "Agent": "codex_cli_sol",
+          "CodexMaterial": "Prompt"
         },
         {
           "Role": "WorkOrderCheck",
@@ -339,7 +358,8 @@
       "Steps": [
         {
           "Role": "Preflight_P1_A",
-          "Agent": "gpt_main_sol"
+          "Agent": "codex_cli_sol",
+          "CodexMaterial": "Repository"
         },
         {
           "Role": "Preflight_P1_B",
@@ -347,7 +367,8 @@
         },
         {
           "Role": "Preflight_P1_Perf",
-          "Agent": "gpt_main_sol"
+          "Agent": "codex_cli_sol",
+          "CodexMaterial": "Repository"
         }
       ]
     },
@@ -359,7 +380,8 @@
       "Steps": [
         {
           "Role": "Preflight_P2_A",
-          "Agent": "gpt_main_sol"
+          "Agent": "codex_cli_sol",
+          "CodexMaterial": "Prompt"
         },
         {
           "Role": "Preflight_P2_B",
@@ -375,7 +397,8 @@
       "Steps": [
         {
           "Role": "Preflight_P3_A",
-          "Agent": "gpt_main_sol"
+          "Agent": "codex_cli_sol",
+          "CodexMaterial": "Prompt"
         },
         {
           "Role": "Preflight_P3_B",
@@ -403,7 +426,8 @@
       "Steps": [
         {
           "Role": "Preflight_PerfCheck",
-          "Agent": "gpt_main_sol"
+          "Agent": "codex_cli_sol",
+          "CodexMaterial": "Prompt"
         }
       ]
     }

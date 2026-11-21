@@ -498,22 +498,85 @@ public sealed class CodexCliTests : IDisposable
         Assert.DoesNotContain(seen.Environment, kv => kv.Value is null && CodexCliChatClient.KeptEnvironment.Contains(kv.Key));
     }
 
-    [Fact]
-    public async Task Without_work_folder_it_runs_in_an_empty_temp_folder()   // 골든 고정 프롬프트 (코드가 프롬프트에 있음)
+    /// <summary>셸 명령 없는 성공 이벤트 (자료 도구 실행의 사후 검사를 통과하는 모양).</summary>
+    private static string QuietEvents(string answer = """{"findings":[]}""") => string.Join("\n",
+        Ev(new { type = "thread.started", thread_id = "t-1" }),
+        Ev(new { type = "item.completed", item = new { id = "item_0", type = "agent_message", text = answer } }),
+        Ev(new { type = "turn.completed", usage = new { input_tokens = 100, cached_input_tokens = 0, cache_write_input_tokens = 0, output_tokens = 10, reasoning_output_tokens = 0 } })) + "\n";
+
+    /// <summary>
+    /// 시험 실행 폴더(AppContext.BaseDirectory)에 자료 도구 서버 자리만 만든다 — 제공사는 파일이 있는지만 보고, 가짜 실행기는 그것을 띄우지 않는다.
+    /// 같은 클래스의 시험은 차례로 돌아 "서버 없음" 시험과 겹치지 않는다.
+    /// </summary>
+    private sealed class FakeEvidenceHost : IDisposable
     {
+        public string Path { get; } = System.IO.Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "HB.Orchestration.Mcp.exe" : "HB.Orchestration.Mcp");
+        public FakeEvidenceHost() => File.WriteAllText(Path, "");
+        public void Dispose() => File.Delete(Path);
+    }
+
+    [Fact]
+    public async Task Without_work_folder_it_runs_in_an_empty_temp_folder_with_evidence_tools_only()   // 골든 고정 프롬프트 (코드가 프롬프트에 있음)
+    {
+        var refused = await Assert.ThrowsAsync<ClaudeCliException>(() =>
+            new CodexCliChatClient(Settings, (_, _, _) => Task.FromResult(Ok(QuietEvents()))).GetResponseAsync([new ChatMessage(ChatRole.User, "p")]));
+        Assert.Contains("CodexEvidenceTools", refused.Message);                     // 셸이 켜진 채 임시 폴더에서 돌지 않는다
+
+        using var host = new FakeEvidenceHost();
         string? workspace = null;
         var entries = -1;
-        var client = new CodexCliChatClient(Settings, (inv, _, _) =>
+        ClaudeCliInvocation? seen = null;
+        var client = new CodexCliChatClient(Settings with { EvidenceTools = true }, (inv, _, _) =>
         {
+            seen = inv;
             workspace = inv.WorkingDirectory;
             entries = Directory.EnumerateFileSystemEntries(workspace).Count();
-            return Task.FromResult(Ok(Events()));
+            return Task.FromResult(Ok(QuietEvents()));
         });
 
         await client.GetResponseAsync([new ChatMessage(ChatRole.User, "p")]);
 
         Assert.Equal(0, entries);
         Assert.False(Directory.Exists(workspace));                                   // 끝나면 지운다
+        Assert.Contains("features.shell_tool=false", seen!.Arguments);
+        Assert.Contains("작업 폴더는 비어 있다", seen.Stdin);
+    }
+
+    [Fact]
+    public async Task Empty_folder_call_with_evidence_tools_turns_the_shell_off_ignores_original_policy_and_drops_shell_results()
+    {
+        using var host = new FakeEvidenceHost();
+        var folder = Directory.CreateDirectory(Path.Combine(_dir, "empty-run")).FullName;
+        var options = new ChatOptions
+        {
+            AdditionalProperties = new()
+            {
+                [ClaudeCliChatClient.WorkFolderKey] = folder,
+                [CodexCliChatClient.EmptyWorkFolderKey] = true,
+                [CodexCliChatClient.EvidenceSourceKey] = new ReviewEvidenceSource(Path.Combine(_dir, "original"), []),
+            },
+        };
+        ClaudeCliInvocation? seen = null;
+        var client = new CodexCliChatClient(Settings with { EvidenceTools = true, EvidenceOriginalRoot = true }, (inv, _, _) =>
+        {
+            seen = inv;
+            return Task.FromResult(Ok(QuietEvents()));
+        });
+
+        await client.GetResponseAsync([new ChatMessage(ChatRole.User, "요청")], options);
+
+        var args = seen!.Arguments.ToList();
+        Assert.Contains("features.shell_tool=false", args);
+        Assert.Contains("mcp_servers.hb_evidence.required=true", args);
+        Assert.Contains(args, a => a.Contains("\"--review-evidence\"," + CodexCliChatClient.TomlString(folder), StringComparison.Ordinal));
+        Assert.DoesNotContain(args, a => a.Contains("--review-evidence-original", StringComparison.Ordinal));   // 빈 폴더에는 원본 자료 정책을 넘기지 않는다
+        Assert.Contains("작업 폴더는 비어 있다", seen.Stdin);
+        Assert.DoesNotContain("rg -n", seen.Stdin);                                    // 셸 읽기 안내가 아니다
+
+        // 셸 명령이 실행 기록에 나오면 결과를 버린다 (사후 검사).
+        var shelled = new CodexCliChatClient(Settings with { EvidenceTools = true }, (_, _, _) => Task.FromResult(Ok(Events())));
+        var dropped = await Assert.ThrowsAsync<ClaudeCliException>(() => shelled.GetResponseAsync([new ChatMessage(ChatRole.User, "요청")], options));
+        Assert.Contains("셸 명령", dropped.Message);
     }
 
     [Fact]
@@ -847,7 +910,16 @@ public sealed class CodexCliTests : IDisposable
             "cxrev": { "Steps": [ { "Role": "Reviewer", "Agent": "a1" } ] },
             "nofb":  { "Steps": [ { "Role": "R", "Agent": "a1" } ] },
             "repo":  { "RepoCopy": true, "Steps": [ { "Role": "R", "Agent": "a1" } ] },
-            "cxsm":  { "MaxInputChars": 300, "Steps": [ { "Role": "R", "Agent": "a1", "FallbackAgent": "a2" } ] }
+            "cxsm":  { "MaxInputChars": 300, "Steps": [ { "Role": "R", "Agent": "a1", "FallbackAgent": "a2" } ] },
+            "mix":   { "Steps": [ { "Role": "R", "Agent": "a1" }, { "Role": "R", "Agent": "a2", "Sees": "Input" } ] },
+            "mixc":  { "Flow": "Concurrent", "Steps": [ { "Role": "R", "Agent": "a2" }, { "Role": "R", "Agent": "a1", "CodexMaterial": "Prompt" } ] },
+            "mixd":  { "Flow": "Debate", "MaxRounds": 1, "Steps": [ { "Role": "R", "Agent": "a1" }, { "Role": "R", "Agent": "a2" }, { "Role": "R", "Agent": "a1", "CodexMaterial": "Prompt" } ] },
+            "prev":  { "Steps": [ { "Role": "R", "Agent": "a2" }, { "Role": "R", "Agent": "a1", "Sees": "Previous" } ] },
+            "must":  { "RequireContext": true, "Steps": [ { "Role": "R", "Agent": "a1" } ] },
+            "deb2":  { "Flow": "Debate", "MaxRounds": 2, "Steps": [ { "Role": "R", "Agent": "a1", "CodexMaterial": "Prompt" }, { "Role": "R", "Agent": "a2" } ] },
+            "cxpr":  { "Steps": [ { "Role": "Reviewer", "Agent": "a1", "CodexMaterial": "Prompt" } ] },
+            "capA":  { "MaxInputChars": 2000, "Steps": [ { "Role": "R", "Agent": "a1" }, { "Role": "R", "Agent": "a2", "Sees": "Previous" } ] },
+            "cxsm2": { "MaxInputChars": 4000, "Steps": [ { "Role": "Reviewer", "Agent": "a1" } ] }
           }
         }
         """;
@@ -936,12 +1008,10 @@ public sealed class CodexCliTests : IDisposable
         Assert.Contains("목록이 전부", withoutCopy);
     }
 
-    [Theory]
-    [InlineData(CodexCliProvider.TypeName)]
-    [InlineData(ClaudeCliProvider.TypeName)]
-    public async Task Cli_agents_cannot_follow_up_and_the_result_says_so_early(string providerType)
+    [Fact]
+    public async Task Claude_cli_agents_cannot_follow_up_and_the_result_says_so_early()
     {
-        using var h = new ModeRunnerHarness(Modes, providerType: providerType);
+        using var h = new ModeRunnerHarness(Modes, providerType: ClaudeCliProvider.TypeName);
         h.Options.Agents[0].StructuredOutput = StructuredOutputMode.Schema;
         using var diff = new CwdFile("+ x\n");
         h.Client.Script = [ScriptedChatClient.Reply("""{"findings":[],"needsInfo":[{"what":"정의","path":null,"symbol":"A","why":"확인"}]}""")];
@@ -1082,6 +1152,435 @@ public sealed class CodexCliTests : IDisposable
         Assert.Contains("다른 에이전트로 대신하라", swapped);                                // 두 번째는 최근 Quota로 바로 막힘 (대체 없음)
         Assert.Equal(0, h.FallbackClient.Calls);
     }
+
+    // ── 섞인 모드 · 빈 폴더 · followUp ─────────────────────────────────────────
+
+    private static bool Has(ChatOptions? options, string key) => options?.AdditionalProperties?.ContainsKey(key) == true;
+
+    [Fact]
+    public async Task Mixed_mode_gives_codex_the_work_folder_and_the_api_step_the_attached_body()
+    {
+        using var h = new ModeRunnerHarness(Modes, providerType: CodexCliProvider.TypeName, withFallbackAgent: true);
+        using var diff = new CwdFile("+ MARK_BODY\n");
+        h.Client.Script = [ScriptedChatClient.Reply("코덱스")];
+
+        var result = await h.Runner.RunAsync("mix", "의도", null, null, [new ContextRange(diff.Name, 1, 1)], null, ModeRunnerHarness.DefaultReason, null, CancellationToken.None);
+
+        Assert.DoesNotContain("섞을 수 없습니다", result);
+        var codex = h.Client.Received[^1];
+        Assert.True(Has(codex.Options, ClaudeCliChatClient.WorkFolderKey));
+        Assert.False(Has(codex.Options, CodexCliChatClient.EmptyWorkFolderKey));
+        Assert.Contains($"## 변경 diff ({diff.Name})", ScriptedChatClient.UserText(codex));     // 저장소 방식: 작업 폴더 안내 + diff
+        var api = h.FallbackClient.Received[^1];
+        Assert.Contains("MARK_BODY", ScriptedChatClient.UserText(api));                       // API 단계는 첨부 본문
+        Assert.DoesNotContain("## 작업 폴더", ScriptedChatClient.UserText(api));
+        Assert.False(Has(api.Options, ClaudeCliChatClient.WorkFolderKey));                    // 로컬 경로를 API 요청에 싣지 않는다
+        Assert.False(Has(api.Options, CodexCliChatClient.EvidenceSourceKey));
+        Assert.False(Has(api.Options, CodexCliChatClient.EmptyWorkFolderKey));
+    }
+
+    [Fact]
+    public async Task Prompt_material_codex_step_gets_the_body_in_an_empty_folder()
+    {
+        using var h = new ModeRunnerHarness(Modes, providerType: CodexCliProvider.TypeName, withFallbackAgent: true);
+        h.Options.Providers["fake"].CodexEvidenceTools = true;
+        using var diff = new CwdFile("+ MARK_BODY\n");
+        string? folder = null;
+        var entries = -1;
+        h.Client.Script = [_ =>
+        {
+            folder = h.Client.Received[^1].Options?.AdditionalProperties?[ClaudeCliChatClient.WorkFolderKey] as string;
+            entries = Directory.EnumerateFileSystemEntries(folder!).Count();
+            return ScriptedChatClient.Reply("코덱스")(default);
+        }];
+
+        await h.Runner.RunAsync("mixc", "의도", null, null, [new ContextRange(diff.Name, 1, 1)], null, ModeRunnerHarness.DefaultReason, null, CancellationToken.None);
+
+        var codex = h.Client.Received[^1];
+        Assert.True(Has(codex.Options, CodexCliChatClient.EmptyWorkFolderKey));
+        Assert.False(Has(codex.Options, CodexCliChatClient.EvidenceSourceKey));
+        Assert.Contains("MARK_BODY", ScriptedChatClient.UserText(codex));
+        Assert.Equal(0, entries);                                                             // 저장소 사본 · context 파일을 깔지 않는다
+        Assert.False(Directory.Exists(folder));                                               // 끝나면 지운다
+        Assert.Contains("MARK_BODY", ScriptedChatClient.UserText(h.FallbackClient.Received[^1]));
+    }
+
+    [Fact]
+    public async Task Codex_without_context_runs_in_an_empty_folder_only_with_evidence_tools()
+    {
+        using var h = new ModeRunnerHarness(Modes, providerType: CodexCliProvider.TypeName);
+        h.Client.Script = [ScriptedChatClient.Reply("코덱스")];
+
+        var refused = await h.Run("nofb");
+        Assert.StartsWith("[모드 'nofb']", refused);
+        Assert.Contains("CodexEvidenceTools", refused);
+        Assert.Equal(0, h.Client.Calls);
+
+        h.Options.Providers["fake"].CodexEvidenceTools = true;
+        var ran = await h.Run("nofb");
+        Assert.Contains("코덱스", ran);
+        Assert.True(Has(h.Client.Received[^1].Options, CodexCliChatClient.EmptyWorkFolderKey));
+        Assert.True(Has(h.Client.Received[^1].Options, ClaudeCliChatClient.WorkFolderKey)); // 작업 폴더 없이 부르면 셸이 켜진 채 돈다
+    }
+
+    [Fact]
+    public async Task Require_context_mode_refuses_without_context()
+    {
+        using var h = new ModeRunnerHarness(Modes, providerType: CodexCliProvider.TypeName);
+        h.Options.Providers["fake"].CodexEvidenceTools = true;
+
+        var result = await h.Run("must");
+
+        Assert.StartsWith("[모드 'must']", result);
+        Assert.Contains("context가 필요", result);
+        Assert.Equal(0, h.Client.Calls);
+    }
+
+    [Fact]
+    public async Task Codex_step_that_does_not_see_the_input_runs_in_an_empty_folder()
+    {
+        using var h = new ModeRunnerHarness(Modes, providerType: CodexCliProvider.TypeName, withFallbackAgent: true);
+        h.Options.Providers["fake"].CodexEvidenceTools = true;
+        using var diff = new CwdFile("+ MARK_BODY\n");
+        h.Client.Script = [ScriptedChatClient.Reply("코덱스")];
+
+        await h.Runner.RunAsync("prev", "의도", null, null, [new ContextRange(diff.Name, 1, 1)], null, ModeRunnerHarness.DefaultReason, null, CancellationToken.None);
+
+        var codex = h.Client.Received[^1];
+        Assert.True(Has(codex.Options, CodexCliChatClient.EmptyWorkFolderKey));
+        Assert.DoesNotContain("MARK_BODY", ScriptedChatClient.UserText(codex));
+        Assert.Contains("대체 응답", ScriptedChatClient.UserText(codex));                         // 앞 단계(API) 결과만
+    }
+
+    [Fact]
+    public async Task Recent_quota_of_the_api_provider_does_not_block_the_codex_steps()
+    {
+        using var h = new ModeRunnerHarness(Modes, providerType: CodexCliProvider.TypeName, withFallbackAgent: true);
+        await HB.Orchestration.Shared.CallLog.AppendAsync(new HB.Orchestration.Shared.CallRecord
+        {
+            Id = "q1", Timestamp = DateTimeOffset.Now.AddMinutes(-5), Tool = "x", Mode = "x", Provider = "plain",
+            Model = "m2", Prompt = "p", Success = false, ErrorKind = "Quota",
+        }, h.LogPath);
+        using var diff = new CwdFile("+ x\n");
+        h.Client.Script = [ScriptedChatClient.Reply("코덱스")];
+
+        var result = await h.Runner.RunAsync("mix", "의도", null, null, [new ContextRange(diff.Name, 1, 1)], null, ModeRunnerHarness.DefaultReason, null, CancellationToken.None);
+
+        Assert.DoesNotContain(AgentRunner.QuotaFailurePrefix, result);
+        Assert.Equal(1, h.Client.Calls);
+        Assert.Equal(1, h.FallbackClient.Calls);
+    }
+
+    [Fact]
+    public async Task Mixed_debate_gives_each_turn_its_own_material()
+    {
+        using var h = new ModeRunnerHarness(Modes, providerType: CodexCliProvider.TypeName, withFallbackAgent: true);
+        h.Options.Providers["fake"].CodexEvidenceTools = true;
+        using var diff = new CwdFile("+ MARK_BODY\n");
+        h.Client.Script = [ScriptedChatClient.Reply("반박"), ScriptedChatClient.Reply("판정")];
+
+        await h.Runner.RunAsync("mixd", "원안", null, null, [new ContextRange(diff.Name, 1, 1)], null, ModeRunnerHarness.DefaultReason, null, CancellationToken.None);
+
+        Assert.Equal(2, h.Client.Calls);
+        var (first, judge) = (h.Client.Received[0], h.Client.Received[1]);
+        Assert.False(Has(first.Options, CodexCliChatClient.EmptyWorkFolderKey));              // 저장소 방식 토론자
+        Assert.Contains("## 변경 diff", ScriptedChatClient.UserText(first));
+        Assert.True(Has(judge.Options, CodexCliChatClient.EmptyWorkFolderKey));               // Prompt 방식 판정자
+        Assert.Contains("MARK_BODY", ScriptedChatClient.UserText(judge));
+        Assert.Contains("반박", ScriptedChatClient.UserText(judge));                           // 토론 기록은 user 글로
+        var api = h.FallbackClient.Received[^1];
+        Assert.Contains("MARK_BODY", ScriptedChatClient.UserText(api));
+        Assert.False(Has(api.Options, ClaudeCliChatClient.WorkFolderKey));
+    }
+
+    [Fact]
+    public async Task Codex_follow_up_sends_one_user_message_with_the_earlier_record()
+    {
+        using var h = new ModeRunnerHarness(Modes, providerType: CodexCliProvider.TypeName);
+        h.Options.Agents[0].StructuredOutput = StructuredOutputMode.Schema;
+        using var diff = new CwdFile("+ x\n");
+        using var more = new CwdFile("class MARK_SUPPLEMENT { }\n");
+        h.Client.Script = [ScriptedChatClient.Reply("""{"findings":[],"needsInfo":[{"what":"정의","path":null,"symbol":"A","why":"확인"}]}"""),
+                           ScriptedChatClient.Reply("""{"findings":[],"needsInfo":[]}""")];
+
+        var result = await h.Runner.RunAsync("cxrev", "의도", null, null, [new ContextRange(diff.Name, 1, 1)], null, ModeRunnerHarness.DefaultReason, null, CancellationToken.None);
+        var runId = result.Split('\n')[0]["runId: ".Length..].Trim();
+        var followUp = await h.Runner.RunFollowUpAsync("cxrev", new FollowUpRequest(runId, 1, ["1-N1"]), "보충 메모", null, [new ContextRange(more.Name, 1, 1)], "자료 보충", CancellationToken.None);
+
+        Assert.DoesNotContain("(followUp 불가", result);
+        Assert.DoesNotContain("[followUp 불가]", followUp);
+        Assert.Equal(2, h.Client.Calls);
+        var sent = h.Client.Received[^1];
+        Assert.DoesNotContain(sent.Messages, m => m.Role == ChatRole.Assistant);              // Codex는 assistant 메시지를 받지 않는다
+        var text = ScriptedChatClient.UserText(sent);
+        Assert.Contains("## 앞 호출 프롬프트", text);
+        Assert.Contains("## 앞 응답", text);
+        Assert.Contains("needsInfo", text);
+        Assert.Contains("## 보충 자료", text);
+        Assert.Contains($"- {more.Name}:1-1", text);                                            // 저장소 방식: 새 작업 폴더의 주목 범위
+        Assert.True(Has(sent.Options, ClaudeCliChatClient.WorkFolderKey));
+    }
+
+    [Fact]
+    public async Task Codex_follow_up_with_only_a_memo_uses_an_empty_folder_and_needs_evidence_tools()
+    {
+        using var h = new ModeRunnerHarness(Modes, providerType: CodexCliProvider.TypeName);
+        h.Options.Agents[0].StructuredOutput = StructuredOutputMode.Schema;
+        using var diff = new CwdFile("+ x\n");
+        h.Client.Script = [ScriptedChatClient.Reply("""{"findings":[],"needsInfo":[{"what":"정의","path":null,"symbol":"A","why":"확인"}]}"""),
+                           ScriptedChatClient.Reply("""{"findings":[],"needsInfo":[]}""")];
+        var result = await h.Runner.RunAsync("cxrev", "의도", null, null, [new ContextRange(diff.Name, 1, 1)], null, ModeRunnerHarness.DefaultReason, null, CancellationToken.None);
+        var runId = result.Split('\n')[0]["runId: ".Length..].Trim();
+
+        var refused = await h.Runner.RunFollowUpAsync("cxrev", new FollowUpRequest(runId, 1, ["1-N1"]), "메모만", null, null, "자료 보충", CancellationToken.None);
+        Assert.StartsWith("[followUp 불가]", refused);
+        Assert.Contains("CodexEvidenceTools", refused);
+        Assert.Equal(1, h.Client.Calls);
+
+        h.Options.Providers["fake"].CodexEvidenceTools = true;
+        var ran = await h.Runner.RunFollowUpAsync("cxrev", new FollowUpRequest(runId, 1, ["1-N1"]), "메모만", null, null, "자료 보충", CancellationToken.None);
+        Assert.DoesNotContain("[followUp 불가]", ran);
+        Assert.True(Has(h.Client.Received[^1].Options, CodexCliChatClient.EmptyWorkFolderKey));
+    }
+
+    [Fact]
+    public async Task Codex_follow_up_waits_out_a_recent_quota()
+    {
+        using var h = new ModeRunnerHarness(Modes, providerType: CodexCliProvider.TypeName);
+        h.Options.Agents[0].StructuredOutput = StructuredOutputMode.Schema;
+        using var diff = new CwdFile("+ x\n");
+        h.Client.Script = [ScriptedChatClient.Reply("""{"findings":[],"needsInfo":[{"what":"정의","path":null,"symbol":"A","why":"확인"}]}""")];
+        var result = await h.Runner.RunAsync("cxrev", "의도", null, null, [new ContextRange(diff.Name, 1, 1)], null, ModeRunnerHarness.DefaultReason, null, CancellationToken.None);
+        var runId = result.Split('\n')[0]["runId: ".Length..].Trim();
+        await HB.Orchestration.Shared.CallLog.AppendAsync(new HB.Orchestration.Shared.CallRecord
+        {
+            Id = "q2", Timestamp = DateTimeOffset.Now, Tool = "x", Mode = "x", Provider = "fake",
+            Model = "m", Prompt = "p", Success = false, ErrorKind = "Quota",
+        }, h.LogPath);
+
+        var followUp = await h.Runner.RunFollowUpAsync("cxrev", new FollowUpRequest(runId, 1, ["1-N1"]), "보충", null, [new ContextRange(diff.Name, 1, 1)], "자료 보충", CancellationToken.None);
+
+        Assert.StartsWith(AgentRunner.QuotaFailurePrefix, followUp);
+        Assert.Equal(1, h.Client.Calls);
+    }
+
+    [Fact]
+    public void Arguments_repeat_dash_i_for_each_image_before_the_model()
+    {
+        var args = CodexCliChatClient.Arguments(Settings, null, "", "C:\\ws", null, imageFiles: ["C:\\t\\image_01.png", "C:\\t\\image_02.jpg"]);
+
+        var first = args.IndexOf("C:\\t\\image_01.png");
+        Assert.Equal("-i", args[first - 1]);
+        Assert.Equal(["-i", "C:\\t\\image_02.jpg"], args[(first + 1)..(first + 3)]);
+        Assert.True(args.IndexOf("-C") < first && first < args.IndexOf("-m"));
+        Assert.Equal("-", args[^1]);
+        Assert.DoesNotContain("-i", CodexCliChatClient.Arguments(Settings, null, "", "C:\\ws", null));
+    }
+
+    [Fact]
+    public void User_content_keeps_text_boundaries_and_collects_images()
+    {
+        var png = new DataContent(new byte[] { 1, 2 }, "image/png");
+        var jpg = new DataContent(new byte[] { 3 }, "image/jpeg");
+        var message = new ChatMessage(ChatRole.User, [new TextContent("첨부\n\n"), new TextContent("[이미지 1] a.png"), png, new TextContent("[이미지 2] b.jpg"), jpg, new TextContent("## 요청")]);
+
+        var (text, images) = CodexCliChatClient.UserContent([message]);
+
+        Assert.Equal("첨부\n\n[이미지 1] a.png\n[이미지 2] b.jpg\n## 요청", text);
+        Assert.Equal([png, jpg], images);
+        Assert.Throws<ClaudeCliException>(() => CodexCliChatClient.UserContent([new ChatMessage(ChatRole.User, [new DataContent(new byte[] { 1 }, "image/gif")])]));
+        Assert.Throws<ClaudeCliException>(() => CodexCliChatClient.UserContent([new ChatMessage(ChatRole.User, [new UriContent("https://x/y.png", "image/png")])]));
+    }
+
+    [Fact]
+    public async Task Images_go_to_a_per_call_temp_folder_outside_the_work_folder_and_are_removed()
+    {
+        var folder = Directory.CreateDirectory(Path.Combine(_dir, "ws")).FullName;
+        List<string>? images = null;
+        var existedDuringRun = false;
+        var client = new CodexCliChatClient(Settings, (inv, _, _) =>
+        {
+            var args = inv.Arguments.ToList();
+            images = [.. args.Select((a, i) => (a, i)).Where(x => x.a == "-i").Select(x => args[x.i + 1])];
+            existedDuringRun = images.All(File.Exists);
+            return Task.FromResult(Ok(Events()));
+        });
+        var message = new ChatMessage(ChatRole.User, [new TextContent("[이미지 1] a.png"), new DataContent(new byte[] { 0x89, 0x50 }, "image/png"), new TextContent("요청")]);
+
+        await client.GetResponseAsync([message], new ChatOptions { AdditionalProperties = new() { [ClaudeCliChatClient.WorkFolderKey] = folder } });
+
+        Assert.Single(images!);
+        Assert.True(existedDuringRun);
+        Assert.EndsWith(".png", images![0]);
+        Assert.False(images[0].StartsWith(folder, StringComparison.OrdinalIgnoreCase));      // 작업 폴더 밖
+        Assert.Empty(Directory.EnumerateFileSystemEntries(folder));
+        Assert.False(File.Exists(images[0]));                                                 // 끝나면 지운다
+    }
+
+    [Fact]
+    public async Task Empty_folder_call_needs_evidence_tools_and_never_takes_the_shell_path()
+    {
+        var folder = Directory.CreateDirectory(Path.Combine(_dir, "empty")).FullName;
+        var ran = false;
+        var options = new ChatOptions { AdditionalProperties = new() { [ClaudeCliChatClient.WorkFolderKey] = folder, [CodexCliChatClient.EmptyWorkFolderKey] = true } };
+
+        var off = new CodexCliChatClient(Settings, (_, _, _) => { ran = true; return Task.FromResult(Ok(Events())); });
+        var refused = await Assert.ThrowsAsync<ClaudeCliException>(() => off.GetResponseAsync([new ChatMessage(ChatRole.User, "p")], options));
+        Assert.Contains("CodexEvidenceTools", refused.Message);
+
+        // 자료 도구를 켜면 자료 도구 경로로 간다 (시험 폴더에는 자료 도구 서버가 없어 그 단계에서 멈춘다 — 셸 안내 경로로 새지 않음).
+        var on = new CodexCliChatClient(Settings with { EvidenceTools = true }, (_, _, _) => { ran = true; return Task.FromResult(Ok(Events())); });
+        var stopped = await Assert.ThrowsAsync<ClaudeCliException>(() => on.GetResponseAsync([new ChatMessage(ChatRole.User, "p")], options));
+        Assert.Contains("자료 도구 서버", stopped.Message);
+        Assert.False(ran);
+    }
+
+    /// <summary>1x1 png (ImageLoader가 머리에서 형식 · 크기를 읽는다).</summary>
+    private const string OnePixelPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
+    private sealed class CwdBytes : IDisposable
+    {
+        public string Name { get; }
+        public CwdBytes(string extension, byte[] body)
+        {
+            Name = $"codex_img_{Guid.NewGuid():N}{extension}";
+            File.WriteAllBytes(Path.Combine(Environment.CurrentDirectory, Name), body);
+        }
+        public void Dispose() => File.Delete(Path.Combine(Environment.CurrentDirectory, Name));
+    }
+
+    [Fact]
+    public async Task Images_reach_codex_steps_but_claude_cli_steps_still_refuse_them()
+    {
+        using var png = new CwdBytes(".png", Convert.FromBase64String(OnePixelPng));
+        using var codex = new ModeRunnerHarness(Modes, providerType: CodexCliProvider.TypeName);
+        codex.Options.Providers["fake"].CodexEvidenceTools = true;
+        codex.Client.Script = [ScriptedChatClient.Reply("코덱스")];
+
+        var ran = await codex.Runner.RunAsync("nofb", "그림 보기", null, null, null, [png.Name], ModeRunnerHarness.DefaultReason, null, CancellationToken.None);
+
+        Assert.Contains("코덱스", ran);
+        Assert.Contains(codex.Client.Received[^1].Messages.SelectMany(m => m.Contents), c => c is DataContent { MediaType: "image/png" });
+
+        using var claude = new ModeRunnerHarness(Modes, providerType: ClaudeCliProvider.TypeName);
+        using var diff = new CwdFile("+ x\n");
+        var refused = await claude.Runner.RunAsync("nofb", "그림 보기", null, null, [new ContextRange(diff.Name, 1, 1)], [png.Name], ModeRunnerHarness.DefaultReason, null, CancellationToken.None);
+        Assert.Contains("images를 받지 않습니다", refused);
+        Assert.Equal(0, claude.Client.Calls);
+    }
+
+    [Fact]
+    public async Task Codex_debater_gets_the_earlier_turns_as_user_text_in_the_second_round()
+    {
+        using var h = new ModeRunnerHarness(Modes, providerType: CodexCliProvider.TypeName, withFallbackAgent: true);
+        h.Options.Providers["fake"].CodexEvidenceTools = true;
+        h.Client.Script = [ScriptedChatClient.Reply("반박 1회차"), ScriptedChatClient.Reply("반박 2회차")];
+
+        await h.Run("deb2", "원안");
+
+        Assert.Equal(2, h.Client.Calls);
+        var second = h.Client.Received[1];
+        Assert.DoesNotContain(second.Messages, m => m.Role == ChatRole.Assistant);
+        var text = ScriptedChatClient.UserText(second);
+        Assert.Contains("## 토론 기록", text);
+        Assert.Contains("반박 1회차", text);
+        Assert.Contains("대체 응답", text);                                                   // 상대(API) 발언
+    }
+
+    [Fact]
+    public async Task Prompt_material_follow_up_sends_the_supplement_body_in_an_empty_folder()
+    {
+        using var h = new ModeRunnerHarness(Modes, providerType: CodexCliProvider.TypeName);
+        h.Options.Providers["fake"].CodexEvidenceTools = true;
+        h.Options.Agents[0].StructuredOutput = StructuredOutputMode.Schema;
+        using var more = new CwdFile("class MARK_SUPPLEMENT_BODY { }\n");
+        h.Client.Script = [ScriptedChatClient.Reply("""{"findings":[],"needsInfo":[{"what":"정의","path":null,"symbol":"A","why":"확인"}]}"""),
+                           ScriptedChatClient.Reply("""{"findings":[],"needsInfo":[]}""")];
+        var result = await h.Run("cxpr", "설계안");
+        var runId = result.Split('\n')[0]["runId: ".Length..].Trim();
+
+        await h.Runner.RunFollowUpAsync("cxpr", new FollowUpRequest(runId, 1, ["1-N1"]), "", null, [new ContextRange(more.Name, 1, 1)], "자료 보충", CancellationToken.None);
+
+        var sent = h.Client.Received[^1];
+        Assert.True(Has(sent.Options, CodexCliChatClient.EmptyWorkFolderKey));
+        Assert.Contains("MARK_SUPPLEMENT_BODY", ScriptedChatClient.UserText(sent));         // 본문 방식: 보충 자료 본문
+    }
+
+    [Fact]
+    public async Task Codex_follow_up_reports_a_broken_mode_graph_instead_of_crashing()
+    {
+        using var h = new ModeRunnerHarness(Modes, providerType: CodexCliProvider.TypeName);
+        h.Options.Agents[0].StructuredOutput = StructuredOutputMode.Schema;
+        using var diff = new CwdFile("+ x\n");
+        h.Client.Script = [ScriptedChatClient.Reply("""{"findings":[],"needsInfo":[{"what":"정의","path":null,"symbol":"A","why":"확인"}]}""")];
+        var result = await h.Runner.RunAsync("cxrev", "의도", null, null, [new ContextRange(diff.Name, 1, 1)], null, ModeRunnerHarness.DefaultReason, null, CancellationToken.None);
+        var runId = result.Split('\n')[0]["runId: ".Length..].Trim();
+        File.WriteAllText(h.ModesPath, """
+            { "Roles": { "R": { "Prompt": "역할 R" } },
+              "Modes": { "cxrev": { "Flow": "Graph", "Steps": [ { "Role": "Reviewer", "Agent": "a1", "From": ["없는단계"] } ] } } }
+            """);
+
+        var followUp = await h.Runner.RunFollowUpAsync("cxrev", new FollowUpRequest(runId, 1, ["1-N1"]), "보충", null, [new ContextRange(diff.Name, 1, 1)], "자료 보충", CancellationToken.None);
+
+        Assert.StartsWith("[모드 'cxrev']", followUp);
+        Assert.Equal(1, h.Client.Calls);
+    }
+
+    [Fact]
+    public async Task Body_cap_counts_only_steps_that_receive_the_attachment()
+    {
+        using var h = new ModeRunnerHarness(Modes, providerType: CodexCliProvider.TypeName, withFallbackAgent: true);
+        var name = $"codex_big_{Guid.NewGuid():N}.cs";
+        File.WriteAllText(Path.Combine(Environment.CurrentDirectory, name), string.Concat(Enumerable.Repeat("// 첨부 본문 상한을 넘기는 긴 줄입니다\n", 200)));
+        try
+        {
+            h.Client.Script = [ScriptedChatClient.Reply("코덱스")];
+
+            // 1단계 Codex(저장소 방식 — 본문 대신 주목 범위) + 2단계 API(앞 결과만): 본문을 받는 단계가 없으니 본문 상한으로 거절하지 않는다.
+            var result = await h.Runner.RunAsync("capA", "의도", null, null, [new ContextRange(name, 1, 200)], null, ModeRunnerHarness.DefaultReason, null, CancellationToken.None);
+
+            Assert.DoesNotContain("[입력이 너무 깁니다]", result);
+            Assert.Equal(1, h.FallbackClient.Calls);
+        }
+        finally { File.Delete(Path.Combine(Environment.CurrentDirectory, name)); }
+    }
+
+    [Fact]
+    public async Task Codex_follow_up_refuses_before_copying_when_the_earlier_record_alone_is_too_long()
+    {
+        using var h = new ModeRunnerHarness(Modes, providerType: CodexCliProvider.TypeName);
+        h.Options.Agents[0].StructuredOutput = StructuredOutputMode.Schema;
+        using var diff = new CwdFile("+ x\n");
+        h.Client.Script = [ScriptedChatClient.Reply("""{"findings":[],"needsInfo":[{"what":"정의","path":null,"symbol":"A","why":"확인"}]}""")];
+        var result = await h.Runner.RunAsync("cxsm2", "의도", null, null, [new ContextRange(diff.Name, 1, 1)], null, ModeRunnerHarness.DefaultReason, null, CancellationToken.None);
+        var runId = result.Split('\n')[0]["runId: ".Length..].Trim();
+
+        var followUp = await h.Runner.RunFollowUpAsync("cxsm2", new FollowUpRequest(runId, 1, ["1-N1"]), new string('메', 4000), null, [new ContextRange(diff.Name, 1, 1)], "자료 보충", CancellationToken.None);
+
+        Assert.StartsWith("[입력이 너무 깁니다] 앞 프롬프트 + 응답 + 메모만", followUp);
+        Assert.Equal(1, h.Client.Calls);
+    }
+
+    [Fact]
+    public void Golden_fixed_run_with_codex_needs_evidence_tools()
+    {
+        using var h = new ModeRunnerHarness(Modes, providerType: CodexCliProvider.TypeName);
+
+        var (_, refused) = h.Runner.PreviewFixedPrompt("cxrev", null, 10);
+        Assert.Contains("CodexEvidenceTools", refused);
+
+        h.Options.Providers["fake"].CodexEvidenceTools = true;
+        var (step, error) = h.Runner.PreviewFixedPrompt("cxrev", null, 10);
+        Assert.Null(error);
+        Assert.NotNull(step);
+    }
+
+    [Theory]
+    [InlineData("docs/preflight/2026-11-21_x/p1_A.md", true)]
+    [InlineData("Game/docs/preflight/a.md", true)]
+    [InlineData("docs/preflights.md", false)]
+    public void Preflight_records_are_left_out_of_the_copy(string path, bool excluded) =>
+        Assert.Equal(excluded, ReviewWorkFolder.IsExcludedFromCopy(path));
 
     // ── 프로세스: 자손이 파이프를 물고 남아도 끝난다 ─────────────────────────────
 

@@ -58,7 +58,7 @@ try:
         'subagent_in/old/a.cs': 'o', 'docs/plans/p.md': 'plan', 'docs/worklog/w.md': 'log', 'docs/worklog.md': 'idx',
         'docs/README.md': 'keep', '.mcp.json': '{}', 'appsettings.local.json': '{}', 'cert.pfx': 'k', '.env': 'K=1',
         'credentials.json': '{}', 'secrets.yaml': 'k', 'Android.keystore': 'k',
-        'docs/work-orders/w.md': 'order', '.mcp.json.bak-1': '{}', 'id_dsa': 'k', 'k.ppk': 'k', '.npmrc': 'k', '.netrc': 'k',
+        'docs/work-orders/w.md': 'order', 'docs/preflight/x/p1_A.md': 'p1', '.mcp.json.bak-1': '{}', 'id_dsa': 'k', 'k.ppk': 'k', '.npmrc': 'k', '.netrc': 'k',
         '.git-credentials': 'k', 'tf.tfstate': '{}', 'a.har': '{}', 'run.log': 'l',
         'big.txt': 'y' * (sct.MAX_FILE + 1), 'img.png': b'\x89PNG\x00\x01', 'gone.cs': 'x',
         'lnk/L.cs': 'class L {}',
@@ -100,7 +100,8 @@ try:
           have('src/New.cs') and have('untracked.cs') and not have('ignored/I.cs') and not have('gone.cs'))
     check('독립성 파일 뺌', not any(have(r) for r in ['CLAUDE.md', 'sub/CLAUDE.md', 'MISTAKES.md', 'PROJECT.md', 'AGENTS.md',
                                                   '.claude/x.md', '.codex/config.toml', 'review_tmp/a.diff', 'subagent_in/old/a.cs',
-                                                  'docs/plans/p.md', 'docs/worklog/w.md', 'docs/worklog.md', 'docs/work-orders/w.md']))
+                                                  'docs/plans/p.md', 'docs/worklog/w.md', 'docs/worklog.md', 'docs/work-orders/w.md',
+                                                  'docs/preflight/x/p1_A.md']))
     check('비밀 모양 뺌', not any(have(r) for r in ['.mcp.json', 'appsettings.local.json', 'cert.pfx', '.env', 'credentials.json',
                                                  'secrets.yaml', 'Android.keystore', '.mcp.json.bak-1', 'id_dsa', 'k.ppk', '.npmrc',
                                                  '.netrc', '.git-credentials', 'tf.tfstate', 'a.har', 'run.log']))

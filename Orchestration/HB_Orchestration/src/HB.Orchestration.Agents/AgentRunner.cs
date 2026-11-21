@@ -22,9 +22,12 @@ public sealed record CallMeta(IReadOnlyList<string>? Files, IReadOnlyList<string
     /// <summary>지휘자가 결과를 보기 전에 완성한 자체 검토. 기록 전용 — 에이전트에게 보내지 않는다.</summary>
     public string? OwnReview { get; init; }
 
-    /// <summary>claude-cli 단계의 작업 폴더 (ReviewWorkFolder). 다른 제공사는 null.</summary>
+    /// <summary>claude-cli · codex-cli 단계의 작업 폴더 (ReviewWorkFolder). 다른 제공사는 null.</summary>
     public string? WorkFolder { get; init; }
     public ReviewEvidenceSource? EvidenceSource { get; init; }
+
+    /// <summary>true면 WorkFolder는 빈 폴더다 (codex-cli: 첨부 본문을 프롬프트로 받는 단계 · context 없는 실행).</summary>
+    public bool EmptyWorkFolder { get; init; }
 }
 
 /// <summary>모드의 한 단계 실행 정보.</summary>
@@ -254,11 +257,14 @@ public sealed class AgentRunner
             using var searchScope = WebSearchScope.Enter(call.WebSearch);
             // 추론 강도는 실행 옵션으로 얹는다 (에이전트 ChatOptions — Schema 모드의 응답 형식 — 위에 합쳐진다).
             var chatOptions = call.Reasoning is { } effort ? new ChatOptions { Reasoning = new ReasoningOptions { Effort = effort } } : null;
-            // claude-cli는 작업 폴더가 있어야 돈다 (ModeRunner가 만든 폴더를 실행 옵션으로 넘긴다).
-            if (call.Meta.WorkFolder is { } workFolder)
+            // claude-cli · codex-cli는 작업 폴더가 있어야 돈다 (ModeRunner가 만든 폴더를 실행 옵션으로 넘긴다). API 제공사에는 싣지 않는다 — 로컬 경로가 요청에 섞이지 않게.
+            var isCodex = string.Equals(call.Agent.ProviderOptions?.Type, Providers.CodexCliProvider.TypeName, StringComparison.OrdinalIgnoreCase);
+            if (call.Meta.WorkFolder is { } workFolder && ModeRunner.UsesWorkFolder(call.Agent.ProviderOptions?.Type))
                 ((chatOptions ??= new ChatOptions()).AdditionalProperties ??= [])[Providers.ClaudeCliChatClient.WorkFolderKey] = workFolder;
-            if (call.Meta.EvidenceSource is { } evidenceSource && string.Equals(call.Agent.ProviderOptions?.Type, Providers.CodexCliProvider.TypeName, StringComparison.OrdinalIgnoreCase))
+            if (call.Meta.EvidenceSource is { } evidenceSource && isCodex)
                 ((chatOptions ??= new ChatOptions()).AdditionalProperties ??= [])[Providers.CodexCliChatClient.EvidenceSourceKey] = evidenceSource;
+            if (call.Meta.EmptyWorkFolder && isCodex)
+                ((chatOptions ??= new ChatOptions()).AdditionalProperties ??= [])[Providers.CodexCliChatClient.EmptyWorkFolderKey] = true;
             // codex-cli: 구조화 출력 스키마는 OpenAI 요청 옵션(StructuredRequest)으로는 닿지 않는다 → 원문 스키마를 넘겨 --output-schema로.
             if (call.Output is { } cliFormat && call.OutputMode == StructuredOutputMode.Schema
                 && string.Equals(call.Agent.ProviderOptions?.Type, Providers.CodexCliProvider.TypeName, StringComparison.OrdinalIgnoreCase))

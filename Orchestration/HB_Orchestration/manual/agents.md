@@ -14,19 +14,20 @@
 | 이름 | 제공사 | 모델 | 쓰는 곳 |
 |---|---|---|---|
 | `gpt_high_astra` | openai | gpt-6-astra | 교체용 상위 모델 (기본 모드에는 없음) |
-| `gpt_main_sol` | openai | gpt-6.1-sol | 리뷰 · 반박 · 판정 · 성능 · preflight 대부분 |
+| `gpt_main_sol` | openai | gpt-6.1-sol | 교체용 (2026-11-21부터 기본 모드에는 없음 — 자리는 `codex_cli_sol`) |
 | `gpt_high_astra62` | openai | gpt-6.2-astra | 교체용 (기본 모드에는 없음) |
 | `gpt_main_sol62` | openai | gpt-6.2-sol | 교체용 (기본 모드에는 없음) |
-| `gpt_mini_luna` | openai | gpt-6-luna | 지시서 검토 (work_order_main) |
+| `gpt_mini_luna` | openai | gpt-6-luna | 교체용 (2026-11-21부터 기본 모드에는 없음) |
 | `gpt_mini_luna_web` | openai-web | gpt-6-luna | 웹검색 단계 (research_main Scout · crash_main CrashSearch) |
 | `gemini_high_argon` | gemini | gemini-4-argon | 교체용 (기본 모드에는 없음) |
 | `gemini_main_hydrogen` | gemini | gemini-4-hydrogen | 논리 검증 · 토론 상대 · parallel · 지시서 검토 (추론 medium) |
 | `gemini_high_carbon` | gemini | gemini-4-carbon | crash 분류 · preflight B · preflight_check |
+| `gemini_high_neon` | gemini | gemini-4-neon | 교체용 (기본 모드에는 없음) |
 | `gemini_mini_lite` | gemini | gemini-3.5-flash-lite | 가벼운 교체용 |
 | `deepseek_main_flash` | fireworks | `accounts/fireworks/models/deepseek-v4p1-flash-1017` | review_high · perf_high의 두 번째 시선 (`Vision: false`) |
 | `local` | local (Ollama) | `ollama list`의 모델 | 꺼 둠 (`Enabled: false`) |
-| `claude_cli_opus` | anthropic-cli | claude-opus-5-5 | API 리뷰 `sub_*` ([claude-cli 제공사](#claude-cli-제공사-sub_-모드)) |
-| `codex_cli_sol` | codex | gpt-6.1-sol | `review_main` 1순위 (ChatGPT 구독, [codex-cli 제공사](#codex-cli-제공사-review_main)) |
+| `claude_cli_opus` | anthropic-cli | claude-opus-5-5 | API 리뷰 `sub_*`의 한도 소진 대체 (기본은 `codex_cli_sol`, [claude-cli 제공사](#claude-cli-제공사-sub_-모드)) |
+| `codex_cli_sol` | codex | gpt-6.1-sol | 웹검색 밖 기본 모드의 sol 자리 전부 — 리뷰 · sub_* · 반박 · 판정 · 성능 · preflight A · 지시서 검토 (ChatGPT 구독, [codex-cli 제공사](#codex-cli-제공사-sol-자리)) |
 | `codex_cli_sol62` | codex | gpt-6.2-sol | 교체용 (기본 모드에는 없음) |
 | `codex_cli_astra62` | codex | gpt-6.2-astra | 교체용 (기본 모드에는 없음) |
 
@@ -87,7 +88,7 @@
 | `openai-compatible` | Chat Completions — OpenAI · Gemini · Fireworks · Ollama · LM Studio |
 | `openai-responses` | OpenAI Responses API, 웹검색 단계용 |
 | `claude-cli` | 아래 [claude-cli 제공사](#claude-cli-제공사-sub_-모드) |
-| `codex-cli` | 아래 [codex-cli 제공사](#codex-cli-제공사-review_main) |
+| `codex-cli` | 아래 [codex-cli 제공사](#codex-cli-제공사-sol-자리) |
 
 **Endpoint**
 
@@ -141,7 +142,7 @@ OpenAI Chat Completions 전용입니다. 다른 제공사에는 넣지 않습니
 | `Schema` | 거기에 `response_format: json_schema`(strict)까지 보내 강제합니다 |
 
 - 모델이 `Schema`를 지원하지 않으면 400 → 그 단계가 실패합니다. 자동으로 `Prompt`로 다시 보내지 않으니, 이 값을 `Prompt`로 바꿉니다.
-- 기본 설정: 제공사 단위로는 `openai`만 `Schema`, 에이전트 단위로는 `gemini_high_argon` · `gemini_high_carbon` · `deepseek_main_flash`도 `Schema`입니다 ([modes.md](modes.md) "구조화 출력").
+- 기본 설정: 제공사 단위로는 `openai`만 `Schema`, 에이전트 단위로는 `gemini_high_argon` · `gemini_high_carbon` · `gemini_high_neon` · `deepseek_main_flash` · `codex_cli_*`도 `Schema`입니다 (codex-cli는 `--output-schema`로) ([modes.md](modes.md) "구조화 출력").
 
 ### 추론 강도 (`ReasoningEffort`)
 
@@ -282,11 +283,11 @@ OpenAI Chat Completions 전용입니다. 다른 제공사에는 넣지 않습니
 
 ## claude-cli 제공사 (`sub_*` 모드)
 
-검토형 서브에이전트(self-reviewer 등)를 Claude Code 구독 대신 **Anthropic API 키**로 돌립니다.
+검토형 서브에이전트(self-reviewer 등)를 Claude Code 구독 대신 **Anthropic API 키**로 돌립니다. 2026-11-04부터 `sub_*`의 기본은 `codex_cli_sol`(Codex 구독)이고, 이 제공사는 Codex 한도 소진 때의 대체(`FallbackAgent`)입니다.
 
 - 서버가 `claude --safe-mode --restricted --strict-mcp-config -p`를 읽기 전용 에이전트로 띄웁니다.
-- `sub_self` · `sub_perf` · `sub_security`는 작업 폴더가 저장소 사본입니다 (모드의 `RepoCopy`). 사본 목록은 `git ls-files --cached --others --exclude-standard` — 추적 파일과 `.gitignore` 밖 새 파일입니다. 에이전트가 Glob · Grep으로 찾아 Read로 읽습니다. `sub_direction`은 지휘자가 넘긴 파일만 받습니다.
-- 사본에서 빼는 것: `.gitignore` 대상 · 이진 · 큰 파일, 지시 · 규칙 · 계획 문서, `DenyPatterns`, 비밀 모양 이름(`.mcp*.json` · `.mcp*.json.*`(백업) · SSH 키 `id_rsa*` 등 · `*.ppk` · `.npmrc` · `.netrc` · `.git-credentials` · `*.tfstate` · `*.har` · `*.log` · `appsettings.*.json` · `google-services.json` · 이름에 secret · token이 든 설정 파일). 코드 · 에셋 안에 박힌 비밀은 이름으로 거르지 못합니다. 더 빼려면 `Context.DenyPatterns`에 넣습니다.
+- claude-cli로 돌 때 `sub_self` · `sub_perf` · `sub_security`는 작업 폴더가 저장소 사본입니다 (모드의 `RepoCopy`). 사본 목록은 `git ls-files --cached --others --exclude-standard` — 추적 파일과 `.gitignore` 밖 새 파일입니다. 에이전트가 Glob · Grep으로 찾아 Read로 읽습니다. `sub_direction`은 지휘자가 넘긴 파일만 받습니다. (Codex로 돌 때는 단계의 `CodexMaterial`을 따릅니다 — sub_* 넷 모두 `Repository`.)
+- 사본에서 빼는 것: `.gitignore` 대상 · 이진 · 큰 파일, 지시 · 규칙 · 계획 문서 · `docs/preflight`, `DenyPatterns`, 비밀 모양 이름(`.mcp*.json` · `.mcp*.json.*`(백업) · SSH 키 `id_rsa*` 등 · `*.ppk` · `.npmrc` · `.netrc` · `.git-credentials` · `*.tfstate` · `*.har` · `*.log` · `appsettings.*.json` · `google-services.json` · 이름에 secret · token이 든 설정 파일). 코드 · 에셋 안에 박힌 비밀은 이름으로 거르지 못합니다. 더 빼려면 `Context.DenyPatterns`에 넣습니다.
 - diff에 든 파일이 사본에서 빠지면 결과 끝에 `(사본에서 뺀 변경 파일: …)`이 붙습니다. 전체를 보게 하려면 그 파일을 `context`로 넘깁니다.
 - **`--bare`는 쓰지 않습니다.** `--tools`에 Glob · Grep을 줘도 Read만 나옵니다 (Claude Code 2.1.312).
 
@@ -296,9 +297,9 @@ OpenAI Chat Completions 전용입니다. 다른 제공사에는 넣지 않습니
 |---|---|
 | 모드 | `sub_self` · `sub_perf` · `sub_security` · `sub_direction` |
 | 역할 | `SubSelf` · `SubPerf` · `SubSecurity` · `SubDirection` = 각 검토형 서브에이전트 정의 본문 (읽는 것만 작업 폴더 · Read 기준) |
-| 에이전트 | `claude_cli_opus` 공용 = claude-opus-5-5 · effort medium · MaxTurns 40 · MaxBudgetUsd 2 · 재시도 없음 (제공사도 MaxAttempts 1) |
+| 에이전트 | 기본 `codex_cli_sol` · 한도 소진 대체 `claude_cli_opus` 공용 = claude-opus-5-5 · effort medium · MaxTurns 40 · MaxBudgetUsd 2 · 재시도 없음 (제공사도 MaxAttempts 1) |
 
-**검토형 리뷰의 기본**입니다 — `/self-review` · `/cross-review` 2단계 · `perf_*` ownReview. 서브에이전트는 `/self-review sub …`로 고르거나 크레딧이 소진됐을 때 씁니다.
+`sub_*`는 `/self-review`의 기본입니다. `/cross-review`(main · high) 2단계와 `perf_*` ownReview는 외부 쪽 sol도 Codex라 기본이 서브에이전트입니다. 서브에이전트는 `/self-review sub …`로 고르거나 한도 · 크레딧이 소진됐을 때도 씁니다.
 
 ### 실행
 
@@ -355,8 +356,9 @@ claude --safe-mode --restricted --strict-mcp-config -p --no-session-persistence 
   - **파일 목록** (경로 · SHA-256 앞 12자 — 기록에 남아 나중에 대조)
   - "이번 검토의 중심" (경로:줄)
 - 본문을 보내지 않으므로 모드 입력 상한(MaxInputChars)은 input에만 적용합니다.
-- context가 없으면 실행하지 않습니다.
-- 한 모드에 다른 제공사 에이전트를 섞을 수 없습니다. images · followUp은 받지 않습니다.
+- context가 없으면 실행하지 않습니다 (claude-cli). codex-cli는 아래 "자료 방식"을 따릅니다.
+- API 제공사 단계와는 한 모드에 섞을 수 있습니다 — 단계마다 입력 · 호출 정보를 따로 만들고, API 단계에는 작업 폴더를 싣지 않습니다. claude-cli와 codex-cli는 폴더 모양이 달라 한 모드에 섞지 않습니다.
+- claude-cli는 images · followUp을 받지 않습니다.
 
 **정의 색인** (`DefinitionIndex`): claude -p가 Read만 주므로, 파일 목록에 줄 수와 정의 위치를 붙입니다.
 
@@ -407,9 +409,9 @@ claude --safe-mode --restricted --strict-mcp-config -p --no-session-persistence 
 - reason 태그는 `[ownReview:sub_self]` · `[ownReview:sub_perf]` · `[ownReview:sub_self+sub_security]`.
 - H4 훅이 읽은 파일을 작업 폴더 기준 상대 경로로 검사합니다.
 
-## codex-cli 제공사 (`review_main`)
+## codex-cli 제공사 (sol 자리)
 
-외부 리뷰(`review_main`)를 OpenAI API 대신 **Codex CLI + ChatGPT 구독 로그인**으로 돌립니다. 리뷰어가 저장소 사본에서 정의 · 호출부를 직접 찾아 읽습니다 (지휘자가 고른 첨부에 갇히지 않게).
+외부 에이전트의 sol 자리(웹검색 단계 밖)를 OpenAI API 대신 **Codex CLI + ChatGPT 구독 로그인**으로 돌립니다 (2026-11-21부터 — 처음은 `review_main`만). 코드 리뷰 단계는 리뷰어가 저장소 사본에서 정의 · 호출부를 직접 찾아 읽습니다 (지휘자가 고른 첨부에 갇히지 않게). 판정 · 설계 단계는 첨부 본문을 받습니다 — 아래 "자료 방식".
 
 ### 실행
 
@@ -417,14 +419,14 @@ claude --safe-mode --restricted --strict-mcp-config -p --no-session-persistence 
 codex exec --json --ephemeral --ignore-user-config
   -c windows.sandbox="unelevated" -c web_search="disabled" -c forced_login_method="chatgpt"
   -c tool_output_token_limit=120000
-  -s read-only --skip-git-repo-check -C <작업 폴더> -m <Model>
+  -s read-only --skip-git-repo-check -C <작업 폴더> [-i <그림> …] -m <Model>
   --disable apps · plugins · remote_plugin · browser_use · browser_use_external · computer_use · in_app_browser · multi_agent · image_generation
   -c model_reasoning_effort=… -c developer_instructions=<시스템 프롬프트>
   [--output-schema <구조화 출력 스키마>] -
 ```
 
 - 사용자 프롬프트는 stdin.
-- 한 턴만 돕니다. followUp · 토론은 거절합니다.
+- 한 턴만 돕니다. assistant 메시지는 거절합니다 — 토론 · followUp은 앞 기록을 user 글에 합쳐 새로 부릅니다.
 
 플래그를 고른 까닭:
 
@@ -467,7 +469,7 @@ Git 조회는 디스크 허용 목록과 함께 고정 HEAD에서도 일반 파�
 
 `Orchestration.Providers.codex.CodexEvidenceOriginalRoot=true`이면 자료 도구가 원본 프로젝트 루트를 읽습니다. 기본값은 false이고 소스 설정은 true입니다. 원본 루트는 ModeRunner가 정해 제공사로 전달하며 모델이 도구 인자로 바꿀 수 없습니다. 두 옵션을 모두 켜야 원본 도구가 연결됩니다. 저장소 사본을 만들지 못한 실행(git이 아님 · 상한 초과)은 원본 정책을 넘기지 않아 사본 자료 도구를 씁니다. 자료 도구 연결 시 exec 내부에 `-c features.shell_tool=false`를 전달해 명령 실행 도구를 끕니다. 그래도 실행 기록에 셸 명령(시작만 된 것 포함)이나 `hb_evidence` 밖 MCP 도구가 나오면 결과를 버리고 실패로 기록합니다 — 사후 검사라 이미 모델로 나간 출력은 되돌리지 못합니다. 자료 서버 시작 시간 상한은 60초입니다(원본 모드는 시작 때 git 목록을 만듦). `--ignore-user-config`는 유지하며 전역 config.toml에 의존하지 않습니다. CLI의 작업 위치는 기존 사본입니다. 원본 정책이 없으면 사본 자료 도구를 사용합니다.
 
-원본 모드에서는 내장 민감 파일 패턴·사본 전용 인증 설정 패턴·`Context.DenyPatterns`를 목록·검색·읽기 전체에 적용합니다. 예를 들어 `company-auth/**`나 `*.keystore`를 프로젝트별 금지 목록에 넣습니다. 원본 목록은 사본과 같은 git 목록(추적 파일 + `.gitignore` 밖 새 파일)에서 시작합니다 — 폴더를 직접 훑지 않으므로 `.gitignore` 대상(개인 설정 · 산출물 · 사내 자료 폴더)은 보이지 않습니다. git 목록을 못 만들면 자료 서버가 시작하지 않습니다(종료 코드 3). 거기서 링크·지시 파일·계획/로그·지시서와, 어느 깊이에 있든 빌드/Unity 캐시 이름의 폴더(`bin` · `obj` · `Library` · `Temp` · `Logs` 등 — 사본 모드는 이 이름 제외를 하지 않음)를 제외하고, 실제 읽을 때 SafePath로 다시 검사합니다. 지휘자가 `context`로 넘긴 메인 루트 경로는 `.gitignore` · 사본 제외 대상이어도 목록에 넣습니다(사본 모드와 같은 규칙, Codex 지시 · 금지 패턴은 그대로 막음 — 서버 인자 4번째 base64 JSON). 속성을 읽지 못해 건너뛴 항목 수(부모 폴더 접근 거부 등, 지워진 추적 파일은 세지 않음)는 응답의 `unreadableCount`입니다 — 파일 자체의 읽기 거부는 목록에 남고 읽을 때 오류 응답이 됩니다. Codex는 MCP 서버를 기본 허용 목록 환경으로 띄우므로, 원본 모드에서는 `XDG_CONFIG_HOME`(git 전역 무시 파일 위치)을 그 서버의 `env`로 따로 넘깁니다. 원본 목록은 최대 50,000개이며 상한에 도달하면 `inventoryTruncated=true`를 표시합니다. 목록은 시작 시 고정하므로 이후 새 파일은 다음 실행에서 보입니다. 파일 내용은 읽는 시점의 값이며 페이지 간 SHA-256이 바뀌면 같은 내용으로 간주하지 않습니다.
+원본 모드에서는 내장 민감 파일 패턴·사본 전용 인증 설정 패턴·`Context.DenyPatterns`를 목록·검색·읽기 전체에 적용합니다. 예를 들어 `company-auth/**`나 `*.keystore`를 프로젝트별 금지 목록에 넣습니다. 원본 목록은 사본과 같은 git 목록(추적 파일 + `.gitignore` 밖 새 파일)에서 시작합니다 — 폴더를 직접 훑지 않으므로 `.gitignore` 대상(개인 설정 · 산출물 · 사내 자료 폴더)은 보이지 않습니다. git 목록을 못 만들면 자료 서버가 시작하지 않습니다(종료 코드 3). 거기서 링크·지시 파일·계획/로그·지시서·`docs/preflight`(/preflight 단계 원문)와, 어느 깊이에 있든 빌드/Unity 캐시 이름의 폴더(`bin` · `obj` · `Library` · `Temp` · `Logs` 등 — 사본 모드는 이 이름 제외를 하지 않음)를 제외하고, 실제 읽을 때 SafePath로 다시 검사합니다. 지휘자가 `context`로 넘긴 메인 루트 경로는 `.gitignore` · 사본 제외 대상이어도 목록에 넣습니다(사본 모드와 같은 규칙, Codex 지시 · 금지 패턴은 그대로 막음 — 서버 인자 4번째 base64 JSON). 속성을 읽지 못해 건너뛴 항목 수(부모 폴더 접근 거부 등, 지워진 추적 파일은 세지 않음)는 응답의 `unreadableCount`입니다 — 파일 자체의 읽기 거부는 목록에 남고 읽을 때 오류 응답이 됩니다. Codex는 MCP 서버를 기본 허용 목록 환경으로 띄우므로, 원본 모드에서는 `XDG_CONFIG_HOME`(git 전역 무시 파일 위치)을 그 서버의 `env`로 따로 넘깁니다. 원본 목록은 최대 50,000개이며 상한에 도달하면 `inventoryTruncated=true`를 표시합니다. 목록은 시작 시 고정하므로 이후 새 파일은 다음 실행에서 보입니다. 파일 내용은 읽는 시점의 값이며 페이지 간 SHA-256이 바뀌면 같은 내용으로 간주하지 않습니다.
 
 원본 옵션이 꺼져 있으면 기존 필터를 거친 작업 사본을 읽으며 Git 조회와 버전 실행은 거절합니다. 고정 버전 관측 외의 외부 환경·임의 진단 명령은 두 모드 모두 제공하지 않습니다. Git 읽기는 설치된 Git의 고정 log/ls-tree/cat-file/rev-parse만 사용하고 명령마다10초·출력 상한을 적용합니다 — 넘으면 git 프로세스 트리를 바로 끝냅니다. 글로벌·시스템 설정과 상속 Git 환경 변수를 제거하고 replace·hooks·fsmonitor·프로토콜·lazy fetch를 비활성화합니다. 로컬 Git 저장소 자체는 사용자가 신뢰하는 입력이라는 전제입니다. 이 도구는 별도 모델이 아니라 같은 Codex 실행이 사용하는 자료 서버입니다. 일반 서버 설정·API 키를 로드하지 않습니다. 파일명 패턴은 현재나 과거 본문에 박힌 비밀을 탐지하지 않습니다. 자료 도구가 연결되지 않는 기존 셸 실행 모드는 그대로이며 OS 권한 격리를 구현한 것이 아닙니다.
 
@@ -528,11 +530,37 @@ Git 조회는 디스크 허용 목록과 함께 고정 HEAD에서도 일반 파�
 - 부모가 끝나고 3초 뒤 남은 자손을 끝냅니다 (파이프를 물고 남으면 읽기가 막힙니다).
 - 시간 상한(`TimeoutSeconds`, 없으면 15분) · 취소면 모두 끝냅니다.
 
+### 자료 방식 (`StepDefinition.CodexMaterial`)
+
+codex-cli 단계가 자료를 받는 길입니다.
+
+| 값 | 작업 폴더 | 프롬프트 | 쓰는 곳 |
+|---|---|---|---|
+| `Repository` (비우면 이것) | 저장소 추적 파일 사본 (+ 원본 자료 모드) | 요청 + 주목 범위 · diff 본문 | 코드 리뷰 — review_* · perf_* · sub_* · preflight_p1 |
+| `Prompt` | 빈 폴더 | 요청 + 첨부 본문 (API 단계와 같음) | 문서를 다 읽어야 하는 판정 · 설계 — design_* · research · crash_check · parallel · work_order · preflight_p2 · p3 · perf |
+
+- 입력을 보지 않는 단계(`Sees: "Previous"` 등)와 context 없는 실행도 빈 폴더입니다.
+- 빈 폴더에도 자료 도구(`hb_evidence`)를 붙여 셸을 끄고 사후 검사를 겁니다 — 작업 폴더 없이 부르면 셸이 켜진 채 임시 폴더에서 돌기 때문입니다. 그래서 제공사 `CodexEvidenceTools`가 꺼져 있으면 빈 폴더 단계는 실행 전에 거절합니다. 원본 자료 정책은 넘기지 않습니다.
+- 모드의 `RequireContext: true`(sub_*)는 context 없이 부를 수 없습니다.
+- 다른 제공사 에이전트로 바꾼 실행에서는 이 값을 쓰지 않습니다.
+
+### 그림 (`images`)
+
+- user 메시지의 그림(png · jpeg)을 호출마다의 임시 폴더(작업 폴더 밖)에 쓰고 그림마다 `-i <파일>`을 되풀이합니다 (`-C` 뒤 · `-m` 앞 — `-i`는 값을 여러 개 받으므로 끝의 `-` 바로 앞에 두지 않습니다). 끝나면 지웁니다.
+- 작업 폴더 밖 그림도 읽고, 2장을 순서대로 읽습니다 (codex-cli 0.170.0 실측).
+- 글 · png · jpeg 밖의 내용은 거절합니다.
+
+### followUp
+
+- assistant 메시지를 받지 않으므로 앞 프롬프트 · 응답을 보충 글 앞에 붙여 한 user 글로 새로 부릅니다. 상한은 합친 글 길이로 잽니다.
+- 보충 자료는 원래 단계의 자료 방식대로 — 저장소 방식이고 보충 context가 있으면 새 저장소 사본 + 주목 범위, 아니면 빈 폴더 + 본문 (메모만 보낼 때도 빈 폴더).
+- 일반 실행과 같은 한도 소진 대기를 따릅니다 (대체 에이전트는 쓰지 않습니다).
+
 ### 한도 소진 대체 (`StepDefinition.FallbackAgent`)
 
-`review_main` 단계는 `codex_cli_sol` + 대체 `gpt_main_sol`입니다.
+2026-11-21부터 대체는 `sub_*`(→ `claude_cli_opus`)에만 있습니다. 다른 Codex 단계는 한도 소진이면 대체 없이 실패합니다 — 지휘자가 `agents`로 `codex_cli_sol=gpt_main_sol`을 골라 다시 부릅니다.
 
-- Codex가 `[실패] Quota`면 같은 입력으로 대체 에이전트에 한 번 다시 보냅니다. 이때 context는 평소처럼 첨부 본문으로 갑니다.
+- Codex가 `[실패] Quota`면 같은 입력으로 대체 에이전트에 한 번 다시 보냅니다. context는 대체 에이전트의 길로 갑니다 (`claude_cli_opus`면 claude-cli 작업 폴더, API 에이전트면 첨부 본문).
 - 최근 1시간 안에 Quota 기록이 있으면 Codex를 부르지 않고 바로 대체합니다.
 - 결과 끝에 이유 줄 · 에이전트 교체 줄이 붙습니다. 실패한 호출도 기록에 남습니다.
 - `agents`로 바꾼 실행에는 대체하지 않습니다.

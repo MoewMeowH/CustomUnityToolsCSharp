@@ -71,51 +71,54 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         var (prepared, planError) = BuildPlan(loaded, modeName, mode, agentOverrides, reasoningOverrides: reasoningOverrides);
         if (planError is not null) return planError;
         var (swap, plan) = (prepared!.Swap, prepared.Steps);
-        // 제공사 Type은 AgentCatalog처럼 대소문자를 무시한다 (/self-review C4 · sub_self C6).
-        var cliSteps = plan.Count(p => UsesWorkFolder(p.Agent.ProviderOptions?.Type));
 
-        var (attached, contextError) = ContextLoader.Load(context, Options.Context, root, cliSteps > 0 ? 0 : maxChars, ct);
+        // 단계마다 자료를 받는 길 (StepKind). 작업 폴더 제공사(claude-cli · codex-cli)와 API 제공사는 한 모드에 섞을 수 있다 —
+        // 단계마다 프롬프트 입력 · 호출 정보를 따로 만든다. 작업 폴더 제공사끼리는 폴더 모양이 달라 섞지 않는다.
+        // 제공사 Type은 AgentCatalog처럼 대소문자를 무시한다 (/self-review C4 · sub_self C6).
+        var cliPlan = plan.Where(p => UsesWorkFolder(p.Agent.ProviderOptions?.Type)).ToList();
+        var cliType = cliPlan.FirstOrDefault()?.Agent.ProviderOptions?.Type;
+        if (cliPlan.Any(p => !string.Equals(p.Agent.ProviderOptions?.Type, cliType, StringComparison.OrdinalIgnoreCase)))
+            return $"[모드 '{modeName}'] claude-cli 에이전트와 codex-cli 에이전트를 한 모드에 섞을 수 없습니다.";
+        var hasContext = context is { Count: > 0 };
+        if (mode.RequireContext && !hasContext)
+            return $"[모드 '{modeName}'] 이 모드는 context가 필요합니다 — 검토할 파일(변경이면 diff 파일 먼저)과 판단용 파일을 넘기세요.";
+        var seesInput = plan.Select((_, i) => mode.Flow == ModeFlow.Debate || nodes![i].SeesInput).ToList();
+        var kinds = plan.Select((p, i) => KindOf(p, seesInput[i], hasContext)).ToList();
+        // 빈 폴더 Codex는 자료 도구를 붙여 셸을 끈 실행만 — 자료 도구가 꺼져 있으면 셸이 켜진 채 돈다.
+        if (plan.Where((_, i) => kinds[i] == StepKind.CodexEmpty).FirstOrDefault(p => p.Agent.ProviderOptions?.CodexEvidenceTools != true) is { } noTools)
+            return $"[모드 '{modeName}'] {noTools.Def.Role}@{noTools.Agent.Name}: context 없는 · 첨부 본문 방식 codex-cli 단계는 제공사 CodexEvidenceTools=true가 필요합니다 (셸을 끈 실행만 허용).";
+        // 첨부 본문을 프롬프트로 받는 단계(API · 빈 폴더 Codex)가 있을 때만 그 길이로 상한을 잰다 — 작업 폴더 단계만이면 복사 총량은 ReviewWorkFolder가 막는다 (/self-review C9 · sub_self C8).
+        var bodySteps = kinds.Where((k, i) => seesInput[i] && k is StepKind.Api or StepKind.CodexEmpty).Any();
+
+        var (attached, contextError) = ContextLoader.Load(context, Options.Context, root, bodySteps ? maxChars : 0, ct);
         if (contextError is not null) return $"[첨부 코드 오류] {contextError}";
 
         // 상한은 에이전트가 실제로 받는 양(input + 첨부) 기준이다.
-        if (maxChars > 0 && input.Length + (cliSteps > 0 ? 0 : attached!.Text.Length) > maxChars)
+        if (bodySteps && maxChars > 0 && input.Length + attached!.Text.Length > maxChars)
             return $"[입력이 너무 깁니다] input {input.Length:N0}자 + 첨부 코드 {attached!.Text.Length:N0}자 / 상한 {maxChars:N0}자. " +
                    "context 범위를 줄여 다시 호출하세요.";
 
         var (loadedImages, imageError) = ImageLoader.Load(images, Options.Images, Options.Context, root, ct);
         if (imageError is not null) return $"[첨부 이미지 오류] {imageError}";
 
-        // 결과 머리말의 첨부 여유 (claude-cli는 첨부 본문을 보내지 않아 이 상한과 무관 — 표시하지 않음)
-        var headroom = cliSteps > 0 ? null : ResultFormatter.AttachmentHeadroom(attached!.Text.Length, input.Length, maxChars);
-
-        // 첨부 자료는 input과 따로 들고 다니다가 프롬프트 맨 앞에 둔다 (같은 자료로 다시 물을 때 앞부분이 같아야 캐시에 걸린다).
-        var promptInput = new PromptInput(input, attached!.Text, loadedImages!);
-        var meta = new CallMeta(files, attached.Sources)
-        {
-            ContextRoots = MergeRoots(attached.Roots, loadedImages!),
-            Reason = reason,
-            OwnReview = string.IsNullOrWhiteSpace(ownReview) ? null : ownReview,
-        };
+        // 결과 머리말의 첨부 여유 (작업 폴더 단계는 첨부 본문을 보내지 않아 이 상한과 무관 — 본문 단계가 있을 때만)
+        var headroom = bodySteps ? ResultFormatter.AttachmentHeadroom(attached!.Text.Length, input.Length, maxChars) : null;
 
         // 이미지는 요청을 받는 단계에만 붙는다 (BuildPrompt). Graph에서는 요청을 보지 않는 단계의 에이전트에 Vision을 요구하지 않는다.
         var imageSteps = mode.Flow == ModeFlow.Graph ? plan.Where((_, i) => nodes![i].SeesInput) : plan;
         if (loadedImages!.Count > 0 && imageSteps.Where(p => !p.Agent.Options.Vision).Select(p => p.Agent.Name).Distinct().ToList() is { Count: > 0 } blind)
             return $"[모드 '{modeName}'] 이미지를 받지 않는 에이전트(Vision=false): {string.Join(", ", blind)}. images 없이 호출하거나 agents로 바꾸세요.";
 
-        // 작업 폴더 단계(claude-cli · codex-cli): context 파일을 통째로 작업 폴더에 복사하고, 프롬프트의 첨부 본문 대신 "주목할 범위"만 넣는다
-        // (codex-cli는 저장소 추적 파일 사본 + diff 본문, RepoCopy 모드의 claude-cli는 저장소 추적 파일 사본). 한 실행의 단계가 같은 프롬프트 입력을 나눠 쓰므로 다른 제공사와 섞지 않는다.
-        string? workFolder = null;
-        var folderNotes = new List<string>();
-        if (cliSteps > 0)
+        // 작업 폴더 단계: context 파일을 통째로 작업 폴더에 복사하고, 프롬프트의 첨부 본문 대신 "주목할 범위"만 넣는다
+        // (codex-cli는 저장소 추적 파일 사본 + diff 본문, RepoCopy 모드의 claude-cli는 저장소 추적 파일 사본).
+        // 빈 폴더 Codex 단계는 API 단계처럼 첨부 본문을 프롬프트로 받고, 따로 만든 빈 폴더에서 돈다.
+        if (cliType is not null)
         {
-            var cliType = plan[0].Agent.ProviderOptions?.Type ?? "";
-            if (cliSteps != plan.Count || plan.Any(p => !string.Equals(p.Agent.ProviderOptions?.Type, cliType, StringComparison.OrdinalIgnoreCase)))
-                return $"[모드 '{modeName}'] {cliType} 에이전트와 다른 제공사 에이전트를 한 모드에 섞을 수 없습니다.";
-            if (loadedImages.Count > 0)
+            if (loadedImages.Count > 0 && string.Equals(cliType, ClaudeCliProvider.TypeName, StringComparison.OrdinalIgnoreCase))
                 return $"[모드 '{modeName}'] {cliType} 단계는 images를 받지 않습니다.";
-            // 크레딧 · 한도 소진 대체 규칙: 직전 판정 가능한 기록이 가까운 Quota면 부르지 않는다.
+            // 크레딧 · 한도 소진 대체 규칙: 직전 판정 가능한 기록이 가까운 Quota면 부르지 않는다 (작업 폴더 제공사만 — API 제공사는 매 호출의 결과로 본다).
             // 단계에 대체 에이전트가 있으면 그 에이전트로 실행하고, 없으면 지휘자가 대신한다 (self-review.md).
-            if (RecentQuota(plan.Select(p => p.Agent.Provider).Distinct(), runner.LogPath, ClaudeCliQuotaHold, DateTimeOffset.Now) is { } quotaAt)
+            if (RecentQuota(cliPlan.Select(p => p.Agent.Provider).Distinct(), runner.LogPath, ClaudeCliQuotaHold, DateTimeOffset.Now) is { } quotaAt)
             {
                 if (fallbackNote is null && FallbackOverrides(plan, agentOverrides) is { } fallback)
                     return await RunFallbackAsync(fallback, reasoningOverrides,
@@ -124,51 +127,68 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
                        $"{ClaudeCliQuotaHold.TotalHours:0}시간 동안은 호출하지 않는다 — " +
                        (string.Equals(cliType, ClaudeCliProvider.TypeName, StringComparison.OrdinalIgnoreCase) ? "서브에이전트로 대신하라" : "다른 에이전트로 대신하라") + " (그 뒤 한 번 다시 시도).";
             }
-            var style = string.Equals(cliType, CodexCliProvider.TypeName, StringComparison.OrdinalIgnoreCase) ? ReviewWorkFolder.Style.Codex
-                : mode.RepoCopy ? ReviewWorkFolder.Style.ClaudeRepo : ReviewWorkFolder.Style.ClaudeRead;
-            // 저장소 사본(git · 복사)은 동기 작업이라 스레드 풀 밖으로 (/cross-review 90978dee2f C2).
-            var repoCopied = true;
-            var (folder, focus, folderError) = await Task.Run(() => ReviewWorkFolder.Create(ReviewWorkFolder.BaseFor(runner.LogPath), context, Options.Context, root, ct, style,
-                note => { if (note.StartsWith(ReviewWorkFolder.NoRepoCopyNote, StringComparison.Ordinal)) repoCopied = false; folderNotes.Add(note); }), ct);
-            if (folderError is not null) return $"[첨부 코드 오류] {folderError}";
-            // Codex는 diff 본문이 프롬프트에 들어간다 — 그 길이로 입력 상한을 다시 잰다.
-            if (style == ReviewWorkFolder.Style.Codex && maxChars > 0 && input.Length + focus!.Length > maxChars)
-            {
-                ReviewWorkFolder.TryDelete(folder);
-                return $"[입력이 너무 깁니다] input {input.Length:N0}자 + 작업 폴더 안내 · diff {focus.Length:N0}자 / 상한 {maxChars:N0}자. diff를 나눠 다시 호출하세요.";
-            }
-            workFolder = folder;
-            promptInput = promptInput with { Context = focus! };
-            // 원본 자료 모드는 저장소 사본이 만들어졌을 때만 (git 목록이 있어야 범위를 정한다) — 아니면 사본 모드로 고른 파일만 (/cross-review 9d03bc8d2b).
-            // 지휘자가 넘긴 메인 루트 경로는 무시 · 사본 제외 파일이어도 읽게 넘긴다 (추가 루트 '@이름/…'은 원본 도구가 읽지 않음).
-            meta = meta with
-            {
-                WorkFolder = folder,
-                EvidenceSource = repoCopied
-                    ? new ReviewEvidenceSource(Path.GetFullPath(root), Options.Context.AllDenyPatterns.ToArray(),
-                        [.. context!.Where(r => !(ContextLoader.TrySplitRootPrefix(r.Path, out var name, out _) && Options.Context.TryGetExtraRoot(name, out _, out _)))
-                            .Select(r => r.Path).Distinct(StringComparer.Ordinal)])
-                    : null,
-            };
         }
 
-        // 세션별 실행 횟수 (대시보드 '세션' 화면 표시용, 한도 없음): 검증을 다 통과한 실행만 센다. 대체로 다시 부른 실행은 한 번으로 (90978dee2f C5).
-        if (fallbackNote is null) sessions.Count(modeName);
+        // 첨부 자료는 input과 따로 들고 다니다가 프롬프트 맨 앞에 둔다 (같은 자료로 다시 물을 때 앞부분이 같아야 캐시에 걸린다).
+        var bodyInput = new PromptInput(input, attached!.Text, loadedImages!);
+        var meta = new CallMeta(files, attached.Sources)
+        {
+            ContextRoots = MergeRoots(attached.Roots, loadedImages!),
+            Reason = reason,
+            OwnReview = string.IsNullOrWhiteSpace(ownReview) ? null : ownReview,
+        };
 
-        // ── 2. 실행 ──────────────────────────────────────────────────────────
-        var runId = Guid.NewGuid().ToString("N")[..10];
-
-        meta = meta with { Provenance = RunProvenance(prepared) };
-
+        string? workFolder = null, emptyFolder = null;
+        var folderNotes = new List<string>();
         string? note = null;
         List<StepResult> results;
+        string runId;
         try
         {
+            var focusInput = bodyInput;
+            var folderMeta = meta;
+            if (kinds.Any(k => k is StepKind.ClaudeFolder or StepKind.CodexRepo))
+            {
+                var style = string.Equals(cliType, CodexCliProvider.TypeName, StringComparison.OrdinalIgnoreCase) ? ReviewWorkFolder.Style.Codex
+                    : mode.RepoCopy ? ReviewWorkFolder.Style.ClaudeRepo : ReviewWorkFolder.Style.ClaudeRead;
+                // 저장소 사본(git · 복사)은 동기 작업이라 스레드 풀 밖으로 (/cross-review 90978dee2f C2).
+                var made = await Task.Run(() => ReviewWorkFolder.Prepare(ReviewWorkFolder.BaseFor(runner.LogPath), context, Options.Context, root, ct, style, folderNotes.Add), ct);
+                if (made.Error is not null) return $"[첨부 코드 오류] {made.Error}";
+                workFolder = made.Folder;
+                // Codex는 diff 본문이 프롬프트에 들어간다 — 그 길이로 입력 상한을 다시 잰다.
+                if (style == ReviewWorkFolder.Style.Codex && maxChars > 0 && input.Length + made.Focus!.Length > maxChars)
+                    return $"[입력이 너무 깁니다] input {input.Length:N0}자 + 작업 폴더 안내 · diff {made.Focus.Length:N0}자 / 상한 {maxChars:N0}자. diff를 나눠 다시 호출하세요.";
+                focusInput = bodyInput with { Context = made.Focus! };
+                // 원본 자료 모드는 저장소 사본이 만들어졌을 때만 (git 목록이 있어야 범위를 정한다) — 아니면 사본 모드로 고른 파일만 (/cross-review 9d03bc8d2b).
+                folderMeta = meta with { WorkFolder = workFolder, EvidenceSource = made.RepoCopied ? EvidenceSourceFor(root, context!) : null };
+            }
+            var emptyMeta = meta;
+            if (kinds.Contains(StepKind.CodexEmpty))
+            {
+                var (folder, emptyError) = ReviewWorkFolder.CreateEmpty(ReviewWorkFolder.BaseFor(runner.LogPath));
+                if (emptyError is not null) return $"[첨부 코드 오류] {emptyError}";
+                emptyFolder = folder;
+                emptyMeta = meta with { WorkFolder = emptyFolder, EmptyWorkFolder = true };
+            }
+
+            // 세션별 실행 횟수 (대시보드 '세션' 화면 표시용, 한도 없음): 검증을 다 통과한 실행만 센다. 대체로 다시 부른 실행은 한 번으로 (90978dee2f C5).
+            if (fallbackNote is null) sessions.Count(modeName);
+
+            // ── 2. 실행 ──────────────────────────────────────────────────────────
+            runId = Guid.NewGuid().ToString("N")[..10];
+            var provenance = RunProvenance(prepared);
+            List<StepMaterial> materials = [.. kinds.Select(k => k switch
+            {
+                StepKind.ClaudeFolder or StepKind.CodexRepo => new StepMaterial(focusInput, folderMeta with { Provenance = provenance }),
+                StepKind.CodexEmpty => new StepMaterial(bodyInput, emptyMeta with { Provenance = provenance }),
+                _ => new StepMaterial(bodyInput, meta with { Provenance = provenance }),
+            })];
+
             if (mode.Flow == ModeFlow.Debate)
-                (results, note) = await RunDebateAsync(runId, modeName, mode, plan, promptInput, meta, ct);
+                (results, note) = await RunDebateAsync(runId, modeName, mode, plan, materials, ct);
             else
             {
-                (results, var skipped) = await RunGraphAsync(runId, modeName, plan, nodes!, promptInput, meta, ct, tool);
+                (results, var skipped) = await RunGraphAsync(runId, modeName, plan, nodes!, materials, ct, tool);
                 if (skipped.Count > 0)
                     note = mode.Flow == ModeFlow.Graph
                         // 실패와 건너뜀을 나눠 적는다 — 다른 갈래의 실패가 건너뛴 단계의 원인처럼 읽히지 않게.
@@ -179,14 +199,15 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         finally
         {
             ReviewWorkFolder.TryDelete(workFolder);
+            ReviewWorkFolder.TryDelete(emptyFolder);
         }
 
         // 한도 소진으로 실패한 단계에 대체 에이전트가 있으면 같은 입력으로 한 번 다시 (실패한 호출은 기록에 남는다).
         if (fallbackNote is null && mode.Flow != ModeFlow.Debate
-            && results.Any(r => !r.Success && r.Text.StartsWith(AgentRunner.QuotaFailurePrefix, StringComparison.Ordinal) && plan[r.Step - 1].Def.FallbackAgent is not null)
+            && results.FirstOrDefault(r => !r.Success && r.Text.StartsWith(AgentRunner.QuotaFailurePrefix, StringComparison.Ordinal) && plan[r.Step - 1].Def.FallbackAgent is not null) is { } quotaFailed
             && FallbackOverrides(plan, agentOverrides) is { } retry)
             return await RunFallbackAsync(retry, reasoningOverrides,
-                $"(runId {runId}: {plan[0].Agent.ProviderOptions?.Type} 한도 소진으로 실패 → 대체 에이전트로 다시 실행)");
+                $"(runId {runId}: {plan[quotaFailed.Step - 1].Agent.ProviderOptions?.Type} 한도 소진으로 실패 → 대체 에이전트로 다시 실행)");
 
         // ── 3. 반환: Last면 끝 단계만 (Claude 쪽 토큰 절약) ─────────────────────
         // 맨 위 runId와 단계 제목의 토큰·시간은 항상 붙인다 (save_result에 넘길 값, 서버 로그를 뒤지지 않도록).
@@ -214,7 +235,9 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             var folderNote = string.Join("\n", folderNotes);
             note = note is null ? folderNote : $"{folderNote}\n{note}";
         }
-        if (cliSteps > 0 && results.Any(r => r.Structured?.Requests is { Count: > 0 }))
+        // 보충 재질문을 못 하는 것은 claude-cli 단계뿐이다 (codex-cli는 앞 기록을 한 user 글로 합쳐 다시 묻는다).
+        if (mode.Flow != ModeFlow.Debate
+            && results.Any(r => r.Structured?.Requests is { Count: > 0 } && kinds[r.Step - 1] == StepKind.ClaudeFolder))
         {
             var noFollowUp = $"(followUp 불가: {CliFollowUpHint})";
             note = note is null ? noFollowUp : $"{noFollowUp}\n{note}";
@@ -244,13 +267,45 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     /// </summary>
     public static readonly TimeSpan ClaudeCliQuotaHold = TimeSpan.FromHours(1);
 
-    /// <summary>작업 폴더 제공사는 앞 응답을 이어 받는 호출을 받지 않는다 (claude-cli · codex-cli).</summary>
-    private const string CliFollowUpHint = "claude-cli · codex-cli 에이전트는 앞 응답을 이어 받지 못합니다. 코드 자료가 더 필요하면 context를 넓혀 새로 run_mode를 부르세요.";
+    /// <summary>claude-cli는 앞 응답을 이어 받는 호출을 받지 않는다 (codex-cli는 앞 기록을 user 글에 합쳐 보낸다).</summary>
+    private const string CliFollowUpHint = "claude-cli 에이전트는 앞 응답을 이어 받지 못합니다. 코드 자료가 더 필요하면 context를 넓혀 새로 run_mode를 부르세요.";
 
     /// <summary>작업 폴더를 쓰는 제공사 Type (claude-cli · codex-cli, 대소문자 무시 — /self-review C4 · sub_self C6).</summary>
     public static bool UsesWorkFolder(string? type) =>
         string.Equals(type, ClaudeCliProvider.TypeName, StringComparison.OrdinalIgnoreCase)
         || string.Equals(type, CodexCliProvider.TypeName, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>단계가 자료를 받는 길.</summary>
+    private enum StepKind
+    {
+        /// <summary>API 제공사: 첨부 본문을 프롬프트로, 작업 폴더 없음.</summary>
+        Api,
+        /// <summary>claude-cli: 작업 폴더 + 주목 범위.</summary>
+        ClaudeFolder,
+        /// <summary>codex-cli 저장소 방식: 저장소 사본 작업 폴더 + 주목 범위 · diff.</summary>
+        CodexRepo,
+        /// <summary>codex-cli 빈 폴더: 첨부 본문을 프롬프트로 (입력을 보지 않는 단계 · context 없는 실행 · Prompt 방식).</summary>
+        CodexEmpty,
+    }
+
+    /// <param name="seesInput">이 단계가 요청과 첨부를 받는지 (Debate는 모두 받는다).</param>
+    private static StepKind KindOf(PlannedStep p, bool seesInput, bool hasContext)
+    {
+        var type = p.Agent.ProviderOptions?.Type;
+        if (string.Equals(type, ClaudeCliProvider.TypeName, StringComparison.OrdinalIgnoreCase)) return StepKind.ClaudeFolder;
+        if (!string.Equals(type, CodexCliProvider.TypeName, StringComparison.OrdinalIgnoreCase)) return StepKind.Api;
+        return seesInput && hasContext && (p.Def.CodexMaterial ?? CodexMaterial.Repository) == CodexMaterial.Repository
+            ? StepKind.CodexRepo : StepKind.CodexEmpty;
+    }
+
+    /// <summary>
+    /// 원본 자료 정책: 지휘자가 넘긴 메인 루트 경로는 무시 · 사본 제외 파일이어도 읽게 넘긴다 (추가 루트 '@이름/…'은 원본 도구가 읽지 않음).
+    /// 저장소 사본이 만들어졌을 때만 쓴다 (git 목록이 있어야 범위를 정한다 — /cross-review 9d03bc8d2b).
+    /// </summary>
+    private ReviewEvidenceSource EvidenceSourceFor(string root, IReadOnlyList<ContextRange> context) =>
+        new(Path.GetFullPath(root), Options.Context.AllDenyPatterns.ToArray(),
+            [.. context.Where(r => !(ContextLoader.TrySplitRootPrefix(r.Path, out var name, out _) && Options.Context.TryGetExtraRoot(name, out _, out _)))
+                .Select(r => r.Path).Distinct(StringComparer.Ordinal)]);
 
     /// <summary>
     /// 대체 에이전트로 바꾸는 이번 실행의 덮어쓰기 ("원래=대체"). 지휘자가 agents로 바꾼 실행이거나 대체가 있는 단계가 없으면 null.
@@ -484,7 +539,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
 
         var runId = Guid.NewGuid().ToString("N")[..10];
         var meta = new CallMeta(null, []) { Reason = reason, Provenance = RunProvenance(plan!) };
-        var (results, _) = await RunGraphAsync(runId, modeName, plan!.Steps, nodes!, new PromptInput(input, "", []), meta, ct, tool);
+        var (results, _) = await RunGraphAsync(runId, modeName, plan!.Steps, nodes!, [.. plan.Steps.Select(_ => new StepMaterial(new PromptInput(input, "", []), meta))], ct, tool);
         return (runId, results, null);
     }
 
@@ -524,7 +579,9 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             return (null, null, $"[입력이 너무 깁니다] {inputLength:N0}자 / 상한 {maxChars:N0}자 (모드 '{modeName}').");
 
         var (plan, error) = BuildPlan(loaded, modeName, mode, agentOverrides, withoutGuidelines, reasoningOverrides);
-        return error is not null ? (null, null, error) : (plan, nodes, null);
+        if (error is not null) return (null, null, error);
+        if (FixedCodexWithoutEvidence(modeName, plan!) is { } codexError) return (null, null, codexError);
+        return (plan, nodes, null);
     }
 
     /// <summary>
@@ -606,41 +663,102 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             if (planError is not null) return planError;
             var step = plan!.Steps[0];
             // 호출해 봐야 제공사가 거절해 실패 기록만 남는다 — 앞에서 돌려준다.
-            if (UsesWorkFolder(step.Agent.ProviderOptions?.Type)) return Fail + CliFollowUpHint;
+            var type = step.Agent.ProviderOptions?.Type;
+            if (string.Equals(type, ClaudeCliProvider.TypeName, StringComparison.OrdinalIgnoreCase)) return Fail + CliFollowUpHint;
+            var codex = string.Equals(type, CodexCliProvider.TypeName, StringComparison.OrdinalIgnoreCase);
+            // codex-cli: 앞 기록을 한 user 글로 합쳐 새로 부른다. 보충 자료는 원래 단계의 자료 방식대로 (저장소 방식이고 보충 context가 있으면 새 저장소 사본 + 주목 범위, 아니면 빈 폴더 + 본문).
+            var kind = StepKind.Api;
+            if (codex)
+            {
+                // 원래 실행 뒤 modes.json의 연결이 깨졌으면 그 오류를 돌려준다.
+                var (followNodes, graphError) = ModeGraph.Resolve(mode);
+                if (graphError is not null) return $"[모드 '{modeName}'] {graphError}";
+                kind = KindOf(step, followNodes![followUp.Step - 1].SeesInput, context is { Count: > 0 });
+                // 일반 실행과 같은 한도 소진 대기 (대체 에이전트는 쓰지 않는다 — 같은 에이전트에게 다시 묻는 호출).
+                if (RecentQuota([step.Agent.Provider], runner.LogPath, ClaudeCliQuotaHold, DateTimeOffset.Now) is { } quotaAt)
+                    return $"{AgentRunner.QuotaFailurePrefix} (최근) — {type} 크레딧 · 한도 소진 기록 {quotaAt.ToLocalTime():MM-dd HH:mm}. " +
+                           $"{ClaudeCliQuotaHold.TotalHours:0}시간 동안은 호출하지 않는다 — 다른 에이전트로 대신하라 (그 뒤 한 번 다시 시도).";
+                if (kind == StepKind.CodexEmpty && step.Agent.ProviderOptions?.CodexEvidenceTools != true)
+                    return Fail + "빈 작업 폴더 codex-cli 호출은 제공사 CodexEvidenceTools=true가 필요합니다 (셸을 끈 실행만 허용).";
+            }
 
             var maxChars = mode.MaxInputChars ?? Options.Budget.MaxInputChars;
-            var (attached, contextError) = ContextLoader.Load(context, Options.Context, Environment.CurrentDirectory, maxChars, ct);
+            var (attached, contextError) = ContextLoader.Load(context, Options.Context, Environment.CurrentDirectory, kind == StepKind.CodexRepo ? 0 : maxChars, ct);
             if (contextError is not null) return $"[첨부 코드 오류] {contextError}";
             if (attached!.Text.Trim().Length == 0 && string.IsNullOrWhiteSpace(input))
                 return Fail + "보충할 자료가 없습니다 (context나 input).";
+            // codex-cli는 앞 기록을 합친 글로 보내므로, 앞 기록과 메모만으로 상한을 넘으면 저장소 사본을 만들기 전에 거절한다 (최종 글 검사는 아래에 그대로).
+            var carried = originalPrompt.TrimEnd().Length + previous.TrimEnd().Length + input.Trim().Length;
+            if (codex && maxChars > 0 && carried > maxChars)
+                return $"[입력이 너무 깁니다] 앞 프롬프트 + 응답 + 메모만 {carried:N0}자 / 상한 {maxChars:N0}자. 보충 범위를 줄이세요.";
 
-            var sb = new StringBuilder();
-            sb.AppendLine("## 보충 자료").AppendLine($"앞 응답의 자료 요청 {string.Join(", ", requested.Select(q => $"{q.Id}({q.What})"))}에 대해 지휘자가 찾은 것이다.").AppendLine();
-            if (attached.Text.Trim().Length > 0) sb.AppendLine(attached.Text.Trim()).AppendLine();
-            var hasMemo = !string.IsNullOrWhiteSpace(input);
-            if (hasMemo) sb.AppendLine("## 지휘자 메모").AppendLine(input.Trim()).AppendLine();
-            if (skipped.Count > 0) sb.AppendLine($"보내지 않은 요청: {string.Join(", ", skipped)} (지휘자 판단{(hasMemo ? " — 이유는 메모 참고" : "")}).").AppendLine();
-            sb.Append(Prompts.FollowUpRules);
-            var prompt = sb.ToString();
-
-            var total = originalPrompt.Length + previous.Length + prompt.Length;
-            if (maxChars > 0 && total > maxChars)
-                return $"[입력이 너무 깁니다] 원래 프롬프트 + 응답 + 보충 {total:N0}자 / 상한 {maxChars:N0}자. 보충 범위를 줄이세요.";
-
-            // 모드의 단계 수보다 뒤 번호로 — 실행되지 않은 단계(앞 단계 실패로 건너뜀)의 번호를 보충 응답이 차지하지 않게.
-            var newStep = Math.Max(run.Max(r => r.Step ?? 0), mode.Steps.Count) + 1;
-            var meta = new CallMeta(files, attached.Sources) { ContextRoots = attached.Roots, Reason = reason, Provenance = RunProvenance(plan) };
-            var call = NewCall(runId, modeName, newStep, step, step.Instructions, new BuiltPrompt(prompt, null), meta) with
+            string? folder = null;
+            var folderNotes = new List<string>();
+            StepResult result;
+            int newStep;
+            try
             {
-                History = [new ChatMessage(ChatRole.User, originalPrompt), new ChatMessage(ChatRole.Assistant, previous)],
-                FollowUpOf = followUp.Step,
-                OmitReasoning = original.ReasoningEffort is null,
-                FollowUpRequests = [.. requested.Select(q => q.Id)],
-                FollowUpSkipped = skipped.Count > 0 ? skipped : null,
-            };
-            var result = await runner.RunStepAsync(call, ct);
+                var supplement = attached.Text.Trim();
+                var meta = new CallMeta(files, attached.Sources) { ContextRoots = attached.Roots, Reason = reason, Provenance = RunProvenance(plan) };
+                if (kind == StepKind.CodexRepo)
+                {
+                    var made = await Task.Run(() => ReviewWorkFolder.Prepare(ReviewWorkFolder.BaseFor(runner.LogPath), context, Options.Context, Environment.CurrentDirectory, ct,
+                        ReviewWorkFolder.Style.Codex, folderNotes.Add), ct);
+                    if (made.Error is not null) return $"[첨부 코드 오류] {made.Error}";
+                    folder = made.Folder;
+                    supplement = made.Focus!.Trim();
+                    meta = meta with { WorkFolder = folder, EvidenceSource = made.RepoCopied ? EvidenceSourceFor(Environment.CurrentDirectory, context!) : null };
+                }
+                else if (kind == StepKind.CodexEmpty)
+                {
+                    var (empty, emptyError) = ReviewWorkFolder.CreateEmpty(ReviewWorkFolder.BaseFor(runner.LogPath));
+                    if (emptyError is not null) return $"[첨부 코드 오류] {emptyError}";
+                    folder = empty;
+                    meta = meta with { WorkFolder = folder, EmptyWorkFolder = true };
+                }
 
-            var notes = new List<string>();
+                var sb = new StringBuilder();
+                sb.AppendLine("## 보충 자료").AppendLine($"앞 응답의 자료 요청 {string.Join(", ", requested.Select(q => $"{q.Id}({q.What})"))}에 대해 지휘자가 찾은 것이다.").AppendLine();
+                if (supplement.Length > 0) sb.AppendLine(supplement).AppendLine();
+                var hasMemo = !string.IsNullOrWhiteSpace(input);
+                if (hasMemo) sb.AppendLine("## 지휘자 메모").AppendLine(input.Trim()).AppendLine();
+                if (skipped.Count > 0) sb.AppendLine($"보내지 않은 요청: {string.Join(", ", skipped)} (지휘자 판단{(hasMemo ? " — 이유는 메모 참고" : "")}).").AppendLine();
+                sb.Append(Prompts.FollowUpRules);
+                var prompt = sb.ToString();
+
+                if (codex)
+                {
+                    // codex-cli는 assistant 메시지를 받지 않는다 — 앞 프롬프트 · 응답을 이 글 앞에 붙이고, 합친 글 길이로 상한을 잰다.
+                    prompt = "## 앞 호출 기록\n아래 '앞 호출 프롬프트'의 작업 폴더 설명은 앞 호출 때의 것이다 (그 폴더는 지워졌다). 지금 자료는 '## 보충 자료'를 따른다.\n\n" +
+                             "## 앞 호출 프롬프트\n" + originalPrompt.TrimEnd() + "\n\n## 앞 응답\n" + previous.TrimEnd() + "\n\n" + prompt;
+                    if (maxChars > 0 && prompt.Length > maxChars)
+                        return $"[입력이 너무 깁니다] 앞 프롬프트 + 응답 + 보충을 합친 글 {prompt.Length:N0}자 / 상한 {maxChars:N0}자. 보충 범위를 줄이세요.";
+                }
+                else
+                {
+                    var total = originalPrompt.Length + previous.Length + prompt.Length;
+                    if (maxChars > 0 && total > maxChars)
+                        return $"[입력이 너무 깁니다] 원래 프롬프트 + 응답 + 보충 {total:N0}자 / 상한 {maxChars:N0}자. 보충 범위를 줄이세요.";
+                }
+
+                // 모드의 단계 수보다 뒤 번호로 — 실행되지 않은 단계(앞 단계 실패로 건너뜀)의 번호를 보충 응답이 차지하지 않게.
+                newStep = Math.Max(run.Max(r => r.Step ?? 0), mode.Steps.Count) + 1;
+                var call = NewCall(runId, modeName, newStep, step, step.Instructions, new BuiltPrompt(prompt, null), meta) with
+                {
+                    History = codex ? null : [new ChatMessage(ChatRole.User, originalPrompt), new ChatMessage(ChatRole.Assistant, previous)],
+                    FollowUpOf = followUp.Step,
+                    OmitReasoning = original.ReasoningEffort is null,
+                    FollowUpRequests = [.. requested.Select(q => q.Id)],
+                    FollowUpSkipped = skipped.Count > 0 ? skipped : null,
+                };
+                result = await runner.RunStepAsync(call, ct);
+            }
+            finally
+            {
+                ReviewWorkFolder.TryDelete(folder);
+            }
+
+            var notes = new List<string>(folderNotes);
             // 보충 응답은 원래 지적을 다시 쓴 전체본이다 → 원래 단계와 겹치는 지적을 보이고, 판정 기준을 알린다 (같은 지적의 이중 채택 방지).
             if (result.Structured is { Parsed: true } fresh && original.Structured is { Parsed: true } before)
                 notes.AddRange(FindingOverlap.Lines([.. before.Findings, .. fresh.Findings]));
@@ -718,8 +836,19 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         if (error is not null) return (null, error);
         if (plan!.Steps[0].Output is null)
             return (null, $"[모드 '{modeName}'] 역할 '{plan.Steps[0].Def.Role}'에 구조화 출력(Output)이 없어 채점할 수 없습니다.");
+        if (FixedCodexWithoutEvidence(modeName, plan) is { } codexError) return (null, codexError);
         return (plan, null);
     }
+
+    /// <summary>
+    /// 골든 고정 실행은 작업 폴더 없이 부른다 — codex-cli는 그때 빈 폴더 + 자료 도구(셸 끔)로만 돈다 (제공사도 막는다).
+    /// 실행 전 확인에서 같은 이유로 거절해 사례를 차례로 돌다 실패 기록만 쌓이지 않게 한다.
+    /// </summary>
+    private static string? FixedCodexWithoutEvidence(string modeName, PreparedPlan plan) =>
+        plan.Steps.FirstOrDefault(p => string.Equals(p.Agent.ProviderOptions?.Type, CodexCliProvider.TypeName, StringComparison.OrdinalIgnoreCase)
+                                       && p.Agent.ProviderOptions?.CodexEvidenceTools != true) is { } s
+            ? $"[모드 '{modeName}'] {s.Def.Role}@{s.Agent.Name}: 골든 고정 실행의 codex-cli는 제공사 CodexEvidenceTools=true가 필요합니다 (작업 폴더 없이 셸을 켠 채 돌지 않게)."
+            : null;
 
     /// <summary>실행 계획의 한 단계. Guidelines는 이 단계 역할에 지침을 붙였는지 (기록용).</summary>
     private sealed record PlannedStep(StepDefinition Def, AgentEntry Agent, string Instructions, GuidelinesProvenance Guidelines, PromptCacheMode? PromptCache, FindingFormat? Output)
@@ -758,6 +887,9 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     /// <summary>사용자 input과 서버가 읽은 첨부 자료·이미지. 프롬프트에서는 첨부가 먼저 온다.</summary>
     private sealed record PromptInput(string Request, string Context, IReadOnlyList<AttachedImage> Images);
 
+    /// <summary>한 단계가 받는 입력과 호출 정보 (섞인 모드에서 단계마다 다르다 — API 단계에는 작업 폴더를 싣지 않는다).</summary>
+    private sealed record StepMaterial(PromptInput Input, CallMeta Meta);
+
     /// <summary>보낼 프롬프트. ContextPrefix는 Text의 앞부분(첨부 자료)이고 없으면 null. Images는 입력을 받는 단계에만 (없으면 null).</summary>
     private sealed record BuiltPrompt(string Text, string? ContextPrefix, IReadOnlyList<AttachedImage>? Images = null);
 
@@ -767,10 +899,11 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
     /// 기다린 단계가 실패했거나 실행되지 않았으면 그 단계도 호출하지 않는다 (앞 결과 없이는 의미가 없으므로 토큰을 쓰지 않는다).
     /// </summary>
     /// <param name="tool">호출 기록의 Tool (골든 crash 실행이면 "golden"). null이면 run_mode.</param>
+    /// <param name="materials">단계(plan 차례)마다의 입력 · 호출 정보.</param>
     /// <returns>실행한 단계의 결과(단계 번호 차례)와 실행하지 않은 단계 번호.</returns>
     private async Task<(List<StepResult> Results, List<int> Skipped)> RunGraphAsync(
         string runId, string mode, List<PlannedStep> plan, IReadOnlyList<GraphNode> nodes,
-        PromptInput input, CallMeta meta, CancellationToken ct, string? tool = null)
+        IReadOnlyList<StepMaterial> materials, CancellationToken ct, string? tool = null)
     {
         var tasks = new Task<StepResult?>[plan.Count];
         for (var i = 0; i < plan.Count; i++) tasks[i] = RunNodeAsync(i);
@@ -786,27 +919,29 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
 
             // Sees는 WaitFor 안에 있으므로 그 작업은 이미 끝났다.
             var p = plan[index];
+            var (input, meta) = materials[index];
             var prompt = BuildPrompt(input, [.. node.Sees.Select(s => tasks[s - 1].Result!)], node.SeesInput);
             return await runner.RunStepAsync(NewCall(runId, mode, node.Step, p, p.Instructions, prompt, meta) with { Tool = tool }, ct);
         }
     }
 
+    /// <param name="materials">단계(plan 차례)마다의 입력 · 호출 정보.</param>
     private async Task<(List<StepResult> Results, string? Note)> RunDebateAsync(
         string runId, string mode, ModeDefinition def,
         List<PlannedStep> plan,
-        PromptInput input, CallMeta meta, CancellationToken ct)
+        IReadOnlyList<StepMaterial> materials, CancellationToken ct)
     {
         var rounds = Math.Clamp(def.MaxRounds ?? 2, 1, ModeDefinition.MaxRoundsHardCap);
         var window = Math.Max(1, def.HistoryWindow);
-        var debaters = plan.Take(2).ToList();
         var turns = new List<StepResult>();
         var step = 0;
         string? note = null;
 
         for (var round = 1; round <= rounds && note is null; round++)
         {
-            foreach (var p in debaters)
+            for (var i = 0; i < 2; i++)
             {
+                var (p, (input, meta)) = (plan[i], materials[i]);
                 var prompt = BuildDebatePrompt(input, turns.TakeLast(window), round, rounds);
                 var result = await runner.RunStepAsync(NewCall(runId, mode, ++step, p, p.Instructions + Prompts.DebateRules, prompt, meta), ct);
                 turns.Add(result);
@@ -823,7 +958,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
         if (plan.Count == 3)
         {
             // 판정자는 토론 전체를 본다 (회차 상한이 있으므로 분량도 상한이 있다).
-            var judge = plan[2];
+            var (judge, (input, meta)) = (plan[2], materials[2]);
             var judgePrompt = BuildDebatePrompt(input, turns, round: 0, rounds: rounds);
             var verdict = await runner.RunStepAsync(NewCall(runId, mode, ++step, judge, judge.Instructions, judgePrompt, meta), ct);
             turns.Add(verdict);

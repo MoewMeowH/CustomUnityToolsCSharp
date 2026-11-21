@@ -48,16 +48,29 @@ public static class ReviewWorkFolder
         string baseDir, IReadOnlyList<ContextRange>? ranges, ContextOptions options, string rootDir, CancellationToken ct = default, Style style = Style.ClaudeRead,
         Action<string>? onNote = null)
     {
+        var r = Prepare(baseDir, ranges, options, rootDir, ct, style, onNote);
+        return (r.Folder, r.Focus, r.Error);
+    }
+
+    /// <summary><see cref="Create"/> 결과 + 저장소 사본을 실제로 깔았는지. 원본 자료 모드는 이 값으로 정한다 (안내 문구로 판정하지 않는다).</summary>
+    public sealed record Prepared(string? Folder, string? Focus, bool RepoCopied, string? Error);
+
+    /// <summary><see cref="Create"/>와 같고, 저장소 사본 여부를 함께 돌려준다.</summary>
+    public static Prepared Prepare(
+        string baseDir, IReadOnlyList<ContextRange>? ranges, ContextOptions options, string rootDir, CancellationToken ct = default, Style style = Style.ClaudeRead,
+        Action<string>? onNote = null)
+    {
         if (ranges is null || ranges.Count == 0)
-            return (null, null, "작업 폴더를 쓰는 단계(claude-cli · codex-cli)는 context가 필요합니다 — 검토할 파일(변경이면 diff 파일 먼저)과 판단용 파일을 넘기세요.");
+            return new(null, null, false, "작업 폴더를 쓰는 단계(claude-cli · codex-cli)는 context가 필요합니다 — 검토할 파일(변경이면 diff 파일 먼저)과 판단용 파일을 넘기세요.");
         if (options.MaxRanges > 0 && ranges.Count > options.MaxRanges)
-            return (null, null, $"범위가 {ranges.Count}개 / 상한 {options.MaxRanges}개. 필요한 범위만 남기세요.");
+            return new(null, null, false, $"범위가 {ranges.Count}개 / 상한 {options.MaxRanges}개. 필요한 범위만 남기세요.");
 
         SweepStale(baseDir);
         var folder = Path.Combine(baseDir, Guid.NewGuid().ToString("N")[..12]);
         try
         {
-            return Fill(folder, ranges, options, rootDir, ct, style, onNote);
+            var (f, focus, error) = Fill(folder, ranges, options, rootDir, ct, style, onNote, out var repoCopied);
+            return new(f, focus, repoCopied && error is null, error);
         }
         catch (OperationCanceledException)
         {
@@ -66,18 +79,42 @@ public static class ReviewWorkFolder
         }
         catch (Exception ex)
         {
-            return Fail(folder, $"작업 폴더를 만들지 못했습니다 ({ex.GetType().Name}: {ex.Message})");
+            var (_, _, error) = Fail(folder, $"작업 폴더를 만들지 못했습니다 ({ex.GetType().Name}: {ex.Message})");
+            return new(null, null, false, error);
+        }
+    }
+
+    /// <summary>
+    /// 빈 작업 폴더 (context 없는 codex-cli 단계 · 첨부 본문을 프롬프트로 받는 단계). 제공사는 여기에도 자료 도구를 붙이고 셸을 끈다 —
+    /// 작업 폴더가 없으면 셸이 켜진 채 임시 폴더에서 돌기 때문이다.
+    /// </summary>
+    public static (string? Folder, string? Error) CreateEmpty(string baseDir)
+    {
+        SweepStale(baseDir);
+        var folder = Path.Combine(baseDir, Guid.NewGuid().ToString("N")[..12]);
+        try
+        {
+            Directory.CreateDirectory(folder);
+            return (folder, null);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            TryDelete(folder);
+            return (null, $"빈 작업 폴더를 만들지 못했습니다 ({ex.GetType().Name}: {ex.Message})");
         }
     }
 
     private static (string? Folder, string? Focus, string? Error) Fill(
-        string folder, IReadOnlyList<ContextRange> ranges, ContextOptions options, string rootDir, CancellationToken ct, Style style, Action<string>? onNote)
+        string folder, IReadOnlyList<ContextRange> ranges, ContextOptions options, string rootDir, CancellationToken ct, Style style, Action<string>? onNote,
+        out bool repoCopied)
     {
+        repoCopied = false;
         Directory.CreateDirectory(folder);
         var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootDir));
         // 저장소 사본: 추적 파일을 먼저 깔고 context 파일을 위에 덮는다 (작업 트리 상태라 내용은 같고, 비추적 diff 파일 · 추가 루트 파일이 여기서 들어간다).
         var repoCopy = style != Style.ClaudeRead;
         var tracked = repoCopy ? CopyTracked(root, folder, options, ct) : default;
+        repoCopied = repoCopy && tracked.Files > 0;
         if (repoCopy && tracked.Files == 0)
             onNote?.Invoke($"{NoRepoCopyNote} {tracked.Note ?? "복사할 수 있는 추적 파일 없음"} — 이 실행은 지휘자가 고른 파일만 봄)");
         var diffs = new List<(string Inside, string Dest)>();
@@ -338,6 +375,8 @@ public static class ReviewWorkFolder
             if (parts[i].Equals("docs", StringComparison.OrdinalIgnoreCase)
                 && (parts[i + 1].Equals("plans", StringComparison.OrdinalIgnoreCase) || parts[i + 1].Equals("worklog", StringComparison.OrdinalIgnoreCase)
                     || parts[i + 1].Equals("worklog.md", StringComparison.OrdinalIgnoreCase)
+                    // /preflight 단계 원문 — 앞 단계 논의를 보지 않아야 하는 단계(preflight_check · perf)가 사본에서 읽지 않게
+                    || parts[i + 1].Equals("preflight", StringComparison.OrdinalIgnoreCase)
                     // /work-order 지시서 기본 폴더 — 계획 원문이라 리뷰어가 "계획대로인가"로 쏠린다 (설정 폴더 WorkOrders.Folder는 아직 안 뺌)
                     || parts[i + 1].Equals("work-orders", StringComparison.OrdinalIgnoreCase)))
                 return true;

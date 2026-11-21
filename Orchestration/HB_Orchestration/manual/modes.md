@@ -40,7 +40,7 @@
       "Return": "All",
       "MaxInputChars": 100000,
       "Steps": [
-        { "Role": "Rebuttal",   "Agent": "gpt_main_sol" },
+        { "Role": "Rebuttal",   "Agent": "codex_cli_sol", "CodexMaterial": "Prompt" },
         { "Role": "LogicCheck", "Agent": "gemini_main_hydrogen", "Sees": "InputAndPrevious" }
       ]
     }
@@ -130,7 +130,7 @@
 | 조사 | `research_main` | luna(웹) → sol | `/mode` |
 | 크래시 | `crash_main` → `crash_check` | carbon → luna(웹) · sol | `/mode` |
 | 구현 | `parallel_main` | sol \| hydrogen | `/mode` (요청할 때만) |
-| 지시서 | `work_order_main` | luna \| hydrogen | `/work-order` |
+| 지시서 | `work_order_main` | sol \| hydrogen | `/work-order` |
 | 실행 전 점검 | `preflight_p1` · `p2` · `p3` · `preflight_check` · `preflight_perf` | 단계 모드 | `/preflight` |
 
 `review_high` · `perf_high`의 두 번째 리뷰어(DeepSeek, `deepseek_main_flash`)는 Vision이 없습니다. `images`를 붙이면 실행 전에 거절됩니다. 이미지가 필요하면 `run_mode`의 `agents`로 argon을 지정해 실행합니다.
@@ -159,6 +159,8 @@ agents: "deepseek_main_flash=gemini_high_argon"
 | `MaxInputChars` | 숫자 | 이 모드의 입력 길이 상한. 없으면 `Budget.MaxInputChars` |
 | `PromptCache` | `Off` / `Context` / 없음 | 이 모드의 프롬프트 캐시 방식 (아래) |
 | `RequireOwnReview` | `true` / 없음 | `true`면 `run_mode`의 `ownReview`가 필수 (review 계열). `list_modes`에 `[ownReview 필수]` 표시 |
+| `RequireContext` | `true` / 없음 | `true`면 context 없이 부를 수 없습니다 (기본 모드: `sub_*` 넷). 없으면 codex-cli 단계는 context 없이 빈 폴더에서 돕니다 |
+| `RepoCopy` | `true` / 없음 | claude-cli 단계의 작업 폴더에 저장소 사본을 깝니다. codex-cli는 단계의 `CodexMaterial`을 따릅니다 |
 | `MaxRounds` (Debate) | 1~5 | 최대 회차. 1회차 = 두 토론자가 한 번씩. 기본 2, 서버 절대 상한 5 |
 | `HistoryWindow` (Debate) | 숫자 | 각 턴이 볼 직전 발언 수 (기본 2). 판정자는 항상 전체 |
 
@@ -180,6 +182,10 @@ agents: "deepseek_main_flash=gemini_high_argon"
 | `Id` | 영문 · 숫자 · `_` · `-` 1~32자 | 다른 단계가 `From`으로 가리킬 이름 (선택). 모드 안에서 겹치지 않고 `input`은 쓸 수 없습니다 |
 | `From` (Graph) | `"input"` · 앞 단계의 `Id` 배열 | 이 단계가 보는 것. 없으면 `["input"]` |
 | `WebSearch` | `{ "MaxCalls": 5, "BlockedDomains": [], "ContextSize": "medium" }` | 이 단계에 웹검색을 켭니다 (없으면 끔). 아래 [웹검색](#웹검색-stepswebsearch) |
+| `FallbackAgent` | 에이전트 이름 | 한도 소진(Quota)이면 같은 입력으로 대신 부를 에이전트 (기본 모드: `sub_*` → `claude_cli_opus`) |
+| `CodexMaterial` | `Repository`(없으면) / `Prompt` | codex-cli 단계의 자료 방식 — 저장소 사본 + 주목 범위 / 첨부 본문 + 빈 폴더. [agents.md 자료 방식](agents.md#자료-방식-stepdefinitioncodexmaterial) |
+
+codex-cli 단계는 API 제공사 단계와 한 모드에 섞을 수 있습니다 (단계마다 입력을 따로 만든다). claude-cli와 codex-cli는 섞지 않습니다.
 
 | `Sees` 값 | 보는 것 |
 |---|---|
@@ -323,7 +329,7 @@ agents: "deepseek_main_flash=gemini_high_argon"
 
 | 값 | 뜻 |
 |---|---|
-| `"gpt_main_sol=gpt_high_astra"` | 그 에이전트만 교체 |
+| `"codex_cli_sol=gpt_main_sol"` | 그 에이전트만 교체 (예: Codex 한도 소진 때 API sol로) |
 | `"*=gpt_high_astra"` | 모든 단계를 교체. 단계마다 다른 에이전트를 쓰는 모드(`review_high` 같은 비교 · 단계별 분담)에서는 서버가 거절합니다 — 바꿀 에이전트만 지정 |
 
 - 교체 대상은 appsettings에 등록 · 활성화된 에이전트여야 합니다. 잘못되면 토큰 없이 거절됩니다.
@@ -365,7 +371,7 @@ agents: "deepseek_main_flash=gemini_high_argon"
 
 ```
 runId: <10자리 hex>
-첨부 42,310자 + input 2,180자 = 44,490자 / 상한 350,000자 (13%)   ← claude-cli(sub_*)가 아닐 때
+첨부 42,310자 + input 2,180자 = 44,490자 / 상한 350,000자 (13%)   ← 첨부 본문을 받는 단계(API · 빈 폴더 Codex)가 있을 때
 ### 1. Cross_P3_A · gpt_main_sol (입력 15,551 / 출력 7,502, 144.0초)
 (재시도 1회 후 성공 · 1회차 Timeout)          ← 재시도가 있었을 때만
 [경고] 응답 언어 이탈 감지 (가나 비율 10.7%, 308자)  ← 검사기 경고가 있을 때만
@@ -475,7 +481,7 @@ review 계열(`Reviewer` · `PerfReviewer`)의 응답을 JSON으로 받아 지�
 
 ### 자료 보충 재질문 (`run_mode`의 `followUp`)
 
-에이전트가 직접 코드를 읽는 도구는 두지 않습니다. 경로 검사를 통과해도 외부 전송 허가는 아니기 때문입니다. 대신 지휘자가 요청을 보고 로컬에서 찾아 **승인한 범위만** 보냅니다.
+API 에이전트에게는 직접 코드를 읽는 도구를 두지 않습니다. 경로 검사를 통과해도 외부 전송 허가는 아니기 때문입니다. 대신 지휘자가 요청을 보고 로컬에서 찾아 **승인한 범위만** 보냅니다. (codex-cli는 작업 폴더 · 자료 도구로 읽습니다 — [agents.md](agents.md#codex-cli-제공사-sol-자리).)
 
 ```
 run_mode(mode, input, context, reason, followUp: { runId, step, requests: ["1-N1", …] })
@@ -488,6 +494,7 @@ run_mode(mode, input, context, reason, followUp: { runId, step, requests: ["1-N1
   - 지휘자 메모 (`input`)
   - 보충 지시
 - 앞부분이 원래 호출과 같아 제공사 프롬프트 캐시에 걸립니다.
+- **codex-cli**는 assistant 메시지를 받지 않아 `## 앞 호출 프롬프트` · `## 앞 응답` · 보충을 **한 user 글**로 합쳐 새로 부릅니다 (캐시는 기대하지 않음). 보충 자료는 원래 단계의 자료 방식대로 — 저장소 방식이고 보충 context가 있으면 새 저장소 사본 + 주목 범위, 아니면 빈 폴더 + 본문 (빈 폴더는 제공사 `CodexEvidenceTools=true` 필요). 최근 한도 소진 기록이 있으면 부르지 않습니다.
 - 계획은 그 단계 하나만, 원래 실행의 에이전트로 다시 조립합니다.
 - 시스템 프롬프트 해시가 원래 호출과 다르면 결과에 `(주의: 시스템 프롬프트가 원래 실행 때와 다르다)`.
 
@@ -506,10 +513,10 @@ run_mode(mode, input, context, reason, followUp: { runId, step, requests: ["1-N1
 - 실행마다 **성공한 보충 1회**.
   - 실패 · 취소된 시도는 다시 할 수 있습니다.
   - 같은 실행의 동시 호출은 서버 안 예약으로 하나만 됩니다.
-- 입력 상한(원래 프롬프트 + 응답 + 보충)은 봅니다.
+- 입력 상한(원래 프롬프트 + 응답 + 보충, codex-cli는 합친 글)은 봅니다.
 - `reason` 필수.
 - `agents` · `reasoning` · `images` · `ownReview`와 함께 쓰면 거절합니다 (원래 단계의 에이전트 · 추론 강도로 보냅니다).
-- 거절하는 경우: 이미 보충한 실행, 진행 중, 없는 · 빈 요청 ID, 모드가 다름, Debate, 골든 평가 실행, 이미지를 받은 단계, 보충할 자료 없음.
+- 거절하는 경우: 이미 보충한 실행, 진행 중, 없는 · 빈 요청 ID, 모드가 다름, Debate, 골든 평가 실행, 이미지를 받은 단계, 보충할 자료 없음, claude-cli 단계, codex-cli 최근 한도 소진 · 빈 폴더인데 `CodexEvidenceTools` 꺼짐.
 
 **판정 화면**
 
