@@ -40,6 +40,11 @@ public sealed class AgyTests : IDisposable
     private AgyRelay Relay() => new(Options, () => _settings, _ => Task.FromResult(_version), () => _home, () => _temps);
 
     /// <summary>통과하는 agy 설정 (필수 deny · Default · 샌드박스 · allow) — 다른 키는 남기는지 보려고 trustedWorkspaces도.</summary>
+    /// <summary>agy.json을 직접 바꾼다 (앱 재시작 뒤 남은 상태 흉내).</summary>
+    private void WriteState(AgyRelay relay, Func<AgyRelay.State, AgyRelay.State> change) =>
+        File.WriteAllText(Path.Combine(_data, "agy.json"),
+            System.Text.Json.JsonSerializer.Serialize(change(relay.Read(out _)), new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)));
+
     private void WriteGoodSettings(AgyRelay relay, string agentMode = "", bool sandbox = true)
     {
         var json = new JsonObject
@@ -338,6 +343,93 @@ public sealed class AgyTests : IDisposable
         // 받지 않은 앞 결과는 보관함으로
         Assert.True(File.Exists(Path.Combine(relay.ArchiveRoot, first.RunId!, AgyRelay.OutputFile)));
         Assert.False(File.Exists(Path.Combine(relay.CurrentFolder, AgyRelay.OutputFile)));
+    }
+
+    [Fact]
+    public async Task RunMode_RequestWaitDone_SharesSlotWithPrepare_Cancel()
+    {
+        var relay = Relay();
+        Assert.Null(relay.SetEnabled(true, true));
+        WriteGoodSettings(relay);
+        Assert.NotNull((await relay.RequestRunAsync("r1", "x")).Error); // 카나리 확인 전
+        await PassCanary(relay);
+
+        var (error, id, until) = await relay.RequestRunAsync("r1", "# 지시\n\n형식\n\n# 요청\n\n코드", TimeSpan.FromMinutes(10));
+        Assert.Null(error);
+        Assert.InRange(until - DateTimeOffset.Now, TimeSpan.FromMinutes(9), TimeSpan.FromMinutes(10));
+        var request = File.ReadAllText(Path.Combine(relay.CurrentFolder, AgyRelay.RequestFile));
+        Assert.StartsWith("# 지시", request);
+        Assert.Contains("output.md", request);
+        // 한 자리: 다른 요청 · 지휘자 agy_prepare · agy_collect는 건드리지 못한다
+        Assert.NotNull((await relay.RequestRunAsync("r2", "y")).Error);
+        Assert.Contains("run_mode", (await relay.PrepareAsync("r1", _ws, "z", null)).Error);
+        Assert.NotNull(relay.Collect("r1").Error);
+        Assert.Equal("gone", relay.RunResult("r2", id).Status); // 다른 방 토큰
+        Assert.Equal("waiting", relay.RunResult("r1", id).Status);
+
+        // 빈 파일 · 처음 본 크기는 아직 쓰는 중으로 본다 — 두 번 연속 같아야 받는다
+        File.WriteAllText(Path.Combine(relay.CurrentFolder, AgyRelay.OutputFile), "");
+        Assert.Equal("waiting", relay.RunResult("r1", id).Status);
+        File.WriteAllText(Path.Combine(relay.CurrentFolder, AgyRelay.OutputFile), "{\"findings\":[]}");
+        Assert.Equal("waiting", relay.RunResult("r1", id).Status);
+        using (new FileStream(Path.Combine(relay.CurrentFolder, AgyRelay.OutputFile), FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            Assert.Equal("waiting", relay.RunResult("r1", id).Status); // agy가 열고 쓰는 중
+        var (status, text, _) = relay.RunResult("r1", id);
+        Assert.Equal(("done", "{\"findings\":[]}"), (status, text));
+        Assert.True(File.Exists(Path.Combine(relay.ArchiveRoot, id!, AgyRelay.OutputFile)));
+        Assert.Null(relay.Read(out _).Run);
+        Assert.Equal("gone", relay.RunResult("r1", id).Status);
+
+        var (_, second, _) = await relay.RequestRunAsync("r1", "again");
+        Assert.False(relay.CancelRun("r2", second));
+        Assert.True(relay.CancelRun("r1", second));
+        Assert.Null(relay.Read(out _).Run);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(relay.CurrentFolder));
+    }
+
+    [Fact]
+    public async Task RunMode_SlotReleased_OnTurnEnd_Oversize_Stale()
+    {
+        var relay = Relay();
+        Assert.Null(relay.SetEnabled(true, true));
+        WriteGoodSettings(relay);
+        await PassCanary(relay);
+
+        // 턴 · 실행이 끝남 (서버가 cancel 없이 꺼짐): 그 방 것만 푼다
+        var (_, first, _) = await relay.RequestRunAsync("r1", "a");
+        Assert.False(relay.ReleaseRunFor("r2"));
+        Assert.True(relay.ReleaseRunFor("r1"));
+        Assert.Null(relay.Read(out _).Run);
+        Assert.True(Directory.Exists(Path.Combine(relay.ArchiveRoot, first!)));
+
+        // 받지 못한 결과(크기 초과)도 자리를 푼다 — 받아 갈 곳이 없어 막히지 않게
+        var (_, big, _) = await relay.RequestRunAsync("r1", "b");
+        File.WriteAllText(Path.Combine(relay.CurrentFolder, AgyRelay.OutputFile), new string('x', AgyRelay.MaxOutputBytes + 1));
+        Assert.Equal("gone", relay.RunResult("r1", big).Status);
+        Assert.Null(relay.Read(out _).Run);
+
+        // 제한 시간이 지난 자리 (앱 재시작 등): 새 요청 · agy_prepare를 막지 않는다
+        var stale = new AgyRelay.RunInfo("old", "r9", DateTimeOffset.Now.AddHours(-1), ForRunMode: true, Until: DateTimeOffset.Now.AddMinutes(-2));
+        Assert.True(stale.Stale(DateTimeOffset.Now));
+        Assert.False((stale with { Until = DateTimeOffset.Now.AddMinutes(5) }).Stale(DateTimeOffset.Now));
+        WriteState(relay, s => s with { Run = stale });
+        Assert.Null((await relay.RequestRunAsync("r1", "c")).Error);
+        WriteState(relay, s => s with { Run = stale });
+        Assert.Null((await relay.PrepareAsync("r1", _ws, "z", null)).Error);
+    }
+
+    [Fact]
+    public void McpConfig_ServerEnv_AddedToBaseServerOnly()
+    {
+        File.WriteAllText(Path.Combine(_ws, ".mcp.json"),
+            """{"mcpServers":{"hb-orchestration":{"command":"x.exe","env":{"KEEP":"1"}},"other":{"command":"y.exe"}}}""");
+        var (path, missing) = McpConfigFile.WriteRoom(_ws, ["hb-orchestration", "other"], null, _data, "abcdef123456", null,
+            ("hb-orchestration", new Dictionary<string, string> { [RoomHub.AgyUrlVariable] = "http://127.0.0.1:5290", [RoomHub.AgyTokenVariable] = "t" }));
+        Assert.Empty(missing);
+        var servers = JsonNode.Parse(File.ReadAllText(path))!["mcpServers"]!;
+        Assert.Equal("1", servers["hb-orchestration"]!["env"]!["KEEP"]!.GetValue<string>());
+        Assert.Equal("t", servers["hb-orchestration"]!["env"]![RoomHub.AgyTokenVariable]!.GetValue<string>());
+        Assert.Null(servers["other"]!["env"]);
     }
 
     [Fact]

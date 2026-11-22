@@ -279,6 +279,32 @@ app.UseStaticFiles(new StaticFileOptions { ContentTypeProvider = staticTypes });
 app.MapRazorPages();
 app.MapStickerImages();
 app.MapMcp(TerminalMcp.Path);
+// agy 중계 (run_mode gemini_agy 단계): hb-orchestration agy-relay 공급자가 이 방 실행 토큰으로 부른다 — 앱 MCP 경로 아래라 토큰 검사 · 같은 출처 예외가 같다.
+// 앱은 agy에 입력하지 않는다 (사람이 곁칸 셸에서). 결과는 {status: waiting|done|refused|gone, id?, text?, error?}
+app.MapPost(TerminalMcp.Path + "/agy-relay/request", async (AgyRelayRequest body, HttpRequest req, Terminals terminals, AgyRelay agy, RoomHub hub) =>
+{
+    if (terminals.RoomFor(req.Headers[TerminalMcp.TokenHeader]) is not { } roomId) return Results.Unauthorized();
+    // 토큰은 읽기 단계 · 단톡방 구성원 방에도 있다 — env를 넣는 조건(RoomHub.AgyOn)을 여기서도 본다
+    if (!hub.AgyAllowed(roomId)) return Results.Json(new { status = "refused", error = "이 방에서는 agy 중계를 쓰지 않습니다 (명령 · 앱 단계 앱 방만)." });
+    var (error, id, until) = await agy.RequestRunAsync(roomId, body.Prompt, body.TimeoutSeconds is > 0 and var s ? TimeSpan.FromSeconds(s) : null);
+    if (error is not null) return Results.Json(new { status = "refused", error });
+    hub.AgyNotice(roomId, RoomHub.AgyWaitText(until), waiting: true);
+    return Results.Json(new { status = "waiting", id });
+});
+app.MapGet(TerminalMcp.Path + "/agy-relay/result", (string? id, HttpRequest req, Terminals terminals, AgyRelay agy, RoomHub hub) =>
+{
+    if (terminals.RoomFor(req.Headers[TerminalMcp.TokenHeader]) is not { } roomId) return Results.Unauthorized();
+    var (status, text, error) = agy.RunResult(roomId, id);
+    if (status == "done") hub.AgyNotice(roomId, $"agy 결과를 받았습니다 ({text?.Length ?? 0:N0}자) — 지휘자가 이어 갑니다.", waiting: false);
+    else if (status == "gone") hub.AgyNotice(roomId, $"agy 중계가 끝났습니다 — {error}", waiting: false);
+    return Results.Json(new { status, text, error });
+});
+app.MapPost(TerminalMcp.Path + "/agy-relay/cancel", (AgyRelayCancel body, HttpRequest req, Terminals terminals, AgyRelay agy, RoomHub hub) =>
+{
+    if (terminals.RoomFor(req.Headers[TerminalMcp.TokenHeader]) is not { } roomId) return Results.Unauthorized();
+    if (agy.CancelRun(roomId, body.Id)) hub.AgyNotice(roomId, "agy 중계를 멈췄습니다 (제한 시간 · 턴 중지) — 중계 폴더를 비웠습니다.", waiting: false);
+    return Results.Json(new { status = "gone" });
+});
 // 화면 테마 (5차 a): 데스크톱 앱이 맨 위 줄 색 · WebView2 색 설정(대시보드 탭 포함)을 맞추려고 읽는다. 읽기만.
 // notifyBody: 데스크톱 알림에 답 앞부분을 보일지 (설정 화면 토글, 기본 끔)
 // conductorImage: 지휘자 프로필 그림 주소 (/profile-image/…, 없으면 null) — 데스크톱 토스트 왼쪽 그림 (결정 "지휘자 프로필 그림")

@@ -576,6 +576,7 @@ public sealed partial class RoomHub
     {
         var exit = await run.Proc.Completion;
         run.Resources?.Release();
+        AgyRunEnded(roomId);
         // 작업이 남은 채 정리했으면 방 기록 줄 ("지금 끝내기" · 상한 · 멈춤 · 설정 바뀜) — 화면이 작업 줄이 지워진 알림을 받기 전에 남긴다
         if (exit.Left > 0 && exit.ClosedBy is "wrapup" or "cap" or "stop" or "settings"
             && BackgroundNote(new RunResult(true, false, null, null, null, null, 0, 0, null) { BackgroundClosedBy = exit.ClosedBy, BackgroundLeft = exit.Left }) is { } note)

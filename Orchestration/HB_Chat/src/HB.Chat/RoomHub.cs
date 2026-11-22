@@ -866,8 +866,10 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
                 try { await Task.WhenAll(settling).WaitAsync(ApprovalSettleWait); } catch (TimeoutException) { }
 
             // live.Cts를 잠금 안에서 먼저 비운 뒤 Dispose한다: Stop · Dispose가 해제된 CTS에 Cancel하지 않게.
+            bool resting;
             lock (live.Gate)
             {
+                resting = Resting(live);
                 live.Cts = null;
                 live.WrapUpCts = null;
                 if (!Resting(live))
@@ -893,6 +895,8 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
                 RestLine(live); // 화면은 턴 끝에 작업 줄을 지운다 — 쉬는 중이면 다시 보인다
                 SubagentLines(live);
             }
+            // 쉬는 실행은 백그라운드 서브에이전트가 run_mode를 기다릴 수 있다 — 그때는 프로세스가 끝날 때(WatchRunAsync) 푼다
+            if (!resting) AgyRunEnded(roomId);
             try { TurnEnded?.Invoke(roomId, result); } catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException) { }
             cts.Dispose();
             wrapUp.Dispose();
@@ -1085,16 +1089,21 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
             else Notice(live, why + " — 이번 실행은 Unity 연결 없이 돕니다.");
         }
         var baseOn = !room.McpOff.Contains(o.McpServer);
+        // agy 중계를 켠 방: 기본 서버에 HB_Chat 주소 · 이 실행 토큰을 env로 — run_mode의 gemini_agy 단계가 이 방으로 중계를 요청한다 (방별 파일)
+        (string, IReadOnlyDictionary<string, string>)? agyEnv =
+            baseOn && AgyOn(room, terminalConfig is not null) && resources.TerminalToken is { } agyToken && SelfUrl?.Invoke() is { } agyUrl
+                ? (o.McpServer, new Dictionary<string, string> { [AgyUrlVariable] = agyUrl, [AgyTokenVariable] = agyToken })
+                : null;
         try
         {
-            if (baseOn && room.McpExtra.Count == 0 && unity is null)
+            if (baseOn && room.McpExtra.Count == 0 && unity is null && agyEnv is null)
                 mcpConfig = McpConfigFile.Write(workspace, o.McpServer, o.DataFolder);
             else
             {
                 var servers = room.McpExtra.Where(s => s != o.McpServer && ClaudeArgs.IsServerName(s)).ToList();
                 if (baseOn) servers.Insert(0, o.McpServer);
                 // 작업 폴더 .mcp.json에 없는 이름은 앱에서 더한 서버에서
-                var (path, missing) = McpConfigFile.WriteRoom(workspace, servers, unity, o.DataFolder, room.Id, o.AppMcp is { } app ? app.Get : null);
+                var (path, missing) = McpConfigFile.WriteRoom(workspace, servers, unity, o.DataFolder, room.Id, o.AppMcp is { } app ? app.Get : null, agyEnv);
                 mcpConfig = roomConfig = resources.RoomConfig = path;
                 if (baseOn && missing.Contains(o.McpServer))
                     throw new InvalidOperationException($"{Path.Combine(workspace, ".mcp.json")}에 mcpServers.{o.McpServer} 항목이 없습니다.");
@@ -1204,6 +1213,36 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
         }
     }
 
+    /// <summary>hb-orchestration agy-relay 공급자가 읽는 환경 변수 (HB_Orchestration AgyRelayProvider와 같은 이름).</summary>
+    public const string AgyUrlVariable = "HB_CHAT_AGY_URL", AgyTokenVariable = "HB_CHAT_AGY_TOKEN";
+
+    /// <summary>이 실행에 agy 중계(도구 · 안내 · run_mode 중계 env)를 붙이는가: 켰을 때 · 앱 MCP를 붙인 명령 · 앱 방 · 단톡방 구성원 · 놀이터가 아님.</summary>
+    private bool AgyOn(Room room, bool terminal) =>
+        Agy?.Enabled == true && terminal && ClaudeArgs.RunsCommands(room.Level) && room.GroupId is null && !GroupChat.IsPlaygroundMember(store, room);
+
+    /// <summary>run_mode agy 중계 요청을 받을 방인가 (루프백 API — 토큰은 이 조건 밖의 방에도 있다).</summary>
+    public bool AgyAllowed(string roomId) => store.Get(roomId) is { } room && AgyOn(room, terminal: true);
+
+    /// <summary>agy 중계(run_mode) 대기 안내 — 입력칸 위 띠 (화면이 처음 그릴 때도 같은 글).</summary>
+    public static string AgyWaitText(DateTimeOffset? until) =>
+        $"agy 대기 중 — 곁칸 터미널 ▾ → 'agy 중계 셸'에서 agy를 새로 띄워 \"{AgyRelay.TypeLine}\"를 입력하세요 (run_mode가 {until:HH:mm}까지 기다립니다).";
+
+    /// <summary>턴 · 실행이 끝난 방의 run_mode agy 중계를 푼다 — 서버가 cancel 없이 꺼졌을 때 자리 · 띠가 남지 않게.</summary>
+    private void AgyRunEnded(string roomId)
+    {
+        if (Agy?.ReleaseRunFor(roomId) == true) AgyNotice(roomId, "agy 중계를 멈췄습니다 (실행이 끝남) — 중계 폴더를 비웠습니다.", waiting: false);
+    }
+
+    /// <summary>
+    /// agy 중계(run_mode) 대기 · 끝 알림 — 입력칸 위 띠("agy" 알림, waiting이 아니면 지움) + 방 기록 줄.
+    /// 지휘자가 run_mode에 묶여 있어 말을 못 하는 동안 사용자에게 알린다.
+    /// </summary>
+    public void AgyNotice(string roomId, string text, bool waiting)
+    {
+        Post(roomId, () => new LiveEvent("agy") { Text = waiting ? text : null });
+        Log?.Note(roomId, RoomNotes.AgyTool, text);
+    }
+
     /// <summary>방 칸 알림 한 줄 (잠금 안에서 보낸다).</summary>
     private void Notice(Live live, string text)
     {
@@ -1254,7 +1293,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
         var askWrites = o.AskAppWrites;
         // 규칙 재료는 쉬는 실행이 이어 쓰는 턴에서도 같은 규칙을 만들게 남긴다 (RulesFor — 기본 서버 · 스티커 · 단톡방 규칙 포함)
         // agy 중계: 켰을 때 · 앱 MCP를 붙인 명령 · 앱 방(단톡방 구성원 아님) — 규칙 글과 도구 허용이 같은 값
-        var agy = Agy?.Enabled == true && terminalConfig is not null && ClaudeArgs.RunsCommands(room.Level) && room.GroupId is null && !playground;
+        var agy = AgyOn(room, terminalConfig is not null);
         var setup = new RunSetup(Terminal: terminalConfig is not null, Unity: unityName, Extras: extraServers, McpOn: mcpConfig is not null,
             AskWrites: room.Level == PermissionLevel.App && askWrites, Workspace: workspace, AppAskWrites: askWrites, Agy: agy);
         var rules = RulesFor(room, setup);

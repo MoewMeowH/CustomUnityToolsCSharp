@@ -1008,10 +1008,12 @@ public sealed class CodexCliTests : IDisposable
         Assert.Contains("목록이 전부", withoutCopy);
     }
 
-    [Fact]
-    public async Task Claude_cli_agents_cannot_follow_up_and_the_result_says_so_early()
+    [Theory]
+    [InlineData(ClaudeCliProvider.TypeName)]
+    [InlineData(AgyRelayProvider.TypeName)]
+    public async Task Claude_cli_agents_cannot_follow_up_and_the_result_says_so_early(string providerType)
     {
-        using var h = new ModeRunnerHarness(Modes, providerType: ClaudeCliProvider.TypeName);
+        using var h = new ModeRunnerHarness(Modes, providerType: providerType);
         h.Options.Agents[0].StructuredOutput = StructuredOutputMode.Schema;
         using var diff = new CwdFile("+ x\n");
         h.Client.Script = [ScriptedChatClient.Reply("""{"findings":[],"needsInfo":[{"what":"정의","path":null,"symbol":"A","why":"확인"}]}""")];

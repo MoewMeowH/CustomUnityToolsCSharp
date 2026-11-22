@@ -1651,6 +1651,11 @@
                 case "notice":
                     notice.textContent = ev.text; notice.hidden = false;
                     break;
+                case "agy": { // agy 중계 대기 띠 (입력칸 위) — 글이 없으면 지운다
+                    const agyWait = $("#agy-wait");
+                    if (agyWait) { agyWait.textContent = ev.text || ""; agyWait.hidden = !ev.text; }
+                    break;
+                }
                 case "end": {
                     liveRunTurn++; // 이 턴의 외부 말풍선 받기가 늦게 와도 진행 칸에 붙이지 않는다
                     loadCommands(); // 이번 실행의 init이 명령 목록을 새로 알려 줬을 수 있다 (Claude 앱 기능 A)

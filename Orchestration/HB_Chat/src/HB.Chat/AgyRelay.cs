@@ -25,10 +25,20 @@ public sealed class AgyRelay(Func<ChatOptions> options, Func<string>? settingsPa
     /// <summary>사용자가 agy에 칠 한 줄.</summary>
     public const string TypeLine = "request.md를 읽고 그대로 해줘";
 
-    /// <summary>보낼 파일 상한 (하나 · 합 · 개수), 요청 글 · 결과 글 상한.</summary>
-    public const int MaxFileBytes = 512 * 1024, MaxTotalBytes = 4 * 1024 * 1024, MaxFiles = 50, MaxRequestChars = 64_000, MaxOutputBytes = 256 * 1024;
+    /// <summary>보낼 파일 상한 (하나 · 합 · 개수), 요청 글 · 결과 글 상한, run_mode가 맡기는 프롬프트(첨부 코드 포함) 상한.</summary>
+    public const int MaxFileBytes = 512 * 1024, MaxTotalBytes = 4 * 1024 * 1024, MaxFiles = 50, MaxRequestChars = 64_000, MaxOutputBytes = 256 * 1024,
+        MaxRunPromptChars = 1_000_000;
 
-    public sealed record RunInfo(string Id, string RoomId, DateTimeOffset At);
+    /// <param name="ForRunMode">run_mode의 gemini_agy 단계가 요청한 중계 — 서버가 결과를 받아 간다 (agy_collect · agy_prepare로 건드리지 않는다).</param>
+    /// <param name="Until">run_mode 중계의 기다림 끝 (공급자가 알린 제한 시간).</param>
+    public sealed record RunInfo(string Id, string RoomId, DateTimeOffset At, bool ForRunMode = false, DateTimeOffset? Until = null)
+    {
+        /// <summary>run_mode 중계가 제한 시간(+1분)을 넘겼다 — 서버가 cancel 없이 끝난 것(턴 중지가 서버째 끔 · 앱 재시작)이라 자리를 막지 않는다.</summary>
+        public bool Stale(DateTimeOffset now) => ForRunMode && (Until is not { } until || now > until + TimeSpan.FromMinutes(1));
+    }
+
+    /// <summary>run_mode 중계 기다림 상한 (공급자가 알린 값을 이 안으로).</summary>
+    public static readonly TimeSpan MinRunWait = TimeSpan.FromMinutes(1), MaxRunWait = TimeSpan.FromHours(1);
 
     /// <param name="Token">deny 구역 파일의 글자 — 결과에 있으면 뚫림.</param>
     /// <param name="Control">current 안 대조 파일의 글자 — 결과에 있어야 agy가 실제로 읽기 · 셸을 돌린 것.</param>
@@ -371,7 +381,9 @@ public sealed class AgyRelay(Func<ChatOptions> options, Func<string>? settingsPa
         {
             var state = Read(out var error);
             if (error is not null) return (error, null, []);
-            if (state.Run is { } other && other.RoomId != roomId)
+            if (state.Run is { ForRunMode: true } waiting && !waiting.Stale(DateTimeOffset.Now))
+                return ($"run_mode가 agy 결과를 기다리는 중입니다 ({waiting.Id}, {waiting.Until:HH:mm}까지) — 끝나거나 취소된 뒤 하세요 (설정 화면에서 비울 수도 있습니다).", null, []);
+            if (state.Run is { ForRunMode: false } other && other.RoomId != roomId)
                 return ($"다른 방의 중계가 진행 중입니다 ({other.Id}, {other.At:MM-dd HH:mm}) — 그 방에서 agy_collect로 받거나 설정 화면에서 비우세요.", null, []);
             if (state.Canary is not null) return ("카나리 확인이 진행 중입니다 — 설정 화면에서 판정한 뒤 하세요.", null, []);
             try
@@ -409,7 +421,7 @@ public sealed class AgyRelay(Func<ChatOptions> options, Func<string>? settingsPa
         {
             var state = Read(out var error);
             if (error is not null) return new(error, null, null, null);
-            if (state.Run is not { } run || run.RoomId != roomId) return new("이 방에서 agy_prepare로 둔 중계가 없습니다.", null, null, null);
+            if (state.Run is not { ForRunMode: false } run || run.RoomId != roomId) return new("이 방에서 agy_prepare로 둔 중계가 없습니다.", null, null, null);
             var output = Path.Combine(CurrentFolder, OutputFile);
             string text;
             try
@@ -428,6 +440,136 @@ public sealed class AgyRelay(Func<ChatOptions> options, Func<string>? settingsPa
             if (Update(s => s with { Run = null }) is { } saveError) return new(saveError, run.Id, null, null);
             return new(null, run.Id, text, AgyCheck.OutputFormatProblem(text));
         }
+    }
+
+    // ---- run_mode 중계 (HB_Orchestration agy-relay 공급자가 이 방 실행 토큰으로 루프백 API를 부른다) ----
+
+    /// <summary>
+    /// run_mode의 gemini_agy 단계: 서버가 만든 프롬프트(지시 + 첨부 코드 + input)를 request.md로 둔다. 관문 · 한 자리는 agy_prepare와 같다.
+    /// 앱은 agy에 입력하지 않는다 — 사용자가 곁칸에서 입력한다.
+    /// </summary>
+    /// <param name="wait">공급자의 기다림 상한 (비우면 15분, <see cref="MinRunWait"/> ~ <see cref="MaxRunWait"/>로 자른다).</param>
+    public async Task<(string? Error, string? Id, DateTimeOffset Until)> RequestRunAsync(string roomId, string? prompt, TimeSpan? wait = null)
+    {
+        if (await WhyNotReadyAsync() is { } why) return (why, null, default);
+        if (string.IsNullOrWhiteSpace(prompt)) return ("프롬프트가 비었습니다.", null, default);
+        if (prompt.Length > MaxRunPromptChars) return ($"프롬프트가 {MaxRunPromptChars:N0}자를 넘습니다 — 첨부를 줄이세요.", null, default);
+        var now = DateTimeOffset.Now;
+        var id = $"{now:yyyyMMdd-HHmmss}-{Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(2))}";
+        var until = now + TimeSpan.FromTicks(Math.Clamp((wait ?? TimeSpan.FromMinutes(15)).Ticks, MinRunWait.Ticks, MaxRunWait.Ticks));
+        lock (_gate)
+        {
+            var state = Read(out var error);
+            if (error is not null) return (error, null, default);
+            // 제한 시간이 지난 run_mode 중계는 받아 갈 곳이 없다 — 보관하고 덮는다
+            if (state.Run is { } other && !other.Stale(now))
+                return ($"진행 중인 agy 중계가 있습니다 ({other.Id}) — 끝내거나 설정 화면에서 비운 뒤 하세요.", null, default);
+            if (state.Canary is not null) return ("카나리 확인이 진행 중입니다 — 설정 화면에서 판정한 뒤 하세요.", null, default);
+            try
+            {
+                if (state.Run is { } stale) Archive(stale);
+                ClearFolder(CurrentFolder);
+                File.WriteAllText(Path.Combine(CurrentFolder, RequestFile), prompt.TrimEnd() + "\n\n" + RunFooter, new UTF8Encoding(false));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return ($"중계 폴더에 쓰지 못했습니다: {ex.Message}", null, default); }
+            if (Update(s => s with { Run = new RunInfo(id, roomId, now, ForRunMode: true, Until: until) }) is { } saveError) return (saveError, null, default);
+            _seenOutput = null;
+        }
+        return (null, id, until);
+    }
+
+    /// <summary>output.md를 마지막으로 본 크기 · 시각 — 두 번 연속 같아야 다 쓴 것으로 본다 (agy가 쓰는 중에 가져가지 않게). _gate 안에서만.</summary>
+    private (string Id, long Length, DateTime Write)? _seenOutput;
+
+    private const string RunFooter =
+        "---\n\n## 규칙 (HB_Chat이 붙임)\n\n" +
+        "- 이 폴더 밖의 파일은 보지 않는다. 파일을 고치지 않는다 — `output.md` 하나만 쓴다.\n" +
+        "- 결과는 이 폴더의 `output.md`에, 위 `# 지시`가 정한 출력 형식 그대로만 쓴다 (앞뒤 설명을 붙이지 않는다).\n";
+
+    /// <summary>
+    /// run_mode 중계 결과: output.md가 비지 않고 두 번 연속 같은 크기 · 시각이면 읽고 보관 · 비우고 "done", 아직이면(없음 · 쓰는 중 · 잠김) "waiting",
+    /// 그 중계가 없거나(취소 · 비우기) 받지 못하면(크기 초과 · 옮기기 실패) "gone" — 받지 못한 때도 자리를 푼다 (받아 갈 곳이 없어 막히지 않게).
+    /// </summary>
+    public (string Status, string? Text, string? Error) RunResult(string roomId, string? id)
+    {
+        lock (_gate)
+        {
+            var state = Read(out var error);
+            if (error is not null) return ("gone", null, error);
+            if (state.Run is not { ForRunMode: true } run || run.Id != id || run.RoomId != roomId)
+                return ("gone", null, "그 agy 중계가 없습니다 (취소됐거나 설정 화면에서 비움).");
+            var output = Path.Combine(CurrentFolder, OutputFile);
+            string text;
+            try
+            {
+                var info = new FileInfo(output);
+                if (!info.Exists || info.Length == 0) return ("waiting", null, null);
+                if (info.Length > MaxOutputBytes) return Drop(run, $"{OutputFile}가 {MaxOutputBytes / 1024}KB를 넘습니다.");
+                var seen = (run.Id, info.Length, info.LastWriteTimeUtc);
+                if (_seenOutput != seen)
+                {
+                    _seenOutput = seen;
+                    return ("waiting", null, null);
+                }
+                // agy가 아직 열고 쓰는 중이면(공유 위반) 다음 물음에 다시
+                using (var stream = new FileStream(output, FileMode.Open, FileAccess.Read, FileShare.Read))
+                using (var reader = new StreamReader(stream))
+                    text = reader.ReadToEnd();
+            }
+            catch (IOException) { return ("waiting", null, null); }
+            catch (UnauthorizedAccessException ex) { return Drop(run, $"{OutputFile}를 읽지 못했습니다: {ex.Message}"); }
+            try
+            {
+                CopyTree(CurrentFolder, Path.Combine(ArchiveRoot, run.Id));
+                ClearFolder(CurrentFolder);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return Drop(run, $"결과를 옮기지 못했습니다: {ex.Message}"); }
+            return Update(s => s with { Run = null }) is { } saveError ? ("gone", null, saveError) : ("done", text, null);
+        }
+    }
+
+    /// <summary>받지 못한 run_mode 중계를 버린다 (_gate 안): 보관 · 비우기는 되는 만큼, 자리는 푼다.</summary>
+    private (string Status, string? Text, string? Error) Drop(RunInfo run, string error)
+    {
+        Release(run);
+        return ("gone", null, error);
+    }
+
+    /// <summary>run_mode 중계 취소 (제한 시간 · 사용자가 턴을 멈춤): 그 중계면 보관 뒤 비우고 자리를 푼다. 풀었으면 true.</summary>
+    public bool CancelRun(string roomId, string? id)
+    {
+        lock (_gate)
+            return Read(out _).Run is { ForRunMode: true } run && run.Id == id && run.RoomId == roomId && Release(run);
+    }
+
+    /// <summary>
+    /// 그 방의 턴 · 실행이 끝났다 (RoomHub): 남은 run_mode 중계는 받아 갈 곳이 없다 — 턴 중지가 claude 프로세스 트리째 끄면 서버가 cancel을 못 보낸다.
+    /// 풀었으면 true.
+    /// </summary>
+    public bool ReleaseRunFor(string roomId)
+    {
+        lock (_gate)
+            return Read(out _).Run is { ForRunMode: true } run && run.RoomId == roomId && Release(run);
+    }
+
+    /// <summary>run_mode 중계 자리를 푼다 (_gate 안) — 보관 · 비우기는 되는 만큼 (남은 파일은 다음 준비가 비운다).</summary>
+    private bool Release(RunInfo run)
+    {
+        try
+        {
+            Archive(run);
+            ClearFolder(CurrentFolder);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        _seenOutput = null;
+        return Update(s => s with { Run = null }) is null;
+    }
+
+    /// <summary>current에 무엇이든 있으면 그 실행 이름으로 보관한다 (_gate 안).</summary>
+    private void Archive(RunInfo run)
+    {
+        if (Directory.Exists(CurrentFolder) && Directory.EnumerateFileSystemEntries(CurrentFolder).Any())
+            CopyTree(CurrentFolder, Path.Combine(ArchiveRoot, run.Id));
     }
 
     /// <summary>진행 중인 중계 · 카나리를 버린다 (설정 화면) — current를 비운다. 중계 폴더 검사를 통과할 때만 (설정이 다른 폴더를 가리키면 지우지 않게).</summary>

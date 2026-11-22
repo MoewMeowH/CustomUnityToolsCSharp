@@ -126,6 +126,9 @@
     }
     <div class="composer" @(Model.ParentGroup is not null ? "hidden" : null) data-attach="@(canAttach ? "1" : "0")" data-attach-why="@(canAttach ? null : noAttachWhy)"
          data-attach-max="@Attachments.MaxPerMessage" data-attach-bytes="@Attachments.MaxBytes">
+        @* agy 중계 대기 (run_mode gemini_agy): 지휘자가 run_mode에 묶여 말을 못 하는 동안 입력칸 위에 — 대화 칸 맨 위 알림은 스크롤 밖이라 안 보였다 (사용자 실제 확인) *@
+        @{ var agyRun = Agy.Read(out _).Run is { ForRunMode: true } r && r.RoomId == room.Id && !r.Stale(DateTimeOffset.Now) ? r : null; }
+        <div class="panel" id="agy-wait" role="status" style="padding:8px 12px;margin-bottom:8px;border-color:var(--warn)" hidden="@(agyRun is null)">@(agyRun is not null ? RoomHub.AgyWaitText(agyRun.Until) : "")</div>
         @* 진행 단계 (3차 b): 지휘자 할 일 목록 — 화면이 snapshot · steps 알림으로 그린다 *@
         <details class="steps" id="steps" hidden><summary id="steps-summary"></summary><ol id="steps-list"></ol></details>
         @* 기다리는 말 (하나씩 취소 · 지금 보내기, 2-2 d · 3차 b) — 화면이 queued · start · snapshot 알림으로 그린다 *@

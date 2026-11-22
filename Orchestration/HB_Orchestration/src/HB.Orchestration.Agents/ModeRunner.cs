@@ -235,11 +235,12 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             var folderNote = string.Join("\n", folderNotes);
             note = note is null ? folderNote : $"{folderNote}\n{note}";
         }
-        // 보충 재질문을 못 하는 것은 claude-cli 단계뿐이다 (codex-cli는 앞 기록을 한 user 글로 합쳐 다시 묻는다).
+        // 보충 재질문을 못 하는 것은 claude-cli · agy-relay 단계다 (codex-cli는 앞 기록을 한 user 글로 합쳐 다시 묻는다).
         if (mode.Flow != ModeFlow.Debate
-            && results.Any(r => r.Structured?.Requests is { Count: > 0 } && kinds[r.Step - 1] == StepKind.ClaudeFolder))
+            && results.Where(r => r.Structured?.Requests is { Count: > 0 }).Select(r => NoFollowUpHint(plan[r.Step - 1].Agent.ProviderOptions?.Type))
+                .OfType<string>().Distinct().ToList() is { Count: > 0 } hints)
         {
-            var noFollowUp = $"(followUp 불가: {CliFollowUpHint})";
+            var noFollowUp = string.Join("\n", hints.Select(h => $"(followUp 불가: {h})"));
             note = note is null ? noFollowUp : $"{noFollowUp}\n{note}";
         }
 
@@ -269,6 +270,15 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
 
     /// <summary>claude-cli는 앞 응답을 이어 받는 호출을 받지 않는다 (codex-cli는 앞 기록을 user 글에 합쳐 보낸다).</summary>
     private const string CliFollowUpHint = "claude-cli 에이전트는 앞 응답을 이어 받지 못합니다. 코드 자료가 더 필요하면 context를 넓혀 새로 run_mode를 부르세요.";
+
+    /// <summary>agy-relay는 한 번 맡기고 받기만 한다 (앞 응답을 assistant 메시지로 받지 않음).</summary>
+    private const string AgyFollowUpHint = "gemini_agy(agy 수동 중계)는 앞 응답을 이어 받지 못합니다. 코드 자료가 더 필요하면 context를 넓혀 새로 run_mode를 부르세요.";
+
+    /// <summary>보충 재질문(followUp)을 받지 않는 제공사면 그 안내, 받으면 null.</summary>
+    private static string? NoFollowUpHint(string? type) =>
+        string.Equals(type, ClaudeCliProvider.TypeName, StringComparison.OrdinalIgnoreCase) ? CliFollowUpHint
+        : string.Equals(type, AgyRelayProvider.TypeName, StringComparison.OrdinalIgnoreCase) ? AgyFollowUpHint
+        : null;
 
     /// <summary>작업 폴더를 쓰는 제공사 Type (claude-cli · codex-cli, 대소문자 무시 — /self-review C4 · sub_self C6).</summary>
     public static bool UsesWorkFolder(string? type) =>
@@ -664,7 +674,7 @@ public sealed class ModeRunner(ModeStore store, AgentCatalog catalog, AgentRunne
             var step = plan!.Steps[0];
             // 호출해 봐야 제공사가 거절해 실패 기록만 남는다 — 앞에서 돌려준다.
             var type = step.Agent.ProviderOptions?.Type;
-            if (string.Equals(type, ClaudeCliProvider.TypeName, StringComparison.OrdinalIgnoreCase)) return Fail + CliFollowUpHint;
+            if (NoFollowUpHint(type) is { } hint) return Fail + hint;
             var codex = string.Equals(type, CodexCliProvider.TypeName, StringComparison.OrdinalIgnoreCase);
             // codex-cli: 앞 기록을 한 user 글로 합쳐 새로 부른다. 보충 자료는 원래 단계의 자료 방식대로 (저장소 방식이고 보충 context가 있으면 새 저장소 사본 + 주목 범위, 아니면 빈 폴더 + 본문).
             var kind = StepKind.Api;

@@ -94,6 +94,7 @@ builder.Services.AddSingleton<IChatClientProvider, OpenAICompatibleProvider>();
 builder.Services.AddSingleton<IChatClientProvider, OpenAIResponsesProvider>(); // 웹검색 단계 (Responses API)
 builder.Services.AddSingleton<IChatClientProvider, ClaudeCliProvider>(); // claude -p 읽기 전용 검토 (sub_* 모드)
 builder.Services.AddSingleton<IChatClientProvider, CodexCliProvider>(); // codex exec 읽기 전용 리뷰, ChatGPT 구독 (review_main)
+builder.Services.AddSingleton<IChatClientProvider, AgyRelayProvider>(); // agy 수동 중계 — HB_Chat 방에서 사람이 곁칸 agy로 (Google 구독)
 
 builder.Services.AddSingleton<AgentCatalog>();
 builder.Services.AddSingleton<AgentRunner>();

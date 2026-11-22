@@ -72,8 +72,10 @@ public static class McpConfigFile
     /// .mcp.json에 없는 이름은 appServer(앱에서 더한 서버)에서 찾고 — 작업 폴더 것이 먼저 —
     /// 둘 다 없으면 빼고 missing으로 돌려준다 (방 칸이 알린다). servers가 비고 unity도 없으면 빈 mcpServers. .mcp.json이 없으면 앱 서버만.
     /// </summary>
+    /// <param name="serverEnv">그 서버 항목의 env에 더할 값 (agy 중계: hb-orchestration에 HB_Chat 주소 · 이 실행 토큰).</param>
     public static (string Path, IReadOnlyList<string> Missing) WriteRoom(string workspaceDir, IEnumerable<string> servers,
-        (string Cli, string Project)? unity, string dataDir, string roomId, Func<string, JsonObject?>? appServer = null)
+        (string Cli, string Project)? unity, string dataDir, string roomId, Func<string, JsonObject?>? appServer = null,
+        (string Server, IReadOnlyDictionary<string, string> Env)? serverEnv = null)
     {
         if (!RoomStore.IsRoomId(roomId)) throw new InvalidOperationException($"방 ID 모양이 아닙니다: {roomId}");
         var source = Path.Combine(workspaceDir, ".mcp.json");
@@ -101,6 +103,11 @@ public static class McpConfigFile
             else if (appServer?.Invoke(name) is { } app) picked[name] = app;
             else missing.Add(name);
         if (unity is { } u) picked[UnityServer] = UnityEntry(u.Cli, u.Project);
+        if (serverEnv is { } add && picked[add.Server] is JsonObject target)
+        {
+            if (target["env"] is not JsonObject env) target["env"] = env = [];
+            foreach (var (k, v) in add.Env) env[k] = v;
+        }
         Directory.CreateDirectory(dataDir);
         var path = RoomPath(dataDir, roomId);
         var tmp = $"{path}.{Guid.NewGuid():N}.tmp";

@@ -4,6 +4,13 @@ using ModelContextProtocol.Server;
 
 namespace HB.Chat;
 
+/// <summary>run_mode agy 중계 요청 본문 (hb-orchestration agy-relay 공급자).</summary>
+/// <param name="TimeoutSeconds">공급자가 기다리는 상한 — 대기 띠 · 낡은 자리 판정에 쓴다.</param>
+public sealed record AgyRelayRequest(string? Prompt, string? Model, int? TimeoutSeconds = null);
+
+/// <summary>run_mode agy 중계 취소 본문.</summary>
+public sealed record AgyRelayCancel(string? Id);
+
 /// <summary>
 /// agy 중계 도구 둘 — 같은 앱 MCP · 실행 토큰 · 명령 · 앱 방(단톡방 구성원 아님)만, 설정에서 켰을 때만 묻지 않는다(<see cref="ClaudeArgs"/>).
 /// 앱은 agy에 입력하지 않는다: prepare는 파일을 두고, 사용자가 곁칸 셸에서 agy를 띄워 직접 입력하고, collect가 결과를 읽는다. 실패는 '['로 시작하는 한 줄.
