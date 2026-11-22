@@ -8,8 +8,12 @@ namespace HB.Chat.Tests;
 /// 단톡방 ② Codex 구성원: 인자(읽기 전용 · 모델 · 강도 · 지시 · resume) · TOML 이스케이프 · 모델 목록 ·
 /// 켤 작업 폴더 설정 · 단톡방에서 Codex 구성원 부르기(새 스레드 → 이어 가기) · 실패 · 과정 기록. 진짜 Codex 대신 TestData/fake-codex.ps1.
 /// </summary>
+[Collection(PingCollection)] // 끝난 뒤 남은 PING을 센다 — ping을 띄우는 다른 시험과 겹치지 않게 차례로
 public sealed class CodexTests : IDisposable
 {
+    /// <summary>ping을 띄우는 시험 묶음 (같은 묶음은 차례로 돈다).</summary>
+    public const string PingCollection = "ping 프로세스";
+
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(30);
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "hbchat-codex-" + Guid.NewGuid().ToString("N"));
     private readonly RoomStore _store;

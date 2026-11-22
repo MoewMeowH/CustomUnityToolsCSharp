@@ -8,6 +8,7 @@ namespace HB.Chat.Tests;
 /// 방의 쉬는 실행 (백그라운드 명령 — Claude 앱처럼): RoomHub + ClaudeSession, 진짜 claude 대신 TestData/fake-claude-session.ps1
 /// (한 프로세스 여러 턴 · 2.1.316 실측 모양). 시간 값은 이 허브에만 준다.
 /// </summary>
+[Collection(CodexTests.PingCollection)] // ping을 띄운다 — CodexTests가 남은 PING을 셀 때 섞이지 않게
 public sealed class RoomRestTests : IDisposable
 {
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(30);
