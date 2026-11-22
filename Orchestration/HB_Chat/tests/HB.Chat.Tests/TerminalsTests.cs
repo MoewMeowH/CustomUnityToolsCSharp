@@ -104,7 +104,8 @@ public sealed class TerminalsTests : IDisposable
     {
         // 중간 부모가 먼저 끝난 손자는 Kill(entireProcessTree)가 찾지 못한다 (셸 → 중간 cmd(바로 끝남) → 손자) — 남으면 3초 뒤 late.txt를 쓴다
         var late = Path.Combine(_dir, "late.txt");
-        var s = await Ended(Agent("r1", "orphan", $"start \"\" /b cmd /d /c start \"\" /b cmd /d /c \"ping -n 4 127.0.0.1 >nul & echo late>{late}\""));
+        // 기다리기는 ping 말고 waitfor — CodexTests가 끝난 뒤 남은 PING을 세므로 병렬로 돌 때 섞이지 않게
+        var s = await Ended(Agent("r1", "orphan", $"start \"\" /b cmd /d /c start \"\" /b cmd /d /c \"waitfor /t 3 hbchatnever >nul 2>&1 & echo late>{late}\""));
         await Task.Delay(TimeSpan.FromSeconds(5));
         Assert.False(File.Exists(late), "손자 프로세스가 터미널이 끝난 뒤에도 살아 있었다");
         Assert.NotNull(s.EndedAt);
@@ -114,7 +115,7 @@ public sealed class TerminalsTests : IDisposable
     public async Task Piped_KillAndDisposeTogether_NoThrow_DisposeTwice()
     {
         // 중지의 Kill과 읽기 끝의 Dispose가 겹쳐도 예외 없이 (잠금), 두 번 해제해도 그대로
-        using var p = PipedProcess.Start("ping -n 30 127.0.0.1 >nul", _dir);
+        using var p = PipedProcess.Start("waitfor /t 30 hbchatnever >nul 2>&1", _dir);
         var pump = p.PumpAsync((_, _) => { });
         await Task.WhenAll(Task.Run(p.Kill), Task.Run(p.Dispose), Task.Run(p.Finish));
         p.Dispose();
