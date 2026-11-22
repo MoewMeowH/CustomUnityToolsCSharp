@@ -312,7 +312,7 @@
             </div>
 
             <div class="settings-tab" id="tab-connect" data-tab="connect" role="tabpanel" aria-labelledby="tab-btn-connect">
-                @* CLI 도구: codex · claude · Unity CLI 버전 확인 · 올리기 — 정해 둔 명령만 (결정 "도는 방이 있으면 거절" · "최신 확인은 단추로") *@
+                @* CLI 도구: codex · claude · Unity CLI · agy 버전 확인 · 올리기 · 없으면 설치 — 정해 둔 명령만 (결정 "도는 방이 있으면 거절" · "최신 확인은 단추로") *@
                 @{
                     var tools = Model.CliTools;
                     var toolPaths = tools.CurrentPaths;
@@ -320,8 +320,8 @@
                 <section class="u-panel-pad panel" id="cli-tools">
                     <h3 class="u-sub-title">CLI 도구</h3>
                     <p class="u-hint muted">
-                        이 앱이 쓰는 명령줄 도구의 버전을 확인하고 올립니다. 올리기는 도는 방이 없을 때만 됩니다 (최대 5분).
-                        claude를 올리면 아래 카드 자가 시험으로 확인하세요.
+                        이 앱이 쓰는 명령줄 도구의 버전을 확인하고 올립니다 (없으면 공식 방법으로 설치). 올리기 · 설치는 도는 방이 없을 때만 됩니다 (최대 5분).
+                        claude를 올리면 아래 카드 자가 시험으로 확인하세요. agy는 백그라운드에서 스스로 올라갑니다 — 판이 바뀌면 아래 agy 중계 절에서 카나리를 다시 해야 중계가 열립니다.
                     </p>
                         <table class="settings-table">
                             <thead><tr><th>도구</th><th>설치 버전</th><th>최신 버전</th><th></th></tr></thead>
@@ -329,11 +329,14 @@
                                 @foreach (var (toolName, toolLabel) in CliTools.Tools)
                                 {
                                     var versions = tools.LastCheck?.Tools.GetValueOrDefault(toolName);
-                                    var (_, whyNot) = CliTools.UpdateCommand(toolName, toolPaths);
+                                    var (toolCommand, whyNot) = CliTools.UpdateCommand(toolName, toolPaths);
+                                    var install = CliTools.Installs(toolName, toolPaths);
                                     var same = versions is { Installed: not null } && versions.Installed == versions.Latest;
+                                    // agy는 백그라운드에서 스스로 올라간다 — 카나리를 확인한 판과 다르면 중계가 막혀 있다
+                                    var agyCanary = toolName == CliTools.Agy && versions?.Installed is { } agyInstalled && agyInstalled != Model.AgyState.VerifiedVersion;
                                     <tr>
                                         <td>@toolLabel<br /><span class="muted mono" style="font-size:12px">@(toolPaths.Exe(toolName) ?? "찾지 못함")</span></td>
-                                        <td>@(versions?.Installed ?? "—")</td>
+                                        <td>@(versions?.Installed ?? "—")@if (agyCanary) { <br /><span class="badge warn" title="agy 중계 절에서 카나리를 다시 하세요">카나리 다시</span> }</td>
                                         <td>@(versions?.Latest ?? "—")@(toolName == CliTools.Claude && versions?.Latest is not null ? " (npm 기준)" : "")</td>
                                         <td>
                                             @if (whyNot is not null)
@@ -342,9 +345,13 @@
                                             }
                                             else
                                             {
-                                                <form method="post" asp-page-handler="CliUpdate" onsubmit="this.querySelector('button').disabled = true; this.querySelector('button').textContent = '올리는 중… (최대 5분)';">
+                                                @* 설치는 단추 한 번으로 공식 스크립트가 돈다 — 돌릴 명령을 확인 창에 먼저 보인다 (사용자 결정 "확인 창 보이기") *@
+                                                <form method="post" asp-page-handler="CliUpdate" data-confirm="@(install ? $"{toolLabel}를 설치합니다 — 이 명령을 돌립니다:\n\n{toolCommand!.Display}" + (CliTools.InstallNote(toolName) is { } note ? "\n\n" + note : "") : null)"
+                                                      onsubmit="if (this.dataset.confirm &amp;&amp; !confirm(this.dataset.confirm)) return false; this.querySelector('button').disabled = true; this.querySelector('button').textContent = '@(install ? "설치하는 중…" : "올리는 중…") (최대 5분)';">
                                                     <input type="hidden" name="tool" value="@toolName" />
-                                                    <button class="btn" type="submit" disabled="@(tools.Busy || same)">@(same ? "최신" : "올리기")</button>
+                                                    @* 서버가 지금 판정과 견준다 — 화면을 연 뒤 도구가 사라졌으면 확인 창 없이 설치하지 않는다 *@
+                                                    <input type="hidden" name="install" value="@(install ? "true" : "false")" />
+                                                    <button class="btn" type="submit" disabled="@(tools.Busy || (!install && same))">@(install ? "설치" : same ? "최신" : "올리기")</button>
                                                 </form>
                                             }
                                         </td>
@@ -359,7 +366,7 @@
                     @if (tools.LastUpdate is { } update)
                     {
                         <p class="muted" style="margin:6px 0 0;font-size:12.5px">
-                            마지막 올리기 @update.At.ToLocalTime().ToString("MM-dd HH:mm") · @SettingsModel.CliToolLabel(update.Tool) · @(update.Before ?? "?") → @(update.After ?? "?") · @(update.Ok ? "성공" : "실패")
+                            마지막 @(update.Install ? "설치" : "올리기") @update.At.ToLocalTime().ToString("MM-dd HH:mm") · @SettingsModel.CliToolLabel(update.Tool) · @(update.Before ?? "?") → @(update.After ?? "?") · @(update.Ok ? "성공" : "실패")
                         </p>
                         @if (update.Output.Length > 0)
                         {

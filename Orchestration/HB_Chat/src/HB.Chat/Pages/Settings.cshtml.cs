@@ -282,7 +282,10 @@ public sealed class SettingsModel(
         "agy-cleared" => "진행 중인 중계 · 카나리를 비웠습니다.",
         "agy-archive" => "agy 보관함을 비웠습니다.",
         "cli-updated" => CliTools.LastUpdate is { } u
-            ? u.Ok ? $"{CliToolLabel(u.Tool)}: {u.Before ?? "?"} → {u.After ?? "?"}" + (u.Before == u.After ? " (바뀐 것 없음)" : "로 올렸습니다.")
+            ? u.Install
+                ? u.Ok ? $"{CliToolLabel(u.Tool)} {u.After}를 설치했습니다."
+                    : $"{CliToolLabel(u.Tool)}를 설치하지 못했습니다 (실행 파일을 찾지 못함) — CLI 도구 칸의 출력을 보세요."
+            : u.Ok ? $"{CliToolLabel(u.Tool)}: {u.Before ?? "?"} → {u.After ?? "?"}" + (u.Before == u.After ? " (바뀐 것 없음)" : "로 올렸습니다.")
                 : $"{CliToolLabel(u.Tool)}를 올리지 못했습니다 — CLI 도구 칸의 출력을 보세요."
             : null,
         "cli" => Cli.LastTest is { } t ? t.Passed ? $"카드 자가 시험 통과 — claude CLI {t.Version}을 확인한 판으로 적었습니다." : "카드 자가 시험이 통과하지 못했습니다 — 아래 단계를 보세요." : null,
@@ -380,16 +383,19 @@ public sealed class SettingsModel(
     /// 한 도구 올리기 — 도는 방(화면 턴 · 백그라운드 작업이 남은 쉬는 실행)이나 자가 시험이 있으면 거절하고, 올리는 동안은 방이 새 말을 받지 않게
     /// 막는다 (실행 중인 CLI를 바꾸지 않게). claude가 올라가면 본 판을 적어 "확인 필요" 띠가 뜨게 한다.
     /// </summary>
-    public async Task<IActionResult> OnPostCliUpdate(string? tool)
+    public async Task<IActionResult> OnPostCliUpdate(string? tool, bool install)
     {
         if (CliSelfTest.Running) Error = "카드 자가 시험이 도는 중입니다 — 끝난 뒤 올리세요.";
+        // 도는 agy를 바꾸면 중계 · 카나리 도중에 판이 바뀐다 (곁칸 agy 셸은 방 수에 세지 않는다)
+        else if (tool == CliTools.Agy && agy.Read(out _) is { Run: not null } or { Canary: not null })
+            Error = "agy 중계 · 카나리가 진행 중입니다 — 끝내거나 아래 agy 중계 절에서 비운 뒤 하세요.";
         else
         {
             using var hold = hub.TryHoldStarts(out var active);
             // 방 색인의 RunStartedAt이 아니라 허브의 지금 상태로 센다 — 앱이 꺼지며 남은 표시에 막히지 않고, 쉬는 실행도 든다
             Error = active > 0 ? $"방 {active}개가 도는 중입니다 (백그라운드 작업 포함) — 끝난 뒤 올리세요."
                 : hold is null ? CliTools.BusyError
-                : await cliTools.UpdateAsync(tool);
+                : await cliTools.UpdateAsync(tool, install);
         }
         if (Error is null)
         {

@@ -41,7 +41,7 @@ public sealed class PermissionLevelConverter : System.Text.Json.Serialization.Js
 /// </summary>
 public sealed class ChatOptions
 {
-    /// <summary>claude 실행 파일. 비우면 PATH에서 claude.exe를 찾는다.</summary>
+    /// <summary>claude 실행 파일. 비우면 PATH에서 claude.exe를 찾고, 없으면 공식 설치 자리 %USERPROFILE%\.local\bin.</summary>
     public string? ClaudePath { get; set; }
 
     /// <summary>
@@ -274,7 +274,7 @@ public sealed class ChatOptions
         return null;
     }
 
-    /// <summary>claude 실행 파일 경로. 설정이 없고 PATH에서도 못 찾으면 "claude" (실행할 때 실패로 보인다).</summary>
+    /// <summary>claude 실행 파일 경로. 설정이 없고 PATH · %USERPROFILE%\.local\bin에서도 못 찾으면 "claude" (실행할 때 실패로 보인다).</summary>
     public string ResolveClaude()
     {
         if (!string.IsNullOrWhiteSpace(ClaudePath)) return ClaudePath.Trim();
@@ -287,6 +287,8 @@ public sealed class ChatOptions
             }
             catch (ArgumentException) { }
         }
-        return "claude";
+        // 공식 설치 스크립트의 자리 — 설정 화면에서 막 설치하면 이 앱의 PATH에는 아직 없다
+        var local = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "bin", OperatingSystem.IsWindows() ? "claude.exe" : "claude");
+        return File.Exists(local) ? local : "claude";
     }
 }
