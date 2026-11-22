@@ -110,28 +110,37 @@ public sealed class TerminalSession
     }
 
     // ---- 지휘자 프로세스 출력을 줄 글로 (파이프 바이트 → UTF-8 글, 줄 끝 \r\n) ----
-    private Decoder _decoder = new UTF8Encoding(false, throwOnInvalidBytes: true).GetDecoder();
-    private bool _ansi;
+    // 디코더는 스트림마다 (0 = stdout, 1 = stderr) — 하나면 stdout 글자가 조각 경계에서 잘린 자리에 stderr 조각이 끼어 디코딩이 깨졌다
+    private readonly Decoder[] _decoders = [NewUtf8(), NewUtf8()];
+    private readonly bool[] _ansi = new bool[2];
+    // 앞 조각 끝에서 UTF-8 디코더가 들고 있던 바이트 — ANSI로 바꿀 때 버리지 않고 함께 다시 읽는다 ('!' 명령 ShellStream과 같음)
+    private readonly byte[][] _held = [[], []];
     private bool _lastCr;
 
+    private static Decoder NewUtf8() => new UTF8Encoding(false, throwOnInvalidBytes: true).GetDecoder();
+
     /// <summary>
-    /// 파이프 출력 조각을 화면용 UTF-8 글로: UTF-8이 아니면(한국어 Windows의 ANSI 코드 페이지 출력) 그 뒤로는 시스템 ANSI로 읽는다.
-    /// 홀로 선 \n은 \r\n으로 (xterm은 \n만으로 줄 처음으로 가지 않는다).
+    /// 파이프 출력 조각(stream 0 = stdout, 1 = stderr)을 화면용 UTF-8 글로: 그 스트림이 UTF-8이 아니면(한국어 Windows의 ANSI 코드 페이지 출력)
+    /// 그 뒤로는 그 스트림을 시스템 ANSI로 읽는다. 홀로 선 \n은 \r\n으로 (xterm은 \n만으로 줄 처음으로 가지 않는다).
     /// </summary>
-    internal byte[] Normalize(byte[] chunk)
+    internal byte[] Normalize(int stream, byte[] chunk)
     {
         string text;
         try
         {
-            var chars = new char[_decoder.GetCharCount(chunk, 0, chunk.Length, flush: false)];
-            text = new string(chars, 0, _decoder.GetChars(chunk, 0, chunk.Length, chars, 0, flush: false));
+            var decoder = _decoders[stream];
+            var chars = new char[decoder.GetCharCount(chunk, 0, chunk.Length, flush: false)];
+            text = new string(chars, 0, decoder.GetChars(chunk, 0, chunk.Length, chars, 0, flush: false));
+            if (!_ansi[stream]) _held[stream] = chunk[^RoomHub.ShellStream.IncompleteUtf8Tail(chunk)..];
         }
-        catch (DecoderFallbackException) when (!_ansi)
+        catch (DecoderFallbackException) when (!_ansi[stream])
         {
-            _ansi = true;
-            _decoder = Terminals.AnsiEncoding.GetDecoder();
-            var chars = new char[_decoder.GetCharCount(chunk, 0, chunk.Length, flush: false)];
-            text = new string(chars, 0, _decoder.GetChars(chunk, 0, chunk.Length, chars, 0, flush: false));
+            _ansi[stream] = true;
+            var decoder = _decoders[stream] = Terminals.AnsiEncoding.GetDecoder();
+            byte[] all = [.. _held[stream], .. chunk];
+            _held[stream] = [];
+            var chars = new char[decoder.GetCharCount(all, 0, all.Length, flush: false)];
+            text = new string(chars, 0, decoder.GetChars(all, 0, all.Length, chars, 0, flush: false));
         }
         var sb = new StringBuilder(text.Length + 16);
         foreach (var ch in text)
@@ -363,13 +372,16 @@ public sealed partial class Terminals : IDisposable
     private async Task PumpAsync(TerminalSession s)
     {
         var process = s.Process!;
-        var reading = process.PumpAsync(chunk =>
+        void Emit(byte[] data)
         {
-            var data = s.Kind == TerminalKind.Agent ? s.Normalize(chunk) : chunk;
             if (data.Length == 0) return;
             var offset = s.Append(data);
             Raise(() => Output?.Invoke(s, data, offset));
-        });
+        }
+        // 지휘자 프로세스(파이프)는 스트림을 가려 받아 스트림마다 디코딩한다. 내 셸(ConPTY)은 화면 바이트 그대로
+        var reading = process is PipedProcess piped
+            ? piped.PumpAsync((stream, chunk) => Emit(s.Normalize(stream, chunk)))
+            : process.PumpAsync(Emit);
         var code = -1;
         try
         {

@@ -74,6 +74,54 @@ public sealed class TerminalsTests : IDisposable
     }
 
     [Fact]
+    public void Agent_Utf8SplitAcrossStderrChunk_StaysUtf8()
+    {
+        // stdout 한글(3바이트)이 조각 경계에서 잘린 자리에 stderr 조각이 끼어도 두 스트림 다 UTF-8로 읽는다 —
+        // 디코더 하나였을 때는 예외로 ANSI로 넘어가 그 세션이 끝까지 깨졌다 (agy 리뷰 · 5291 지휘자 확인)
+        var s = new TerminalSession("r1", TerminalKind.Agent, "mix", "x");
+        var han = Encoding.UTF8.GetBytes("한");
+        var text = new StringBuilder();
+        text.Append(Encoding.UTF8.GetString(s.Normalize(0, han[..2])));
+        text.Append(Encoding.UTF8.GetString(s.Normalize(1, Encoding.UTF8.GetBytes("err\n"))));
+        text.Append(Encoding.UTF8.GetString(s.Normalize(0, [.. han[2..], .. Encoding.UTF8.GetBytes("글\n")])));
+        Assert.Contains("한", text.ToString());
+        Assert.Contains("글", text.ToString());
+        Assert.Contains("err", text.ToString());
+    }
+
+    [Fact]
+    public void Agent_AnsiSplitAcrossChunks_KeepsHeldByte()
+    {
+        // CP949 "한"(C7 D1)이 [C7] · [D1 \n]으로 나뉘면 첫 바이트는 UTF-8 디코더가 들고 있다 — ANSI로 바꿀 때 버리지 않는다 (/self-review feb02b1439 C2)
+        if (CultureInfo.CurrentCulture.TextInfo.ANSICodePage != 949) return;
+        var s = new TerminalSession("r1", TerminalKind.Agent, "ansi", "x");
+        var text = Encoding.UTF8.GetString(s.Normalize(0, [0xC7])) + Encoding.UTF8.GetString(s.Normalize(0, [0xD1, 0x0A]));
+        Assert.Equal("한\r\n", text);
+    }
+
+    [Fact]
+    public async Task Agent_OrphanedGrandchild_EndsWithTerminal()
+    {
+        // 중간 부모가 먼저 끝난 손자는 Kill(entireProcessTree)가 찾지 못한다 (셸 → 중간 cmd(바로 끝남) → 손자) — 남으면 3초 뒤 late.txt를 쓴다
+        var late = Path.Combine(_dir, "late.txt");
+        var s = await Ended(Agent("r1", "orphan", $"start \"\" /b cmd /d /c start \"\" /b cmd /d /c \"ping -n 4 127.0.0.1 >nul & echo late>{late}\""));
+        await Task.Delay(TimeSpan.FromSeconds(5));
+        Assert.False(File.Exists(late), "손자 프로세스가 터미널이 끝난 뒤에도 살아 있었다");
+        Assert.NotNull(s.EndedAt);
+    }
+
+    [Fact]
+    public async Task Piped_KillAndDisposeTogether_NoThrow_DisposeTwice()
+    {
+        // 중지의 Kill과 읽기 끝의 Dispose가 겹쳐도 예외 없이 (잠금), 두 번 해제해도 그대로
+        using var p = PipedProcess.Start("ping -n 30 127.0.0.1 >nul", _dir);
+        var pump = p.PumpAsync((_, _) => { });
+        await Task.WhenAll(Task.Run(p.Kill), Task.Run(p.Dispose), Task.Run(p.Finish));
+        p.Dispose();
+        await pump.WaitAsync(Wait);
+    }
+
+    [Fact]
     public async Task Shell_InputAndCtrlC()
     {
         // 내 셸: 친 키가 셸로 가고, Ctrl+C(0x03)가 그 안의 명령을 멈춘다 (멈추지 않으면 exit가 ping 60초 뒤에야 돌아 시간 초과)
@@ -164,14 +212,20 @@ public sealed class TerminalsTests : IDisposable
     public void Environment_DropsAppUrls()
     {
         Environment.SetEnvironmentVariable("ASPNETCORE_URLS", "http://localhost:5290");
+        Environment.SetEnvironmentVariable("DOTNET_HTTP_PORTS", "5290");
         try
         {
             var env = TerminalEnvironment.Current(new Dictionary<string, string> { ["X_EXTRA"] = "1" });
             Assert.False(env.ContainsKey("ASPNETCORE_URLS"));
+            Assert.False(env.ContainsKey("DOTNET_HTTP_PORTS"));
             Assert.Equal("1", env["X_EXTRA"]);
             Assert.EndsWith("\0\0", TerminalEnvironment.Block(env));
         }
-        finally { Environment.SetEnvironmentVariable("ASPNETCORE_URLS", null); }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ASPNETCORE_URLS", null);
+            Environment.SetEnvironmentVariable("DOTNET_HTTP_PORTS", null);
+        }
     }
 
     [Fact]
