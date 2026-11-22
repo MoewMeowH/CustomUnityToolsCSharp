@@ -299,18 +299,19 @@ public sealed partial class Terminals : IDisposable
         return Launch(roomId, TerminalKind.Agent, name, command, workingDirectory, () => PipedProcess.Start(command, workingDirectory), out session);
     }
 
-    /// <summary>내 셸을 연다 (ConPTY, 곁칸 "+"). shell = <see cref="Shells"/>의 키.</summary>
-    public string? OpenShell(string roomId, string shell, string workingDirectory, out TerminalSession? session)
+    /// <summary>내 셸을 연다 (ConPTY, 곁칸 "+"). shell = <see cref="Shells"/>의 키. label을 주면 탭 이름을 그것으로 (agy 중계 셸).</summary>
+    public string? OpenShell(string roomId, string shell, string workingDirectory, out TerminalSession? session, string? label = null)
     {
         session = null;
-        if (!Shells.TryGetValue(shell, out var label)) return "모르는 셸입니다.";
+        if (!Shells.TryGetValue(shell, out var shellLabel)) return "모르는 셸입니다.";
+        label ??= shellLabel;
         var system = Environment.GetFolderPath(Environment.SpecialFolder.System);
         // 전체 경로로 — 작업 폴더 · PATH의 같은 이름 실행 파일이 대신 뜨지 않게
         var commandLine = shell == "powershell"
             ? $"\"{Path.Combine(system, "WindowsPowerShell", "v1.0", "powershell.exe")}\" -NoLogo"
             : $"\"{Path.Combine(system, "cmd.exe")}\"";
         int count;
-        lock (_gate) count = _byRoom.TryGetValue(roomId, out var l) ? l.Count(s => s.Kind == TerminalKind.Shell && s.Command == shell) : 0;
+        lock (_gate) count = _byRoom.TryGetValue(roomId, out var l) ? l.Count(s => s.Kind == TerminalKind.Shell && s.Name.StartsWith(label + " ", StringComparison.Ordinal)) : 0;
         return Launch(roomId, TerminalKind.Shell, $"{label} {count + 1}", shell, workingDirectory,
             () => PseudoConsole.Start(commandLine, workingDirectory, DefaultCols, DefaultRows), out session);
     }

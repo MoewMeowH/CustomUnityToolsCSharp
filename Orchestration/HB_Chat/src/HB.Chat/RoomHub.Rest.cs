@@ -13,7 +13,8 @@ public sealed partial class RoomHub
     internal ClaudeSession.SessionTimings? SessionTimings { get; set; }
 
     /// <summary>이 방 실행 준비 중 규칙 글을 만드는 재료 — 이어 쓰는 턴이 같은 규칙을 다시 만든다.</summary>
-    internal sealed record RunSetup(bool Terminal, string? Unity, IReadOnlyList<string> Extras, bool McpOn, bool AskWrites, string Workspace, bool AppAskWrites);
+    internal sealed record RunSetup(bool Terminal, string? Unity, IReadOnlyList<string> Extras, bool McpOn, bool AskWrites, string Workspace, bool AppAskWrites,
+        bool Agy = false);
 
     /// <summary>실행 하나가 만든 자원 (터미널 토큰 · 설정 파일 · 방 MCP 설정 파일). 쉬는 실행이 가져가면(Adopted) 프로세스가 끝날 때 정리한다.</summary>
     private sealed class RunResources(Terminals? terminals)
@@ -631,7 +632,7 @@ public sealed partial class RoomHub
         // 놀이터 구성원은 놀이터 단계 안내 (명령 · 카드 · 질문 카드 안내가 맞지 않음)
         (GroupChat.IsPlaygroundMember(store, room) ? PlaygroundRules.Base
             : RoomRules.For(room.Level, terminal: s.Terminal, unity: s.Unity, unityMeasure: s.Unity is { } u && options.Value.IsMeasureUnity(u),
-                askWrites: s.AppAskWrites, rest: room.GroupId is null, memory: s.Terminal && room.GroupId is null,
+                askWrites: s.AppAskWrites, rest: room.GroupId is null, memory: s.Terminal && room.GroupId is null, agy: s.Agy,
                 extras: [.. s.Extras.Where(x => x != McpConfigFile.UnityServer)],
                 // 모델 선택창 안내는 기본 서버가 붙고 요청 창 · 스위치가 있는 방에만
                 modeCard: s.McpOn && !room.McpOff.Contains(options.Value.McpServer) && room.GroupId is null))

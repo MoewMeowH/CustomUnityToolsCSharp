@@ -241,6 +241,39 @@ public sealed class ChatOptions
         return null;
     }
 
+    // ---- agy(Antigravity CLI) 수동 중계 ----
+
+    /// <summary>agy 실행 파일 (버전 확인만 — 앱은 agy에 입력하지 않는다). 비우면 %LOCALAPPDATA%\agy\bin\agy.exe, 없으면 PATH의 agy.exe.</summary>
+    public string? AgyPath { get; set; }
+
+    /// <summary>
+    /// agy 중계 폴더 (그 아래 current 하나만 쓴다). 비우면 %SystemDrive%\agy_relay. 사용자 프로필 밖이어야 한다 —
+    /// agy deny가 프로필을 막아야 하고, deny가 allow를 이겨서 프로필 안이면 agy가 중계 폴더에 쓰지 못한다.
+    /// </summary>
+    public string? AgyRelayDir { get; set; }
+
+    public string AgyRelayFolder =>
+        !string.IsNullOrWhiteSpace(AgyRelayDir) ? AgyRelayDir.Trim()
+        : Path.Combine(Path.GetPathRoot(Environment.GetFolderPath(Environment.SpecialFolder.Windows)) is { Length: > 0 } root ? root : @"C:\", "agy_relay");
+
+    /// <summary>agy.exe 경로. 못 찾으면 null.</summary>
+    public string? ResolveAgy()
+    {
+        if (!string.IsNullOrWhiteSpace(AgyPath)) return File.Exists(AgyPath.Trim()) ? AgyPath.Trim() : null;
+        var local = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "agy", "bin", "agy.exe");
+        if (File.Exists(local)) return local;
+        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            try
+            {
+                var candidate = Path.Combine(dir.Trim(), "agy.exe");
+                if (File.Exists(candidate)) return candidate;
+            }
+            catch (ArgumentException) { }
+        }
+        return null;
+    }
+
     /// <summary>claude 실행 파일 경로. 설정이 없고 PATH에서도 못 찾으면 "claude" (실행할 때 실패로 보인다).</summary>
     public string ResolveClaude()
     {

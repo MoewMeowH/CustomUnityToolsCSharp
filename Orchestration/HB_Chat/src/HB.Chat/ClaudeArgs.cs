@@ -44,6 +44,9 @@ public sealed record RunSpec(
     /// <summary>앱 MCP의 방 기억 도구(<see cref="MemoryTools.Quiet"/>)를 묻지 않고 쓰게 한다 — 앱 MCP를 붙인 보통 방 (단톡방 구성원이 아님), 모든 단계.</summary>
     public bool RoomMemory { get; init; }
 
+    /// <summary>agy 중계 도구(<see cref="AgyTools.Quiet"/>)를 묻지 않고 쓰게 한다 — 설정에서 켠 명령 · 앱 방. 아니면 목록에서 뺀다.</summary>
+    public bool AgyRelay { get; init; }
+
     /// <summary>
     /// McpConfigPath 파일에 기본 서버 말고 더 든 서버 이름 (방이 더한 .mcp.json 서버 · unity).
     /// --allowedTools에 넣지 않는다 — 호출마다 앱(stdio 호스트)이 지금 방 단계 · 연결을 다시 보고 허용한다 (결정 4: 실행 중 내리기가 바로 막히게).
@@ -194,7 +197,7 @@ public static partial class ClaudeArgs
                 if (!string.IsNullOrWhiteSpace(spec.TerminalMcpConfigPath))
                 {
                     args.Add("--disallowedTools");
-                    args.AddRange([TerminalMcp.StartTool, TerminalMcp.BrowserOpenTool, .. TerminalMcp.QuietTools]);
+                    args.AddRange([TerminalMcp.StartTool, TerminalMcp.BrowserOpenTool, .. TerminalMcp.QuietTools, .. AgyTools.Quiet]);
                 }
                 AddMcp(args, spec);
                 break;
@@ -210,6 +213,7 @@ public static partial class ClaudeArgs
                 args.AddRange(EditDenied.Select(p => $"Edit({p})"));
                 if (spec.Playground) args.AddRange(PlaygroundDenied.Select(p => $"Edit({p})"));
                 args.AddRange(attachDeny);
+                AddAgyDenied(args, spec);
                 AddMcp(args, spec);
                 // --allowedTools 가변 인자(AddMcp의 MCP 규칙 뒤)에 작업 폴더 안 편집을 이어 붙인다.
                 args.Add(CommandEditAllow);
@@ -223,6 +227,7 @@ public static partial class ClaudeArgs
                 foreach (var dir in spec.ProtectedWorkspaces.Where(IsRuleSafePath).Select(AbsoluteRulePath))
                     args.AddRange([$"Edit({dir}/.claude/**)", $"Edit({dir}/.mcp*.json)"]);
                 args.AddRange(attachDeny);
+                AddAgyDenied(args, spec);
                 AddMcp(args, spec);
                 break;
             default:
@@ -346,6 +351,12 @@ public static partial class ClaudeArgs
     /// <summary>모델 선택 카드로 묻는 도구 이름 (기본 서버의 run_mode).</summary>
     public const string RunModeTool = "run_mode";
 
+    /// <summary>agy 중계를 켜지 않은 실행은 agy 도구를 목록에서 뺀다 (--disallowedTools 가변 인자 안에서 부른다).</summary>
+    private static void AddAgyDenied(List<string> args, RunSpec spec)
+    {
+        if (!string.IsNullOrWhiteSpace(spec.TerminalMcpConfigPath) && !spec.AgyRelay) args.AddRange(AgyTools.Quiet);
+    }
+
     private static void AddMcp(List<string> args, RunSpec spec)
     {
         if (string.IsNullOrWhiteSpace(spec.McpConfigPath))
@@ -362,6 +373,7 @@ public static partial class ClaudeArgs
         foreach (var extra in spec.ExtraMcpServers)
             if (!IsServerName(extra) || extra == TerminalMcp.Server) throw new ArgumentException($"MCP 서버 이름 형식이 올바르지 않다: {extra}");
         if (terminal && RunsCommands(spec.Level)) args.AddRange(TerminalMcp.QuietTools);
+        if (terminal && RunsCommands(spec.Level) && spec.AgyRelay) args.AddRange(AgyTools.Quiet);
         // 방 기억 도구는 읽기 단계에도 — 자기 방 기록 · 메모만 다룬다
         if (terminal && spec.RoomMemory) args.AddRange(MemoryTools.Quiet);
     }

@@ -398,6 +398,109 @@
                     </form>
                 </section>
 
+                @* agy 수동 중계: 앱은 agy 설정을 검사만 하고(결정 "검사 + 추천 JSON만"), agy에는 사용자가 곁칸 셸에서 직접 입력한다 *@
+                @{
+                    var agyState = Model.AgyState;
+                    var agyCheck = Model.AgyChecked;
+                    var agyVersion = Model.Agy.LastVersion;
+                    var agyVerified = agyVersion is not null && agyVersion == agyState.VerifiedVersion;
+                    var agyWarn = agyState.Enabled && (!agyCheck.Ok || agyVersion is not null && !agyVerified || Model.AgyRelayProblem is not null);
+                }
+                <section class="panel" id="agy" style="padding:12px 14px@(agyWarn ? ";border-color:var(--warn)" : "")">
+                    <h3 class="u-sub-title">agy 중계 (Antigravity CLI)</h3>
+                    <p class="u-hint muted">
+                        지휘자가 요청 · 코드 사본을 중계 폴더에 두면, <b>내가</b> 곁칸 터미널 ▾ → 'agy 중계 셸'에서 <code class="mono">agy</code>를 띄워 안내된 한 줄을 입력하고,
+                        지휘자가 결과를 읽습니다. 앱은 agy에 입력하지 않습니다 — Antigravity 약관은 앱이 agy를 감싸 쓰는 것을 막습니다 (FAQ, 2026-11-22 확인).
+                        보내는 코드는 Google로 갑니다 — 회사 코드는 회사 정책을 먼저 확인하세요.
+                        agy 셸 샌드박스는 <b>임시 폴더(%TEMP%)</b>를 deny와 상관없이 읽습니다 — 거기에 민감한 파일을 두지 마세요.
+                    </p>
+                    @if (Model.AgyLoadError is { } agyLoad)
+                    {
+                        <p class="u-warn-line">@agyLoad</p>
+                    }
+                    @if (Model.AgyMessage is { } agyMessage)
+                    {
+                        <p class="u-lead" role="status">@agyMessage</p>
+                    }
+                    <p class="u-lead">
+                        agy <span class="mono">@(AppOptions.Value.ResolveAgy() ?? "찾지 못함")</span> · 지금 판 <b>@(agyVersion ?? "아직 안 읽음")</b> · 카나리 확인한 판 <b>@(agyState.VerifiedVersion ?? "없음")</b>@(agyState.VerifiedAt is { } vAt ? $" ({vAt.ToLocalTime():MM-dd HH:mm})" : "")
+                        @if (agyVersion is not null && !agyVerified) { <span class="badge warn">카나리 확인 필요</span> }
+                        <br />중계 폴더 <span class="mono">@Model.Agy.CurrentFolder</span>@(Model.AgyRelayProblem is { } relayWhy ? " — " + relayWhy : "")
+                        <br />진행 중: @(agyState.Run is { } run ? $"{run.Id} ({run.At.ToLocalTime():MM-dd HH:mm})" : agyState.Canary is not null ? "카나리 확인" : "없음") · 보관함 @(Model.Agy.ArchiveCount)개
+                    </p>
+                    <form method="post" asp-page-handler="AgyEnable" class="settings-add">
+                        <label class="switch">
+                            <input type="checkbox" name="enabled" value="true" checked="@agyState.Enabled" />
+                            <span class="track"></span>
+                            agy 중계 켜기
+                        </label>
+                        <label class="muted"><input type="checkbox" name="telemetryOff" value="true" checked="@(agyState.TelemetryOffAt is not null)" />
+                            agy <code class="mono">/config</code>에서 <b>Enable Telemetry</b>(학습)를 껐습니다 — 계정에 저장돼 앱이 확인할 수 없습니다</label>
+                        <button class="btn primary" type="submit">@Icons.Svg("check") 저장</button>
+                    </form>
+                    <p class="u-note-top-12 muted" style="font-size:12.5px">
+                        약관: 꺼도 "Google still uses your data to provide the service, process any feedback and help keep Antigravity safe" ·
+                        "Google employees and contractors may access, view, review and use Interactions" · 보관은 삭제 요청(antigravity-support@google.com) 전까지.
+                    </p>
+
+                    <h4 class="u-sub-title" style="margin-top:12px">agy 설정 검사 <span class="muted mono" style="font-size:12px">@Model.Agy.SettingsPath</span></h4>
+                    @if (agyCheck.Ok)
+                    {
+                        <p class="u-lead">필수 항목 통과 (Default 모드 · 터미널 샌드박스 · deny).</p>
+                    }
+                    @foreach (var problem in agyCheck.Problems)
+                    {
+                        <p class="u-warn-line-tight">@problem</p>
+                    }
+                    @foreach (var warning in agyCheck.Warnings)
+                    {
+                        <p class="muted" style="margin:2px 0;font-size:12.5px">@warning</p>
+                    }
+                    @if (agyCheck.MissingDeny.Count + agyCheck.MissingRecommended.Count > 0)
+                    {
+                        <ul class="mono" style="font-size:12px;margin:4px 0">
+                            @foreach (var p in agyCheck.MissingDeny) { <li>필수 · read_file(@p)</li> }
+                            @foreach (var p in agyCheck.MissingRecommended) { <li class="muted">권장 · read_file(@p)</li> }
+                        </ul>
+                    }
+                    <details open="@(!agyCheck.Ok)">
+                        <summary class="muted" style="font-size:12.5px">넣을 JSON — agy를 끄고 이 내용으로 settings.json을 바꾼 뒤 다시 띄우세요 (앱은 고치지 않음)</summary>
+                        <textarea id="agy-json" class="mono" readonly rows="14" style="width:100%;font-size:12px;margin-top:6px">@agyCheck.SuggestedJson</textarea>
+                        <button class="btn" type="button" onclick="navigator.clipboard.writeText(document.getElementById('agy-json').value); this.textContent = '복사함';">복사</button>
+                    </details>
+                    <form method="post" asp-page-handler="AgyCheck" class="u-gap-above"><button class="btn" type="submit">@Icons.Svg("check") agy 판 · 설정 다시 보기</button></form>
+
+                    <h4 class="u-sub-title" style="margin-top:12px">카나리 확인 (agy를 올린 뒤마다)</h4>
+                    <p class="u-hint muted">
+                        deny 구역(데이터 폴더)에 무작위 글자 파일을, 중계 폴더에 다른 글자의 대조 파일을 두고 agy가 둘 다 읽어 결과 파일에 옮겨 쓰게 합니다 —
+                        대조 글자는 있고 deny 구역 글자는 없어야 통과 (자동 판정). 통과한 판만 중계 도구가 씁니다.
+                    </p>
+                    @if (agyState.Canary is not null)
+                    {
+                        <ol style="font-size:13px;margin:4px 0 8px">
+                            <li>아무 방 곁칸 터미널 ▾ → <b>agy 중계 셸</b>을 열고 <code class="mono">agy</code>를 새로 띄웁니다.</li>
+                            @foreach (var line in Model.Agy.CanaryLines())
+                            {
+                                <li>이 줄을 입력합니다 (승인창은 Yes): <code class="mono">@line</code></li>
+                            }
+                            <li>두 줄이 끝나면 아래 '판정'을 누릅니다.</li>
+                        </ol>
+                        <form method="post" asp-page-handler="AgyJudge" class="settings-add"><button class="btn primary" type="submit">@Icons.Svg("check") 판정</button></form>
+                    }
+                    else
+                    {
+                        <form method="post" asp-page-handler="AgyCanary" class="settings-add"><button class="btn" type="submit" disabled="@(!agyState.Enabled)">카나리 만들기</button></form>
+                    }
+                    @if (agyState.LastCanary is { } lastCanary)
+                    {
+                        <p class="muted" style="margin:6px 0 0;font-size:12.5px">마지막 판정 @lastCanary</p>
+                    }
+                    <div class="settings-add u-gap-above">
+                        <form method="post" asp-page-handler="AgyClearCurrent" onsubmit="return confirm('진행 중인 중계 · 카나리를 버리고 중계 폴더를 비울까요?')"><button class="btn" type="submit">진행 중 비우기</button></form>
+                        <form method="post" asp-page-handler="AgyClearArchive" onsubmit="return confirm('agy 보관함(지난 요청 · 결과)을 모두 지울까요?')"><button class="btn" type="submit" disabled="@(Model.Agy.ArchiveCount == 0)">보관함 비우기</button></form>
+                    </div>
+                </section>
+
                 @* 앱에서 더한 MCP 서버: 모든 방 연결 탭에 "앱 서버"로, 방마다 켬. 작업 폴더 .mcp.json에 같은 이름이 있으면 그쪽 *@
                 @* Codex 구성원: 켤 수 있는 작업 폴더 — 기본 없음 *@
                 <section class="u-panel-pad panel">

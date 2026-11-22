@@ -16,11 +16,15 @@ public static class ChatBackup
     /// 데스크톱 앱 탭의 웹 프로필 webapps (Claude · ChatGPT · Gemini 로그인 쿠키 — zip에 넣지 않는다).
     /// 들어가지도 않는다 (webview2 · browser는 캐시 파일이 수만 개).
     /// </summary>
-    public static readonly IReadOnlyList<string> SkipFolders = ["webview2", "webapps", "browser", "browser-shots", "logs", "selftest", "toast-images"];
+    public static readonly IReadOnlyList<string> SkipFolders = ["webview2", "webapps", "browser", "browser-shots", "logs", "selftest", "toast-images", "agy-runs", "agy-canary"];
 
-    /// <summary>실행 때 다시 만드는 MCP 설정 (맨 위만).</summary>
+    /// <summary>
+    /// 실행 때 다시 만드는 MCP 설정 (맨 위만), agy.json — 카나리 확인한 판 · 학습 끄기 확인은 그 PC · 계정 것이라 다른 곳으로 따라가지 않게
+    /// (agy 보관함 · 카나리도 위에서 뺀다 — 보낸 코드 사본).
+    /// </summary>
     private static bool SkipTopFile(string name) =>
-        name.StartsWith("mcp-", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".json", StringComparison.OrdinalIgnoreCase) && name != "mcp-servers.json";
+        name.StartsWith("mcp-", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".json", StringComparison.OrdinalIgnoreCase) && name != "mcp-servers.json"
+        || name.Equals("agy.json", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>쓰다 만 임시 파일 (모든 깊이) — 저장 중 .tmp · 첨부 올리는 중 .part.</summary>
     private static bool SkipPartial(string name) =>

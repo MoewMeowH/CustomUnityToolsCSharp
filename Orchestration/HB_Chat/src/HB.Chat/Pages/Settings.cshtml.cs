@@ -10,8 +10,89 @@ namespace HB.Chat.Pages;
 /// </summary>
 public sealed class SettingsModel(
     RoomStore store, RoomHub hub, RoomList list, ChatTranscripts transcripts, IOptions<ChatOptions> options,
-    ProfileView profiles, FaceCatalog faces, RoomRuns runs, StickerPacks packs, CodexSettings codexSettings, CliVersions cliVersions, CliTools cliTools) : PageModel
+    ProfileView profiles, FaceCatalog faces, RoomRuns runs, StickerPacks packs, CodexSettings codexSettings, CliVersions cliVersions, CliTools cliTools,
+    AgyRelay agy) : PageModel
 {
+    // ---- agy 수동 중계 (설정 검사 · 카나리 · 켜기) — 앱은 agy 설정 파일을 고치지 않는다 (결정 "검사 + 추천 JSON만") ----
+
+    public AgyRelay Agy => agy;
+    public AgyRelay.State AgyState => agy.Read(out _);
+    public string? AgyLoadError
+    {
+        get
+        {
+            agy.Read(out var error);
+            return error;
+        }
+    }
+
+    public AgyCheck.Result AgyChecked => _agyCheck ??= agy.Check();
+    private AgyCheck.Result? _agyCheck;
+
+    /// <summary>중계 폴더 문제 (없으면 null). 화면을 그릴 때 한 번 — 폴더는 만들지 않는다 (켤 때 만든다).</summary>
+    public string? AgyRelayProblem => (_agyRelay ??= [agy.WhyBadRelay(create: false)])[0];
+    private string?[]? _agyRelay;
+
+    /// <summary>켜기 · 끄기 (켜려면 학습 끄기 확인 칸).</summary>
+    public async Task<IActionResult> OnPostAgyEnable(bool enabled, bool telemetryOff)
+    {
+        Error = agy.SetEnabled(enabled, telemetryOff);
+        if (Error is null)
+        {
+            await agy.VersionAsync();
+            hub.TouchAll(); // 열린 방 화면이 셸 메뉴를 다시 그리게
+            return Redirect($"/Settings?done={(enabled ? "agy-on" : "agy-off")}#agy");
+        }
+        Fill();
+        return Page();
+    }
+
+    /// <summary>agy 판 다시 읽기 + 설정 검사 (화면을 다시 그리면 검사는 늘 새로).</summary>
+    public async Task<IActionResult> OnPostAgyCheck()
+    {
+        await agy.VersionAsync();
+        return Redirect("/Settings?done=agy-checked#agy");
+    }
+
+    public async Task<IActionResult> OnPostAgyCanary()
+    {
+        Error = agy.CreateCanary();
+        if (Error is null)
+        {
+            await agy.VersionAsync();
+            return Redirect("/Settings?done=agy-canary#agy");
+        }
+        Fill();
+        return Page();
+    }
+
+    public async Task<IActionResult> OnPostAgyJudge()
+    {
+        var (_, message) = await agy.JudgeCanaryAsync();
+        AgyMessage = message;
+        Fill();
+        return Page();
+    }
+
+    public IActionResult OnPostAgyClearCurrent()
+    {
+        Error = agy.ClearCurrent();
+        if (Error is null) return Redirect("/Settings?done=agy-cleared#agy");
+        Fill();
+        return Page();
+    }
+
+    public IActionResult OnPostAgyClearArchive()
+    {
+        Error = agy.ClearArchive();
+        if (Error is null) return Redirect("/Settings?done=agy-archive#agy");
+        Fill();
+        return Page();
+    }
+
+    /// <summary>카나리 판정 결과 (그 POST에서 바로 그린다).</summary>
+    public string? AgyMessage { get; private set; }
+
     // ---- Codex 구성원: 켤 수 있는 작업 폴더 · 실행 파일 · 이 계정 모델 ----
 
     public IReadOnlyList<string> CodexWorkspaces => codexSettings.Workspaces();
@@ -156,7 +237,9 @@ public sealed class SettingsModel(
         "addworkspace" or "removeworkspace" or "addunity" or "removeunity" or "measureunity" or "measure" or "rename" or "added" or "removed" or "renamed"
             or "appwrites" or "addappwritefolder" or "removeappwritefolder" or "appwrites-added" or "appwrites-removed" => "work",
         "cliselftest" or "cli" or "clicheck" or "cliupdate" or "cli-checked" or "cli-updated" or "codexworkspaces" or "codex" or "addmcpfields" or "addmcpjson" or "importmcp" or "removemcp"
-            or "mcp-added" or "mcp-secret" or "mcp-removed" => "connect",
+            or "mcp-added" or "mcp-secret" or "mcp-removed"
+            or "agyenable" or "agycheck" or "agycanary" or "agyjudge" or "agyclearcurrent" or "agycleararchive"
+            or "agy-on" or "agy-off" or "agy-checked" or "agy-canary" or "agy-cleared" or "agy-archive" => "connect",
         "stickerpack" or "pack" or "faces" => "decor",
         "backup" => "data",
         _ => null,
@@ -192,6 +275,12 @@ public sealed class SettingsModel(
         "appwrites-added" => "늘 허용 폴더를 더했습니다.",
         "appwrites-removed" => "늘 허용 폴더를 뺐습니다 — 그 폴더 쓰기는 다시 카드로 묻습니다.",
         "cli-checked" => "CLI 버전을 확인했습니다.",
+        "agy-on" => "agy 중계를 켰습니다 — 명령 · 앱 방의 다음 실행부터 도구 · 안내가 붙습니다. 판이 확인되지 않았으면 카나리 확인을 먼저 하세요.",
+        "agy-off" => "agy 중계를 껐습니다 — 다음 실행부터 도구 · 안내가 빠집니다.",
+        "agy-checked" => "agy 판과 설정을 다시 봤습니다.",
+        "agy-canary" => "카나리를 만들었습니다 — 아래 순서대로 agy에 입력한 뒤 '판정'을 누르세요.",
+        "agy-cleared" => "진행 중인 중계 · 카나리를 비웠습니다.",
+        "agy-archive" => "agy 보관함을 비웠습니다.",
         "cli-updated" => CliTools.LastUpdate is { } u
             ? u.Ok ? $"{CliToolLabel(u.Tool)}: {u.Before ?? "?"} → {u.After ?? "?"}" + (u.Before == u.After ? " (바뀐 것 없음)" : "로 올렸습니다.")
                 : $"{CliToolLabel(u.Tool)}를 올리지 못했습니다 — CLI 도구 칸의 출력을 보세요."

@@ -51,6 +51,9 @@ public sealed class RoomNotes(Func<string> dataFolder)
     /// <summary>Unity 캡처 그림 줄 — 브라우저 스크린샷과 같은 모양.</summary>
     public const string UnityShotTool = "Unity 스크린샷";
 
+    /// <summary>agy 중계 준비 · 받기 줄 (보낸 파일 목록 · 결과 크기) — 요약 칸 없이 글 그대로.</summary>
+    public const string AgyTool = "agy 중계";
+
     private readonly Lock _gate = new();
     private string? _path;
     private long _end;
@@ -139,12 +142,12 @@ public sealed class RoomNotes(Func<string> dataFolder)
                 return (room, new RoomNote(at, decision, false) { Room = Str(e, "summary") is { } opened && RoomStore.IsRoomId(opened) ? opened : null });
             var text = tool switch
             {
-                BackgroundTool or TerminalTool => decision,
+                BackgroundTool or TerminalTool or AgyTool => decision,
                 ApprovalRequest.PlanTool => "계획 " + (decision == "허용" ? "승인" : decision),
                 _ => summary.Length > 0 ? $"승인 {decision} — {tool}: {summary}" : $"승인 {decision} — {tool}",
             };
             // "항상 허용"은 없앤 단추의 옛 기록. 고쳐 허용한 카드(모델 선택 · 새 방)는 "허용 (…)"로 남는다
-            var denied = tool is not (BackgroundTool or TerminalTool) && decision is not ("허용" or "항상 허용" or RoomHub.TurnAllowLabel)
+            var denied = tool is not (BackgroundTool or TerminalTool or AgyTool) && decision is not ("허용" or "항상 허용" or RoomHub.TurnAllowLabel)
                 && !decision.StartsWith("허용 (", StringComparison.Ordinal);
             return (room, new RoomNote(at, text, denied));
         }

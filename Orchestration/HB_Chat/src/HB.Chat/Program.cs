@@ -46,7 +46,17 @@ builder.Services.AddHttpContextAccessor();
 // 지휘자 브라우저: 방마다 화면 없는 Chrome(없으면 Edge) · 별도 프로필 — 같은 앱 MCP
 builder.Services.AddSingleton(sp => new AgentBrowser(() => sp.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder,
     blockedPorts: () => TerminalMcp.BlockedPorts(sp.GetRequiredService<Microsoft.AspNetCore.Hosting.Server.IServer>(), sp.GetRequiredService<IOptions<ChatOptions>>().Value)));
-builder.Services.AddMcpServer().WithHttpTransport(o => o.Stateless = true).WithTools<TerminalTools>().WithTools<BrowserTools>().WithTools<RoomTools>().WithTools<MemoryTools>();
+builder.Services.AddMcpServer().WithHttpTransport(o => o.Stateless = true).WithTools<TerminalTools>().WithTools<BrowserTools>().WithTools<RoomTools>().WithTools<MemoryTools>()
+    .WithTools<AgyTools>();
+// agy 수동 중계: 데이터 폴더 agy.json · 중계 폴더 — 앱은 agy에 입력하지 않는다 (사람이 곁칸 셸에서)
+builder.Services.AddSingleton(sp =>
+{
+    ChatOptions Opts() => sp.GetRequiredService<IOptions<ChatOptions>>().Value;
+    var contentRoot = builder.Environment.ContentRootPath;
+    // deny 필수 목록에 앱 · 저장소 · Claude 설정 · Codex 홈 · 호출 기록 폴더도 (회사 PC에서 프로필 밖에 있을 수 있다)
+    return new AgyRelay(Opts, guarded: () => [.. WorkspaceStore.GuardedFolders(Opts(), contentRoot), Opts().CodexHomeDir(),
+        Path.GetDirectoryName(Path.GetFullPath(Opts().CallLogFile)) ?? ""]);
+});
 // 방 메모 (지휘자가 이어 갈 것을 적는 한 장) — 같은 앱 MCP의 room_memo_* 도구 · 곁칸
 builder.Services.AddSingleton(sp => new RoomMemos(() => sp.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder));
 // 구독 한도: Claude는 실행 때 받은 값을 데이터 폴더에, Codex는 계정 조회(codex app-server, 5분마다) · 세션 기록 중 새 것
@@ -71,6 +81,7 @@ builder.Services.AddSingleton(sp =>
         Terminals = sp.GetRequiredService<Terminals>(),
         Browser = sp.GetRequiredService<AgentBrowser>(),
         Stickers = sp.GetRequiredService<StickerCatalog>(),
+        Agy = sp.GetRequiredService<AgyRelay>(),
         SelfUrl = () => TerminalMcp.LoopbackUrl(sp.GetRequiredService<Microsoft.AspNetCore.Hosting.Server.IServer>()),
     };
 });

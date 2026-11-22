@@ -414,6 +414,9 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
     /// <summary>스티커 설정 — Claude 방 규칙에 스티커 안내(<see cref="StickerRules"/>)를 붙일 때. 없으면 안내 없음.</summary>
     public HB.Orchestration.ChatUi.StickerCatalog? Stickers { get; init; }
 
+    /// <summary>agy 수동 중계 — 켜져 있으면 명령 · 앱 방에 agy 도구 · 안내를 붙인다. 없으면(시험) 붙이지 않는다.</summary>
+    public AgyRelay? Agy { get; init; }
+
     /// <summary>
     /// 방을 열어 둔 화면이 있을 때만 그 방 알림으로 — 없으면 알림을 만들지도 않는다(터미널 출력 base64, /self-review 57b59ef134 C4).
     /// 터미널 출력은 snapshot에 남기지 않는다 — 화면이 버퍼로 다시 받는다.
@@ -1250,8 +1253,10 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
         // 실행 하나 동안 같은 값 — 규칙 글과 ask 규칙이 어긋나지 않게 한 번 읽는다
         var askWrites = o.AskAppWrites;
         // 규칙 재료는 쉬는 실행이 이어 쓰는 턴에서도 같은 규칙을 만들게 남긴다 (RulesFor — 기본 서버 · 스티커 · 단톡방 규칙 포함)
+        // agy 중계: 켰을 때 · 앱 MCP를 붙인 명령 · 앱 방(단톡방 구성원 아님) — 규칙 글과 도구 허용이 같은 값
+        var agy = Agy?.Enabled == true && terminalConfig is not null && ClaudeArgs.RunsCommands(room.Level) && room.GroupId is null && !playground;
         var setup = new RunSetup(Terminal: terminalConfig is not null, Unity: unityName, Extras: extraServers, McpOn: mcpConfig is not null,
-            AskWrites: room.Level == PermissionLevel.App && askWrites, Workspace: workspace, AppAskWrites: askWrites);
+            AskWrites: room.Level == PermissionLevel.App && askWrites, Workspace: workspace, AppAskWrites: askWrites, Agy: agy);
         var rules = RulesFor(room, setup);
         // 이어 쓰는 세션은 CLI가 압축 전까지 처음 시스템 프롬프트를 쓴다 (단계 실측: resume에 넣은 새 규칙은 안 보임).
         // 지휘자가 마지막으로 받은 규칙과 다르면 이번 말 앞에 새 규칙을 붙인다 — 갈래 첫 실행 · 이 칸 전에 만든 방도 한 번 받는다.
@@ -1288,6 +1293,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
             AskWrites = room.Level == PermissionLevel.App && askWrites, // 앱 단계 폴더 밖 쓰기 묻기 (설정 · 규칙 글과 같은 값)
             TerminalMcpConfigPath = terminalConfig, // 명령 방: 앱 MCP(터미널 도구)
             RoomMemory = terminalConfig is not null && room.GroupId is null, // 방 기억 도구 — 규칙 글(RulesFor)과 같은 조건
+            AgyRelay = agy,
         };
         ProcessSpec process;
         try

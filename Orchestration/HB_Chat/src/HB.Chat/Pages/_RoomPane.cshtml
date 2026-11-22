@@ -1,5 +1,6 @@
 @model RoomModel
 @inject ProfileView Profiles
+@inject AgyRelay Agy
 @*
     오른쪽 방 칸. 첫 화면(Room.cshtml)과 방 전환(?handler=Pane)이 같이 쓴다. 동작은 wwwroot/chat.js의 mountRoom.
 *@
@@ -233,6 +234,10 @@
                         @foreach (var (key, label) in Terminals.Shells)
                         {
                             <button type="button" role="menuitem" data-shell="@key">@label</button>
+                        }
+                        @if (Agy.Enabled)
+                        {
+                            <button type="button" role="menuitem" data-shell="agy" title="중계 폴더에서 PowerShell — agy는 직접 띄워 입력">agy 중계 셸</button>
                         }
                     </div>
                 </div>
