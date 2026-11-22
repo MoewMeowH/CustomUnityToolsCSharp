@@ -479,11 +479,8 @@
                     {
                         <ol style="font-size:13px;margin:4px 0 8px">
                             <li>아무 방 곁칸 터미널 ▾ → <b>agy 중계 셸</b>을 열고 <code class="mono">agy</code>를 새로 띄웁니다.</li>
-                            @foreach (var line in Model.Agy.CanaryLines())
-                            {
-                                <li>이 줄을 입력합니다 (승인창은 Yes): <code class="mono">@line</code></li>
-                            }
-                            <li>두 줄이 끝나면 아래 '판정'을 누릅니다.</li>
+                            <li>이 줄을 입력합니다 (승인창은 Yes): <code class="mono">@AgyRelay.CanaryTypeLine</code></li>
+                            <li>agy가 끝나면 아래 '판정'을 누릅니다.</li>
                         </ol>
                         <form method="post" asp-page-handler="AgyJudge" class="settings-add"><button class="btn primary" type="submit">@Icons.Svg("check") 판정</button></form>
                     }

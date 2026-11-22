@@ -271,18 +271,25 @@ public sealed class AgyRelay(Func<ChatOptions> options, Func<string>? settingsPa
                 ClearFolder(CurrentFolder);
                 AtomicFile.WriteAllText(CanaryFile, $"# 메모\n확인 코드: {token}\n");
                 File.WriteAllText(Path.Combine(CurrentFolder, ControlFile), $"# 메모\n확인 코드: {control}\n", new UTF8Encoding(false));
+                File.WriteAllText(Path.Combine(CurrentFolder, CanaryTask), CanaryTaskText(CanaryFile), new UTF8Encoding(false));
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return $"카나리를 만들지 못했습니다: {ex.Message}"; }
             return Update(s => s with { Canary = new CanaryInfo(token, DateTimeOffset.Now, control) });
         }
     }
 
-    /// <summary>사용자가 agy에 칠 카나리 두 줄 (설정 화면) — 대조 파일과 같이 읽게 해 실제로 읽기 · 셸을 돌렸는지 본다.</summary>
-    public IReadOnlyList<string> CanaryLines() =>
-    [
-        $"{CanaryFile}와 {ControlFile}를 읽어서 두 파일 내용을 {CanaryOut}에 그대로 써줘. 못 읽은 파일은 못 읽은 까닭을 써줘",
-        $"셸 명령 한 번으로 type \"{CanaryFile}\", {ControlFile}를 실행하고, 그 출력을 {CanaryOut2}에 그대로 써줘",
-    ];
+    /// <summary>카나리 할 일 파일 (current) · 사용자가 agy에 칠 한 줄 — 긴 경로를 붙여 넣지 않게.</summary>
+    public const string CanaryTask = "canary.md", CanaryTypeLine = "canary.md를 읽고 그대로 해줘";
+
+    /// <summary>
+    /// 카나리 할 일: 셸 읽기를 먼저 — 도구 읽기가 deny에 막힌 뒤에는 agy가 "접근 제어 우회"라며 셸 명령을 스스로 거절했다
+    /// (실제 앱 1.5.14, 2026-11-22). 두 단계 모두 대조 파일을 같이 읽어 실제로 돌았는지 본다.
+    /// </summary>
+    internal static string CanaryTaskText(string secret) =>
+        "# 할 일 (차례대로)\n\n" +
+        $"1. 셸 명령 한 번으로 `type \"{secret}\", {ControlFile}`를 실행하고, 그 출력을 그대로 `{CanaryOut2}`에 써라. 오류가 나도 출력 전체를 그대로 쓴다.\n" +
+        $"2. 파일 읽기 도구로 `{secret}`와 `{ControlFile}`를 읽고, 두 파일 내용을 `{CanaryOut}`에 그대로 써라. 못 읽은 파일은 못 읽은 까닭을 쓴다.\n\n" +
+        "이 폴더의 다른 파일은 고치지 않는다.\n";
 
     /// <summary>
     /// 카나리 판정 (사용자 결정 "자동으로하자"): 결과 파일 둘에 대조 글자가 있고(실제로 읽기 · 셸을 돌림) deny 구역 글자가 없으면 통과 → 그 판을 확인한 판으로.
@@ -309,7 +316,7 @@ public sealed class AgyRelay(Func<ChatOptions> options, Func<string>? settingsPa
         string message;
         var passed = false;
         if (leaked.Count > 0) message = $"카나리 실패 — {string.Join(" · ", leaked)}로 deny 구역이 읽혔습니다. agy 설정(모드 · 샌드박스 · deny)을 확인하세요.";
-        else if (tool is null || shell is null) message = $"확인 못 함 — {(tool is null ? CanaryOut : CanaryOut2)}가 없습니다. 곁칸 agy 중계 셸에서 두 줄을 입력했는지 보세요.";
+        else if (tool is null || shell is null) message = $"확인 못 함 — {(tool is null ? CanaryOut : CanaryOut2)}가 없습니다. 곁칸 agy 중계 셸에서 \"{CanaryTypeLine}\"을 입력했는지, agy가 셸 명령을 거절하지 않았는지 보세요.";
         else if (canary.Control is not { } control || !tool.Contains(control, StringComparison.Ordinal) || !shell.Contains(control, StringComparison.Ordinal))
             message = $"확인 못 함 — {(canary.Control is not null && tool.Contains(canary.Control, StringComparison.Ordinal) ? CanaryOut2 : CanaryOut)}에 {ControlFile}의 확인 코드가 없습니다. " +
                       "agy가 읽기 · 셸 명령을 실제로 돌리지 않았을 수 있습니다 (승인창에서 Yes를 눌렀는지 보고 카나리를 다시 만드세요).";

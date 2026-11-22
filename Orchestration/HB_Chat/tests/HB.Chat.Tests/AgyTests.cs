@@ -182,6 +182,10 @@ public sealed class AgyTests : IDisposable
         var token = canary.Token;
         var control = canary.Control!;
         Assert.True(File.Exists(Path.Combine(relay.CurrentFolder, AgyRelay.ControlFile)));
+        // 할 일 파일: 셸 읽기가 먼저 (도구 읽기가 막힌 뒤에는 agy가 셸을 "우회"라며 거절했다), 두 단계 모두 대조 파일
+        var task = File.ReadAllText(Path.Combine(relay.CurrentFolder, AgyRelay.CanaryTask));
+        Assert.True(task.IndexOf(AgyRelay.CanaryOut2, StringComparison.Ordinal) < task.IndexOf("파일 읽기 도구", StringComparison.Ordinal));
+        Assert.Contains($"type \"{relay.CanaryFile}\", {AgyRelay.ControlFile}", task);
         // 시험임을 알리는 문구 없이 (agy가 옮겨 쓰지 않거나 가리지 않게)
         Assert.DoesNotContain("격리", File.ReadAllText(relay.CanaryFile));
 
