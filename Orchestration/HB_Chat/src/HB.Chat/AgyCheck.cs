@@ -22,6 +22,9 @@ public static partial class AgyCheck
         IReadOnlyList<string> MissingRecommended, string SuggestedJson)
     {
         public bool Ok => Problems.Count == 0;
+
+        /// <summary>필수 항목이 통과해도 넣을 JSON을 펼쳐 보일지 — AGY 한도용 statusLine · 스크립트 폴더 write_file deny를 더했을 때.</summary>
+        public bool OpenSuggestion { get; init; }
     }
 
     private static readonly JsonSerializerOptions Pretty = new() { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
@@ -56,7 +59,8 @@ public static partial class AgyCheck
     /// <param name="required">deny가 덮어야 하는 경로 (없으면 막힘).</param>
     /// <param name="recommended">덮으면 좋은 경로 (경고만).</param>
     /// <param name="relayCurrent">agy가 결과를 쓰는 폴더 — allow write_file이 없으면 쓸 때마다 승인창 (경고).</param>
-    public static Result Inspect(string? json, IReadOnlyList<string> required, IReadOnlyList<string> recommended, string relayCurrent)
+    /// <param name="statusScript">AGY 한도용 statusLine 스크립트 (<see cref="AgyLimits"/>). 없으면 statusLine은 보지 않는다. 막지 않고 경고만.</param>
+    public static Result Inspect(string? json, IReadOnlyList<string> required, IReadOnlyList<string> recommended, string relayCurrent, string? statusScript = null)
     {
         var problems = new List<string>();
         var warnings = new List<string>();
@@ -123,7 +127,46 @@ public static partial class AgyCheck
         if (suggested["permissions"] is not JsonObject permissions) suggested["permissions"] = permissions = [];
         permissions["deny"] = new JsonArray([.. deny.Concat(missing.Concat(missingRecommended).Select(p => $"read_file({p})")).Select(s => (JsonNode?)JsonValue.Create(s))]);
         permissions["allow"] = new JsonArray([.. (allowOk ? allow : [.. allow, allowNeeded]).Select(s => (JsonNode?)JsonValue.Create(s))]);
-        return new Result(problems, warnings, missing, missingRecommended, suggested.ToJsonString(Pretty));
+        var open = false;
+        if (statusScript is not null)
+        {
+            var status = StatusLine(root, statusScript, readable);
+            if (status.Warning is { } statusWarning) warnings.Add(statusWarning);
+            if (status.Add)
+            {
+                suggested["statusLine"] = new JsonObject { ["type"] = "command", ["command"] = AgyLimits.Command(statusScript), ["stack_with_default"] = true };
+                open = true;
+            }
+            // 이 스크립트는 agy가 샌드박스 밖에서 돌린다 — 쓰는 statusLine이면 스크립트 폴더 쓰기도 막는다 (없으면 승인창만 지킴, /self-review sub 지휘자 K1)
+            var folder = RulePath(Path.GetDirectoryName(Path.GetFullPath(statusScript))!);
+            if (status.Ours && !deny.Select(r => Inner(r, "write_file")).OfType<string>().Any(d => d == "*" || Covers(d, folder)))
+            {
+                warnings.Add($"AGY 한도: statusLine 스크립트 폴더에 write_file deny가 없습니다 — agy가 스크립트를 고치면 다음 상태 줄 갱신 때 샌드박스 밖에서 돕니다 (지금은 승인창만 지킴). 넣을 JSON에 write_file({folder})를 더했습니다.");
+                ((JsonArray)permissions["deny"]!).Add(JsonValue.Create($"write_file({folder})"));
+                open = true;
+            }
+        }
+        return new Result(problems, warnings, missing, missingRecommended, suggested.ToJsonString(Pretty)) { OpenSuggestion = open };
+    }
+
+    /// <summary>
+    /// AGY 한도 statusLine 검사: 경고(없으면 null) · 넣을 JSON에 statusLine을 넣을지(없을 때만 — 다른 명령은 사용자 것이라 덮지 않고,
+    /// 경로에 공백이 있으면 agy가 따옴표를 글자 그대로 넘겨 쓸 수 없다) · 이 스크립트를 쓰는 statusLine인지(지금 · 넣을 JSON).
+    /// </summary>
+    private static (string? Warning, bool Add, bool Ours) StatusLine(JsonObject root, string script, bool readable)
+    {
+        var command = AgyLimits.Command(script);
+        var node = readable ? root["statusLine"] : null;
+        var current = node is JsonObject o && o["command"] is JsonValue c && c.GetValueKind() == JsonValueKind.String ? c.GetValue<string>() : null;
+        if (string.Equals(current, command, StringComparison.OrdinalIgnoreCase))
+            return node is JsonObject s && s["enabled"] is JsonValue e && e.GetValueKind() == JsonValueKind.False
+                ? ("AGY 한도: statusLine이 꺼져 있습니다 (\"enabled\": false) — 켜야 사이드바에 AGY 한도가 갱신됩니다.", false, true)
+                : (null, false, true);
+        if (Path.GetFullPath(script).Contains(' ', StringComparison.Ordinal))
+            return ($"AGY 한도: 데이터 폴더 경로에 공백이 있어 statusLine 명령을 쓸 수 없습니다 (agy가 따옴표를 글자 그대로 넘김) — 사이드바에 AGY 한도가 보이지 않습니다: {script}", false, false);
+        if (node is not null)
+            return ($"AGY 한도: 다른 statusLine이 있어 덮지 않았습니다 — AGY 한도를 보려면 statusLine.command를 다음으로 바꾸세요: {command}", false, false);
+        return ("AGY 한도: statusLine이 없습니다 — 넣을 JSON의 statusLine을 넣으면 agy를 띄워 둔 동안 사이드바에 AGY 한도가 보입니다.", true, true);
     }
 
     /// <summary>

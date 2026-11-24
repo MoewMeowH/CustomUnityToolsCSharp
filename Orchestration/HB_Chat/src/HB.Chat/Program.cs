@@ -64,7 +64,10 @@ builder.Services.AddSingleton(sp =>
 {
     ChatOptions Opts() => sp.GetRequiredService<IOptions<ChatOptions>>().Value;
     return new UsageLimits(() => Opts().DataFolder, () => Opts().CodexHomeDir(),
-        ct => CodexLimits.ReadAsync(Opts().ResolveCodex(), Opts().CodexHomeDir(), ct));
+        ct => CodexLimits.ReadAsync(Opts().ResolveCodex(), Opts().CodexHomeDir(), ct))
+    {
+        Alerts = new LimitAlerts(() => Opts().DataFolder), // 7일 창 80 · 95% 문턱
+    };
 });
 // claude CLI 판 기록 (카드 자가 시험 · 확인하지 않은 판 띠)
 builder.Services.AddSingleton(sp => new CliVersions(() => sp.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder));
@@ -171,6 +174,13 @@ _ = Task.Run(async () =>
         && app.Services.GetRequiredService<CliVersions>().Note(version))
         app.Services.GetRequiredService<RoomHub>().TouchAll();
 });
+
+// 구독 한도 문턱 알림: 새 알림이 생기면 열린 화면 · 데스크톱이 목록과 같이 한도를 다시 받게. agy statusLine 스크립트를 맞추고 한도 파일을 지켜본다
+{
+    var limits = app.Services.GetRequiredService<UsageLimits>();
+    limits.AlertRaised += _ => app.Services.GetRequiredService<RoomHub>().TouchAll();
+    limits.StartAgy();
+}
 
 // 이 필드 전에 만든 방은 마지막 줄까지 읽음으로 (안 그러면 업그레이드 직후 기존 방이 전부 안 읽음 — /self-review 5225b1ffaf C4).
 try
@@ -353,6 +363,12 @@ app.MapGet("/api/rooms", (RoomList list, ProfileStore profiles, FaceCatalog face
     // 미리보기는 늘 싣는다 — 펫 말풍선(4초, 알림 센터에 남지 않음)은 늘 보이고(결정 "말풍선은 늘"), 토스트 본문은 데스크톱이 notifyBody로 가린다
     return Results.Json(RoomApi.Rows(list.All(), withPreview: true, faceUrl: s => faces.Url(s.Face, packs.For(packs.Effective(s.StickerPack)))),
         RoomApi.Json);
+});
+// 데스크톱 앱: 최근 한도 문턱 알림 (오래된 것부터) — 앞에 못 본 것만 Windows 알림. 읽기만.
+app.MapGet("/api/limits/alerts", (UsageLimits limits, HttpContext ctx) =>
+{
+    ctx.Response.Headers.CacheControl = "no-store";
+    return Results.Json(limits.Alerts?.Recent() ?? [], RoomApi.Json);
 });
 app.MapGet("/events/{id}", async (string id, RoomStore store, RoomHub hub, HttpContext ctx) =>
 {

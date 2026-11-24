@@ -144,6 +144,12 @@ public sealed class PetController : IDisposable
         if (Showing && PetMood.Bubble(notices) is { } saying) _bubble.Say(saying, _form.Bounds, _dark);
     }
 
+    /// <summary>방 알림이 아닌 말풍선 하나 (한도 문턱). 펫이 보일 때만.</summary>
+    public void Say(PetSaying saying)
+    {
+        if (Showing) _bubble.Say(saying, _form.Bounds, _dark);
+    }
+
     /// <summary>채팅 서버와 끊김: 쉬는 흐린 모습.</summary>
     public void Disconnected()
     {

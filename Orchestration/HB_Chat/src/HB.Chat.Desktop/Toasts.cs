@@ -7,8 +7,8 @@ using Windows.Storage.Streams;
 
 namespace HB.Chat.Desktop;
 
-/// <summary>토스트 한 장 (방 하나): 굵은 첫 줄 · 글 · 누르면 열 방.</summary>
-public sealed record ToastSpec(string? RoomId, string Title, string Text);
+/// <summary>토스트 한 장 (방 하나): 굵은 첫 줄 · 글 · 누르면 열 방. 방이 없는 알림(한도)은 Tag로 같은 종류끼리 바꾼다.</summary>
+public sealed record ToastSpec(string? RoomId, string Title, string Text, string? Tag = null);
 
 /// <summary>
 /// Windows 토스트 알림: 트레이 풍선 대신 앱 이름 · 아이콘 · 지휘자 프로필 그림 · "방 열기" 단추가 있는 알림.
@@ -59,7 +59,7 @@ public static partial class Toasts
         if (logo is not null && File.Exists(logo)) builder.AddAppLogoOverride(new Uri(logo), ToastGenericAppLogoCrop.Circle);
         builder.Show(t =>
         {
-            t.Tag = spec.RoomId ?? "test";
+            t.Tag = spec.RoomId ?? spec.Tag ?? "test";
             t.Group = Group;
         });
     }

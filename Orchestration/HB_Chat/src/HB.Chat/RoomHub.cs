@@ -547,13 +547,10 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
     }
 
     /// <summary>
-    /// 방 줄이 아니라 사이드바 전체가 바뀌었을 때(예 CLI 판 띠) 열린 화면이 목록을 다시 받게 한다 — 목록 알림은 방 ID를 달고 가므로 보이는 방 하나로 낸다.
-    /// 방이 없으면 다시 받을 목록도 없다.
+    /// 방 줄이 아니라 사이드바 전체가 바뀌었을 때(예 CLI 판 띠 · 한도 알림) 열린 화면이 목록을 다시 받게 한다 — 목록 알림은 방 ID를 달고 가므로 보이는 방 하나로 낸다.
+    /// 방이 없어도 빈 ID로 낸다 — 사이드바 한도 줄 · 데스크톱 한도 알림은 방과 상관없다 (/self-review sub C6). 받는 쪽은 ID를 보지 않고 목록을 다시 받는다.
     /// </summary>
-    public void TouchAll()
-    {
-        if (store.All().FirstOrDefault(r => r.GroupId is null && r.DeletedAt is null) is { } any) Touch(any.Id);
-    }
+    public void TouchAll() => Touch(store.All().FirstOrDefault(r => r.GroupId is null && r.DeletedAt is null)?.Id ?? "");
 
     /// <summary>
     /// 프로필 · 지휘자 표정이 바뀌었다고 알린다 (3차 e): 방 목록 줄마다 Touch에 더해, 열린 방 화면이 방을 다시 열어

@@ -201,7 +201,7 @@ public sealed class AgyRelay(Func<ChatOptions> options, Func<string>? settingsPa
         try { if (File.Exists(SettingsPath)) json = File.ReadAllText(SettingsPath); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { json = "{ 읽지 못함: " + ex.Message; }
         AgyCheck.Result result;
-        try { result = AgyCheck.Inspect(json, RequiredDeny(), RecommendedDeny(), CurrentFolder); }
+        try { result = AgyCheck.Inspect(json, RequiredDeny(), RecommendedDeny(), CurrentFolder, AgyLimits.ScriptPath(O.DataFolder)); }
         catch (Exception ex) when (ex is InvalidOperationException or ArgumentException) // 같은 키가 두 번 든 파일 등
         {
             result = AgyCheck.Inspect("{ 읽지 못함", RequiredDeny(), RecommendedDeny(), CurrentFolder) with { Problems = [$"agy 설정 파일 모양이 올바르지 않습니다: {ex.Message}"] };

@@ -239,7 +239,7 @@ public sealed class MainForm : Form
             {
                 _chatView.CoreWebView2.Navigate(_chatPending ?? _chatUrl.AbsoluteUri);
                 _chatPending = null;
-                _watcher = new RoomWatcher(_chatUrl, OnRooms, OnConnection, SynchronizationContext.Current!);
+                _watcher = new RoomWatcher(_chatUrl, OnRooms, OnConnection, SynchronizationContext.Current!, OnLimitAlerts);
                 _watcher.Start();
             }
         }
@@ -436,6 +436,29 @@ public sealed class MainForm : Form
         var icon = notices.Any(n => n.Kind == NoticeKind.Approval) ? ToolTipIcon.Warning
             : notices.Any(n => n.Kind == NoticeKind.Failed) ? ToolTipIcon.Error : ToolTipIcon.Info;
         _tray.ShowBalloonTip(5000, title, text.Length > 0 ? text : "(제목 없음)", icon);
+    }
+
+    private readonly LimitNotices _limitNotices = new(DateTimeOffset.Now);
+
+    /// <summary>
+    /// 한도 문턱 알림 목록 (UI 스레드). 새것만 알린다 — 펫이 보이면 펫 말풍선만(방 알림과 같은 규칙), 아니면 토스트(같은 Tag로 앞 것을 바꿈),
+    /// 토스트를 못 띄우면 트레이 풍선. 방이 없으므로 누르면 큰 창만 연다.
+    /// </summary>
+    private void OnLimitAlerts(IReadOnlyList<LimitAlertRow> rows)
+    {
+        if (_closing) return;
+        var fresh = _limitNotices.Update(rows);
+        if (fresh.Count == 0) return;
+        Trace("한도 알림 " + string.Join(", ", fresh.Select(a => a.Id)));
+        var (title, text) = LimitNotices.Balloon(fresh);
+        if (_pet?.Showing == true)
+        {
+            _pet.Say(new PetSaying(NoticeKind.Limit, "한도 알림", title, text));
+            return;
+        }
+        if (ShowToasts([new ToastSpec(null, title, text, Tag: "limits")])) return;
+        _balloonRoom = null;
+        _tray.ShowBalloonTip(5000, title, text, ToolTipIcon.Warning);
     }
 
     // ---- 토스트 알림 ----

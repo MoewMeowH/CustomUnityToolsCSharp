@@ -371,6 +371,14 @@ details.long > .body { margin-top: 6px; }
 .limit-row .bar .fill.lim-warn { background: var(--warn); }
 .limit-row .bar .fill.lim-err { background: var(--err); }
 .limit-panel .when, .limit-panel .note { font-size: 11px; }
+.limit-source.wide .limit-row { grid-template-columns: 96px 1fr 38px; } /* AGY 창 이름이 김 (Claude·GPT 7일) */
+/* 한도 문턱 알림 띠: 한도 줄 바로 위, 닫으면 브라우저에 기억 */
+.limit-alerts { border-top: 1px solid var(--line); padding: 4px 8px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.limit-alert { display: flex; align-items: flex-start; gap: 6px; padding: 4px 6px; border-radius: 6px; border: 1px solid currentColor; }
+.limit-alert.lim-warn { color: var(--warn); }
+.limit-alert.lim-err { color: var(--err); }
+.limit-alert > span { flex: 1; overflow-wrap: anywhere; }
+.limit-alert .x { background: none; border: 0; color: inherit; cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; }
 .side-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 12px;
              border-top: 1px solid var(--line); font-size: 12.5px; }
 .side-foot label { display: flex; gap: 4px; align-items: center; color: var(--muted); cursor: pointer; }

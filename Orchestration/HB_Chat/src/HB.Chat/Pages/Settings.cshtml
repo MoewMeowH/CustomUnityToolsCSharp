@@ -470,7 +470,7 @@
                             @foreach (var p in agyCheck.MissingRecommended) { <li class="muted">권장 · read_file(@p)</li> }
                         </ul>
                     }
-                    <details open="@(!agyCheck.Ok)">
+                    <details open="@(!agyCheck.Ok || agyCheck.OpenSuggestion)">
                         <summary class="muted" style="font-size:12.5px">넣을 JSON — agy를 끄고 이 내용으로 settings.json을 바꾼 뒤 다시 띄우세요 (앱은 고치지 않음)</summary>
                         <textarea id="agy-json" class="mono" readonly rows="14" style="width:100%;font-size:12px;margin-top:6px">@agyCheck.SuggestedJson</textarea>
                         <button class="btn" type="button" onclick="navigator.clipboard.writeText(document.getElementById('agy-json').value); this.textContent = '복사함';">복사</button>

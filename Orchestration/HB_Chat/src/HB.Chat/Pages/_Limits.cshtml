@@ -1,14 +1,27 @@
 @inject UsageLimits Limits
 @*
     사이드바 아래 구독 한도 (결정: 사이드바 아래 + 누르면 창, 색만).
-    Claude는 HB_Chat 실행 때 받은 마지막 값, Codex는 계정 조회(5분마다) · ~/.codex 세션 기록 중 새 값. 목록을 다시 받을 때 화면이 ?handler=Limits로 다시 받는다.
+    Claude는 HB_Chat 실행 때 받은 마지막 값, Codex는 계정 조회(5분마다) · ~/.codex 세션 기록 중 새 값, AGY는 agy statusLine 스크립트가 남긴 값.
+    목록을 다시 받을 때 화면이 ?handler=Limits로 다시 받는다 (#limit-alerts · #usage-limits 둘 다).
     처음 그릴 때는 조회를 기다리지 않고 뒤에서 시작만 한다 (화면이 붙자마자 목록을 다시 받으며 보인다).
+    그릴 때마다 문턱(7일 창 80 · 95%)도 본다 — 새 알림은 위 띠로, 닫은 알림은 브라우저가 기억한다.
 *@
 @{
     var now = DateTimeOffset.Now;
     _ = Limits.RefreshCodexAsync(now);
-    var sources = new (string Name, LimitSnapshot? Value)[] { ("Claude", Limits.Claude()), ("Codex", Limits.Codex(now)) };
+    var sources = new (string Name, LimitSnapshot? Value)[] { ("Claude", Limits.Claude()), ("Codex", Limits.Codex(now)), ("AGY", Limits.Agy()) };
+    Limits.CheckAlerts([.. sources.Select(s => s.Value)]);
+    var alerts = Limits.Alerts?.Active(now) ?? [];
 }
+<div id="limit-alerts" class="limit-alerts" hidden="@(alerts.Count == 0)">
+    @foreach (var a in alerts)
+    {
+        <div class="limit-alert @Level(a.Level)" data-alert-id="@a.Id">
+            <span>⚠ <b>@a.Title</b> — @a.Text</span>
+            <button type="button" class="x" data-dismiss-alert title="닫기 (이 브라우저에 기억)">×</button>
+        </div>
+    }
+</div>
 <details class="side-limits" id="usage-limits">
     <summary title="구독 사용량 한도 — 누르면 자세히">
         @foreach (var (name, s) in sources)
@@ -21,10 +34,16 @@
                 }
                 else
                 {
-                    foreach (var w in s.Windows)
+                    @* AGY는 창이 4개라 쓴 창만 (결정: 요약 줄은 사용률이 0보다 큰 창만) *@
+                    var windows = name == "AGY" ? s.Windows.Where(w => Shown(w, now) is > 0 || w.Status is not null).ToList() : [.. s.Windows];
+                    if (windows.Count == 0)
+                    {
+                        <span>0%</span>
+                    }
+                    foreach (var w in windows)
                     {
                         var shown = Shown(w, now);
-                        <span class="@Level(shown)">@w.Label @Percent(shown, w, now)</span>
+                        <span class="@Level(shown)">@w.Label @Percent(shown, w, now, name == "AGY")</span>
                     }
                 }
             </span>
@@ -33,11 +52,16 @@
     <div class="limit-panel">
         @foreach (var (name, s) in sources)
         {
-            <div class="limit-source">
+            <div class="limit-source @(name == "AGY" ? "wide" : null)">
                 <div class="limit-head"><b>@name</b>@if (s?.Plan is { } plan) { <span class="muted"> · @plan</span> }@if (s?.UsingOverage == true) { <span class="lim-warn"> · 초과 사용 중</span> }</div>
                 @if (s is null || s.Windows.Count == 0)
                 {
-                    <div class="muted">@(name == "Claude" ? "아직 받은 값이 없습니다 — HB_Chat에서 Claude를 한 번 돌리면 보입니다." : "Codex 계정 조회 · 세션 기록에서 한도 값을 받지 못했습니다.")</div>
+                    <div class="muted">@(name switch
+                    {
+                        "Claude" => "아직 받은 값이 없습니다 — HB_Chat에서 Claude를 한 번 돌리면 보입니다.",
+                        "Codex" => "Codex 계정 조회 · 세션 기록에서 한도 값을 받지 못했습니다.",
+                        _ => "agy에서 받은 값이 없습니다 — 설정 'agy' 칸의 넣을 JSON(statusLine)을 agy 설정에 넣고 agy를 띄우면 보입니다.",
+                    })</div>
                 }
                 else
                 {
@@ -47,7 +71,7 @@
                         <div class="limit-row">
                             <span class="label">@w.Label</span>
                             <span class="bar"><span class="fill @Level(shown)" style="width:@(Math.Clamp(shown ?? 0, 0, 100).ToString("0", System.Globalization.CultureInfo.InvariantCulture))%"></span></span>
-                            <span class="@Level(shown)">@Percent(shown, w, now)</span>
+                            <span class="@Level(shown)">@Percent(shown, w, now, name == "AGY")</span>
                             <span class="muted reset">@Reset(w.ResetsAt, now)</span>
                         </div>
                     }
@@ -59,7 +83,7 @@
                 }
             </div>
         }
-        <div class="muted note">Claude는 HB_Chat에서 Claude를 돌릴 때마다 갱신됩니다 (추가 호출 없음). Codex는 목록을 다시 받을 때 5분마다 계정에서 조회하고, 실패하면 세션 기록의 마지막 값입니다.</div>
+        <div class="muted note">Claude는 HB_Chat에서 Claude를 돌릴 때마다 갱신됩니다 (추가 호출 없음). Codex는 목록을 다시 받을 때 5분마다 계정에서 조회하고, 실패하면 세션 기록의 마지막 값입니다. AGY는 agy를 띄워 둔 동안 상태 줄이 바뀔 때마다 갱신됩니다. 7일 창이 80 · 95%를 넘으면 한 번씩 알립니다.</div>
     </div>
 </details>
 
@@ -73,8 +97,9 @@
     /// <summary>색: 80% 이상 노랑 · 95% 이상 빨강 (결정 "색만").</summary>
     private static string? Level(double? shown) => shown >= 95 ? "lim-err" : shown >= 80 ? "lim-warn" : null;
 
-    private static string Percent(double? shown, LimitWindow w, DateTimeOffset now) =>
-        shown is { } p ? $"{p:0}%" : w.ResetsAt is { } r && r <= now ? "초기화됨" : "?";
+    /// <summary>사용률 글. AGY는 사용률이 없으면 창 상태 글(꺼짐 · 남음 N) — Claude 상태는 영어 원문이라 "?" 그대로 (/self-review sub C1).</summary>
+    private static string Percent(double? shown, LimitWindow w, DateTimeOffset now, bool agy = false) =>
+        shown is { } p ? $"{p:0}%" : w.ResetsAt is { } r && r <= now ? "초기화됨" : agy && w.Percent is null && w.Status is { } note ? note : "?";
 
     /// <summary>"초기화 14:30 (2시간 5분 뒤)" — 지났으면 "초기화됨".</summary>
     private static string Reset(DateTimeOffset? at, DateTimeOffset now)

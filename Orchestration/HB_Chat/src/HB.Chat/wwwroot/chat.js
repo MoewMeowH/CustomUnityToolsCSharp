@@ -80,12 +80,41 @@
                 fresh.open = old.open;
                 old.replaceWith(fresh);
             }
+            const alerts = tmp.querySelector("#limit-alerts"), oldAlerts = document.getElementById("limit-alerts");
+            if (alerts && oldAlerts) {
+                oldAlerts.replaceWith(alerts);
+                hideDismissedAlerts();
+            }
         } catch { /* 다음 알림 때 다시 */ }
         finally {
             limitsBusy = false;
             if (limitsAgain) { limitsAgain = false; refreshLimits(); }
         }
     }
+    // 한도 문턱 알림 띠: 닫은 알림 ID를 브라우저에 기억 (편의만 — 못 읽으면 다시 보임). 서버 목록에 없는 ID는 버린다 —
+    // 띠가 비었을 때는 버리지 않는다 (서버가 기록을 잠깐 못 읽어 빈 띠를 그린 경우 — /self-review sub C8)
+    const dismissedKey = "hbchat.limitAlertsClosed";
+    function dismissedAlerts() { try { return new Set(JSON.parse(localStorage.getItem(dismissedKey) || "[]")); } catch { return new Set(); } }
+    function hideDismissedAlerts() {
+        const box = document.getElementById("limit-alerts");
+        if (!box) return;
+        const closed = dismissedAlerts();
+        const items = [...box.querySelectorAll("[data-alert-id]")];
+        items.forEach(a => { a.hidden = closed.has(a.dataset.alertId); });
+        box.hidden = items.every(a => a.hidden);
+        if (items.length === 0) return;
+        const live = [...closed].filter(id => items.some(a => a.dataset.alertId === id));
+        try { localStorage.setItem(dismissedKey, JSON.stringify(live)); } catch { }
+    }
+    document.addEventListener("click", (e) => {
+        const item = e.target.closest?.("[data-dismiss-alert]")?.closest("[data-alert-id]");
+        if (!item) return;
+        const closed = dismissedAlerts();
+        closed.add(item.dataset.alertId);
+        try { localStorage.setItem(dismissedKey, JSON.stringify([...closed])); } catch { }
+        hideDismissedAlerts();
+    });
+    hideDismissedAlerts();
     function scheduleList() { clearTimeout(listTimer); listTimer = setTimeout(refreshList, 250); }
     // 작업 폴더별 묶음 (3차 d): 접은 폴더 이름을 브라우저에 저장한다 (편의만 — 못 읽으면 모두 펼침). 목록을 다시 받을 때마다 다시 적용.
     function closedGroups() { try { return new Set(JSON.parse(localStorage.getItem("hbchat.wsClosed") || "[]")); } catch { return new Set(); } }

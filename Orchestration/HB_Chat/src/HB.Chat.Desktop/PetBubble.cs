@@ -180,7 +180,7 @@ public sealed class PetBubble : Form
             g.FillPath(fill, shape);
             g.DrawPath(pen, shape);
         }
-        var dot = saying.Kind switch { NoticeKind.Failed => err, NoticeKind.Done => ok, _ => accent };
+        var dot = saying.Kind switch { NoticeKind.Failed or NoticeKind.Limit => err, NoticeKind.Done => ok, _ => accent };
         var top = body.Top + PadY;
         using (var brush = new SolidBrush(dot)) g.FillEllipse(brush, body.Left + PadX, top + 5, 8, 8);
         // GDI+ 글자 — GDI(TextRenderer)는 알파 비트맵에 글자 자리 알파를 0으로 남겨 레이어드 창에서 글자가 비친다

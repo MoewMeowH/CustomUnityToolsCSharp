@@ -70,6 +70,8 @@ public enum NoticeKind
     Done,
     /// <summary>실행이 실패로 끝났다.</summary>
     Failed,
+    /// <summary>구독 한도 문턱을 넘었다 (방 없음 — 펫 말풍선에만 쓴다, <see cref="LimitNotices"/>).</summary>
+    Limit,
 }
 
 /// <summary>알림 하나. Question: Approval 중 질문 카드 (풍선 글만 다름). Preview: 답 끝 · 실패일 때 방의 미리보기 (승인 · 질문은 싣지 않음).</summary>

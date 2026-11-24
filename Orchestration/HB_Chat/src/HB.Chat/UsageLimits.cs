@@ -13,11 +13,21 @@ public sealed record LimitWindow(string Name, double? Percent, DateTimeOffset? R
         "five_hour" => "5시간",
         "seven_day" => "7일",
         "seven_day_overage_included" => "Fable 7일",
+        "gemini-5h" => "Gemini 5시간",
+        "gemini-weekly" => "Gemini 7일",
+        "3p-5h" => "Claude·GPT 5시간",
+        "3p-weekly" => "Claude·GPT 7일",
         _ => Name,
     };
+
+    /// <summary>
+    /// 7일 창 — 문턱 알림 대상 (결정 "7일 창만"). Claude seven_day*(모델별 7일 창이 와도), Codex 10080분 창(seven_day로 읽힘, <see cref="UsageLimits.MinutesName"/>),
+    /// AGY *-weekly.
+    /// </summary>
+    public bool IsWeekly => Name.StartsWith("seven_day", StringComparison.Ordinal) || Name.EndsWith("-weekly", StringComparison.Ordinal);
 }
 
-/// <summary>한 곳(Claude · Codex)의 마지막 한도: 받은 시각 · 창들 · 요금제 · 상태.</summary>
+/// <summary>한 곳(Claude · Codex · AGY)의 마지막 한도: 받은 시각 · 창들 · 요금제(AGY는 agy 판) · 상태.</summary>
 public sealed record LimitSnapshot(string Source, DateTimeOffset At, IReadOnlyList<LimitWindow> Windows)
 {
     public string? Plan { get; init; }
@@ -43,6 +53,7 @@ public sealed record LimitSnapshot(string Source, DateTimeOffset At, IReadOnlyLi
 /// Claude: 실행마다 오는 rate_limit_event를 데이터 폴더 limits.json에 남긴다 (마지막 값만).
 /// Codex: 계정 조회(<see cref="CodexLimits"/>, <see cref="AccountInterval"/>마다 한 번 — 사용자 결정으로 Codex만 추가 호출)와
 /// 세션 기록(CODEX_HOME/sessions/…/rollout-*.jsonl)의 token_count 이벤트 rate_limits 중 더 새 것. 조회가 실패하면 기록 값만 남는다.
+/// AGY: agy statusLine 스크립트가 남긴 파일 (<see cref="AgyLimits"/>, agy를 띄워 둔 동안만 갱신).
 /// </summary>
 public sealed class UsageLimits(Func<string> dataFolder, Func<string?>? codexHome = null, Func<CancellationToken, Task<LimitSnapshot?>>? codexQuery = null)
 {
@@ -66,6 +77,47 @@ public sealed class UsageLimits(Func<string> dataFolder, Func<string?>? codexHom
 
     private string FilePath() => Path.Combine(dataFolder(), "limits.json");
 
+    /// <summary>문턱 알림 (없으면 알리지 않음 — 시험).</summary>
+    public LimitAlerts? Alerts { get; init; }
+
+    /// <summary>새 문턱 알림이 생겼다 (부르는 스레드에서). 열린 화면 · 데스크톱이 다시 받게 하는 데 쓴다.</summary>
+    public event Action<IReadOnlyList<LimitAlert>>? AlertRaised;
+
+    /// <summary>주어진 한도 값들로 문턱을 본다 — 새 알림이 있으면 <see cref="AlertRaised"/>.</summary>
+    public void CheckAlerts(params LimitSnapshot?[] snapshots)
+    {
+        if (Alerts?.Check(snapshots) is { Count: > 0 } fresh) AlertRaised?.Invoke(fresh);
+    }
+
+    /// <summary>agy statusLine 스크립트가 남긴 한도 (<see cref="AgyLimits"/>). 없거나 못 읽으면 null.</summary>
+    public LimitSnapshot? Agy() => AgyLimits.Read(AgyLimits.LimitsPath(dataFolder()));
+
+    private FileSystemWatcher? _agyWatch;
+
+    /// <summary>
+    /// statusLine 스크립트를 맞추고, 한도 파일이 바뀔 때마다 AGY 문턱을 본다 (agy만 쓰고 화면을 다시 그리지 않아도 알림이 가게). 앱을 켤 때 한 번.
+    /// 폴더를 못 만들거나 볼 수 없으면 조용히 건너뛴다 — 사이드바를 그릴 때도 본다.
+    /// </summary>
+    public void StartAgy()
+    {
+        var folder = dataFolder();
+        AgyLimits.EnsureScript(folder);
+        try
+        {
+            var watch = new FileSystemWatcher(Path.Combine(folder, AgyLimits.Folder), AgyLimits.LimitsName)
+            {
+                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size,
+            };
+            FileSystemEventHandler changed = (_, _) => CheckAlerts(Agy());
+            watch.Changed += changed;
+            watch.Created += changed;
+            watch.Renamed += (_, _) => CheckAlerts(Agy());
+            watch.EnableRaisingEvents = true;
+            _agyWatch = watch;
+        }
+        catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException or PlatformNotSupportedException) { }
+    }
+
     /// <summary>Claude 실행이 알려 준 한도를 남긴다 (창이 없으면 남기지 않음). 실패는 무시한다 — 실행을 막지 않게.</summary>
     public void SaveClaude(RateLimitEvent ev, DateTimeOffset? now = null)
     {
@@ -83,6 +135,7 @@ public sealed class UsageLimits(Func<string> dataFolder, Func<string?>? codexHom
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        CheckAlerts(snapshot);
     }
 
     /// <summary>남겨 둔 Claude 한도. 없거나 못 읽으면 null.</summary>
@@ -150,7 +203,9 @@ public sealed class UsageLimits(Func<string> dataFolder, Func<string?>? codexHom
                 LimitSnapshot? got = null;
                 try { got = await codexQuery(CancellationToken.None); }
                 catch (Exception) { } // 조회기는 null로 실패를 알리지만, 백그라운드 작업이 예외로 끝나지 않게
-                if (got is not null) lock (_gate) _account = got;
+                if (got is null) return;
+                lock (_gate) _account = got;
+                CheckAlerts(got);
             });
         }
     }
