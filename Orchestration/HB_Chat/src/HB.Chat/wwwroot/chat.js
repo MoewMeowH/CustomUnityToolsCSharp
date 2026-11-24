@@ -1121,7 +1121,7 @@
         // ---- 오른쪽 곁칸 (3차 c): 단계 · 방 정보 · 외부 실행 · 첨부. 열림 · 탭은 브라우저 저장(편의만 — 못 읽으면 닫힌 채 · 단계 탭) ----
         const side = $("#side"), sideToggle = $("#side-toggle");
         const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch { } } };
-        const sideTabs = ["steps", "info", "runs", "files", "docs", "mcp", "term", "browser"];
+        const sideTabs = ["steps", "info", "runs", "files", "docs", "changes", "mcp", "term", "browser"];
         // 저장값이 모르는 탭이면 단계 탭 — 모든 칸이 숨던 문제
         let sideTab = sideTabs.includes(store.get("hbchat.sideTab")) ? store.get("hbchat.sideTab") : "steps";
         if (sideTab === "term" && !$("#side-tab-term")) sideTab = "steps"; // 터미널 탭이 없는 칸(옛 화면)이면
@@ -1137,11 +1137,12 @@
             if (tab === "term" && !side.hidden) showTerm(termActive); // xterm은 탭이 보일 때 만든다 (안 보이면 크기를 못 잰다)
             if (tab === "browser" && !side.hidden) loadBrowserFrame(); // 마지막 화면 (실시간 프레임은 바뀔 때만 온다)
             if (tab === "docs" && !side.hidden && !docsLoaded) loadDocs(); // 턴 끝 loadSide도 이 함수를 부른다 — 목록은 한 번만
+            if (tab === "changes" && !side.hidden && !changesLoaded && !changesLoading) loadChanges(); // 턴 끝에 이미 받는 중이면 한 번만 (/self-review sub C10)
         }
         function sidePlaceholder(text) {
             // 받는 중 · 실패 글은 탭과 상관없이 보인다 (c216951e79 C6 · 지휘자 K3) — 단계 탭은 화면이 그리므로 그 탭에만 가린다
             const p = el("p", "muted side-sec side-wait", text);
-            p.hidden = sideTab === "steps" || sideTab === "term" || sideTab === "browser" || sideTab === "docs";
+            p.hidden = sideTab === "steps" || sideTab === "term" || sideTab === "browser" || sideTab === "docs" || sideTab === "changes";
             $("#side-data").replaceChildren(p);
         }
         // 방 정보 · 외부 실행 · 첨부는 열 때 · 턴 끝 · 제목 · 규칙 · 첨부가 바뀔 때 서버에서 다시 받는다 (방 칸을 그릴 때는 계산하지 않음).
@@ -1302,6 +1303,70 @@
             const target = docLinkTarget(docPath, href);
             if (target) openDoc(target);
         });
+        // ---- 변경 탭: git 저장소 변경 · 출처 · diff (보기만). 문서 탭처럼 #side-data 밖 — diff를 보는 동안은 목록을 다시 받지 않는다
+        let changePath = null, changesLoading = false, changesAgain = false, changesLoaded = false, changeSeq = 0;
+        const changesSec = $("#side-sec-changes"), changesList = $("#changes-list"), changesView = $("#changes-view");
+        async function loadChanges() {
+            if (!changesList || changePath !== null || disposed) return;
+            if (changesLoading) { changesAgain = true; return; }
+            changesLoading = true;
+            try {
+                const res = await fetch(self + "?handler=Changes", { cache: "no-store" });
+                if (disposed || changePath !== null) return;
+                changesList.replaceChildren(...(res.ok ? parseHtml(await res.text()) : [el("p", "muted", "변경 목록을 불러오지 못했습니다 (" + res.status + ").")]));
+                changesLoaded = res.ok;
+            } catch {
+                if (!disposed) changesList.replaceChildren(el("p", "muted", "변경 목록을 불러오지 못했습니다."));
+            } finally {
+                changesLoading = false;
+                if (changesAgain && !disposed) { changesAgain = false; loadChanges(); }
+            }
+        }
+        // 턴 끝: 이 턴에 바뀐 파일 — 탭이 보이고 목록 화면일 때만
+        function refreshChangesOnTurnEnd() {
+            changesLoaded = false;
+            if (!side || side.hidden || sideTab !== "changes" || changePath !== null) return;
+            loadChanges();
+        }
+        async function openChange(path) {
+            const seq = ++changeSeq;
+            const res = await fetch(self + "?handler=ChangeDiff&path=" + encodeURIComponent(path), { cache: "no-store" }).catch(() => null);
+            const html = res?.ok ? await res.text().catch(() => null) : null;
+            if (disposed || seq !== changeSeq) return;
+            changePath = path;
+            $("#changes-path").textContent = path;
+            $("#changes-body").replaceChildren(...(html !== null ? parseHtml(html)
+                : [el("p", "muted", "diff를 열지 못했습니다 (" + (res?.status ?? "연결 끊김") + ") — 그 사이 변경 목록에서 빠졌을 수 있습니다.")]));
+            changesList.hidden = true;
+            changesView.hidden = false;
+            changesSec.scrollTop = 0;
+        }
+        changesSec?.addEventListener("click", (e) => {
+            if (e.target.closest("#changes-back")) {
+                changeSeq++;
+                changePath = null; changesLoaded = false; changesView.hidden = true; changesList.hidden = false; loadChanges();
+                return;
+            }
+            const item = e.target.closest("[data-change]");
+            if (item) openChange(item.dataset.change);
+        });
+        // 입력칸 위 띠: 같은 저장소에서 작업 중인 다른 방 (방을 열 때 · 목록 신호 때 — 잦은 신호는 1초로 모은다)
+        let repoTimer = null, repoSeq = 0;
+        async function loadRepoBand() {
+            const band = $("#repo-band");
+            if (!band || disposed) return;
+            const seq = ++repoSeq;
+            try {
+                const res = await fetch(self + "?handler=RepoPeers", { cache: "no-store" });
+                if (!res.ok || disposed || seq !== repoSeq) return;
+                const names = (await res.json()).working || [];
+                band.textContent = names.length ? "⚠ 같은 저장소에서 " + names.map(n => "'" + n + "'").join(", ") + " 작업 중 — 커밋 전에 곁칸 '변경' 탭에서 인덱스를 보세요." : "";
+                band.hidden = names.length === 0;
+                $("#side-tab-changes")?.classList.toggle("has-peers", names.length > 0);
+            } catch { /* 다음 신호 때 */ }
+        }
+        function scheduleRepoBand() { clearTimeout(repoTimer); repoTimer = setTimeout(loadRepoBand, 1000); }
+        loadRepoBand();
         function setSide(open) {
             side.hidden = !open;
             sideToggle.setAttribute("aria-expanded", String(open));
@@ -1314,6 +1379,7 @@
             // 문서 탭을 누를 때는 목록을 새로 받는다 (읽는 중이면 본문 그대로 — loadDocs가 거른다)
             side.querySelectorAll(".side-tabs [data-tab]").forEach(b => b.addEventListener("click", () => {
                 if (b.dataset.tab === "docs") docsLoaded = false;
+                if (b.dataset.tab === "changes") changesLoaded = false;
                 showTab(b.dataset.tab);
             }));
             // Esc로 닫기 — 좁은 폭에서는 곁칸이 "정보" 단추를 덮는다 (지휘자 K2)
@@ -1528,7 +1594,7 @@
         async function handle(ev) {
             switch (ev.kind) {
                 case "rooms":
-                    scheduleList(); // 방 목록 신호 (어느 방이든) — 탭당 SSE 하나라 방 SSE가 같이 싣는다
+                    scheduleList(); scheduleRepoBand(); // 방 목록 신호 (어느 방이든) — 탭당 SSE 하나라 방 SSE가 같이 싣는다
                     break;
                 case "profiles":
                     // 프로필 · 표정이 바뀜 (3차 e): 이름 · 그림 · 표정은 방을 열 때 받으므로 다시 연다 (쓰던 글은 dispose가 남긴다)
@@ -1557,6 +1623,7 @@
                     if (sideTab === "browser" && !side.hidden) loadBrowserFrame();
                     loadSide(); // 끊긴 사이 끝난 턴은 end가 오지 않는다 — 비용 · 외부 실행을 새로 (C3)
                     refreshDocsOnTurnEnd();
+                    refreshChangesOnTurnEnd();
                     break;
                 case "background":
                     showBackground(ev.backgroundCount, ev.backgroundUntil, ev.tasks);
@@ -1732,6 +1799,7 @@
                     if (ev.face) setFace(ev.face);
                     loadSide(); // 곁칸이 열려 있으면 비용 · 컨텍스트 · 외부 실행 · 첨부를 새로 (3차 c)
                     refreshDocsOnTurnEnd();
+                    refreshChangesOnTurnEnd();
                     break;
                 }
                 case "idle":

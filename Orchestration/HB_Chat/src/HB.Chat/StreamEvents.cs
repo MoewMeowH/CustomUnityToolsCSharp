@@ -116,6 +116,9 @@ public sealed record ToolUse(string Name, string? Detail)
 
     /// <summary>MCP 도구 입력의 command 글 — 묶음 도구(Unity <c>--tool-groups</c>의 capture 등)가 어느 명령인지. 없으면 null.</summary>
     public string? Command { get; init; }
+
+    /// <summary>쓰기 도구(<see cref="ClaudeRunner.WriteTools"/>)가 쓰는 파일 경로 (file_path · notebook_path) — 방이 고친 파일 기록. 그 밖은 null.</summary>
+    public string? Path { get; init; }
 }
 
 /// <summary>
@@ -409,6 +412,8 @@ public static class StreamParser
                 {
                     Id = Str(c, "id"),
                     Command = hasInput && name.StartsWith("mcp__", StringComparison.Ordinal) ? Str(input, "command") : null,
+                    Path = hasInput && ClaudeRunner.WriteTools.Contains(name) && Str(input, name == "NotebookEdit" ? "notebook_path" : "file_path") is { Length: > 0 and <= 1024 } path
+                        ? path : null, // 잘린 경로는 다른 파일이 되므로 너무 길면 버림
                 });
             }
         return list;

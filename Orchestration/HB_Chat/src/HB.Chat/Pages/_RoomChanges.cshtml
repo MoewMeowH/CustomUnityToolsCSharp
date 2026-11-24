@@ -1,0 +1,66 @@
+@model HB.Chat.Pages.RoomModel
+@*
+    곁칸 변경 탭 목록 (?handler=Changes). 파일을 누르면 화면이 ?handler=ChangeDiff로 diff를 받는다 (보기만 — 되돌리기 없음, 사용자 결정).
+    출처: 이 방 · 다른 방(쓰기 도구 기록) · 출처 모름(Bash 등).
+*@
+@{
+    var c = Model.Changes!;
+}
+@if (c.Working.Count > 0)
+{
+    <p class="changes-warn">⚠ 같은 저장소에서 작업 중: @string.Join(", ", c.Working.Select(p => p.Name)) — 커밋 전에 아래 인덱스를 보세요.</p>
+}
+@if (c.Error is not null)
+{
+    <p class="muted">@c.Error</p>
+    if (c.MyEdits.Count > 0)
+    {
+        <p class="changes-sum">이 방이 쓰기 도구로 부른 파일 (최근 @(c.MyEdits.Count)개)</p>
+        <ul class="changes-list plain">
+            @foreach (var e in c.MyEdits)
+            {
+                <li><span class="path mono">@e.Path</span> <span class="muted">@e.At.ToLocalTime().ToString("MM-dd HH:mm") · @e.Tool</span></li>
+            }
+        </ul>
+    }
+}
+else
+{
+    <p class="changes-sum">이 방 <b>@c.Count(HB.Chat.Pages.ChangeOrigin.Mine)</b> · 다른 방 <b>@c.Count(HB.Chat.Pages.ChangeOrigin.Other)</b> · 출처 모름 <b>@c.Count(HB.Chat.Pages.ChangeOrigin.Unknown)</b>@(c.Truncated ? $" (앞 {HB.Chat.Pages.RoomModel.MaxChanges}개만)" : "")</p>
+    <p class="muted mono changes-root" title="저장소 루트">@c.Root</p>
+    var foreign = c.StagedNotMine;
+    if (foreign.Count > 0)
+    {
+        <div class="changes-warn">
+            인덱스(staged)에 이 방이 고치지 않은 파일 @(foreign.Count)개 — 커밋에 섞일 수 있습니다.
+            <ul>
+                @foreach (var r in foreign.Take(20))
+                {
+                    <li class="mono">@r.Entry.Path@(r.Origin == HB.Chat.Pages.ChangeOrigin.Other ? $" ({r.OtherName})" : "")</li>
+                }
+            </ul>
+        </div>
+    }
+    if (c.Rows.Count == 0)
+    {
+        <p class="muted">바뀐 파일이 없습니다.</p>
+    }
+    <ul class="changes-list">
+        @foreach (var r in c.Shown)
+        {
+            <li>
+                <button type="button" class="change-item" data-change="@r.Entry.Path" title="@(r.Entry.OldPath is { } old ? old + " → " + r.Entry.Path : r.Entry.Path)">
+                    <span class="st st-@(r.Entry.Shown == '?' ? "u" : r.Entry.Shown.ToString().ToLowerInvariant())">@r.Entry.Shown</span>
+                    <span class="path mono">@r.Entry.Path</span>
+                    @if (r.Entry.Staged) { <span class="badge">staged</span> }
+                    @switch (r.Origin)
+                    {
+                        case HB.Chat.Pages.ChangeOrigin.Mine: <span class="origin mine">이 방</span> break;
+                        case HB.Chat.Pages.ChangeOrigin.Other: <span class="origin other">@r.OtherName@(r.OtherCount > 1 ? $" 외 {r.OtherCount - 1}" : "")</span> break;
+                        default: <span class="origin unknown" title="쓰기 도구 기록에 없음 — Bash · 다른 프로그램 · 이 앱 밖 세션">출처 모름</span> break;
+                    }
+                </button>
+            </li>
+        }
+    </ul>
+}

@@ -14,7 +14,8 @@ namespace HB.Chat.Pages;
 /// </summary>
 public sealed partial class RoomModel(
     RoomStore store, RoomHub hub, RoomList list, ChatTranscripts transcripts, StickerPacks packs, FaceCatalog faces, RoomRuns runs,
-    RoomNotes notes, Terminals terminals, AgentBrowser browser, McpProbe probe, IOptions<ChatOptions> options, GroupChat groups, RoomMemos memos)
+    RoomNotes notes, Terminals terminals, AgentBrowser browser, McpProbe probe, IOptions<ChatOptions> options, GroupChat groups, RoomMemos memos,
+    GitChanges git, RoomEdits edits)
     : PageModel
 {
     public Room Room { get; private set; } = null!;

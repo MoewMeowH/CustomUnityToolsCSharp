@@ -361,6 +361,43 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
     /// <summary>구독 한도 (실행이 알려 준 rate_limit_event를 남김). 없으면 남기지 않음.</summary>
     public UsageLimits? Limits { get; init; }
 
+    /// <summary>방이 쓰기 도구로 부른 파일 기록 (곁칸 변경 탭 · 같은 저장소 경고). 없으면 남기지 않는다 (시험).</summary>
+    public RoomEdits? Edits { get; init; }
+
+    /// <summary>
+    /// 같은 저장소 알림 줄 (방 ID → <see cref="RepoPeers.Line"/>, 없으면 null). 보낼 때 말 끝에 붙인다 (결정 "화면 + 지휘에게도").
+    /// 없으면 붙이지 않는다 (시험).
+    /// </summary>
+    public Func<string, CancellationToken, Task<string?>>? RepoNote { get; init; }
+
+    /// <summary>알림 줄을 구하는 상한 — 넘으면 줄 없이 보낸다 (보내기가 git 때문에 늦어지지 않게, /self-review sub C3).</summary>
+    public static readonly TimeSpan RepoNoteWait = TimeSpan.FromSeconds(2);
+
+    private Task<string> WithRepoNoteAsync(string roomId, string text, CancellationToken ct) => WithRepoNoteAsync(RepoNote, roomId, text, RepoNoteWait, ct);
+
+    /// <summary>
+    /// 지휘자에게 갈 말 끝에 같은 저장소 알림 줄을 붙인다. 슬래시 명령(앞 공백을 뺀 첫 글자가 '/')에는 붙이지 않는다 (명령 인자가 된다).
+    /// 줄을 구하지 못하면(시간 넘김 · git 오류 · 어떤 예외든) 말만 보낸다 — 알림 때문에 말이 막히거나 "내부 오류"가 되지 않게 (/self-review sub C2).
+    /// 실행 자체가 취소됐으면 말만 돌려주고 취소는 실행이 처리한다.
+    /// </summary>
+    internal static async Task<string> WithRepoNoteAsync(Func<string, CancellationToken, Task<string?>>? note, string roomId, string text, TimeSpan wait,
+        CancellationToken ct)
+    {
+        if (note is null || text.TrimStart().StartsWith('/')) return text;
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        limit.CancelAfter(wait);
+        string? line;
+        try { line = await note(roomId, limit.Token); }
+        catch (Exception) { line = null; } // 알림은 덧붙이는 것뿐 — 무엇으로 실패해도 말은 보낸다
+        return line is null ? text : text.TrimEnd() + "\n\n" + line;
+    }
+
+    /// <summary>
+    /// 같은 저장소 판정용 활동: 턴이 끝난 뒤 쉬는 실행에서 백그라운드 작업 · 서브에이전트가 돌면 작업 중으로 본다 (파일을 고치거나 git을 돌릴 수 있다, /self-review sub C4).
+    /// </summary>
+    public RoomActivity PeerActivity(string roomId) =>
+        ActivityOf(roomId) is RoomActivity.Idle && RestingTasks(roomId) > 0 ? RoomActivity.Busy : ActivityOf(roomId);
+
     /// <summary>claude CLI 판 기록 — 실행 init마다 본 판을 적는다 (확인하지 않은 판 띠). 없으면(시험) 적지 않는다.</summary>
     public CliVersions? Cli { get; init; }
 
@@ -836,7 +873,7 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
             try
             {
                 result = auto is { } a ? await AutoTurnAsync(roomId, live, a.Run, a.Wait, generation, cts.Token)
-                    : await RunOneAsync(roomId, live, text!, generation, cts.Token, wrapUp.Token);
+                    : await RunOneAsync(roomId, live, await WithRepoNoteAsync(roomId, text!, cts.Token), generation, cts.Token, wrapUp.Token);
             }
             catch (Exception ex)
             {
@@ -1425,6 +1462,10 @@ public sealed partial class RoomHub(RoomStore store, ChatTranscripts transcripts
         }
         if (view.UnityName is not null) KeepUnityShots(room.Id, ev, view.Captures);
         if (ev is RateLimitEvent limits) Limits?.SaveClaude(limits); // 사이드바 한도 줄은 목록을 다시 그릴 때 읽는다
+        // 곁칸 변경 탭 · 같은 저장소 경고: 이 방(서브에이전트 포함)이 쓰기 도구로 부른 파일 — 잠금 밖에서 (파일 쓰기)
+        if (Edits is not null && ev is UsageEvent or SubagentToolsEvent)
+            foreach (var tool in ev is UsageEvent used ? used.Tools : ((SubagentToolsEvent)ev).Tools)
+                if (tool.Path is { } edited) Edits.Add(room.Id, edited, tool.Name);
         if (ev is UsageEvent calls)
             foreach (var call in calls.Tools)
             {

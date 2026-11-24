@@ -156,6 +156,25 @@ select, input[type=text], textarea { background: var(--panel); border: 1px solid
 .docs-folder > .docs-project:first-of-type { margin-top: 8px; }
 .docs-bar { position: sticky; top: -10px; background: var(--panel); padding: 4px 0 8px; display: flex; gap: 8px; align-items: center; overflow-wrap: anywhere; }
 #docs-view[hidden], #docs-list[hidden] { display: none; }
+/* 변경 탭: git 변경 · 출처 배지 · diff (보기만) */
+.changes-sum { font-size: 13px; margin: 0 0 2px; }
+.changes-root { font-size: 11px; margin: 0 0 8px; overflow-wrap: anywhere; }
+.changes-warn { border: 1px solid var(--warn); color: var(--warn); border-radius: 6px; padding: 6px 8px; margin: 0 0 8px; font-size: 12.5px; }
+.changes-warn ul { margin: 4px 0 0; padding-left: 18px; }
+.changes-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; }
+.changes-list.plain li { overflow-wrap: anywhere; }
+.change-item { display: flex; gap: 6px; align-items: baseline; width: 100%; text-align: left; background: none; border: 0; color: inherit; padding: 3px 4px; border-radius: 4px; cursor: pointer; font: inherit; }
+.change-item:hover { background: var(--line); }
+.change-item .path { flex: 1; overflow-wrap: anywhere; }
+.change-item .st { width: 1.2em; font-weight: 600; text-align: center; }
+.change-item .st-m { color: var(--warn); } .change-item .st-a, .change-item .st-u { color: var(--ok); } .change-item .st-d { color: var(--err); }
+.change-item .origin { font-size: 11px; white-space: nowrap; border: 1px solid currentColor; border-radius: 8px; padding: 0 6px; }
+.change-item .origin.mine { color: var(--ok); } .change-item .origin.other { color: var(--warn); } .change-item .origin.unknown { color: var(--muted); }
+#changes-view[hidden], #changes-list[hidden] { display: none; }
+pre.diff { font-size: 12px; line-height: 1.45; overflow-x: auto; margin: 0; }
+pre.diff .add { color: var(--ok); } pre.diff .del { color: var(--err); } pre.diff .hunk { color: var(--accent); } pre.diff .meta { color: var(--muted); }
+.repo-band { padding: 8px 12px; margin-bottom: 8px; border-color: var(--warn); color: var(--warn); }
+.side-tablist .has-peers::after { content: " ●"; color: var(--warn); }
 .docs-body { font-size: 13px; overflow-wrap: anywhere; }
 .docs-body table { border-collapse: collapse; display: block; overflow-x: auto; }
 .docs-body th, .docs-body td { border: 1px solid var(--line); padding: 2px 6px; vertical-align: top; }

@@ -69,6 +69,9 @@ builder.Services.AddSingleton(sp =>
         Alerts = new LimitAlerts(() => Opts().DataFolder), // 7일 창 80 · 95% 문턱
     };
 });
+// 방이 쓰기 도구로 부른 파일 (곁칸 변경 탭 출처 · 같은 저장소 경고) · git 변경 읽기
+builder.Services.AddSingleton(sp => new RoomEdits(() => sp.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder));
+builder.Services.AddSingleton<GitChanges>();
 // claude CLI 판 기록 (카드 자가 시험 · 확인하지 않은 판 띠)
 builder.Services.AddSingleton(sp => new CliVersions(() => sp.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder));
 // 설정 화면 CLI 도구 (codex · claude · Unity CLI 버전 확인 · 올리기)
@@ -80,6 +83,16 @@ builder.Services.AddSingleton(sp =>
     {
         Log = new ApprovalLog(() => options.Value.DataFolder),
         Limits = sp.GetRequiredService<UsageLimits>(),
+        Edits = sp.GetRequiredService<RoomEdits>(),
+        // 같은 저장소에서 다른 방이 작업 중이면 보낼 말 끝에 한 줄 (허브는 이미 만들어진 뒤에 불린다)
+        RepoNote = async (roomId, ct) =>
+        {
+            var store = sp.GetRequiredService<RoomStore>();
+            if (store.Get(roomId) is not { } room) return null;
+            var hub = sp.GetRequiredService<RoomHub>();
+            var (root, peers) = await RepoPeers.FindAsync(room, store.All(), sp.GetRequiredService<GitChanges>(), options.Value.WorkspacePath, hub.PeerActivity, store.Get, ct);
+            return root is null ? null : RepoPeers.Line(root, peers);
+        },
         Cli = sp.GetRequiredService<CliVersions>(),
         Terminals = sp.GetRequiredService<Terminals>(),
         Browser = sp.GetRequiredService<AgentBrowser>(),
@@ -206,6 +219,7 @@ void PurgeTrash()
         {
             app.Services.GetRequiredService<Terminals>().Forget(id);
             app.Services.GetRequiredService<AgentBrowser>().Close(id, "방 삭제");
+            app.Services.GetRequiredService<RoomEdits>().Forget(id);
         }
         if (removed.Count > 0)
             app.Logger.LogWarning("휴지통에서 30일 지난 방 {Count}개를 지웠습니다 (방 색인 · 첨부, 세션 기록은 남김): {Ids}", removed.Count, string.Join(", ", removed));

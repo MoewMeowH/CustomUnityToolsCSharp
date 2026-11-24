@@ -223,6 +223,8 @@ public static partial class Attachments
         {
             var line = lines[end - 1];
             if (line.Trim().Length == 0) { end--; continue; }
+            // 앱이 보낼 때 붙인 같은 저장소 알림 줄 (지휘자에게만 — 말풍선 · 미리보기 · 제목에서는 뺀다)
+            if (line.StartsWith(RepoPeers.Marker, StringComparison.Ordinal)) { end--; continue; }
             if (!line.StartsWith(Marker, StringComparison.Ordinal) || line.Length <= Marker.Length || line[Marker.Length..].Trim().Length == 0) break;
             paths.Add(line[Marker.Length..].Trim());
             end--;
@@ -231,11 +233,11 @@ public static partial class Attachments
         return (string.Join('\n', lines[..end]).TrimEnd(), paths);
     }
 
-    /// <summary>목록 미리보기 · 제목용 글: 첨부 줄을 뺀 본문, 본문이 없으면 "첨부 n개".</summary>
+    /// <summary>목록 미리보기 · 제목용 글: 첨부 줄 · 같은 저장소 알림 줄을 뺀 본문, 본문이 없으면 "첨부 n개".</summary>
     public static string WithoutLines(string text)
     {
         var (body, paths) = Split(text);
-        return paths.Count == 0 ? text : body.Length > 0 ? body : $"첨부 {paths.Count}개";
+        return paths.Count == 0 ? (body.Length > 0 ? body : text) : body.Length > 0 ? body : $"첨부 {paths.Count}개";
     }
 
     /// <summary>경로가 그 방 첨부 폴더 바로 아래 파일이면 파일 이름, 아니면 null (말풍선이 그 방 첨부만 칩 · 미리보기로 그린다).</summary>

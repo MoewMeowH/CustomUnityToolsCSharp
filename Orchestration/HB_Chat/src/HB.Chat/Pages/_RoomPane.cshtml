@@ -129,6 +129,8 @@
         @* agy 중계 대기 (run_mode gemini_agy): 지휘자가 run_mode에 묶여 말을 못 하는 동안 입력칸 위에 — 대화 칸 맨 위 알림은 스크롤 밖이라 안 보였다 (사용자 실제 확인) *@
         @{ var agyRun = Agy.Read(out _).Run is { ForRunMode: true } r && r.RoomId == room.Id && !r.Stale(DateTimeOffset.Now) ? r : null; }
         <div class="panel" id="agy-wait" role="status" style="padding:8px 12px;margin-bottom:8px;border-color:var(--warn)" hidden="@(agyRun is null)">@(agyRun is not null ? RoomHub.AgyWaitText(agyRun.Until) : "")</div>
+        @* 같은 저장소 다른 방 작업 중 (결정 "화면 + 지휘에게도"): 방을 열 때 · 목록 신호 때 화면이 ?handler=RepoPeers로 받아 채운다 *@
+        <div class="panel repo-band" id="repo-band" role="status" hidden></div>
         @* 진행 단계 (3차 b): 지휘자 할 일 목록 — 화면이 snapshot · steps 알림으로 그린다 *@
         <details class="steps" id="steps" hidden><summary id="steps-summary"></summary><ol id="steps-list"></ol></details>
         @* 기다리는 말 (하나씩 취소 · 지금 보내기, 2-2 d · 3차 b) — 화면이 queued · start · snapshot 알림으로 그린다 *@
@@ -213,6 +215,7 @@
                 <button type="button" role="tab" data-tab="runs" id="side-tab-runs" aria-controls="side-sec-runs">외부 실행</button>
                 <button type="button" role="tab" data-tab="files" id="side-tab-files" aria-controls="side-sec-files">첨부</button>
                 <button type="button" role="tab" data-tab="docs" id="side-tab-docs" aria-controls="side-sec-docs">문서</button>
+                <button type="button" role="tab" data-tab="changes" id="side-tab-changes" aria-controls="side-sec-changes">변경</button>
                 <button type="button" role="tab" data-tab="mcp" id="side-tab-mcp" aria-controls="side-sec-mcp">연결</button>
                 <button type="button" role="tab" data-tab="term" id="side-tab-term" aria-controls="side-sec-term">터미널</button>
                 @if (ClaudeArgs.RunsCommands(room.Level))
@@ -256,6 +259,15 @@
             <div id="docs-view" hidden>
                 <div class="docs-bar"><button type="button" class="btn" id="docs-back">← 목록</button> <span class="muted" id="docs-path"></span></div>
                 <div class="docs-body body" id="docs-body"></div>
+            </div>
+        </section>
+        @* 변경: 작업 폴더가 든 git 저장소의 변경 · 출처 · diff (보기만). 문서 탭처럼 #side-data 밖 — 탭을 열 때 · 턴 끝에 ?handler=Changes,
+           diff는 ?handler=ChangeDiff *@
+        <section class="side-sec side-changes" data-tab="changes" id="side-sec-changes" role="tabpanel" aria-labelledby="side-tab-changes" hidden>
+            <div id="changes-list"><p class="muted">불러오는 중…</p></div>
+            <div id="changes-view" hidden>
+                <div class="docs-bar"><button type="button" class="btn" id="changes-back">← 목록</button> <span class="muted mono" id="changes-path"></span></div>
+                <div id="changes-body"></div>
             </div>
         </section>
         @* 지휘자 브라우저 (결정 "보기만"): 명령 방만. browser · browser-frame 알림으로 그린다 *@
