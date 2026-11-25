@@ -15,7 +15,7 @@ namespace HB.Chat.Pages;
 public sealed partial class RoomModel(
     RoomStore store, RoomHub hub, RoomList list, ChatTranscripts transcripts, StickerPacks packs, FaceCatalog faces, RoomRuns runs,
     RoomNotes notes, Terminals terminals, AgentBrowser browser, McpProbe probe, IOptions<ChatOptions> options, GroupChat groups, RoomMemos memos,
-    GitChanges git, RoomEdits edits)
+    GitChanges git, RoomEdits edits, Snippets snippets)
     : PageModel
 {
     public Room Room { get; private set; } = null!;
@@ -186,7 +186,7 @@ public sealed partial class RoomModel(
         if (!RoomStore.IsRoomId(id) || store.Get(id) is not { } room) return NotFound();
         var user = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude");
         var workspace = options.Value.WorkspacePath(room.Workspace);
-        return new JsonResult(new { commands = CommandCatalog.Build(hub.Commands(id), workspace, user) });
+        return new JsonResult(new { commands = CommandCatalog.Build(hub.Commands(id), workspace, user), snippets = snippets.All() }); // 지시 상용구는 입력칸 ; 목록
     }
 
     /// <summary>명령 방: 작업 폴더 · 사용자 설정이 이미 미리 허용한 명령 (카드 없이 실행됨).</summary>

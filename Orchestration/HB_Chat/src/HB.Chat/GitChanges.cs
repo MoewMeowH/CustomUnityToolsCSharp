@@ -22,7 +22,11 @@ public sealed record GitEntry(char Index, char Work, string Path, string? OldPat
 /// 저장소 변경: 루트(전체 경로) · 줄 전부 · 오류(git 없음 · 저장소 아님 · 시간 넘김 — 있으면 줄은 비어 있음) ·
 /// HEAD 커밋 시각(없으면 null — 그 전 편집 기록은 이미 커밋된 일이라 출처 판정에서 뺀다).
 /// </summary>
-public sealed record GitStatus(string? Root, IReadOnlyList<GitEntry> Entries, string? Error, DateTimeOffset? HeadAt = null);
+public sealed record GitStatus(string? Root, IReadOnlyList<GitEntry> Entries, string? Error, DateTimeOffset? HeadAt = null)
+{
+    /// <summary>저장소 루트 <see cref="GitChanges.IgnoreFile"/>로 숨긴 미추적 줄 수.</summary>
+    public int Hidden { get; init; }
+}
 
 /// <summary>
 /// 곁칸 변경 탭 · 같은 저장소 경고용 git 읽기. git CLI를 인자 목록으로(셸 없이) 부르고, GIT_OPTIONAL_LOCKS=0으로 status가 인덱스 잠금을 잡지 않게 한다
@@ -73,8 +77,28 @@ public sealed class GitChanges
         var (headExit, head, _, _) = await RunAsync(root, ["log", "-1", "--format=%ct"], ct);
         DateTimeOffset? headAt = headExit == 0 && long.TryParse(head.Trim(), out var seconds) && seconds is > 0 and < 253402300799
             ? DateTimeOffset.FromUnixTimeSeconds(seconds) : null; // 커밋이 없는 새 저장소면 null
-        return new(root, Parse(output), null, headAt);
+        var entries = Parse(output);
+        var hidden = 0;
+        // 앱 전용 무시 파일 (결정 "앱 전용 무시 파일"): 미추적 줄만 숨긴다 — 추적 변경 · staged는 늘 보임 (인덱스 경고가 가려지지 않게).
+        // gitignore 문법은 git이 풀게 한다: 무시 파일 패턴에 **맞는** 미추적 파일만 받아 그 줄을 뺀다 — 두 조회 사이에 누가 git add한 파일은
+        // 이 목록에 없어 숨지 않는다 (빠진 것을 무시로 치지 않음, sub_self C8)
+        var ignore = Path.Combine(root, IgnoreFile);
+        if (entries.Any(e => e.Untracked) && File.Exists(ignore))
+        {
+            var (lsExit, matched, _, _) = await RunAsync(root, ["ls-files", "--others", "--ignored", "--exclude-from=" + ignore, "-z"], ct);
+            if (lsExit == 0)
+            {
+                var hide = matched.Split('\0', StringSplitOptions.RemoveEmptyEntries).ToHashSet(StringComparer.Ordinal);
+                var shown = entries.Where(e => !e.Untracked || !hide.Contains(e.Path)).ToList();
+                hidden = entries.Count - shown.Count;
+                entries = shown;
+            }
+        }
+        return new(root, entries, null, headAt) { Hidden = hidden };
     }
+
+    /// <summary>변경 탭에서 미추적 파일을 숨기는 앱 전용 무시 파일 (저장소 루트, gitignore 문법).</summary>
+    public const string IgnoreFile = ".hbchatignore";
 
     /// <summary>
     /// 파일 하나의 diff (HEAD 대비 — staged와 작업 트리 둘 다). 미추적이면 파일 앞부분. 글(없으면 null)과 안내(이진 · 잘림 · 실패).

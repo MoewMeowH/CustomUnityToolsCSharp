@@ -26,8 +26,16 @@
 }
 else
 {
-    <p class="changes-sum">이 방 <b>@c.Count(HB.Chat.Pages.ChangeOrigin.Mine)</b> · 다른 방 <b>@c.Count(HB.Chat.Pages.ChangeOrigin.Other)</b> · 출처 모름 <b>@c.Count(HB.Chat.Pages.ChangeOrigin.Unknown)</b>@(c.Truncated ? $" (앞 {HB.Chat.Pages.RoomModel.MaxChanges}개만)" : "")</p>
+    <p class="changes-sum">이 방 <b>@c.Count(HB.Chat.Pages.ChangeOrigin.Mine)</b> · 다른 방 <b>@c.Count(HB.Chat.Pages.ChangeOrigin.Other)</b> · 출처 모름 <b>@c.Count(HB.Chat.Pages.ChangeOrigin.Unknown)</b>@(c.Truncated ? $" (앞 {HB.Chat.Pages.RoomModel.MaxChanges}개만)" : "")@(c.Hidden > 0 ? $" · 숨김 {c.Hidden}개 ({GitChanges.IgnoreFile})" : "")</p>
     <p class="muted mono changes-root" title="저장소 루트">@c.Root</p>
+    if (c.Add is { } add)
+    {
+        @* 이 방 파일만 add (결정 "입력칸 + 복사 둘 다"): 앱은 실행하지 않는다 — 글을 입력칸에 넣거나 명령을 복사만 *@
+        <div class="changes-add">
+            <button type="button" class="btn" data-add-insert="@add.Prompt" title="지휘자에게 보낼 글을 입력칸에 넣습니다 (보내지 않음)">이 방 파일만 add — 입력칸에 넣기</button>
+            <button type="button" class="btn" data-add-copy="@add.Command" title="@add.Command">복사</button>
+        </div>
+    }
     var foreign = c.StagedNotMine;
     if (foreign.Count > 0)
     {

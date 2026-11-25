@@ -81,6 +81,31 @@
                     }
                 </section>
 
+                @* 지시 상용구 (결정 "지시 상용구" · 처음 비움): 방 입력칸에 ; 로 시작하면 이름으로 찾아 글을 넣는다 (보내지 않음) *@
+                <section class="u-panel-pad panel">
+                    <h3 class="u-sub-title">지시 상용구</h3>
+                    <p class="u-hint muted">방 입력칸에 <code class="mono">;</code>로 시작해 이름을 치면 목록이 뜨고, 고르면 글이 입력칸에 들어갑니다 (보내지 않음). 이름 @(Snippets.MaxName)자 · 글 @(Snippets.MaxText)자 · @(Snippets.MaxCount)개까지.</p>
+                    @{ var draft = Model.SnippetDraft; }
+                    @foreach (var s in Model.SnippetList)
+                    {
+                        @* 저장이 거절된 폼이면 사용자가 쓴 값을 그대로 다시 보인다 *@
+                        var mine = draft is { } d && string.Equals(d.Original?.Trim(), s.Name, StringComparison.OrdinalIgnoreCase) ? draft : null;
+                        <form method="post" asp-page-handler="SnippetSave" class="settings-snippet">
+                            <input type="hidden" name="original" value="@s.Name" />
+                            <input type="text" name="name" value="@(mine?.Name ?? s.Name)" maxlength="@Snippets.MaxName" aria-label="상용구 이름" />
+                            <textarea name="text" rows="2" maxlength="@Snippets.MaxText" aria-label="@s.Name 글">@(mine?.Text ?? s.Text)</textarea>
+                            <button class="btn" type="submit">@Icons.Svg("check") 저장</button>
+                            <button class="btn" type="submit" asp-page-handler="SnippetRemove" formnovalidate>@Icons.Svg("trash") 지우기</button>
+                        </form>
+                    }
+                    @{ var fresh = draft is { } nd && string.IsNullOrWhiteSpace(nd.Original) ? draft : null; }
+                    <form method="post" asp-page-handler="SnippetSave" class="settings-snippet">
+                        <input type="text" name="name" value="@(fresh?.Name ?? "")" placeholder="이름 (예: 리뷰)" maxlength="@Snippets.MaxName" required aria-label="새 상용구 이름" />
+                        <textarea name="text" rows="2" placeholder="넣을 글 (예: /self-review sub)" maxlength="@Snippets.MaxText" required aria-label="새 상용구 글">@(fresh?.Text ?? "")</textarea>
+                        <button class="btn primary" type="submit">@Icons.Svg("plus") 더하기</button>
+                    </form>
+                </section>
+
                 @* 데스크톱 알림 (노션 "데스크톱 알림에 답변 내용 보이기", 결정 "설정 화면 토글" · 기본 끔). 승인 · 질문 풍선은 늘 제목만 *@
                 <section class="u-panel-pad panel">
                     <h3 class="u-sub-title">데스크톱 알림</h3>

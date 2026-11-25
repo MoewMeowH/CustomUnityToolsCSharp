@@ -72,6 +72,8 @@ builder.Services.AddSingleton(sp =>
 // 방이 쓰기 도구로 부른 파일 (곁칸 변경 탭 출처 · 같은 저장소 경고) · git 변경 읽기
 builder.Services.AddSingleton(sp => new RoomEdits(() => sp.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder));
 builder.Services.AddSingleton<GitChanges>();
+// 지시 상용구 (입력칸 ';' 목록, 설정 화면에서 고침)
+builder.Services.AddSingleton(sp => new Snippets(() => sp.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder));
 // claude CLI 판 기록 (카드 자가 시험 · 확인하지 않은 판 띠)
 builder.Services.AddSingleton(sp => new CliVersions(() => sp.GetRequiredService<IOptions<ChatOptions>>().Value.DataFolder));
 // 설정 화면 CLI 도구 (codex · claude · Unity CLI 버전 확인 · 올리기)

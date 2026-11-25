@@ -23,6 +23,51 @@ public sealed record ChangesView(string? Root, string? Error, IReadOnlyList<Chan
 
     /// <summary>인덱스(staged)에 올라간 줄 중 이 방이 고치지 않은 것 — 커밋에 섞일 수 있음 (다른 세션의 git rm · mv가 섞인 일).</summary>
     public IReadOnlyList<ChangeRow> StagedNotMine => [.. Rows.Where(r => r.Entry.Staged && r.Origin != ChangeOrigin.Mine)];
+
+    /// <summary><see cref="GitChanges.IgnoreFile"/>로 숨긴 미추적 줄 수.</summary>
+    public int Hidden { get; init; }
+
+    /// <summary>"이 방 파일만 add" 명령 (<see cref="AddCommand"/>). 이 방 줄이 없으면 null.</summary>
+    public (string Command, string Prompt)? Add => Root is { } root ? AddCommand(root, Rows, StagedNotMine.Count) : null;
+
+    /// <summary>
+    /// 셸마다 다르게 풀리는 글자 — 큰따옴표 안에서도 PowerShell은 ` $와 둥근 따옴표(“ ” „ ‘ ’)를, bash는 $ ` 와 대화형이면 !를 푼다 (sub_self C3).
+    /// </summary>
+    private static bool Risky(string s) => s.IndexOfAny(['"', '`', '$', '!', '“', '”', '„', '‘', '’']) >= 0;
+
+    /// <summary>명령 길이 상한 — Windows 명령줄(32K)보다 넉넉히 작게. 넘는 경로는 빼고 알린다 (sub_self C4).</summary>
+    public const int MaxCommandChars = 8000;
+
+    /// <summary>
+    /// 이 방 출처 줄만 올리는 명령과 지휘자에게 보낼 글 (결정 "입력칸 + 복사 둘 다"). 앱은 실행하지 않는다 (결정 "보기만").
+    /// 넣는 줄: 작업 트리 쪽 변경이 있는 줄(Work ≠ ' ')과 미추적 — 이미 인덱스에 다 오른 줄(staged 이름 바꿈 · git rm 삭제)은 빼고,
+    /// 옛 경로도 넣지 않는다 (인덱스 · 작업 트리 어디에도 없어 git add가 명령 전체를 실패시킨다 — sub_self C2 · 지휘자 K1).
+    /// git이 경로를 패턴(* ? [ ])으로 풀지 않게 --literal-pathspecs (sub_self C1). 위험 글자 경로 · 길이를 넘는 경로는 빼고 글에 알린다.
+    /// 넣을 경로가 없거나 루트에 위험 글자가 있으면 null.
+    /// </summary>
+    public static (string Command, string Prompt)? AddCommand(string root, IReadOnlyList<ChangeRow> rows, int stagedNotMine)
+    {
+        var paths = rows.Where(r => r.Origin == ChangeOrigin.Mine && (r.Entry.Untracked || r.Entry.Work != ' ')).Select(r => r.Entry.Path)
+            .Distinct(StringComparer.Ordinal).ToList();
+        if (paths.Count == 0 || Risky(root)) return null;
+        var head = $"git -C \"{root}\" --literal-pathspecs add --";
+        var safe = new List<string>();
+        var (risky, tooLong, length) = (0, 0, head.Length);
+        foreach (var p in paths)
+        {
+            if (Risky(p)) { risky++; continue; }
+            if (length + p.Length + 3 > MaxCommandChars) { tooLong++; continue; }
+            safe.Add(p);
+            length += p.Length + 3;
+        }
+        if (safe.Count == 0) return null;
+        var command = head + " " + string.Join(' ', safe.Select(p => $"\"{p}\""));
+        var prompt = new StringBuilder("이 방에서 고친 파일만 올려 줘 (다른 방 · 출처 모름 파일은 올리지 말 것):\n").Append(command);
+        if (stagedNotMine > 0) prompt.Append($"\n인덱스에 이 방이 고치지 않은 파일 {stagedNotMine}개가 이미 있음 — 커밋 전에 git restore --staged로 뺄지 물어볼 것.");
+        if (risky > 0) prompt.Append($"\n따옴표 · $ · ` · ! 가 든 경로 {risky}개는 명령에서 뺐음 — 따로 확인할 것.");
+        if (tooLong > 0) prompt.Append($"\n명령이 너무 길어 경로 {tooLong}개를 뺐음 — 나눠서 올릴 것.");
+        return (command, prompt.ToString());
+    }
 }
 
 /// <summary>
@@ -59,7 +104,7 @@ public sealed partial class RoomModel
         var byPath = edits.ByPath(names.Keys.Append(id));
         var rows = status.Entries.Select(e => Origin(id, status.Root, status.HeadAt, e, byPath, names))
             .OrderBy(r => r.Origin).ThenBy(r => r.Entry.Path, StringComparer.OrdinalIgnoreCase).ToList();
-        Changes = new(status.Root, null, rows, [], working);
+        Changes = new(status.Root, null, rows, [], working) { Hidden = status.Hidden };
         return Partial("_RoomChanges", this);
     }
 

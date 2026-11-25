@@ -11,7 +11,7 @@ namespace HB.Chat.Pages;
 public sealed class SettingsModel(
     RoomStore store, RoomHub hub, RoomList list, ChatTranscripts transcripts, IOptions<ChatOptions> options,
     ProfileView profiles, FaceCatalog faces, RoomRuns runs, StickerPacks packs, CodexSettings codexSettings, CliVersions cliVersions, CliTools cliTools,
-    AgyRelay agy) : PageModel
+    AgyRelay agy, Snippets snippets) : PageModel
 {
     // ---- agy 수동 중계 (설정 검사 · 카나리 · 켜기) — 앱은 agy 설정 파일을 고치지 않는다 (결정 "검사 + 추천 JSON만") ----
 
@@ -150,6 +150,30 @@ public sealed class SettingsModel(
         return Page();
     }
 
+    // ---- 지시 상용구 (입력칸 ';' 목록) ----
+
+    public IReadOnlyList<Snippet> SnippetList => snippets.All();
+
+    /// <summary>저장이 거절된 상용구 폼의 값 (original이 비면 새로 더하기 폼) — 다시 그릴 때 그 폼에 채운다 (sub_self C6).</summary>
+    public (string? Original, string? Name, string? Text)? SnippetDraft { get; private set; }
+
+    public IActionResult OnPostSnippetSave(string? original, string? name, string? text)
+    {
+        Error = snippets.Save(original, name, text);
+        if (Error is null) return RedirectToPage(new { done = "snippet" });
+        SnippetDraft = (original, name, text);
+        Fill();
+        return Page();
+    }
+
+    public IActionResult OnPostSnippetRemove(string? original)
+    {
+        Error = snippets.Remove(original); // 고치던 이름이 아니라 원래 이름으로
+        if (Error is null) return RedirectToPage(new { done = "snippet" });
+        Fill();
+        return Page();
+    }
+
     /// <summary>테마 이름 (설정 화면).</summary>
     public static string ThemeName(string theme) => theme switch
     {
@@ -233,7 +257,7 @@ public sealed class SettingsModel(
     /// </summary>
     public static string? TabFor(string? done, string? handler) => (handler ?? done)?.ToLowerInvariant() switch
     {
-        "theme" or "notify" or "profile" or "image-size" => "general",
+        "theme" or "notify" or "profile" or "image-size" or "snippetsave" or "snippetremove" or "snippet" => "general",
         "addworkspace" or "removeworkspace" or "addunity" or "removeunity" or "measureunity" or "measure" or "rename" or "added" or "removed" or "renamed"
             or "appwrites" or "addappwritefolder" or "removeappwritefolder" or "appwrites-added" or "appwrites-removed" => "work",
         "cliselftest" or "cli" or "clicheck" or "cliupdate" or "cli-checked" or "cli-updated" or "codexworkspaces" or "codex" or "addmcpfields" or "addmcpjson" or "importmcp" or "removemcp"
@@ -267,6 +291,7 @@ public sealed class SettingsModel(
         "pack" => "스티커 팩을 바꿨습니다.",
         "theme" => "화면 테마를 바꿨습니다.",
         "notify" => "데스크톱 알림 설정을 바꿨습니다.",
+        "snippet" => "지시 상용구를 바꿨습니다 — 방 입력칸에서 ; 로 찾습니다 (열린 방은 다시 열면 보임).",
         "mcp-added" => "MCP 서버를 더했습니다. 쓸 방의 곁칸 → 연결에서 켜세요.",
         "mcp-secret" => "MCP 서버를 더했습니다 — 다만 확인할 점이 있습니다 (평문 토큰 · 원격 http · 원격으로 보내는 환경 변수 — 목록의 경고 줄). 토큰은 ${변수} 자리표시를 권합니다.",
         "mcp-removed" => "MCP 서버를 목록에서 뺐고, 켜 두었던 방에서도 껐습니다.",

@@ -1347,6 +1347,19 @@
                 changePath = null; changesLoaded = false; changesView.hidden = true; changesList.hidden = false; loadChanges();
                 return;
             }
+            // 이 방 파일만 add: 글을 입력칸에 넣기만 (보내지 않음) · 명령 복사 — 앱은 git을 실행하지 않는다
+            const insert = e.target.closest("[data-add-insert]");
+            if (insert) {
+                textBox.value = insert.dataset.addInsert;
+                textBox.dispatchEvent(new Event("input", { bubbles: true }));
+                textBox.focus();
+                return;
+            }
+            const copy = e.target.closest("[data-add-copy]");
+            if (copy) {
+                navigator.clipboard.writeText(copy.dataset.addCopy).then(() => { copy.textContent = "복사함"; }, () => { copy.textContent = "복사 실패"; });
+                return;
+            }
             const item = e.target.closest("[data-change]");
             if (item) openChange(item.dataset.change);
         });
@@ -2072,28 +2085,35 @@
         cmdBox.setAttribute("role", "listbox");
         form.before(cmdBox);
         const cmdKinds = { command: "명령", skill: "스킬", builtin: "기본", terminal: "터미널" };
-        let commands = [], cmdShown = [], cmdIndex = 0;
+        let commands = [], snippets = [], cmdShown = [], cmdIndex = 0, cmdPicked = false;
         async function loadCommands() {
             try {
                 const res = await fetch(self + "?handler=Commands", { cache: "no-store" });
                 if (!res.ok || disposed) return;
                 const data = await res.json();
                 commands = Array.isArray(data.commands) ? data.commands : [];
+                snippets = Array.isArray(data.snippets) ? data.snippets : []; // 지시 상용구 (설정 화면)
                 updateCmd();
             } catch { /* 목록이 없어도 보내기는 그대로 */ }
         }
         // '/' 뒤가 이름에 쓰는 글자뿐일 때만 — 경로("/c/Users…")처럼 다른 글자가 있으면 열지 않는다 (포함 일치로 일반 글이 바뀌지 않게, db1b130ff2 C4)
         function cmdQuery() { return /^\/[A-Za-z0-9:._-]*$/.test(textBox.value) ? textBox.value.slice(1).toLowerCase() : null; }
+        // 지시 상용구: ';'로 시작하고 줄바꿈이 없을 때 이름으로 찾는다 — 맞는 이름이 없으면 상자를 띄우지 않는다 (';'로 시작하는 보통 말이 바뀌지 않게)
+        function snipQuery() { return /^;[^\n]*$/.test(textBox.value) ? textBox.value.slice(1).trim().toLowerCase() : null; }
+        function ranked(list, q, key) {
+            return [...list.filter(c => key(c).startsWith(q)), ...list.filter(c => !key(c).startsWith(q) && key(c).includes(q))].slice(0, 8);
+        }
         function updateCmd() {
-            const q = cmdQuery();
-            const name = (c) => String(c.name).toLowerCase();
-            cmdShown = q === null ? [] : [...commands.filter(c => name(c).startsWith(q)), ...commands.filter(c => !name(c).startsWith(q) && name(c).includes(q))].slice(0, 8);
+            const q = cmdQuery(), sq = q === null ? snipQuery() : null;
+            cmdShown = q !== null ? ranked(commands, q, c => String(c.name).toLowerCase())
+                : sq !== null ? ranked(snippets, sq, s => String(s.name).toLowerCase()).map(s => ({ ...s, snip: true })) : [];
             if (cmdShown.length === 0) { cmdBox.hidden = true; return; }
             cmdIndex = Math.min(cmdIndex, cmdShown.length - 1);
             const rows = cmdShown.map((c, i) => {
                 const row = el("div", "cmd-item" + (i === cmdIndex ? " on" : ""));
                 row.setAttribute("role", "option");
-                row.append(el("span", "cmd-name", "/" + c.name + (c.hint ? " " + c.hint : "")), el("span", "cmd-kind", cmdKinds[c.kind] || c.kind),
+                if (c.snip) row.append(el("span", "cmd-name", ";" + c.name), el("span", "cmd-kind", "상용구"), el("span", "cmd-desc snip-text", c.text));
+                else row.append(el("span", "cmd-name", "/" + c.name + (c.hint ? " " + c.hint : "")), el("span", "cmd-kind", cmdKinds[c.kind] || c.kind),
                     el("span", "cmd-desc", c.description || ""));
                 row.addEventListener("mousedown", (e) => { e.preventDefault(); pickCmd(i); }); // 입력칸 blur보다 먼저
                 return row;
@@ -2104,13 +2124,18 @@
         function pickCmd(i) {
             const c = cmdShown[i];
             if (!c) return;
-            textBox.value = "/" + c.name + " ";
+            textBox.value = c.snip ? c.text : "/" + c.name + " "; // 상용구는 글로 바꾼다 (보내지 않음)
+            cmdPicked = true; // 아래 input 알림이 목록을 다시 열지 않게 — 넣은 글이 ';'로 시작해도 다음 Enter는 보내기 (sub_self C5)
             cmdBox.hidden = true;
             textBox.focus();
             textBox.setSelectionRange(textBox.value.length, textBox.value.length);
             textBox.dispatchEvent(new Event("input", { bubbles: true }));
         }
-        textBox.addEventListener("input", () => { cmdIndex = 0; updateCmd(); });
+        textBox.addEventListener("input", () => {
+            cmdIndex = 0;
+            if (cmdPicked) { cmdPicked = false; cmdBox.hidden = true; return; } // 고르기가 낸 알림 — 사용자가 다시 고칠 때부터 목록
+            updateCmd();
+        });
         textBox.addEventListener("blur", () => { cmdBox.hidden = true; });
         loadCommands();
 
