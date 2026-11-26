@@ -314,8 +314,30 @@ namespace HBLint.Core.Ir
                 CheckField(at, field, json.Get(field.Name), json, errors);
             if (spec.RequireOneOf.Length > 0 && spec.RequireOneOf.All(f => json.Get(f) == null))
                 errors.Add(Error(json, $"{at}: {string.Join(" · ", spec.RequireOneOf)} 가운데 하나 이상 있어야 합니다"));
+            if (errors.Count == errorCount)
+                CheckPatterns(at, kind, json, errors);
 
             return errors.Count == errorCount ? new IrNode(name, spec, json, inputs) : null;
+        }
+
+        /// <summary>패턴 칸 — 분석기가 같은 클래스로 읽으므로 여기서 읽히면 분석기에서도 읽힌다.</summary>
+        private static void CheckPatterns(string at, string kind, JsonObject json, List<IrError> errors)
+        {
+            if (kind == "filter.name" && json.Get("pattern") is JsonString pattern)
+            {
+                NamePattern.ParseRegex(pattern.Value, out var error);
+                if (error != null)
+                    errors.Add(Error(pattern, $"{at}.pattern: 정규식이 잘못됐습니다 — {error}"));
+            }
+            if (kind == "filter.location" && json.Get("paths") is JsonArray paths)
+            {
+                foreach (var path in paths.Items.OfType<JsonString>())
+                {
+                    PathPattern.Parse(path.Value, out var error);
+                    if (error != null)
+                        errors.Add(Error(path, $"{at}.paths: '{path.Value}' — {error}"));
+                }
+            }
         }
 
         private static void CheckField(string at, FieldSpec field, JsonValue? value, JsonObject owner, List<IrError> errors)
@@ -441,6 +463,29 @@ namespace HBLint.Core.Ir
                 }
                 foreach (var node in nodes.Where(n => !reached.Contains(n.Name)))
                     errors.Add(Error(Pos(node), $"nodes.{node.Name}: report에 닿지 않아 쓰이지 않습니다", isWarning: true, node: node.Name));
+            }
+
+            // 이름은 선언 사이트에만 있다 — 앞에 선언 노드가 없으면 늘 0건
+            foreach (var node in nodes.Where(n => n.Kind == "filter.name"))
+            {
+                if (!Upstream(node, byName).Any(n => n.Kind == "sites.declaration"))
+                    errors.Add(Error(Pos(node), $"nodes.{node.Name}: 이름은 선언(sites.declaration) 사이트에만 있어 이 필터는 늘 0건입니다", isWarning: true, node: node.Name));
+            }
+        }
+
+        /// <summary>노드로 들어오는 모든 노드 (고리는 앞에서 걸렀다).</summary>
+        private static IEnumerable<IrNode> Upstream(IrNode node, Dictionary<string, IrNode> byName)
+        {
+            var seen = new HashSet<string>();
+            var stack = new Stack<string>(node.AllInputs);
+            while (stack.Count > 0)
+            {
+                var name = stack.Pop();
+                if (!seen.Add(name) || !byName.TryGetValue(name, out var upstream))
+                    continue;
+                yield return upstream;
+                foreach (var source in upstream.AllInputs)
+                    stack.Push(source);
             }
         }
 

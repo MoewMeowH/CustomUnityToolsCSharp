@@ -51,6 +51,21 @@ header > strong { white-space: nowrap; padding-top: 5px; }
 .palette-item { padding: 3px 8px; margin: 2px 0; background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; cursor: grab; }
 .palette-item:hover { border-color: var(--accent); }
 .palette-item.disabled { opacity: 0.4; cursor: default; }
+.group-help { color: var(--muted); font-weight: normal; }
+
+.help-toggle { background: none; border: none; padding: 0; color: var(--accent); font-size: 12px; }
+.help-box { background: #1f2d3a; border: 1px solid #2f4a63; border-radius: 4px; padding: 6px 8px; margin-bottom: 12px; }
+.help-box.closed { background: none; border-color: transparent; padding: 0 0 0 2px; }
+.help-box p { margin: 6px 0 0; line-height: 1.5; }
+.help-example { color: var(--muted); }
+.help-example b { color: var(--text); margin-right: 4px; }
+.guide { margin-bottom: 6px; }
+.guide-body { background: #1f2d3a; border: 1px solid #2f4a63; border-radius: 4px; padding: 6px 8px; margin-top: 4px; font-size: 12px; line-height: 1.45; }
+.guide-socket { margin: 2px 0; }
+.guide-socket .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+.guide dl { margin: 8px 0 4px; }
+.guide dt { font-weight: 600; margin-top: 6px; }
+.guide dd { margin: 1px 0 0; color: var(--muted); }
 
 .canvas { flex: 1; position: relative; display: flex; flex-direction: column; min-width: 0; }
 .toolbar { display: flex; gap: 6px; align-items: center; padding: 6px 10px; background: var(--panel); border-bottom: 1px solid var(--line); }

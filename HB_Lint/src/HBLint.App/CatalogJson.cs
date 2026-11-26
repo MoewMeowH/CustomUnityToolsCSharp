@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using HBLint.Core.Help;
 using HBLint.Core.Ir;
 
 namespace HBLint.App;
@@ -23,7 +24,13 @@ internal static class CatalogJson
             Head("requires", "stringArray", false, "검사 중인 어셈블리가 이것들을 모두 참조할 때만 규칙을 쓴다", hint: "assembly"),
             Head("ignoreAssemblies", "stringArray", false, "* 와일드카드 어셈블리 이름 — 맞으면 검사하지 않는다")),
         ["nodes"] = new JsonArray(NodeCatalog.All.Select(Node).ToArray<JsonNode?>()),
+        ["scopeHelp"] = Help(NodeHelp.Scope),
+        ["socketHelp"] = new JsonObject(NodeHelp.Sockets.Select(s => KeyValuePair.Create(s.Key.ToString(), (JsonNode?)JsonValue.Create(s.Value)))),
+        ["glossary"] = new JsonArray(NodeHelp.Glossary.Select(t => (JsonNode?)new JsonObject { ["term"] = t.Key, ["meaning"] = t.Value }).ToArray()),
     };
+
+    private static JsonObject? Help(HelpText? help) =>
+        help == null ? null : new JsonObject { ["help"] = help.Help, ["example"] = help.Example };
 
     private static JsonObject Node(NodeSpec spec)
     {
@@ -42,6 +49,12 @@ internal static class CatalogJson
         };
         if (spec.RequireOneOf.Length > 0)
             node["requireOneOf"] = Array(spec.RequireOneOf);
+        var help = NodeHelp.Find(spec.Kind);
+        if (help != null)
+        {
+            node["help"] = help.Help;
+            node["example"] = help.Example;
+        }
         return node;
     }
 

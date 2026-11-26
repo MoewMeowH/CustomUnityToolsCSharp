@@ -1,0 +1,15 @@
+{
+  "$schema": "./hblint.schema.json",
+  "version": 1,
+  "id": "CLL0016",
+  "title": "클라 enum은 CommonEnum.cs의 CommonEnum 클래스에 선언 — 예외: private enum, 에디터 코드(Editor 어셈블리 · Editor 폴더 · #if UNITY_EDITOR). 파일 · 클래스 이름이 바뀌면 commonEnum 노드만 고친다.",
+  "severity": "warning",
+  "ignoreAssemblies": ["*Editor*"],
+  "nodes": {
+    "enums": { "kind": "sites.declaration", "from": "scope", "kinds": ["enum"], "accessibility": ["public", "internal", "protected"] },
+    "notEditorDefine": { "kind": "filter.define", "from": "enums", "define": "UNITY_EDITOR", "where": "outside" },
+    "notEditorFolder": { "kind": "filter.location", "from": "notEditorDefine", "paths": ["Editor/**"], "where": "outside" },
+    "commonEnum": { "kind": "filter.location", "from": "notEditorFolder", "paths": ["CommonEnum.cs"], "types": ["CommonEnum"], "where": "outside" },
+    "report": { "kind": "report", "from": "commonEnum", "message": "enum은 CommonEnum.cs의 CommonEnum 클래스 안에 선언하세요 (private · 에디터 전용은 예외)." }
+  }
+}

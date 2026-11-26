@@ -30,6 +30,19 @@ export interface NodeSpec {
   inputs: InputSpec[];
   fields: FieldSpec[];
   requireOneOf?: string[];
+  /** 처음 보는 사람용 설명 · 한 줄 예. */
+  help?: string;
+  example?: string;
+}
+
+export interface HelpText {
+  help: string;
+  example: string;
+}
+
+export interface GlossaryTerm {
+  term: string;
+  meaning: string;
 }
 
 export interface Catalog {
@@ -43,6 +56,23 @@ export interface Catalog {
   maxNodes: number;
   head: FieldSpec[];
   nodes: NodeSpec[];
+  scopeHelp?: HelpText;
+  socketHelp?: Partial<Record<Socket, string>>;
+  glossary?: GlossaryTerm[];
+}
+
+/** 팔레트 묶음 이름 → 소켓 설명 (필터 묶음은 따로). */
+export function groupHelp(catalog: Catalog, group: string): string | undefined {
+  if (group === '끝') return '규칙의 끝 — 경고를 띄운다';
+  if (group === 'Sites 거르기 · 합치기') return '찾은 곳(Sites)을 받아 조건으로 거르거나 합쳐 다시 Sites로 내보낸다';
+  return catalog.socketHelp?.[group as Socket];
+}
+
+/** 팔레트 마우스 올림 글 — 설명 첫 문장 + 받는 것. */
+export function paletteTitle(spec: NodeSpec): string {
+  const first = spec.help ? spec.help.split(/(?<=\.)\s/)[0] : '';
+  const accepts = `받음: ${spec.inputs.map((i) => `${i.name}(${i.accepts.join('·')})`).join(', ')}`;
+  return [first, `${spec.kind} — ${accepts}`].filter((x) => x.length > 0).join('\n');
 }
 
 export function findSpec(catalog: Catalog, kind: unknown): NodeSpec | undefined {

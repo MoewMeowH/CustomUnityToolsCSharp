@@ -65,6 +65,25 @@ samples/more/                 예시 규칙 더 (CLL0004~0012 — 할당 · Unit
 | `nodes` | 노드 이름 → 노드 (필수) |
 | `layout` | 편집기용 노드 위치 · 메모 (분석기에 넘기지 않음) |
 
+### 처음 보는 사람용
+
+규칙 하나는 **왼쪽에서 오른쪽으로 범위를 좁혀 가는 선**이다. 범위(어느 클래스 · 메서드 안) → 찾을 것(사이트) → 거르기(필터) → 보고.
+
+```text
+규칙 시작 ─▶ 선언(enum) ─▶ 이름(^E[A-Z], notMatching) ─▶ 보고 "enum 이름은 E로 시작하세요"
+  전체 코드     enum 선언 이름 자리    규칙을 어긴 이름만 남김         그 자리마다 경고
+```
+
+| 말 | 뜻 |
+|---|---|
+| 사이트 | 규칙이 걸 수 있는 코드 위치 하나 — 함수를 부른 자리, `new`를 쓴 자리, 선언 이름 자리. 경고는 이 위치에 뜬다 |
+| 소켓 | 노드 사이 선의 종류 (편집 앱에서 색). Scope 전체 코드 · Types 클래스 범위 · Methods 메서드 범위 · Sites 찾은 곳 · Groups 메서드마다 묶은 것 |
+| 필터 | Sites를 받아 조건에 맞는 것만 다시 Sites로 내보내는 노드 — 여러 개를 이어 붙인다 |
+| 타입 전체 이름 (메타데이터 이름) | 네임스페이스까지 쓴 이름 (`UnityEngine.MonoBehaviour`). 중첩 클래스는 `Outer+Inner`, 제네릭은 `` List`1 `` |
+| inside · outside | 필터가 그 조건 안만 남길지 · 밖만 남길지 |
+
+편집 앱에서는 팔레트 맨 위 "읽는 법"과, 노드를 고르면 인스펙터 위에 나오는 "이 노드는?" 상자에 같은 설명이 있다 (원본은 `src/HBLint.Core/Help/NodeHelp.cs` — 새 노드는 여기에 설명을 넣어야 시험이 통과한다).
+
 ### 노드와 소켓
 
 노드는 `from`으로 앞 노드를 받는다. `"from": "scope"`는 규칙 시작(컴파일 전체). 선의 종류(소켓)는 왼쪽에서 오른쪽으로 좁아진다 — **Scope → Types → Methods → Sites → Groups → Report**. 받을 수 없는 소켓끼리 이으면 검증 오류다. 값(이름 · 숫자 · 메시지)은 선이 아니라 노드 안 칸이다. report는 규칙마다 하나.
@@ -83,6 +102,9 @@ samples/more/                 예시 규칙 더 (CLL0004~0012 — 할당 · Unit
 | `sites.boxing` | 〃 | 박싱 변환 (대입 · 인자 · params · 인터페이스로 · nullable · 캐스트). 대상 타입 = 박싱되는 값의 형. **잡지 않는 것**: `string + 값` · `+=` (컴파일러가 `값.ToString()`으로 바꿔 박싱하지 않음 — 연결은 `sites.stringConcat`), 보간 `$"{i}"`(대상 BCL에 따라 박싱될 수 있음) · 오버라이드 없는 struct의 `ToString` · `GetHashCode` · `Equals` 호출 · `HasFlag`의 인스턴스 · `foreach (object x in List<int>)` (변환으로 보이지 않는 박싱) |
 | `sites.stringConcat` | 〃 | string `+` · `+=` · 보간. 식 하나에 한 번(`a + b + c`, 연결 안 보간은 바깥 하나), 상수끼리는 뺀다. `string.Concat` · `Format` 직접 호출은 잡지 않는다 |
 | `sites.lambda` | 〃 | 람다 · 무명 메서드를 **만드는 자리**. `capturingOnly`(기본 true): 지역 · 매개변수 · `this`를 캡처하는 것만 (안쪽 람다가 캡처한 것은 안쪽 람다 몫). 쿼리 식 안 암시적 람다 · 메서드 그룹 → 델리게이트는 잡지 않는다 |
+| `sites.declaration` | 〃 | **선언 자체** — 사이트 위치는 선언 이름 (`public enum EState`의 `EState`, 필드 `int a, b;`는 변수마다, partial은 조각마다). `kinds`(필수): `class` · `struct` · `interface` · `enum` · `delegate` · `method` · `property` · `field` · `event` (record는 class · struct로). `method`는 일반 메서드만 — 생성자 · 연산자 · 접근자 · 로컬 함수 · 명시적 인터페이스 구현은 빠지고(인덱서 · 명시적 구현 속성 · 이벤트도), override · 암시적 인터페이스 구현 · Unity 메시지(`Update`)는 들어간다 (이름 규칙에 쓸 때 주의). `static`: true면 static만(static class · const 포함), false면 아닌 것만. `extension`: true면 확장 메서드만, false면 아닌 것만. `accessibility`: `public` · `internal` · `protected` · `private` 가운데 고른 것만 — 안 적은 선언은 C# 기본값(최상위 타입 internal, 멤버 · 중첩 타입 private, 인터페이스 멤버 public), `protected internal`은 protected · internal, `private protected`는 private · protected 둘 다로 보고 하나라도 고른 것이면 통과. 범위: Types에서 받으면 그 계열 타입 자신의 선언과 그 안 멤버(중첩 타입 · delegate는 그 타입 자신으로 판정), Methods에서 받으면 그 메서드 선언. 대상 타입이 없어 `filter.targetType` 뒤에서는 0건 |
+| `filter.name` | Sites → Sites | 선언 이름으로 거른다. `startsWith`(여럿 가운데 하나로 시작, 대소문자 가림) · `pattern`(.NET 정규식, 일부 일치 — 전체는 `^…$`. 한 번이라도 100ms를 넘기면 그 컴파일에서 그 필터를 끄고(뒤 사이트는 모두 빠짐) CLL9002로 알린다) 가운데 하나 이상, 둘 다면 둘 다 맞아야 "맞음". `keep`: `matching` = 맞는 것만, `notMatching` = 안 맞는 것만(규칙을 어긴 이름). 이름은 `sites.declaration` 사이트에만 있어 다른 사이트는 늘 빠진다 (앞에 선언 노드가 없으면 검증 경고) |
+| `filter.location` | Sites → Sites | 코드 자리(파일 · 감싸는 클래스)로 거른다 — 어느 사이트에나. `paths`: 파일 이름 · 경로 패턴, **경로 끝부분**과 폴더 경계에서 맞춘다 (Unity는 `Assets/…` 상대 경로, IDE는 절대 경로라 같은 패턴이 양쪽에 맞게). 경로에 `Assets` · `Packages` · `PackageCache` 폴더가 있으면 가장 앞의 것부터만 본다 — `D:/Work/Editor/Game/Assets/…`의 바깥 `Editor`에 `Editor/**`가 맞지 않게 (그런 폴더가 없는 .NET 프로젝트는 경로 전체를 보고, 프로젝트 바깥 상위 폴더 이름이 `Assets`면 거기부터 본다). `\` · `/` 같음, 대소문자 무시, `*` = 폴더 이름 하나 안 아무 글자, `**` = 폴더 0단계 이상, 끝이 `/`면 그 폴더 아래 전부 (`CommonEnum.cs` · `Editor/**` · `Assets/Scripts/*.cs` — `MyCommonEnum.cs`는 `CommonEnum.cs`에 안 맞음). `types`: 감싸는 클래스 이름(바깥 어느 단계든) — 점 · `+`가 없으면 이름만(`CommonEnum`), 있으면 메타데이터 이름(`Game.CommonEnum`). 선언 사이트는 선언을 감싸는 바깥 클래스(자기 자신은 아님), 그 밖 사이트는 코드를 감싸는 클래스. `paths` · `types` 가운데 하나 이상, 둘 다면 "그 파일 안이면서 그 클래스 안"이 안. `where`: `inside` · `outside` |
 | `filter.targetType` | Sites → Sites | `type`: 사이트가 다루는 식의 정적 타입이 이 계열인 것만. `category`: `reference` · `value` — 참조 · 값 형식인 것만 (타입 매개변수는 `class` · `struct` 제약으로, 제약이 없으면 어느 쪽도 아님). 둘 중 하나 이상, 둘 다면 둘 다 맞아야. 타입 매개변수의 계열은 제약으로 본다. 정적 타입이 인터페이스 · `object`면 `type`에 걸리지 않는다. 대상 타입은 `sites.nullOperator`(왼쪽 식) · `sites.member`(인스턴스) · `sites.new` · `sites.boxing` 사이트에만 있다 — 다른 사이트 뒤에 이으면 늘 0건 |
 | `filter.context` | Sites → Sites | `context` · `where`(`inside` · `outside`). `loop`: for · foreach · while · do의 본문 · 조건 · for 증감식 (for 초기화 · foreach 컬렉션 식은 한 번만 돌아서 밖, 람다 · 로컬 함수 경계에서 멈춤). `lambda`: 람다 · 무명 메서드 몸통 (Methods에서 받은 사이트는 원래 람다 몸통을 빼므로 Scope · Types에서 뜻이 있음) |
 | `filter.define` | Sites → Sites | `define` · `where`(`inside` · `outside`): **그 디파인이 없으면 다른 기호가 무엇이든 꺼지는 구간** 안 · 밖. `#if` · `#elif` · `#else` · 중첩 · `!` `&&` `\|\|` `==` `!=`를 읽는다. `#if UNITY_EDITOR \|\| DEVELOPMENT_BUILD`는 개발 빌드에서 켜지므로 구간이 아니다 |
@@ -108,7 +130,16 @@ samples/more/                 예시 규칙 더 (CLL0004~0012 — 할당 · Unit
 | CLL0011 | `position-rotation-pair` | MonoBehaviour → 짝 묶기(a: `Transform.position` 쓰기, b: `rotation` 쓰기, `methodAndTarget`) |
 | CLL0012 | `transform-repeat-in-update` | MonoBehaviour → Update 계열 → `sites.member`(`transform` 읽기) → 묶기(`methodAndTarget`) → 개수(4) |
 
-검증(`hblint-gen validate`, 분석기도 같은 검사): JSON 형식 · 모르는 칸 · kind · 필수 칸 · 값 범위 · 노드 수(256개까지) · 없는 노드 · 소켓 · 고리 · report 하나 · 규칙 사이 id 중복(분석기는 먼저 읽은 규칙만 쓰고 나머지를 CLL9002로). report에 닿지 않는 노드는 경고이고 분석기는 그 노드를 무시한다.
+코드 규약 예시 (`samples/client-conventions/`, 쓰는 법은 위와 같다 — id가 겹치면 바꿔서):
+
+| id | 파일 | 그래프 |
+|---|---|---|
+| CLL0013 | `no-unity-debug` | `sites.member`(`UnityEngine.Debug.Log` · `LogWarning` · `LogError` · `LogException` · `Log*Format` · `LogAssertion*`, `call`). `DrawLine` · `Assert`는 넣지 않았다. 로그 시스템 구현이 든 어셈블리는 `ignoreAssemblies`에, 같은 어셈블리면 `filter.location`(`types`: 구현 클래스, `outside`)으로 뺀다 |
+| CLL0014 | `extension-method-prefix` | `sites.declaration`(method, `extension`) → `filter.name`(`startsWith` `E_`, `notMatching`) |
+| CLL0015 | `enum-prefix` | `sites.declaration`(enum) → `filter.name`(`^E[A-Z]`, `notMatching`) |
+| CLL0016 | `enum-location` | `ignoreAssemblies`(`*Editor*`) · `sites.declaration`(enum, public · internal · protected) → `filter.define`(`UNITY_EDITOR`, outside) → `filter.location`(`Editor/**`, outside) → `filter.location`(`CommonEnum.cs` + `CommonEnum`, outside). 파일 · 클래스 이름이 바뀌면 마지막 노드만 고친다. `*Editor*`는 이름에 Editor가 든 런타임 asmdef(예 게임 안 레벨 에디터)도 통째로 빼므로 그런 어셈블리가 있으면 이름을 좁힌다 |
+
+검증(`hblint-gen validate`, 분석기도 같은 검사): JSON 형식 · 모르는 칸 · kind · 필수 칸 · 값 범위 · 정규식 · 경로 패턴 · 노드 수(256개까지) · 없는 노드 · 소켓 · 고리 · report 하나 · 규칙 사이 id 중복(분석기는 먼저 읽은 규칙만 쓰고 나머지를 CLL9002로). report에 닿지 않는 노드는 경고이고 분석기는 그 노드를 무시한다.
 
 생성된 코드(`<auto-generated>`)는 검사하지 않는다.
 

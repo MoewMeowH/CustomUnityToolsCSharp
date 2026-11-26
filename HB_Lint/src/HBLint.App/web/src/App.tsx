@@ -4,7 +4,8 @@ import {
   type Connection, type Edge as FlowEdge, type EdgeChange, type NodeChange,
 } from '@xyflow/react';
 import { api, ApiError, type AppStateDto, type GenerateResult, type PreviewResult, type RecentEntry, type RuleSummary, type Validation } from './api';
-import { findSpec, paletteGroup, socketColor, type Catalog } from './catalog';
+import { findSpec, groupHelp, paletteGroup, paletteTitle, socketColor, type Catalog } from './catalog';
+import { Guide } from './Guide';
 import { Inspector } from './Inspector';
 import {
   addNode, connect, connectProblem, disconnect, docText, edgesOf, moveNode, newRuleDoc, nodesOf, noteOf, outputSocket,
@@ -475,9 +476,13 @@ export function App() {
           </section>
           <section className="palette">
             <h4>노드 (끌어 놓거나 누르기)</h4>
+            <Guide catalog={catalog} />
             {[...groups].map(([group, specs]) => (
               <div key={group}>
-                <h5 style={{ color: group in socketColor ? socketColor[group as keyof typeof socketColor] : undefined }}>{group}</h5>
+                <h5 style={{ color: group in socketColor ? socketColor[group as keyof typeof socketColor] : undefined }} title={groupHelp(catalog, group)}>
+                  {group}
+                  {groupHelp(catalog, group) && <span className="group-help"> — {groupHelp(catalog, group)}</span>}
+                </h5>
                 {specs.map((spec) => (
                   <div
                     key={spec.kind}
@@ -485,7 +490,7 @@ export function App() {
                     draggable={!!open}
                     onDragStart={(e) => e.dataTransfer.setData('application/hblint-kind', spec.kind)}
                     onClick={() => place(spec.kind)}
-                    title={`${spec.kind} — 받음: ${spec.inputs.map((i) => `${i.name}(${i.accepts.join('·')})`).join(', ')}`}
+                    title={paletteTitle(spec)}
                   >
                     {spec.title}
                   </div>

@@ -189,9 +189,15 @@ namespace HBLint.Analyzers
         private readonly bool _appendPath;
         private readonly List<ProducerPlan> _producers;
         private readonly GroupSpec? _group;
+        private readonly string _id;
+        private readonly string _owner;
+        private readonly List<NamePattern> _namePatterns;
 
-        private RulePlan(RuleIr rule, List<ProducerPlan> producers, GroupSpec? group)
+        private RulePlan(RuleIr rule, string owner, List<ProducerPlan> producers, GroupSpec? group, List<NamePattern> namePatterns)
         {
+            _id = rule.Id;
+            _owner = owner;
+            _namePatterns = namePatterns;
             _descriptor = RuleDescriptors.Rules[rule.Id];
             _severity = rule.Severity == "error" ? DiagnosticSeverity.Error : rule.Severity == "info" ? DiagnosticSeverity.Info : DiagnosticSeverity.Warning;
             _message = rule.Report.GetString("message")!;
@@ -255,6 +261,7 @@ namespace HBLint.Analyzers
             var flow = rule.Nodes.Where(n => reached.Contains(n.Name) && n.Spec.Output == Socket.Sites).ToList();
             var index = flow.Select((n, i) => (n.Name, i)).ToDictionary(x => x.Name, x => x.i);
             var filters = new SiteFilter?[flow.Count + slotInputs.Length];
+            var namePatterns = new List<NamePattern>();
             for (var i = 0; i < flow.Count; i++)
             {
                 switch (flow[i].Kind)
@@ -271,6 +278,18 @@ namespace HBLint.Analyzers
                         break;
                     case "filter.context":
                         filters[i] = new ContextFilter(flow[i].GetString("context") == "loop", flow[i].GetString("where") == "inside");
+                        break;
+                    case "filter.name":
+                        // 정규식 · 경로 패턴은 검증(RuleIr)을 통과했으면 모두 읽힌다
+                        var pattern = flow[i].GetString("pattern");
+                        var regex = pattern == null ? null : NamePattern.ParseRegex(pattern, out _);
+                        var namePattern = new NamePattern(flow[i].GetStrings("startsWith"), regex);
+                        namePatterns.Add(namePattern);
+                        filters[i] = new NameFilter(namePattern, flow[i].GetString("keep") == "matching");
+                        break;
+                    case "filter.location":
+                        var paths = flow[i].GetStrings("paths").Select(p => PathPattern.Parse(p, out _)).OfType<PathPattern>().ToArray();
+                        filters[i] = new LocationFilter(paths, flow[i].GetStrings("types"), flow[i].GetString("where") == "inside");
                         break;
                 }
             }
@@ -324,7 +343,7 @@ namespace HBLint.Analyzers
                 if (producer != null)
                     producers.Add(new ProducerPlan(producer, context, graph, index[node.Name]));
             }
-            return producers.Count == 0 ? null : new RulePlan(rule, producers, group);
+            return producers.Count == 0 ? null : new RulePlan(rule, owner.Name, producers, group, namePatterns);
         }
 
         private static SiteProducer? CreateProducer(IrNode node, Compilation compilation, GuardCache guards, Action<string> notFound)
@@ -357,6 +376,8 @@ namespace HBLint.Analyzers
                     return new StringConcatProducer();
                 case "sites.lambda":
                     return new LambdaProducer(node.GetBool("capturingOnly") ?? true);
+                case "sites.declaration":
+                    return new DeclarationProducer(node.GetStrings("kinds"), node.GetBool("static"), node.GetBool("extension"), node.GetStrings("accessibility"));
                 default:
                     return null;
             }
@@ -364,6 +385,17 @@ namespace HBLint.Analyzers
 
         public void Register(CompilationStartAnalysisContext start)
         {
+            // 이름 필터 정규식은 처음 시간을 넘기면 꺼진다 — 컴파일 끝에 알린다 (꺼진 뒤 그 필터를 지나는 사이트는 빠졌으므로)
+            if (_namePatterns.Count > 0)
+            {
+                start.RegisterCompilationEndAction(end =>
+                {
+                    if (_namePatterns.Any(p => p.TimedOut))
+                        end.ReportDiagnostic(Diagnostic.Create(RuleDescriptors.RuleInvalid, Location.None, _owner, _id,
+                            $"이름 필터의 정규식이 {NamePattern.Timeout.TotalMilliseconds}ms를 넘겨 이 컴파일에서 그 필터를 껐습니다 (그 뒤 사이트는 보고되지 않음) — 정규식을 단순하게 고치세요"));
+                });
+            }
+
             if (_group != null)
             {
                 start.RegisterSymbolStartAction(OnGroupTypeStart, SymbolKind.NamedType);

@@ -1,5 +1,6 @@
 #nullable enable
 using System.Linq;
+using HBLint.Core.Help;
 using HBLint.Core.Ir;
 using HBLint.Core.Json;
 
@@ -61,6 +62,7 @@ namespace HBLint.Core.Generation
             }
             var node = new JsonObject()
                 .Add("title", S($"{spec.Kind} — {spec.Title}" + (spec.Output == null ? "" : $" (→ {spec.Output})")))
+                .Add("description", S(Describe(spec.Kind)))
                 .Add("type", S("object"))
                 .Add("required", required)
                 .Add("additionalProperties", new JsonBool(false))
@@ -73,6 +75,12 @@ namespace HBLint.Core.Generation
                 node.Add("anyOf", anyOf);
             }
             return node;
+        }
+
+        private static string Describe(string kind)
+        {
+            var help = NodeHelp.Find(kind);
+            return help == null ? "" : help.Help + " 예: " + help.Example;
         }
 
         private static JsonObject Field(FieldSpec field)

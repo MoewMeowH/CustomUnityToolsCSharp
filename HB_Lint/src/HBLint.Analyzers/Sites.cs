@@ -16,10 +16,11 @@ namespace HBLint.Analyzers
     /// 사이트 — 규칙이 걸 수 있는 코드 위치 하나. Node는 속한 메서드 · 타입 · 맥락을 찾을 때,
     /// Anchor는 디파인 가드 판정에, TargetType은 "대상 타입" 필터에 쓴다 (사이트가 다루는 식의 정적 타입, 없으면 null).
     /// Instance는 멤버 사용의 인스턴스 식 — "같은 대상"으로 묶을 때만 키로 바꾼다. 람다 사이트는 람다 연산(대상 아님 — 키는 null).
+    /// Declared는 선언 사이트의 선언 기호 (이름 필터 · 코드 자리 필터가 쓴다, 다른 사이트는 null).
     /// </summary>
     internal sealed class Site
     {
-        public Site(SyntaxNode node, SemanticModel model, Location location, int anchor, ITypeSymbol? targetType, IOperation? instance = null)
+        public Site(SyntaxNode node, SemanticModel model, Location location, int anchor, ITypeSymbol? targetType, IOperation? instance = null, ISymbol? declared = null)
         {
             Node = node;
             Model = model;
@@ -27,7 +28,10 @@ namespace HBLint.Analyzers
             Anchor = anchor;
             TargetType = targetType;
             Instance = instance;
+            Declared = declared;
         }
+
+        public ISymbol? Declared { get; }
 
         public IOperation? Instance { get; }
 
@@ -567,6 +571,141 @@ namespace HBLint.Analyzers
         }
     }
 
+    /// <summary>
+    /// sites.declaration — 타입 · 메서드 · 속성 · 필드 · 이벤트 선언. 위치는 선언 이름, 필드 int a, b;는 변수마다.
+    /// method는 일반 메서드만 (생성자 · 연산자 · 접근자 · 로컬 함수 · 명시적 인터페이스 구현은 이름을 정할 수 없어 뺀다). 속성 · 이벤트도 명시적 구현 · 인덱서는 뺀다.
+    /// partial 타입 · 메서드는 조각마다 사이트 하나.
+    /// </summary>
+    internal sealed class DeclarationProducer : SiteProducer
+    {
+        private readonly HashSet<string> _kinds;
+        private readonly bool? _static;
+        private readonly bool? _extension;
+        private readonly HashSet<string>? _accessibility;
+
+        public DeclarationProducer(string[] kinds, bool? isStatic, bool? extension, string[] accessibility)
+            : base(new OperationKind[0], SyntaxKindsFor(kinds))
+        {
+            _kinds = new HashSet<string>(kinds, StringComparer.Ordinal);
+            _static = isStatic;
+            _extension = extension;
+            _accessibility = accessibility.Length == 0 ? null : new HashSet<string>(accessibility, StringComparer.Ordinal);
+        }
+
+        private static SyntaxKind[] SyntaxKindsFor(string[] kinds)
+        {
+            var result = new List<SyntaxKind>();
+            if (kinds.Contains("class") || kinds.Contains("struct"))
+                result.AddRange(new[] { SyntaxKind.RecordDeclaration, SyntaxKind.RecordStructDeclaration });
+            if (kinds.Contains("class"))
+                result.Add(SyntaxKind.ClassDeclaration);
+            if (kinds.Contains("struct"))
+                result.Add(SyntaxKind.StructDeclaration);
+            if (kinds.Contains("interface"))
+                result.Add(SyntaxKind.InterfaceDeclaration);
+            if (kinds.Contains("enum"))
+                result.Add(SyntaxKind.EnumDeclaration);
+            if (kinds.Contains("delegate"))
+                result.Add(SyntaxKind.DelegateDeclaration);
+            if (kinds.Contains("method"))
+                result.Add(SyntaxKind.MethodDeclaration);
+            if (kinds.Contains("property"))
+                result.Add(SyntaxKind.PropertyDeclaration);
+            if (kinds.Contains("event"))
+                result.Add(SyntaxKind.EventDeclaration);
+            // 필드 · 필드 꼴 이벤트는 변수(int a, b;의 a · b)마다
+            if (kinds.Contains("field") || kinds.Contains("event"))
+                result.Add(SyntaxKind.VariableDeclarator);
+            return result.ToArray();
+        }
+
+        public override Site? OnSyntax(SyntaxNode node, SemanticModel model, CancellationToken cancellationToken)
+        {
+            SyntaxToken identifier;
+            switch (node)
+            {
+                case BaseTypeDeclarationSyntax type:
+                    identifier = type.Identifier;
+                    break;
+                case DelegateDeclarationSyntax @delegate:
+                    identifier = @delegate.Identifier;
+                    break;
+                case MethodDeclarationSyntax method:
+                    identifier = method.Identifier;
+                    break;
+                case PropertyDeclarationSyntax property:
+                    identifier = property.Identifier;
+                    break;
+                case EventDeclarationSyntax eventDeclaration:
+                    identifier = eventDeclaration.Identifier;
+                    break;
+                case VariableDeclaratorSyntax variable when variable.Parent?.Parent is BaseFieldDeclarationSyntax:
+                    identifier = variable.Identifier;
+                    break;
+                default:
+                    return null;
+            }
+
+            var symbol = model.GetDeclaredSymbol(node, cancellationToken);
+            var kind = symbol == null ? null : KindOf(symbol);
+            if (symbol == null || kind == null || !_kinds.Contains(kind) || !Passes(symbol))
+                return null;
+            return new Site(node, model, identifier.GetLocation(), identifier.SpanStart, null, declared: symbol);
+        }
+
+        /// <summary>선언 종류 이름 (고를 수 없는 선언이면 null).</summary>
+        private static string? KindOf(ISymbol symbol)
+        {
+            switch (symbol)
+            {
+                case INamedTypeSymbol type:
+                    switch (type.TypeKind)
+                    {
+                        case TypeKind.Class: return "class";
+                        case TypeKind.Struct: return "struct";
+                        case TypeKind.Interface: return "interface";
+                        case TypeKind.Enum: return "enum";
+                        case TypeKind.Delegate: return "delegate";
+                        default: return null;
+                    }
+                case IMethodSymbol method:
+                    return method.MethodKind == MethodKind.Ordinary ? "method" : null;
+                case IPropertySymbol property:
+                    return property.IsIndexer || property.ExplicitInterfaceImplementations.Length > 0 ? null : "property";
+                case IEventSymbol eventSymbol:
+                    return eventSymbol.ExplicitInterfaceImplementations.Length > 0 ? null : "event";
+                case IFieldSymbol _:
+                    return "field";
+                default:
+                    return null;
+            }
+        }
+
+        private bool Passes(ISymbol symbol)
+        {
+            if (_static.HasValue && symbol.IsStatic != _static.Value)
+                return false;
+            if (_extension.HasValue && (symbol is IMethodSymbol method && method.IsExtensionMethod) != _extension.Value)
+                return false;
+            return _accessibility == null || Accessibilities(symbol.DeclaredAccessibility).Any(_accessibility.Contains);
+        }
+
+        /// <summary>protected internal = protected · internal, private protected = private · protected.</summary>
+        private static string[] Accessibilities(Accessibility accessibility)
+        {
+            switch (accessibility)
+            {
+                case Accessibility.Public: return new[] { "public" };
+                case Accessibility.Internal: return new[] { "internal" };
+                case Accessibility.Protected: return new[] { "protected" };
+                case Accessibility.Private: return new[] { "private" };
+                case Accessibility.ProtectedOrInternal: return new[] { "protected", "internal" };
+                case Accessibility.ProtectedAndInternal: return new[] { "private", "protected" };
+                default: return new string[0];
+            }
+        }
+    }
+
     /// <summary>사이트 필터 (filter.*). 흐름 중간에서 사이트를 거른다.</summary>
     internal abstract class SiteFilter
     {
@@ -648,6 +787,72 @@ namespace HBLint.Analyzers
             }
             return false;
         }
+    }
+
+    /// <summary>filter.name — 선언 이름이 조건에 맞는 것(matching) · 안 맞는 것(notMatching)만. 이름이 없는 사이트 · 정규식 시간 초과는 늘 뺀다.</summary>
+    internal sealed class NameFilter : SiteFilter
+    {
+        private readonly NamePattern _pattern;
+        private readonly bool _keepMatching;
+
+        public NameFilter(NamePattern pattern, bool keepMatching)
+        {
+            _pattern = pattern;
+            _keepMatching = keepMatching;
+        }
+
+        public override bool Passes(Site site, CancellationToken cancellationToken)
+        {
+            if (site.Declared == null)
+                return false;
+            var matches = _pattern.Matches(site.Declared.Name);
+            return matches.HasValue && matches.Value == _keepMatching;
+        }
+    }
+
+    /// <summary>
+    /// filter.location — 사이트가 있는 파일(경로 끝부분 패턴) · 감싸는 타입(바깥 어느 단계든) 안 · 밖. 둘 다 주면 둘 다 맞아야 안.
+    /// 감싸는 타입: 선언 사이트는 선언을 감싸는 바깥 타입(자기 자신은 아님), 그 밖 사이트는 코드를 감싸는 타입.
+    /// 타입 이름에 . · +가 없으면 이름만, 있으면 메타데이터 이름(Game.Outer+Inner)과 맞춘다.
+    /// </summary>
+    internal sealed class LocationFilter : SiteFilter
+    {
+        private readonly PathPattern[] _paths;
+        private readonly string[] _types;
+        private readonly bool _inside;
+
+        public LocationFilter(PathPattern[] paths, string[] types, bool inside)
+        {
+            _paths = paths;
+            _types = types;
+            _inside = inside;
+        }
+
+        public override bool Passes(Site site, CancellationToken cancellationToken) => Inside(site, cancellationToken) == _inside;
+
+        private bool Inside(Site site, CancellationToken cancellationToken)
+        {
+            if (_paths.Length > 0)
+            {
+                var path = site.Location.SourceTree?.FilePath;
+                if (path == null || path.Length == 0 || !_paths.Any(p => p.Matches(path)))
+                    return false;
+            }
+            if (_types.Length == 0)
+                return true;
+            var type = site.Declared != null ? site.Declared.ContainingType : SymbolUtil.ContainingType(site.Node, site.Model, cancellationToken);
+            for (; type != null; type = type.ContainingType)
+            {
+                if (_types.Any(name => TypeMatches(type, name)))
+                    return true;
+            }
+            return false;
+        }
+
+        private static bool TypeMatches(INamedTypeSymbol type, string name) =>
+            name.IndexOf('.') < 0 && name.IndexOf('+') < 0
+                ? type.Name == name
+                : SymbolUtil.MetadataName(type) == name;
     }
 
     /// <summary>filter.define — define이 없으면 꺼지는 구간 안 · 밖.</summary>

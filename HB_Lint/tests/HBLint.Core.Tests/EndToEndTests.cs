@@ -108,6 +108,83 @@ public class EndToEndTests
         }, found);
     }
 
+    private const string ConventionUnity = """
+        namespace UnityEngine
+        {
+            public class Object { }
+            public static class Debug
+            {
+                public static void Log(object message) { }
+                public static void LogWarning(object message) { }
+                public static void LogError(object message) { }
+                public static void LogException(System.Exception exception) { }
+                public static void LogFormat(string format, params object[] args) { }
+                public static void LogWarningFormat(string format, params object[] args) { }
+                public static void LogErrorFormat(string format, params object[] args) { }
+                public static void LogAssertion(object message) { }
+                public static void LogAssertionFormat(string format, params object[] args) { }
+                public static void DrawLine(int a, int b) { }
+            }
+        }
+        """;
+
+    [Fact]
+    public void 클라_규약_예시_셋이_각각_걸림()
+    {
+        var set = RuleSet.Build(RuleSet.ReadFolder(Path.Combine(Samples, "client-conventions")));
+        Assert.Empty(set.Errors);
+        Assert.Empty(set.Warnings);
+
+        var unity = TestCompiler.Emit(TestCompiler.Compile("UnityEngine.CoreModule", ConventionUnity));
+        var rules = TestCompiler.Emit(TestCompiler.Compile("Game.LintRules", set.Text!, TestCompiler.Attributes));
+        var files = new (string Path, string Source)[]
+        {
+            ("Assets/Scripts/Common/CommonEnum.cs", """
+                public class CommonEnum
+                {
+                    public enum EState { A }
+                }
+                """),
+            ("Assets/Scripts/Player.cs", """
+                using UnityEngine;
+                public static class PlayerExt
+                {
+                    public static int E_Twice(this int x) => x * 2;
+                    public static int Twice(this int x) => x * 2;
+                    public static int Helper(int x) => x;
+                }
+                public class Player
+                {
+                    public enum EMove { A }
+                    private enum Inner { A }
+                #if UNITY_EDITOR
+                    public enum EEditorOnly { A }
+                #endif
+                    void M()
+                    {
+                        Debug.Log("x");
+                        Debug.LogErrorFormat("{0}", 1);
+                        Debug.DrawLine(0, 1);
+                    }
+                }
+                """),
+            ("Assets/Editor/Tool.cs", "public enum ETool { A }"),
+        };
+        // 에디터 컴파일처럼 UNITY_EDITOR를 넣는다 — 없으면 #if UNITY_EDITOR 안 선언은 파싱되지도 않아 디파인 예외를 시험하지 못한다
+        var diagnostics = TestCompiler.RunAnalyzer(TestCompiler.Compile("Game", files, new[] { "UNITY_EDITOR" }, unity, TestCompiler.Attributes, rules));
+
+        var found = diagnostics
+            .Select(d => d.Id + " " + d.Location.SourceTree!.GetText().ToString(d.Location.SourceSpan))
+            .OrderBy(s => s, StringComparer.Ordinal);
+        Assert.Equal(new[]
+        {
+            "CLL0013 Log", "CLL0013 LogErrorFormat",
+            "CLL0014 Twice",
+            "CLL0015 Inner",
+            "CLL0016 EMove",
+        }, found);
+    }
+
     [Fact]
     public void 저장소의_예시가_프리셋_생성물_스키마와_같음()
     {

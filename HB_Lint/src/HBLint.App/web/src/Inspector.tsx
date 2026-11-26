@@ -134,6 +134,7 @@ export function Inspector(props: Props) {
   return (
     <aside className="inspector">
       <h3>{isScope ? '규칙 시작 (머리 칸)' : (spec?.title ?? '모르는 노드')}</h3>
+      <HelpBox help={isScope ? catalog.scopeHelp?.help : spec?.help} example={isScope ? catalog.scopeHelp?.example : spec?.example} />
       {!isScope && (
         <div className="field">
           <label>노드 이름</label>
@@ -173,6 +174,27 @@ export function Inspector(props: Props) {
       )}
       {!isScope && <button className="danger" onClick={() => props.onDelete(selected)}>노드 지우기 (Delete)</button>}
     </aside>
+  );
+}
+
+/** 노드 쉬운 설명 — 접어 두면 노드를 바꿔도 접힌 채로. */
+function HelpBox(props: { help?: string; example?: string }) {
+  const [open, setOpen] = useState(() => localStorage.getItem('hblint.help') !== 'closed');
+  if (!props.help) return null;
+  const toggle = () => {
+    localStorage.setItem('hblint.help', open ? 'closed' : 'open');
+    setOpen(!open);
+  };
+  return (
+    <div className={`help-box ${open ? '' : 'closed'}`}>
+      <button className="help-toggle" onClick={toggle}>{open ? '▾ 이 노드는?' : '▸ 이 노드는?'}</button>
+      {open && (
+        <>
+          <p>{props.help}</p>
+          {props.example && <p className="help-example"><b>예</b> {props.example}</p>}
+        </>
+      )}
+    </div>
   );
 }
 

@@ -1,0 +1,27 @@
+{
+  "$schema": "./hblint.schema.json",
+  "version": 1,
+  "id": "CLL0013",
+  "title": "Unity Debug 로그 금지 — HLog를 쓴다 (기능 확장 · 통합 관리). HLog 구현이 든 어셈블리는 ignoreAssemblies에 넣는다.",
+  "severity": "warning",
+  "requires": ["UnityEngine.CoreModule"],
+  "nodes": {
+    "debugLog": {
+      "kind": "sites.member",
+      "from": "scope",
+      "members": [
+        "UnityEngine.Debug.Log",
+        "UnityEngine.Debug.LogWarning",
+        "UnityEngine.Debug.LogError",
+        "UnityEngine.Debug.LogException",
+        "UnityEngine.Debug.LogFormat",
+        "UnityEngine.Debug.LogWarningFormat",
+        "UnityEngine.Debug.LogErrorFormat",
+        "UnityEngine.Debug.LogAssertion",
+        "UnityEngine.Debug.LogAssertionFormat"
+      ],
+      "uses": ["call"]
+    },
+    "report": { "kind": "report", "from": "debugLog", "message": "Unity Debug 로그 대신 HLog를 쓰세요." }
+  }
+}

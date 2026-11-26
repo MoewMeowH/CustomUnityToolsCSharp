@@ -27,6 +27,15 @@ internal static class TestCompiler
             Bcl.Concat(references), Options);
     }
 
+    /// <summary>파일 경로 · 전처리 기호를 정해 여러 파일로 (코드 자리 · 디파인 필터 시험).</summary>
+    public static CSharpCompilation Compile(string assemblyName, (string Path, string Source)[] files, string[] defines, params MetadataReference[] references)
+    {
+        var options = new CSharpParseOptions(preprocessorSymbols: defines);
+        return CSharpCompilation.Create(assemblyName,
+            files.Select(f => CSharpSyntaxTree.ParseText(f.Source, options, path: f.Path)),
+            Bcl.Concat(references), Options);
+    }
+
     public static void AssertNoErrors(Compilation compilation)
     {
         var errors = compilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).ToList();

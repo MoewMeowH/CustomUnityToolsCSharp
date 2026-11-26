@@ -345,6 +345,24 @@ public class RuleApiTests
     }
 
     [Fact]
+    public async Task 카탈로그에_쉬운_설명_소켓_용어()
+    {
+        using var dir = new TempDir();
+        await using var app = await TestApp.Start(dir);
+
+        var json = await Json(await app.Client.GetAsync("/api/catalog"));
+
+        foreach (var node in json.GetProperty("nodes").EnumerateArray())
+        {
+            Assert.False(string.IsNullOrWhiteSpace(node.GetProperty("help").GetString()), node.GetProperty("kind").GetString());
+            Assert.False(string.IsNullOrWhiteSpace(node.GetProperty("example").GetString()), node.GetProperty("kind").GetString());
+        }
+        Assert.False(string.IsNullOrWhiteSpace(json.GetProperty("scopeHelp").GetProperty("help").GetString()));
+        Assert.Equal(["Scope", "Types", "Methods", "Sites", "Groups"], json.GetProperty("socketHelp").EnumerateObject().Select(p => p.Name));
+        Assert.Contains(json.GetProperty("glossary").EnumerateArray(), t => t.GetProperty("term").GetString() == "사이트");
+    }
+
+    [Fact]
     public async Task 폴더를_열기_전에는_규칙_API가_거절()
     {
         using var dir = new TempDir();

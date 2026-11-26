@@ -53,6 +53,7 @@
         "oneOf": [
           {
             "title": "types.derived — 타입 계열 (→ Types)",
+            "description": "어떤 클래스와 그 자식 클래스만 보겠다고 범위를 좁힙니다. 인터페이스를 넣으면 그 인터페이스를 구현한 클래스가 범위입니다. 예: UnityEngine.MonoBehaviour → MonoBehaviour를 상속한 스크립트만 검사",
             "type": "object",
             "required": [
               "kind",
@@ -71,12 +72,13 @@
               "type": {
                 "type": "string",
                 "minLength": 1,
-                "description": "기준 타입 메타데이터 이름 (그 타입과 자식, 인터페이스면 구현 타입)"
+                "description": "기준 타입 전체 이름 — 네임스페이스까지 (예 UnityEngine.MonoBehaviour). 그 타입과 자식, 인터페이스면 구현 타입이 범위"
               }
             }
           },
           {
             "title": "methods.named — 메서드 이름 (→ Methods)",
+            "description": "범위 안 클래스에서 이름이 같은 메서드만 고릅니다. 그 메서드 몸통 안 코드만 검사하고 싶을 때 씁니다. 예: MonoBehaviour → 메서드 이름(Update, LateUpdate) → Update · LateUpdate 안만 검사",
             "type": "object",
             "required": [
               "kind",
@@ -99,12 +101,13 @@
                   "type": "string",
                   "minLength": 1
                 },
-                "description": "메서드 이름 (그 타입에 선언된 것)"
+                "description": "메서드 이름 (예 Update) — 범위 타입에 선언된 것"
               }
             }
           },
           {
             "title": "methods.coroutine — 코루틴 (IEnumerator · IEnumerator<T> 반환 일반 메서드) (→ Methods)",
+            "description": "범위 안 클래스에서 코루틴(IEnumerator를 돌려주는 메서드)만 고릅니다. 예: MonoBehaviour → 코루틴 → 코루틴 안의 new WaitForSeconds 찾기",
             "type": "object",
             "required": [
               "kind",
@@ -123,6 +126,7 @@
           },
           {
             "title": "methods.follow — 호출 따라가기 (→ Methods)",
+            "description": "고른 메서드가 부르는 같은 클래스의 메서드까지 따라가서 범위에 넣습니다. depth만큼 몇 단계 따라갈지 정합니다. 예: Update → 호출 따라가기(1) → Update가 부르는 Move() 안도 검사",
             "type": "object",
             "required": [
               "kind",
@@ -142,12 +146,13 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 2,
-                "description": "같은 클래스 일반 메서드를 몇 단계까지 따라갈지"
+                "description": "같은 클래스의 일반 메서드를 몇 단계까지 따라갈지 (0 = 따라가지 않음)"
               }
             }
           },
           {
             "title": "sites.member — 멤버 사용 (→ Sites)",
+            "description": "특정 함수 · 속성 · 필드를 쓰는 곳을 찾습니다. 부르기 · 읽기 · 쓰기 · 비교 중 어떤 쓰임만 볼지도 고를 수 있습니다. 예: UnityEngine.Debug.Log → Debug.Log(...)를 부른 줄마다 걸림",
             "type": "object",
             "required": [
               "kind",
@@ -170,7 +175,7 @@
                   "type": "string",
                   "minLength": 1
                 },
-                "description": "\"타입 메타데이터 이름.멤버 이름\" (오버로드 · 오버라이드 포함) 또는 \"타입 메타데이터 이름.*\" (그 타입에 선언된 메서드 · 속성 · 필드 전부)"
+                "description": "\"타입 전체 이름.멤버 이름\" (예 UnityEngine.Debug.Log — 오버로드 · 오버라이드 포함) 또는 \"타입 전체 이름.*\" (그 타입에 선언된 메서드 · 속성 · 필드 전부)"
               },
               "uses": {
                 "type": "array",
@@ -183,12 +188,13 @@
                     "compare"
                   ]
                 },
-                "description": "쓰임 (없으면 전부). compare = == · != 의 한쪽 (비교도 읽기라서 read를 고르면 비교도 들어감)"
+                "description": "쓰임 (없으면 전부). call = 부르기, read = 읽기, write = 쓰기, compare = == · != 의 한쪽 (비교도 읽기라서 read를 고르면 비교도 들어감)"
               }
             }
           },
           {
             "title": "sites.namespace — 네임스페이스 사용 (→ Sites)",
+            "description": "어떤 네임스페이스(와 그 아래)의 타입 · 멤버 · using을 쓰는 곳을 찾습니다. 예: UnityEditor → 런타임 코드에서 UnityEditor를 쓴 곳 찾기",
             "type": "object",
             "required": [
               "kind",
@@ -211,16 +217,17 @@
                   "type": "string",
                   "minLength": 1
                 },
-                "description": "네임스페이스 (하위 포함)"
+                "description": "네임스페이스 (예 UnityEditor — 그 아래 네임스페이스 포함)"
               },
               "usings": {
                 "type": "boolean",
-                "description": "using 지시문도 (기본 true)"
+                "description": "using 지시문도 걸지 (기본 true)"
               }
             }
           },
           {
             "title": "sites.declaredInDefine — 디파인 안 선언 사용 (→ Sites)",
+            "description": "#if 디파인 안에만 선언된 것을 디파인 밖에서 쓰는 곳을 찾습니다. 빌드에서 그 디파인이 꺼지면 컴파일이 깨지는 코드를 미리 잡습니다. 예: UNITY_EDITOR → #if UNITY_EDITOR 안에만 있는 메서드를 밖에서 부른 곳",
             "type": "object",
             "required": [
               "kind",
@@ -239,12 +246,13 @@
               "define": {
                 "type": "string",
                 "minLength": 1,
-                "description": "이 디파인 안에만 선언된 것(같은 어셈블리)을 쓰는 곳"
+                "description": "디파인 (예 UNITY_EDITOR) — 이 #if 안에만 선언된 것(같은 어셈블리)을 쓰는 곳"
               }
             }
           },
           {
             "title": "sites.nullOperator — null 연산자 (→ Sites)",
+            "description": "?. · ?? · ??= · is null을 쓴 곳을 찾습니다. Unity 오브젝트는 파괴돼도 이 연산자로는 null이 아니라서 자주 잡는 규칙입니다. 예: null 연산자 → 대상 타입(UnityEngine.Object) → Unity 오브젝트에 쓴 ?. 찾기",
             "type": "object",
             "required": [
               "kind",
@@ -276,6 +284,7 @@
           },
           {
             "title": "sites.new — 객체 생성 (→ Sites)",
+            "description": "new로 객체 · 배열을 만드는 곳을 찾습니다. 매 프레임 돌면 가비지가 쌓이는 코드를 찾을 때 씁니다. 예: Update → 객체 생성 → 대상 타입(참조 형식) → Update 안 new List 찾기",
             "type": "object",
             "required": [
               "kind",
@@ -294,6 +303,7 @@
           },
           {
             "title": "sites.boxing — 박싱 변환 (→ Sites)",
+            "description": "값 형식(int · struct)이 object · 인터페이스로 바뀌며 힙에 복사되는(박싱) 곳을 찾습니다. 예: Update → 박싱 변환 → Update 안 박싱 찾기",
             "type": "object",
             "required": [
               "kind",
@@ -312,6 +322,7 @@
           },
           {
             "title": "sites.stringConcat — 문자열 연결 · 보간 (→ Sites)",
+            "description": "문자열을 + · += · $\"…\"로 이어 붙이는 곳을 찾습니다. 매번 새 문자열이 만들어집니다. 예: Update → 문자열 연결 → Update 안 \"HP: \" + hp 찾기",
             "type": "object",
             "required": [
               "kind",
@@ -330,6 +341,7 @@
           },
           {
             "title": "sites.lambda — 람다 (→ Sites)",
+            "description": "람다(() => …)를 만드는 곳을 찾습니다. 기본은 바깥 변수를 붙잡는(캡처) 람다만 — 그런 람다는 만들 때마다 가비지가 생깁니다. 예: Update → 람다 → Update 안 캡처 람다 찾기",
             "type": "object",
             "required": [
               "kind",
@@ -351,7 +363,177 @@
             }
           },
           {
+            "title": "sites.declaration — 선언 (→ Sites)",
+            "description": "클래스 · enum · 메서드 같은 선언 자체를 찾습니다. static · 확장 메서드 · 접근 수준으로 좁힐 수 있고, 이름 · 자리 필터와 이어 이름 규칙 · 선언 위치 규칙을 만듭니다. 예: 선언(method, 확장 메서드) → 이름(E_로 시작, notMatching) → E_ 없는 확장 메서드 찾기",
+            "type": "object",
+            "required": [
+              "kind",
+              "from",
+              "kinds"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "sites.declaration"
+              },
+              "from": {
+                "type": "string",
+                "description": "받는 소켓: Scope · Types · Methods"
+              },
+              "kinds": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "enum": [
+                    "class",
+                    "struct",
+                    "interface",
+                    "enum",
+                    "delegate",
+                    "method",
+                    "property",
+                    "field",
+                    "event"
+                  ]
+                },
+                "description": "찾을 선언 종류 (record는 class · struct로). method는 일반 메서드만 — 생성자 · 연산자 · 접근자 · 로컬 함수 · 명시적 인터페이스 구현은 빠짐"
+              },
+              "static": {
+                "type": "boolean",
+                "description": "true = static만 (static class · const 포함), false = static 아닌 것만, 비우면 상관없음"
+              },
+              "extension": {
+                "type": "boolean",
+                "description": "true = 확장 메서드(this 매개변수)만, false = 확장 메서드 아닌 것만, 비우면 상관없음"
+              },
+              "accessibility": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "enum": [
+                    "public",
+                    "internal",
+                    "protected",
+                    "private"
+                  ]
+                },
+                "description": "이 접근 수준으로 선언된 것만 (없으면 전부). 안 적은 선언은 C# 기본값 — 최상위 타입 internal, 멤버 · 중첩 타입 private (인터페이스 멤버는 public). protected internal은 protected · internal, private protected는 private · protected 둘 다로 본다"
+              }
+            }
+          },
+          {
+            "title": "filter.name — 이름 (→ Sites)",
+            "description": "선언의 이름으로 거릅니다. notMatching을 고르면 규칙을 어긴 이름만 남습니다. 선언(sites.declaration) 뒤에만 뜻이 있습니다. 예: 선언(enum) → 이름(정규식 ^E[A-Z], notMatching) → E로 시작 안 하는 enum",
+            "type": "object",
+            "required": [
+              "kind",
+              "from",
+              "keep"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "filter.name"
+              },
+              "from": {
+                "type": "string",
+                "description": "받는 소켓: Sites"
+              },
+              "startsWith": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "description": "이 가운데 하나로 시작하면 맞음 (대소문자 가림)"
+              },
+              "pattern": {
+                "type": "string",
+                "minLength": 1,
+                "description": ".NET 정규식 — 이름 일부만 맞아도 맞음 (전체는 ^…$). 둘 다 쓰면 둘 다 맞아야 맞음"
+              },
+              "keep": {
+                "enum": [
+                  "matching",
+                  "notMatching"
+                ],
+                "description": "matching = 맞는 이름만 남김, notMatching = 안 맞는 이름만 남김 (규칙을 어긴 이름 찾기). 이름은 선언 사이트에만 있다 — 다른 사이트는 늘 빠짐"
+              }
+            },
+            "anyOf": [
+              {
+                "required": [
+                  "startsWith"
+                ]
+              },
+              {
+                "required": [
+                  "pattern"
+                ]
+              }
+            ]
+          },
+          {
+            "title": "filter.location — 코드 자리 (파일 · 클래스) (→ Sites)",
+            "description": "코드가 있는 파일 · 감싸는 클래스로 거릅니다. 파일 이름이나 폴더, 클래스 이름이 바뀌면 이 칸만 고치면 됩니다. 어느 사이트 뒤에나 이을 수 있습니다. 예: 선언(enum) → 코드 자리(CommonEnum.cs · CommonEnum 클래스, outside) → 밖에 선언된 enum",
+            "type": "object",
+            "required": [
+              "kind",
+              "from",
+              "where"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "filter.location"
+              },
+              "from": {
+                "type": "string",
+                "description": "받는 소켓: Sites"
+              },
+              "paths": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "description": "파일 이름 · 경로 패턴 — 경로 끝부분과 맞춘다 (대소문자 무시, \\ · / 같음, 경로에 Assets · Packages 폴더가 있으면 거기부터만 봄). * = 폴더 이름 하나 안 아무 글자, ** = 폴더 여러 단계. 예 CommonEnum.cs · Editor/** · Assets/Scripts/*.cs"
+              },
+              "types": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "description": "감싸는 클래스 이름 (바깥 어느 단계든). 점이 없으면 이름만(CommonEnum), 있으면 네임스페이스까지 쓴 이름(Game.CommonEnum, 중첩은 Outer+Inner)"
+              },
+              "where": {
+                "enum": [
+                  "inside",
+                  "outside"
+                ],
+                "description": "inside = 그 자리 안만, outside = 밖만. paths · types를 둘 다 쓰면 \"그 파일 안이면서 그 클래스 안\"이 안"
+              }
+            },
+            "anyOf": [
+              {
+                "required": [
+                  "paths"
+                ]
+              },
+              {
+                "required": [
+                  "types"
+                ]
+              }
+            ]
+          },
+          {
             "title": "filter.targetType — 대상 타입 (→ Sites)",
+            "description": "찾은 곳이 다루는 값의 타입으로 거릅니다. 그 타입 계열만, 또는 참조 형식(class) · 값 형식(struct)만 남깁니다. 예: 객체 생성 → 대상 타입(참조 형식) → struct 생성은 빼고 class 생성만",
             "type": "object",
             "required": [
               "kind",
@@ -369,7 +551,7 @@
               "type": {
                 "type": "string",
                 "minLength": 1,
-                "description": "사이트가 다루는 식의 정적 타입이 이 타입 계열인 것만 (대상 타입이 있는 사이트: null 연산자 · 멤버 사용 · 객체 생성 · 박싱)"
+                "description": "타입 전체 이름 — 찾은 곳이 다루는 값의 타입이 이 계열인 것만 (대상 타입이 있는 사이트: null 연산자 · 멤버 사용 · 객체 생성 · 박싱)"
               },
               "category": {
                 "enum": [
@@ -394,6 +576,7 @@
           },
           {
             "title": "filter.context — 맥락 (→ Sites)",
+            "description": "반복문 안 · 람다 안에 있는 것만(또는 밖만) 남깁니다. 예: 코루틴 → 객체 생성 → 맥락(loop, inside) → 코루틴 반복문 안 new만",
             "type": "object",
             "required": [
               "kind",
@@ -428,6 +611,7 @@
           },
           {
             "title": "filter.define — 디파인 가드 (→ Sites)",
+            "description": "#if 디파인 안에 있는 코드만(또는 밖만) 남깁니다. 예: UNITY_EDITOR · outside → 에디터 전용 구간의 코드는 빼고 봄",
             "type": "object",
             "required": [
               "kind",
@@ -447,7 +631,7 @@
               "define": {
                 "type": "string",
                 "minLength": 1,
-                "description": "디파인"
+                "description": "디파인 (예 UNITY_EDITOR)"
               },
               "where": {
                 "enum": [
@@ -460,6 +644,7 @@
           },
           {
             "title": "sites.union — 합치기 (→ Sites)",
+            "description": "여러 노드에서 찾은 곳을 하나로 합칩니다. 같은 자리는 한 번만 알립니다. 예: 멤버 사용 A + 멤버 사용 B → 합치기 → 보고 하나",
             "type": "object",
             "required": [
               "kind",
@@ -482,6 +667,7 @@
           },
           {
             "title": "groups.by — 묶기 (→ Groups)",
+            "description": "찾은 곳을 메서드마다(또는 메서드 안 같은 대상마다) 묶습니다. 개수 노드와 함께 \"한 메서드에 N번 이상\" 규칙을 만듭니다. 예: transform 읽기 → 묶기(methodAndTarget) → 개수(4) → 같은 transform을 4번 이상 읽는 메서드",
             "type": "object",
             "required": [
               "kind",
@@ -508,6 +694,7 @@
           },
           {
             "title": "groups.pair — 짝 묶기 (→ Groups)",
+            "description": "두 흐름(a · b)이 같은 메서드 안에 둘 다 있는 묶음만 남깁니다. 예: position 쓰기(a) + rotation 쓰기(b) → 짝 묶기 → SetPositionAndRotation으로 합칠 곳",
             "type": "object",
             "required": [
               "kind",
@@ -539,6 +726,7 @@
           },
           {
             "title": "groups.count — 개수 (→ Groups)",
+            "description": "묶음 안에 찾은 곳이 min개 이상인 묶음만 남깁니다. 예: 묶기 → 개수(4) → 4번 이상인 메서드만",
             "type": "object",
             "required": [
               "kind",
@@ -558,12 +746,13 @@
                 "type": "integer",
                 "minimum": 2,
                 "maximum": 100,
-                "description": "사이트가 이 수 이상인 묶음만"
+                "description": "찾은 곳이 이 수 이상인 묶음만"
               }
             }
           },
           {
             "title": "report — 보고",
+            "description": "규칙의 끝입니다. 여기까지 온 곳마다 IDE · Unity 콘솔에 경고(또는 오류)를 띄웁니다. 메시지에는 어떻게 고칠지를 적습니다. 예: \"Debug 대신 HLog를 쓰세요\"",
             "type": "object",
             "required": [
               "kind",
@@ -582,7 +771,7 @@
               "message": {
                 "type": "string",
                 "minLength": 1,
-                "description": "진단 메시지 (Groups를 받으면 묶음마다 하나 — 첫 사이트 위치, 나머지는 추가 위치)"
+                "description": "경고 메시지 — 어떻게 고칠지 적는다 (Groups를 받으면 묶음마다 하나 — 첫 위치에 뜨고 나머지는 추가 위치)"
               },
               "appendPath": {
                 "type": "boolean",

@@ -1,0 +1,12 @@
+{
+  "$schema": "./hblint.schema.json",
+  "version": 1,
+  "id": "CLL0014",
+  "title": "확장 메서드 이름은 E_로 시작 — 클라 static 헬퍼의 확장 메서드는 E_를 붙인다.",
+  "severity": "warning",
+  "nodes": {
+    "extensionMethods": { "kind": "sites.declaration", "from": "scope", "kinds": ["method"], "extension": true },
+    "noPrefix": { "kind": "filter.name", "from": "extensionMethods", "startsWith": ["E_"], "keep": "notMatching" },
+    "report": { "kind": "report", "from": "noPrefix", "message": "확장 메서드 이름은 E_로 시작하세요 (예 E_ToKey)." }
+  }
+}

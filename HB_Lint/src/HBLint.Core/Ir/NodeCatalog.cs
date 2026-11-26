@@ -126,6 +126,9 @@ namespace HBLint.Core.Ir
         public static readonly string[] TypeCategories = { "reference", "value" };
         public static readonly string[] Contexts = { "loop", "lambda" };
         public static readonly string[] GroupKeys = { "method", "methodAndTarget" };
+        public static readonly string[] DeclarationKinds = { "class", "struct", "interface", "enum", "delegate", "method", "property", "field", "event" };
+        public static readonly string[] Accessibilities = { "public", "internal", "protected", "private" };
+        public static readonly string[] NameKeeps = { "matching", "notMatching" };
 
         /// <summary>sites.member의 members에서 "타입.*" = 그 타입에 선언된 멤버 전부.</summary>
         public const string AllMembers = "*";
@@ -136,34 +139,34 @@ namespace HBLint.Core.Ir
         {
             new NodeSpec("types.derived", "타입 계열", Socket.Types,
                 new[] { new InputSpec("from", false, Socket.Scope, Socket.Types) },
-                new[] { new FieldSpec("type", FieldType.String, true, "기준 타입 메타데이터 이름 (그 타입과 자식, 인터페이스면 구현 타입)") { Hint = FieldHint.Type } }),
+                new[] { new FieldSpec("type", FieldType.String, true, "기준 타입 전체 이름 — 네임스페이스까지 (예 UnityEngine.MonoBehaviour). 그 타입과 자식, 인터페이스면 구현 타입이 범위") { Hint = FieldHint.Type } }),
             new NodeSpec("methods.named", "메서드 이름", Socket.Methods,
                 new[] { new InputSpec("from", false, Socket.Types) },
-                new[] { new FieldSpec("names", FieldType.StringArray, true, "메서드 이름 (그 타입에 선언된 것)") }),
+                new[] { new FieldSpec("names", FieldType.StringArray, true, "메서드 이름 (예 Update) — 범위 타입에 선언된 것") }),
             // 반환형만 본다 — IEnumerable 구현의 GetEnumerator 같은 코루틴 아닌 메서드도 들어간다
             new NodeSpec("methods.coroutine", "코루틴 (IEnumerator · IEnumerator<T> 반환 일반 메서드)", Socket.Methods,
                 new[] { new InputSpec("from", false, Socket.Types) },
                 new FieldSpec[0]),
             new NodeSpec("methods.follow", "호출 따라가기", Socket.Methods,
                 new[] { new InputSpec("from", false, Socket.Methods) },
-                new[] { new FieldSpec("depth", FieldType.Int, true, "같은 클래스 일반 메서드를 몇 단계까지 따라갈지") { Min = 0, Max = 2 } }),
+                new[] { new FieldSpec("depth", FieldType.Int, true, "같은 클래스의 일반 메서드를 몇 단계까지 따라갈지 (0 = 따라가지 않음)") { Min = 0, Max = 2 } }),
             new NodeSpec("sites.member", "멤버 사용", Socket.Sites,
                 new[] { new InputSpec("from", false, SiteSources) },
                 new[]
                 {
-                    new FieldSpec("members", FieldType.StringArray, true, "\"타입 메타데이터 이름.멤버 이름\" (오버로드 · 오버라이드 포함) 또는 \"타입 메타데이터 이름.*\" (그 타입에 선언된 메서드 · 속성 · 필드 전부)") { Hint = FieldHint.Member },
-                    new FieldSpec("uses", FieldType.ChoiceArray, false, "쓰임 (없으면 전부). compare = == · != 의 한쪽 (비교도 읽기라서 read를 고르면 비교도 들어감)") { Choices = MemberUses },
+                    new FieldSpec("members", FieldType.StringArray, true, "\"타입 전체 이름.멤버 이름\" (예 UnityEngine.Debug.Log — 오버로드 · 오버라이드 포함) 또는 \"타입 전체 이름.*\" (그 타입에 선언된 메서드 · 속성 · 필드 전부)") { Hint = FieldHint.Member },
+                    new FieldSpec("uses", FieldType.ChoiceArray, false, "쓰임 (없으면 전부). call = 부르기, read = 읽기, write = 쓰기, compare = == · != 의 한쪽 (비교도 읽기라서 read를 고르면 비교도 들어감)") { Choices = MemberUses },
                 }),
             new NodeSpec("sites.namespace", "네임스페이스 사용", Socket.Sites,
                 new[] { new InputSpec("from", false, SiteSources) },
                 new[]
                 {
-                    new FieldSpec("namespaces", FieldType.StringArray, true, "네임스페이스 (하위 포함)") { Hint = FieldHint.Namespace },
-                    new FieldSpec("usings", FieldType.Bool, false, "using 지시문도 (기본 true)"),
+                    new FieldSpec("namespaces", FieldType.StringArray, true, "네임스페이스 (예 UnityEditor — 그 아래 네임스페이스 포함)") { Hint = FieldHint.Namespace },
+                    new FieldSpec("usings", FieldType.Bool, false, "using 지시문도 걸지 (기본 true)"),
                 }),
             new NodeSpec("sites.declaredInDefine", "디파인 안 선언 사용", Socket.Sites,
                 new[] { new InputSpec("from", false, SiteSources) },
-                new[] { new FieldSpec("define", FieldType.String, true, "이 디파인 안에만 선언된 것(같은 어셈블리)을 쓰는 곳") { Hint = FieldHint.Define } }),
+                new[] { new FieldSpec("define", FieldType.String, true, "디파인 (예 UNITY_EDITOR) — 이 #if 안에만 선언된 것(같은 어셈블리)을 쓰는 곳") { Hint = FieldHint.Define } }),
             new NodeSpec("sites.nullOperator", "null 연산자", Socket.Sites,
                 new[] { new InputSpec("from", false, SiteSources) },
                 new[] { new FieldSpec("operators", FieldType.ChoiceArray, false, "연산자 (없으면 전부, is null은 is not null · 복합 패턴 포함)") { Choices = NullOperators } }),
@@ -179,11 +182,38 @@ namespace HBLint.Core.Ir
             new NodeSpec("sites.lambda", "람다", Socket.Sites,
                 new[] { new InputSpec("from", false, SiteSources) },
                 new[] { new FieldSpec("capturingOnly", FieldType.Bool, false, "지역 · 매개변수 · this를 캡처하는 람다만 (기본 true)") }),
+            new NodeSpec("sites.declaration", "선언", Socket.Sites,
+                new[] { new InputSpec("from", false, SiteSources) },
+                new[]
+                {
+                    new FieldSpec("kinds", FieldType.ChoiceArray, true, "찾을 선언 종류 (record는 class · struct로). method는 일반 메서드만 — 생성자 · 연산자 · 접근자 · 로컬 함수 · 명시적 인터페이스 구현은 빠짐") { Choices = DeclarationKinds },
+                    new FieldSpec("static", FieldType.Bool, false, "true = static만 (static class · const 포함), false = static 아닌 것만, 비우면 상관없음"),
+                    new FieldSpec("extension", FieldType.Bool, false, "true = 확장 메서드(this 매개변수)만, false = 확장 메서드 아닌 것만, 비우면 상관없음"),
+                    new FieldSpec("accessibility", FieldType.ChoiceArray, false, "이 접근 수준으로 선언된 것만 (없으면 전부). 안 적은 선언은 C# 기본값 — 최상위 타입 internal, 멤버 · 중첩 타입 private (인터페이스 멤버는 public). protected internal은 protected · internal, private protected는 private · protected 둘 다로 본다") { Choices = Accessibilities },
+                }),
+            new NodeSpec("filter.name", "이름", Socket.Sites,
+                new[] { new InputSpec("from", false, Socket.Sites) },
+                new[]
+                {
+                    new FieldSpec("startsWith", FieldType.StringArray, false, "이 가운데 하나로 시작하면 맞음 (대소문자 가림)"),
+                    new FieldSpec("pattern", FieldType.String, false, ".NET 정규식 — 이름 일부만 맞아도 맞음 (전체는 ^…$). 둘 다 쓰면 둘 다 맞아야 맞음"),
+                    new FieldSpec("keep", FieldType.Choice, true, "matching = 맞는 이름만 남김, notMatching = 안 맞는 이름만 남김 (규칙을 어긴 이름 찾기). 이름은 선언 사이트에만 있다 — 다른 사이트는 늘 빠짐") { Choices = NameKeeps },
+                },
+                requireOneOf: new[] { "startsWith", "pattern" }),
+            new NodeSpec("filter.location", "코드 자리 (파일 · 클래스)", Socket.Sites,
+                new[] { new InputSpec("from", false, Socket.Sites) },
+                new[]
+                {
+                    new FieldSpec("paths", FieldType.StringArray, false, "파일 이름 · 경로 패턴 — 경로 끝부분과 맞춘다 (대소문자 무시, \\ · / 같음, 경로에 Assets · Packages 폴더가 있으면 거기부터만 봄). * = 폴더 이름 하나 안 아무 글자, ** = 폴더 여러 단계. 예 CommonEnum.cs · Editor/** · Assets/Scripts/*.cs"),
+                    new FieldSpec("types", FieldType.StringArray, false, "감싸는 클래스 이름 (바깥 어느 단계든). 점이 없으면 이름만(CommonEnum), 있으면 네임스페이스까지 쓴 이름(Game.CommonEnum, 중첩은 Outer+Inner)"),
+                    new FieldSpec("where", FieldType.Choice, true, "inside = 그 자리 안만, outside = 밖만. paths · types를 둘 다 쓰면 \"그 파일 안이면서 그 클래스 안\"이 안") { Choices = GuardPositions },
+                },
+                requireOneOf: new[] { "paths", "types" }),
             new NodeSpec("filter.targetType", "대상 타입", Socket.Sites,
                 new[] { new InputSpec("from", false, Socket.Sites) },
                 new[]
                 {
-                    new FieldSpec("type", FieldType.String, false, "사이트가 다루는 식의 정적 타입이 이 타입 계열인 것만 (대상 타입이 있는 사이트: null 연산자 · 멤버 사용 · 객체 생성 · 박싱)") { Hint = FieldHint.Type },
+                    new FieldSpec("type", FieldType.String, false, "타입 전체 이름 — 찾은 곳이 다루는 값의 타입이 이 계열인 것만 (대상 타입이 있는 사이트: null 연산자 · 멤버 사용 · 객체 생성 · 박싱)") { Hint = FieldHint.Type },
                     new FieldSpec("category", FieldType.Choice, false, "대상 타입이 참조 형식(reference) · 값 형식(value)인 것만 (타입 매개변수는 class · struct 제약으로)") { Choices = TypeCategories },
                 },
                 requireOneOf: new[] { "type", "category" }),
@@ -198,7 +228,7 @@ namespace HBLint.Core.Ir
                 new[] { new InputSpec("from", false, Socket.Sites) },
                 new[]
                 {
-                    new FieldSpec("define", FieldType.String, true, "디파인") { Hint = FieldHint.Define },
+                    new FieldSpec("define", FieldType.String, true, "디파인 (예 UNITY_EDITOR)") { Hint = FieldHint.Define },
                     new FieldSpec("where", FieldType.Choice, true, "그 디파인이 없으면 꺼지는 구간 안(inside) · 밖(outside)") { Choices = GuardPositions },
                 }),
             new NodeSpec("sites.union", "합치기", Socket.Sites,
@@ -212,12 +242,12 @@ namespace HBLint.Core.Ir
                 new[] { new FieldSpec("key", FieldType.Choice, true, "groups.by와 같은 기준. a · b가 둘 다 있는 묶음만") { Choices = GroupKeys } }),
             new NodeSpec("groups.count", "개수", Socket.Groups,
                 new[] { new InputSpec("from", false, Socket.Groups) },
-                new[] { new FieldSpec("min", FieldType.Int, true, "사이트가 이 수 이상인 묶음만") { Min = 2, Max = 100 } }),
+                new[] { new FieldSpec("min", FieldType.Int, true, "찾은 곳이 이 수 이상인 묶음만") { Min = 2, Max = 100 } }),
             new NodeSpec(ReportKind, "보고", null,
                 new[] { new InputSpec("from", false, Socket.Sites, Socket.Groups) },
                 new[]
                 {
-                    new FieldSpec("message", FieldType.String, true, "진단 메시지 (Groups를 받으면 묶음마다 하나 — 첫 사이트 위치, 나머지는 추가 위치)"),
+                    new FieldSpec("message", FieldType.String, true, "경고 메시지 — 어떻게 고칠지 적는다 (Groups를 받으면 묶음마다 하나 — 첫 위치에 뜨고 나머지는 추가 위치)"),
                     new FieldSpec("appendPath", FieldType.Bool, false, "따라가서 닿은 곳이면 메시지 끝에 (Update → A) 경로를 붙임 (기본 true)"),
                 }),
         };

@@ -1,0 +1,12 @@
+{
+  "$schema": "./hblint.schema.json",
+  "version": 1,
+  "id": "CLL0015",
+  "title": "enum 이름은 E + 대문자로 시작 (EState O, Enemy · State X).",
+  "severity": "warning",
+  "nodes": {
+    "enums": { "kind": "sites.declaration", "from": "scope", "kinds": ["enum"] },
+    "noPrefix": { "kind": "filter.name", "from": "enums", "pattern": "^E[A-Z]", "keep": "notMatching" },
+    "report": { "kind": "report", "from": "noPrefix", "message": "enum 이름은 E로 시작하세요 (예 EState)." }
+  }
+}

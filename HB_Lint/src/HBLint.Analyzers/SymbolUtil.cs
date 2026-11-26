@@ -106,10 +106,20 @@ namespace HBLint.Analyzers
             return left == null ? null : left + "." + member.Name;
         }
 
-        /// <summary>코드를 직접 감싸는 타입 선언의 타입 (중첩 타입이면 안쪽).</summary>
+        /// <summary>메타데이터 이름 (Game.Outer+Inner, 제네릭은 List`1) — GetTypeByMetadataName에 넣는 꼴.</summary>
+        public static string MetadataName(INamedTypeSymbol type)
+        {
+            var name = type.MetadataName;
+            for (var outer = type.ContainingType; outer != null; outer = outer.ContainingType)
+                name = outer.MetadataName + "+" + name;
+            var ns = type.ContainingNamespace;
+            return ns == null || ns.IsGlobalNamespace ? name : ns.ToDisplayString() + "." + name;
+        }
+
+        /// <summary>코드를 직접 감싸는 타입 선언의 타입 (중첩 타입이면 안쪽, delegate 선언도 타입).</summary>
         public static INamedTypeSymbol? ContainingType(SyntaxNode syntax, SemanticModel model, CancellationToken cancellationToken)
         {
-            var declaration = syntax.AncestorsAndSelf().OfType<BaseTypeDeclarationSyntax>().FirstOrDefault();
+            var declaration = syntax.AncestorsAndSelf().FirstOrDefault(n => n is BaseTypeDeclarationSyntax || n is DelegateDeclarationSyntax);
             return declaration == null ? null : model.GetDeclaredSymbol(declaration, cancellationToken) as INamedTypeSymbol;
         }
     }
