@@ -1004,6 +1004,16 @@
             term.open(box);
             const v = { id, term, fit, box, end: 0, pending: [], cols: 0, rows: 0 };
             termViews.set(id, v);
+            // Windows 터미널처럼: Ctrl+C는 고른 글이 있으면 복사(없으면 셸에 ^C), Ctrl+V는 xterm이 ^V로 보내지 않고 브라우저 붙여넣기로 —
+            // paste 이벤트가 onData로 들어온다. 키 자리(code)로 본다 (한글 입력 상태에서도)
+            term.attachCustomKeyEventHandler(e => {
+                if (!e.ctrlKey || e.shiftKey || e.altKey || e.metaKey) return true;
+                if (e.code === "KeyC" && term.hasSelection()) {
+                    if (e.type === "keydown") { copyText(term.getSelection()); term.clearSelection(); }
+                    return false;
+                }
+                return !(e.code === "KeyV" && shell);
+            });
             // 키 입력(내 셸만): 앞 요청이 끝난 뒤 보낸다 (순서가 바뀌면 명령이 섞인다). 붙여넣기는 한 번에 1,000자씩 — 서버 상한 4KB
             if (shell) term.onData(d => {
                 for (let i = 0; i < d.length; i += 1000) {
