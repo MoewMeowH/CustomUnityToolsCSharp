@@ -1,15 +1,18 @@
 import { useEffect, useState } from 'react';
-import type { NameProblem, IrError } from './api';
+import type { NameProblem, IrError, SettingsDto } from './api';
 import type { Catalog, FieldSpec } from './catalog';
 import { findSpec } from './catalog';
 import { nodeData, noteOf, renameProblem, SCOPE, type Json, type RuleDoc } from './model';
 import { SymbolInput } from './SymbolInput';
+import { scopeSummary, type ScopeEntry } from './rules';
 
 interface Props {
   catalog: Catalog;
   doc: RuleDoc;
   selected: string | null;
   projectLoaded: boolean;
+  /** 규칙 폴더 공통 설정 — 머리 칸에 "이 규칙에서 빠지는 것"을 보일 때. */
+  settings: SettingsDto | null;
   errors: IrError[];
   names: NameProblem[];
   onField: (node: string, field: string, value: Json | undefined) => void;
@@ -161,6 +164,7 @@ export function Inspector(props: Props) {
           )}
         </div>
       ))}
+      {isScope && <ScopeBox settings={props.settings} head={data} />}
       {spec?.requireOneOf && <small className="hint">{spec.requireOneOf.join(' · ')} 가운데 하나 이상</small>}
       <div className="field">
         <label>메모 (layout — 분석기에는 넘기지 않음)</label>
@@ -174,6 +178,45 @@ export function Inspector(props: Props) {
       )}
       {!isScope && <button className="danger" onClick={() => props.onDelete(selected)}>노드 지우기 (Delete)</button>}
     </aside>
+  );
+}
+
+function ScopeList(props: { title: string; entries: ScopeEntry[] }) {
+  if (props.entries.length === 0) return null;
+  return (
+    <div className="scope-row">
+      <b>{props.title}</b>
+      {props.entries.map((e) => (
+        <span key={e.pattern} className={`scope-chip ${e.source}`} title={e.source === 'common' ? '공통 설정에서' : '이 규칙에서'}>
+          {e.pattern} <small>{e.source === 'common' ? '공통' : '규칙'}</small>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** 이 규칙에서 빠지는 것 — 공통 설정 + 머리 칸. 다시 넣기에 맞으면 빠지지 않는다 (분석기와 같은 판정). */
+function ScopeBox(props: { settings: SettingsDto | null; head: Record<string, unknown> }) {
+  const s = scopeSummary(props.settings?.ok ? props.settings : null, props.head);
+  const empty = s.ignoreAssemblies.length + s.ignorePaths.length + s.includeAssemblies.length + s.includePaths.length === 0;
+  return (
+    <div className="scope-box">
+      <div className="scope-head">이 규칙에서 빠지는 것</div>
+      {empty && <small className="muted">없음 — 모든 어셈블리 · 파일을 검사합니다.</small>}
+      <ScopeList title="어셈블리" entries={s.ignoreAssemblies} />
+      <ScopeList title="경로" entries={s.ignorePaths} />
+      {(s.includeAssemblies.length > 0 || s.includePaths.length > 0) && (
+        <div className="scope-row">
+          <b>다시 넣음</b>
+          {s.includeAssemblies.map((p, i) => <span key={'a' + i} className="scope-chip include" title="어셈블리">{p}</span>)}
+          {s.includePaths.map((p, i) => <span key={'p' + i} className="scope-chip include" title="경로">{p}</span>)}
+        </div>
+      )}
+      {s.includeAssemblies.length > 0 && s.includePaths.length === 0 && s.ignorePaths.length > 0 && (
+        <small className="muted">어셈블리만 다시 넣었습니다 — 경로 제외는 따로라, 다시 넣은 어셈블리의 파일이 위 경로에 있으면 여전히 빠집니다.</small>
+      )}
+      {props.settings && !props.settings.ok && <div className="field-problem">공통 설정 파일에 오류가 있어 공통 제외를 뺀 채 보입니다 (도구줄 "공통 설정").</div>}
+    </div>
   );
 }
 

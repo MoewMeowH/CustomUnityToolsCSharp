@@ -24,7 +24,7 @@ namespace HBLint.Core.Help
     {
         /// <summary>규칙 시작(머리 칸) 노드.</summary>
         public static readonly HelpText Scope = new HelpText(
-            "규칙 하나의 출발점입니다. 여기서 프로젝트 코드 전체를 받아 오른쪽 노드로 넘기고, 오른쪽으로 갈수록 범위가 좁아집니다. id · 심각도 · 검사하지 않을 어셈블리도 여기서 정합니다.",
+            "규칙 하나의 출발점입니다. 여기서 프로젝트 코드 전체를 받아 오른쪽 노드로 넘기고, 오른쪽으로 갈수록 범위가 좁아집니다. id · 심각도와, 이 규칙에서 뺄 어셈블리 · 경로(공통 설정에서 뺀 것을 다시 넣기도)를 여기서 정합니다.",
             "규칙 시작 → 선언(enum) → 이름(E로 시작 안 함) → 보고");
 
         /// <summary>노드 kind → 설명. 모든 노드가 있어야 한다 (시험이 확인).</summary>
@@ -121,6 +121,7 @@ namespace HBLint.Core.Help
             Term("디파인", "#if 뒤에 쓰는 기호 (예 UNITY_EDITOR · DEVELOPMENT_BUILD). 빌드마다 켜지고 꺼집니다."),
             Term("필터", "Sites를 받아 조건에 맞는 것만 다시 Sites로 내보내는 노드. 여러 개를 이어 붙일 수 있습니다."),
             Term("inside · outside", "필터가 그 조건 안에 있는 것만 남길지(inside), 밖에 있는 것만 남길지(outside)."),
+            Term("제외 · 다시 넣기", "공통 설정(도구줄 \"공통 설정\")에서 뺀 어셈블리 · 경로는 모든 규칙에서 검사하지 않습니다. 한 규칙에서만 다시 보려면 규칙 시작의 includeAssemblies · includePaths에 적습니다."),
         };
 
         private static KeyValuePair<string, string> Term(string term, string meaning) => new KeyValuePair<string, string>(term, meaning);

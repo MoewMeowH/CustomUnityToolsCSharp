@@ -51,16 +51,18 @@ namespace HBLint.Analyzers
                 }
 
                 var rule = parsed.Rule;
-                if (!rule.Requires.All(referenced.Contains))
-                    continue;
-                if (rule.IgnoreAssemblies.Any(pattern => WildcardMatch(pattern, compilation.AssemblyName ?? "")))
-                    continue;
-                // 같은 id를 두 규칙이 쓰면 id 하나로 둘을 따로 끌 수 없다 — 먼저 읽은 것만 쓴다
+                // 같은 id를 두 규칙이 쓰면 id 하나로 둘을 따로 끌 수 없다 — 먼저 읽은 것만 쓴다.
+                // 적용 여부(requires · 제외)보다 먼저 id를 잡는다 — 먼저 읽은 규칙이 이 어셈블리를 건너뛰어도 뒤의 같은 id 규칙(편집 앱 미리 보기의 옛 생성물 등)이 대신 돌지 않게
                 if (!activeIds.Add(rule.Id))
                 {
                     config.Add(Diagnostic.Create(RuleDescriptors.RuleInvalid, Location.None, source.Owner.Name, rule.Id, "다른 규칙이 이미 같은 id를 씁니다"));
                     continue;
                 }
+                if (!rule.Requires.All(referenced.Contains))
+                    continue;
+                // 제외(공통 설정이 생성 때 합쳐짐 + 규칙)에 맞고 다시 넣기에는 안 맞으면 이 어셈블리는 검사하지 않는다
+                if (rule.SkipsAssembly(compilation.AssemblyName ?? ""))
+                    continue;
                 RulePlan.Build(rule, source.Owner, compilation, guards, config)?.Register(start);
             }
 
@@ -74,9 +76,41 @@ namespace HBLint.Analyzers
             }
         }
 
-        /// <summary>* 와일드카드 패턴 (대소문자 가림).</summary>
-        internal static bool WildcardMatch(string pattern, string value) =>
-            Regex.IsMatch(value, "^" + Regex.Escape(pattern).Replace("\\*", ".*") + "$");
+    }
+
+    /// <summary>
+    /// 규칙 머리의 경로 제외 — 사이트 파일이 ignorePaths에 맞고 includePaths에 안 맞으면 보고하지 않는다.
+    /// 파일(SyntaxTree)마다 한 번만 판정한다 (사이트마다 경로 패턴을 돌리지 않게).
+    /// </summary>
+    internal sealed class PathScope
+    {
+        private readonly PathPattern[] _ignore;
+        private readonly PathPattern[] _include;
+        private readonly ConcurrentDictionary<SyntaxTree, bool> _skipped = new ConcurrentDictionary<SyntaxTree, bool>();
+
+        private PathScope(PathPattern[] ignore, PathPattern[] include)
+        {
+            _ignore = ignore;
+            _include = include;
+        }
+
+        /// <summary>제외 경로가 없으면 null (판정 안 함).</summary>
+        public static PathScope? Create(RuleIr rule)
+        {
+            if (rule.IgnorePaths.Length == 0)
+                return null;
+            // 검증(RuleIr)을 통과했으면 모두 읽힌다
+            PathPattern[] Read(string[] patterns) => patterns.Select(p => PathPattern.Parse(p, out _)).OfType<PathPattern>().ToArray();
+            return new PathScope(Read(rule.IgnorePaths), Read(rule.IncludePaths));
+        }
+
+        public bool Skips(Location location)
+        {
+            var tree = location.SourceTree;
+            if (tree == null || string.IsNullOrEmpty(tree.FilePath))
+                return false;
+            return _skipped.GetOrAdd(tree, t => _ignore.Any(p => p.Matches(t.FilePath)) && !_include.Any(p => p.Matches(t.FilePath)));
+        }
     }
 
     /// <summary>사이트 노드가 받는 범위: Scope(컴파일 전체) · Types(그 타입 계열 안) · Methods(그 메서드 안, 따라가기 포함).</summary>
@@ -192,12 +226,14 @@ namespace HBLint.Analyzers
         private readonly string _id;
         private readonly string _owner;
         private readonly List<NamePattern> _namePatterns;
+        private readonly PathScope? _paths;
 
         private RulePlan(RuleIr rule, string owner, List<ProducerPlan> producers, GroupSpec? group, List<NamePattern> namePatterns)
         {
             _id = rule.Id;
             _owner = owner;
             _namePatterns = namePatterns;
+            _paths = PathScope.Create(rule);
             _descriptor = RuleDescriptors.Rules[rule.Id];
             _severity = rule.Severity == "error" ? DiagnosticSeverity.Error : rule.Severity == "info" ? DiagnosticSeverity.Info : DiagnosticSeverity.Warning;
             _message = rule.Report.GetString("message")!;
@@ -568,6 +604,8 @@ namespace HBLint.Analyzers
                     if (!map.TryGetValue(hit.Container, out path))
                         continue;
                 }
+                if (_paths != null && _paths.Skips(hit.Site.Location))
+                    continue;
                 var inA = hit.Plan.Passes(hit.Site, 0, cancellationToken);
                 var inB = group.Pair && hit.Plan.Passes(hit.Site, 1, cancellationToken);
                 if ((!inA && !inB) || !hit.Plan.Producer.Confirm(hit.Site, cancellationToken))
@@ -666,7 +704,7 @@ namespace HBLint.Analyzers
         /// </summary>
         private void Report(ProducerPlan plan, Site site, string? path, ref HashSet<TextSpan>? seen, Action<Diagnostic> report, System.Threading.CancellationToken cancellationToken)
         {
-            if (!plan.Passes(site, 0, cancellationToken) || !plan.Producer.Confirm(site, cancellationToken))
+            if ((_paths != null && _paths.Skips(site.Location)) || !plan.Passes(site, 0, cancellationToken) || !plan.Producer.Confirm(site, cancellationToken))
                 return;
             seen ??= new HashSet<TextSpan>();
             if (!seen.Add(site.Location.SourceSpan))

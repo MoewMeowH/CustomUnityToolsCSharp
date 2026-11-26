@@ -80,6 +80,76 @@ public class RuleApiTests
     }
 
     [Fact]
+    public async Task 공통_설정_읽기_쓰기와_생성에_합쳐짐()
+    {
+        var (dir, app, rules) = await Open();
+        using (dir)
+        await using (app)
+        {
+            var empty = await Json(await app.Client.GetAsync("/api/settings"));
+            Assert.False(empty.GetProperty("exists").GetBoolean());
+            Assert.True(empty.GetProperty("ok").GetBoolean());
+
+            var saved = await Json(await app.Client.PutAsJsonAsync("/api/settings",
+                new { ignoreAssemblies = new[] { " Assembly-CSharp-firstpass ", "", "Assembly-CSharp-firstpass" }, ignorePaths = new[] { "Plugins/Demigiant/**" } }));
+            Assert.True(saved.GetProperty("exists").GetBoolean());
+            Assert.Equal(["Assembly-CSharp-firstpass"], saved.GetProperty("ignoreAssemblies").EnumerateArray().Select(e => e.GetString()));
+            Assert.True(File.Exists(Path.Combine(rules, RuleSettings.FileName)));
+
+            // 배열 안 null은 빈 항목처럼 뺀다
+            var withNull = await app.Client.PutAsync("/api/settings", new StringContent("""{ "ignoreAssemblies": [null, "Assembly-CSharp-firstpass"], "ignorePaths": ["Plugins/Demigiant/**"] }""", Encoding.UTF8, "application/json"));
+            Assert.True(withNull.IsSuccessStatusCode, await withNull.Content.ReadAsStringAsync());
+
+            // 잘못된 경로 패턴은 쓰지 않는다
+            var bad = await app.Client.PutAsJsonAsync("/api/settings", new { ignoreAssemblies = Array.Empty<string>(), ignorePaths = new[] { "a//b" } });
+            Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
+            Assert.Contains("Plugins/Demigiant/**", File.ReadAllText(Path.Combine(rules, RuleSettings.FileName)));
+
+            var generate = await Json(await app.Client.PostAsync("/api/generate", null));
+            Assert.True(generate.GetProperty("ok").GetBoolean());
+            Assert.Contains("Assembly-CSharp-firstpass", File.ReadAllText(Path.Combine(dir.Path, "out", "LintRules.g.cs")));
+        }
+    }
+
+    [Fact]
+    public async Task 공통_설정에_다시_넣을_것이_없으면_검증_경고()
+    {
+        var (dir, app, _) = await Open();
+        using (dir)
+        await using (app)
+        {
+            const string rule = """{ "version": 1, "id": "CLL0050", "includeAssemblies": ["DOTween.Modules"], "nodes": { "n": { "kind": "sites.new", "from": "scope" }, "r": { "kind": "report", "from": "n", "message": "m" } } }""";
+
+            var before = await Json(await app.Client.PostAsync("/api/validate", Body(rule)));
+            Assert.Contains(before.GetProperty("errors").EnumerateArray(), e => e.GetProperty("message").GetString()!.Contains("includeAssemblies를 적었지만"));
+
+            await Json(await app.Client.PutAsJsonAsync("/api/settings", new { ignoreAssemblies = new[] { "DOTween*" }, ignorePaths = Array.Empty<string>() }));
+            var after = await Json(await app.Client.PostAsync("/api/validate", Body(rule)));
+            Assert.DoesNotContain(after.GetProperty("errors").EnumerateArray(), e => e.GetProperty("message").GetString()!.Contains("includeAssemblies를 적었지만"));
+        }
+    }
+
+    [Fact]
+    public async Task 최근_목록에서_지우기()
+    {
+        var (dir, app, rules) = await Open();
+        using (dir)
+        await using (app)
+        {
+            var other = Path.Combine(dir.Path, "other");
+            Directory.CreateDirectory(other);
+            await app.Open(other, Path.Combine(dir.Path, "out2", "LintRules.g.cs"));
+            var state = await Json(await app.Client.GetAsync("/api/state"));
+            Assert.Equal(2, state.GetProperty("recent").GetArrayLength());
+
+            var after = await Json(await app.Client.PostAsJsonAsync("/api/recent/forget", new { rules }));
+
+            Assert.Equal([other], after.GetProperty("recent").EnumerateArray().Select(r => r.GetProperty("rules").GetString()));
+            Assert.True(Directory.Exists(rules)); // 폴더는 그대로
+        }
+    }
+
+    [Fact]
     public void 다음_id는_빈_번호를_채우지_않음()
     {
         var folder = new RuleFolder(Path.GetTempPath(), "x.cs");
@@ -360,7 +430,7 @@ public class RuleApiTests
         var union = json.GetProperty("nodes").EnumerateArray().Single(n => n.GetProperty("kind").GetString() == "sites.union");
         Assert.True(union.GetProperty("inputs")[0].GetProperty("many").GetBoolean());
         Assert.Equal(JsonValueKind.Null, json.GetProperty("nodes").EnumerateArray().Single(n => n.GetProperty("kind").GetString() == "report").GetProperty("output").ValueKind);
-        Assert.Equal(["id", "title", "severity", "requires", "ignoreAssemblies"], json.GetProperty("head").EnumerateArray().Select(h => h.GetProperty("name").GetString()));
+        Assert.Equal(["id", "title", "severity", "requires", "ignoreAssemblies", "ignorePaths", "includeAssemblies", "includePaths"], json.GetProperty("head").EnumerateArray().Select(h => h.GetProperty("name").GetString()));
     }
 
     [Fact]

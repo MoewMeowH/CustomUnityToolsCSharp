@@ -64,12 +64,23 @@ internal sealed class AppState(AppOptions options)
         }
     }
 
+    /// <summary>최근 목록에서 그 규칙 폴더 항목을 뺀다 (지금 연 것이어도 목록에서만).</summary>
+    public void Forget(string rules)
+    {
+        lock (_gate)
+            Write(Recent().Where(r => !string.Equals(r.Rules, rules, StringComparison.OrdinalIgnoreCase)).ToList());
+    }
+
     private void Remember()
     {
         if (_folder == null)
             return;
         var entry = new RecentEntry(_folder.Folder, _folder.Output, _projectPath, _csproj);
-        var list = Recent().Where(r => !string.Equals(r.Rules, entry.Rules, StringComparison.OrdinalIgnoreCase)).Prepend(entry).Take(MaxRecent).ToList();
+        Write(Recent().Where(r => !string.Equals(r.Rules, entry.Rules, StringComparison.OrdinalIgnoreCase)).Prepend(entry).Take(MaxRecent).ToList());
+    }
+
+    private void Write(List<RecentEntry> list)
+    {
         try
         {
             Directory.CreateDirectory(Options.DataFolder);

@@ -58,6 +58,18 @@ body.resizing { cursor: col-resize; user-select: none; }
 .help-example { color: var(--muted); }
 .help-example b { color: var(--text); margin-right: 4px; }
 .guide-button { margin-left: auto; white-space: nowrap; flex-shrink: 0; }
+.guide-button-next { white-space: nowrap; flex-shrink: 0; }
+.settings-window { width: min(620px, 94vw); }
+.settings-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 8px; }
+.settings-window .notice ul { margin: 4px 0 0; padding-left: 16px; }
+.scope-box { border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; margin: 4px 0 12px; }
+.scope-head { font-weight: 600; margin-bottom: 4px; }
+.scope-row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 3px 0; }
+.scope-row > b { font-size: 11px; color: var(--muted); margin-right: 2px; }
+.scope-chip { font-family: Consolas, monospace; font-size: 11px; padding: 1px 6px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line); }
+.scope-chip small { color: var(--muted); font-family: inherit; }
+.scope-chip.common { border-color: #2f4a63; }
+.scope-chip.include { border-color: #3b6b4b; color: #8fd6a8; }
 .guide-backdrop { position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, 0.45); display: flex; align-items: flex-start; justify-content: center; padding-top: 70px; }
 .guide-window { width: min(560px, 92vw); max-height: calc(100vh - 110px); display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5); }
 .guide-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--line); }
@@ -70,8 +82,8 @@ body.resizing { cursor: col-resize; user-select: none; }
 .guide-body dt { font-weight: 600; margin-top: 6px; }
 .guide-body dd { margin: 1px 0 0; color: var(--muted); }
 
-.rule-picker { position: relative; display: flex; gap: 4px; align-items: center; min-width: 0; flex-shrink: 1; margin-right: 6px; }
-.rule-picker-button { display: flex; gap: 6px; align-items: center; max-width: 340px; min-width: 150px; font-family: Consolas, 'Malgun Gothic', monospace; }
+.rule-picker { position: relative; display: flex; gap: 4px; align-items: center; flex-shrink: 0; margin-right: 6px; }
+.rule-picker-button { display: flex; gap: 6px; align-items: center; width: 260px; font-family: Consolas, 'Malgun Gothic', monospace; }
 .rule-picker-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: left; white-space: pre; }
 .rule-picker .caret { color: var(--muted); }
 .rule-picker > button.small { white-space: nowrap; flex-shrink: 0; }
@@ -86,7 +98,7 @@ body.resizing { cursor: col-resize; user-select: none; }
 .rule-picker-popup .rule-title { grid-column: 2 / 4; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .canvas { flex: 1; position: relative; display: flex; flex-direction: column; min-width: 0; }
-.toolbar { display: flex; gap: 6px; align-items: center; padding: 6px 10px; background: var(--panel); border-bottom: 1px solid var(--line); }
+.toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 10px; background: var(--panel); border-bottom: 1px solid var(--line); }
 .toolbar .file { font-family: Consolas, monospace; margin-right: 8px; white-space: nowrap; }
 .toolbar button { white-space: nowrap; flex-shrink: 0; }
 .status { flex: 1; min-width: 0; margin-left: 8px; color: var(--muted); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -154,6 +166,9 @@ button.link { background: none; border: none; color: var(--accent); padding: 0; 
 .start h2 { margin: 0; }
 .start .row { display: flex; gap: 8px; }
 .start .recent { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
-.start .recent button { width: 100%; text-align: left; display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; }
+.start .recent li { display: flex; gap: 4px; align-items: stretch; }
+.start .recent button.recent-open { flex: 1; min-width: 0; text-align: left; display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; }
+.start .recent button.recent-forget { flex-shrink: 0; padding: 0 10px; color: var(--muted); }
+.start .recent button.recent-forget:hover:not(:disabled) { color: var(--error); border-color: var(--error); }
 .start .recent small { color: var(--muted); }
 .start-status { max-width: 640px; margin: 12px auto; }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RuleSummary } from './api';
-import { clampSidebar, filterRules, ruleName, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN } from './rules';
+import { clampSidebar, filterRules, ruleName, scopeSummary, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN } from './rules';
 
 const rule = (id: string | null, file: string, title: string | null = null): RuleSummary =>
   ({ id, file, title, errors: 0, warnings: 0, editable: true });
@@ -27,6 +27,27 @@ describe('filterRules', () => {
   it('낱말이 여럿이면 모두 있어야', () => {
     expect(filterRules(rules, 'enum 대문자').map((r) => r.id)).toEqual(['CLL0015']);
     expect(filterRules(rules, 'enum tag')).toEqual([]);
+  });
+});
+
+describe('scopeSummary', () => {
+  it('공통 먼저 · 같은 글자는 공통으로 한 번, 다시 넣기는 규칙 것', () => {
+    const summary = scopeSummary(
+      { ignoreAssemblies: ['Assembly-CSharp-firstpass', 'DOTween*'], ignorePaths: ['Plugins/**'] },
+      { ignoreAssemblies: ['*Editor*', 'DOTween*'], includeAssemblies: ['DOTween.Modules'], includePaths: [], ignorePaths: 'bad' },
+    );
+    expect(summary.ignoreAssemblies).toEqual([
+      { pattern: 'Assembly-CSharp-firstpass', source: 'common' },
+      { pattern: 'DOTween*', source: 'common' },
+      { pattern: '*Editor*', source: 'rule' },
+    ]);
+    expect(summary.ignorePaths).toEqual([{ pattern: 'Plugins/**', source: 'common' }]);
+    expect(summary.includeAssemblies).toEqual(['DOTween.Modules']);
+    expect(summary.includePaths).toEqual([]);
+  });
+
+  it('설정이 없으면 규칙 것만', () => {
+    expect(scopeSummary(null, { ignorePaths: ['Editor/**', ''] }).ignorePaths).toEqual([{ pattern: 'Editor/**', source: 'rule' }]);
   });
 });
 

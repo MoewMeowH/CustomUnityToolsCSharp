@@ -155,6 +155,16 @@ export interface GenerateResult {
 
 const q = encodeURIComponent;
 
+/** 규칙 폴더 공통 설정 hblint.settings.json (서버 /api/settings). ok = false면 파일에 오류가 있어 목록이 비어 보인다. */
+export interface SettingsDto {
+  file: string;
+  exists: boolean;
+  ok: boolean;
+  ignoreAssemblies: string[];
+  ignorePaths: string[];
+  errors: string[];
+}
+
 export const api = {
   hasToken: () => token.length > 0,
   catalog: () => call<Catalog>('GET', '/catalog'),
@@ -173,5 +183,9 @@ export const api = {
   preview: (text: string) => call<PreviewResult>('POST', '/preview', text),
   types: (text: string) => call<TypeEntry[]>('GET', '/symbols/types?q=' + q(text)),
   namespaces: (text: string) => call<string[]>('GET', '/symbols/namespaces?q=' + q(text)),
+  settings: () => call<SettingsDto>('GET', '/settings'),
+  saveSettings: (ignoreAssemblies: string[], ignorePaths: string[]) => call<SettingsDto>('PUT', '/settings', { ignoreAssemblies, ignorePaths }),
+  /** 시작 화면 최근 목록에서 뺀다. */
+  forgetRecent: (rules: string) => call<AppStateDto>('POST', '/recent/forget', { rules }),
   members: (type: string, text: string) => call<MemberEntry[]>('GET', '/symbols/members?type=' + q(type) + '&q=' + q(text)),
 };

@@ -7,13 +7,15 @@ interface Props {
   busy: boolean;
   onUnity: (path: string) => void;
   onRecent: (entry: RecentEntry) => void;
+  /** 최근 목록에서 지우기 (폴더 · 파일은 건드리지 않음). */
+  onForget: (entry: RecentEntry) => void;
   onManual: () => void;
 }
 
 const folderName = (path: string) => path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? path;
 
 /** 아무것도 안 연 첫 화면 — Unity 프로젝트 폴더 하나로 연다 (규칙 폴더 · 생성물 · 대상 프로젝트는 앱이 정함). */
-export function StartScreen({ recent, busy, onUnity, onRecent, onManual }: Props) {
+export function StartScreen({ recent, busy, onUnity, onRecent, onForget, onManual }: Props) {
   const [path, setPath] = useState('');
 
   return (
@@ -37,10 +39,11 @@ export function StartScreen({ recent, busy, onUnity, onRecent, onManual }: Props
           <ul className="recent">
             {recent.map((r) => (
               <li key={r.rules}>
-                <button disabled={busy} onClick={() => onRecent(r)} title={`규칙 폴더 ${r.rules}\n생성물 ${r.out}${r.project ? `\n대상 ${r.project}` : ''}`}>
+                <button className="recent-open" disabled={busy} onClick={() => onRecent(r)} title={`규칙 폴더 ${r.rules}\n생성물 ${r.out}${r.project ? `\n대상 ${r.project}` : ''}`}>
                   <strong>{folderName(r.project ?? r.rules)}</strong>
                   <small>{r.project ?? r.rules}</small>
                 </button>
+                <button className="recent-forget small" disabled={busy} onClick={() => onForget(r)} title="최근 목록에서 지우기 (폴더 · 파일은 그대로)">✕</button>
               </li>
             ))}
           </ul>

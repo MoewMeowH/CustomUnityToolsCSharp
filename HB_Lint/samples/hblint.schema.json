@@ -44,7 +44,28 @@
       "items": {
         "type": "string"
       },
-      "description": "* 와일드카드 어셈블리 이름 — 맞으면 검사하지 않는다"
+      "description": "* 와일드카드 어셈블리 이름 — 맞으면 검사하지 않는다 (공통 설정 hblint.settings.json의 제외도 함께, includeAssemblies에 맞으면 다시 검사)"
+    },
+    "ignorePaths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "파일 경로 패턴 — 맞는 파일은 보고하지 않는다 (filter.location과 같은 패턴, includePaths에 맞으면 다시)"
+    },
+    "includeAssemblies": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "제외(공통 설정 · 이 규칙)에 걸려도 다시 검사할 어셈블리 (* 와일드카드)"
+    },
+    "includePaths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "제외에 걸려도 다시 보고할 파일 경로 패턴"
     },
     "nodes": {
       "type": "object",

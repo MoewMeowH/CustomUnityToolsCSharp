@@ -110,7 +110,7 @@ internal static class GeneratorCli
             set = null!;
             return false;
         }
-        set = RuleSet.Build(RuleSet.ReadFolder(folder));
+        set = RuleSet.FromFolder(folder);
         return true;
     }
 

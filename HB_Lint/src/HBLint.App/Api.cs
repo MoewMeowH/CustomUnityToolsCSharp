@@ -1,4 +1,5 @@
 using HBLint.App.Workspace;
+using HBLint.Core.Generation;
 using HBLint.Core.Ir;
 using HBLint.Core.Json;
 
@@ -9,6 +10,10 @@ internal sealed record WorkspaceRequest(string? Rules, string? Out);
 internal sealed record ProjectRequest(string? Path, string? Csproj);
 
 internal sealed record UnityRequest(string? Path, bool? Setup, bool? Probe);
+
+internal sealed record SettingsRequest(string[]? IgnoreAssemblies, string[]? IgnorePaths);
+
+internal sealed record ForgetRequest(string? Rules);
 
 internal sealed record IrErrorDto(string Message, int Line, int Column, bool Warning, string? Node);
 
@@ -79,7 +84,7 @@ internal static class Api
             if (!File.Exists(path))
                 return Results.NotFound();
             var text = File.ReadAllText(path);
-            return Results.Ok(new { file, text, validation = Validate(text, state.Project) });
+            return Results.Ok(new { file, text, validation = Validate(text, state) });
         });
 
         // PUT = 있는 파일 고치기, POST = 새 파일 (있으면 409 — 다른 규칙을 덮지 않게)
@@ -87,7 +92,32 @@ internal static class Api
         api.MapPost("/rules/{file}", (string file, HttpRequest request, AppState state) => Save(file, request, state, create: true));
 
         api.MapPost("/validate", async (HttpRequest request, AppState state) =>
-            Results.Ok(Validate(await ReadBody(request), state.Project)));
+            Results.Ok(Validate(await ReadBody(request), state)));
+
+        api.MapGet("/settings", (AppState state) =>
+            state.Folder is { } folder ? Results.Ok(SettingsDto(folder)) : NoFolder());
+
+        // 공통 설정 쓰기 — 규칙 폴더 바로 아래 hblint.settings.json 하나만. 검증에 걸리면 쓰지 않는다
+        api.MapPut("/settings", (SettingsRequest request, AppState state) =>
+        {
+            if (state.Folder is not { } folder)
+                return NoFolder();
+            var settings = new RuleSettings(Clean(request.IgnoreAssemblies), Clean(request.IgnorePaths));
+            var (parsed, errors) = RuleSettings.Parse(settings.ToJson());
+            if (parsed == null)
+                return Results.BadRequest(new { error = string.Join("\n", errors.Select(e => e.Message)) });
+            if (!folder.WriteSettings(parsed))
+                return Error($"{RuleSettings.FileName}이(가) 규칙 폴더 밖을 가리키는 링크라 쓰지 않았습니다");
+            return Results.Ok(SettingsDto(folder));
+        });
+
+        api.MapPost("/recent/forget", (ForgetRequest request, AppState state) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.Rules))
+                return Error("지울 항목이 없습니다");
+            state.Forget(request.Rules);
+            return Results.Ok(StateDto(state));
+        });
 
         api.MapPost("/generate", (AppState state) =>
         {
@@ -141,7 +171,16 @@ internal static class Api
             var parsed = RuleIr.Parse(await ReadBody(request));
             if (parsed.Rule == null)
                 return Error("규칙에 오류가 있어 돌릴 수 없습니다 — 문제 목록을 먼저 고치세요");
-            var result = await Task.Run(() => Preview.Run(project, parsed.Rule, ct), ct);
+            RuleSettings settings = RuleSettings.Empty;
+            if (state.Folder is { } folder)
+            {
+                var (read, settingsErrors) = folder.ReadSettings();
+                // 생성이 막히는 상태에서 공통 제외 없이 돌리면 실제와 다르다 — 먼저 고치게 한다
+                if (read == null)
+                    return Error($"공통 설정({RuleSettings.FileName})에 오류가 있어 미리 보기를 돌리지 않습니다 — 도구줄 '공통 설정'에서 고치세요: {string.Join(" / ", settingsErrors)}");
+                settings = read;
+            }
+            var result = await Task.Run(() => Preview.Run(project, parsed.Rule, settings, ct), ct);
             return Results.Ok(result);
         });
     }
@@ -165,19 +204,42 @@ internal static class Api
             return Error($"JSON이 아닙니다 ({e.Line},{e.Column}): {e.Message}");
         }
         var changed = HBLint.Core.Generation.OutputFile.WriteIfChanged(path, text);
-        return Results.Ok(new { file, changed, text, validation = Validate(text, state.Project) });
+        return Results.Ok(new { file, changed, text, validation = Validate(text, state) });
     }
 
-    private static object Validate(string text, ProjectSession? project)
+    /// <summary>규칙 검증 + 공통 설정과 맞춰 본 경고 (다시 넣을 것이 없는 include…).</summary>
+    private static object Validate(string text, AppState state)
     {
         var parsed = RuleIr.Parse(text);
+        var project = state.Project;
+        var errors = parsed.Errors.Select(e => new IrErrorDto(e.Message, e.Line, e.Column, e.IsWarning, e.Node)).ToList();
+        if (parsed.Rule != null && state.Folder?.ReadSettings().Settings is { } settings)
+            errors.AddRange(settings.Warnings(parsed.Rule).Select(w => new IrErrorDto(w, 0, 0, true, null)));
         return new
         {
             ok = parsed.Success,
-            errors = parsed.Errors.Select(e => new IrErrorDto(e.Message, e.Line, e.Column, e.IsWarning, e.Node)),
+            errors,
             names = project != null ? NameCheck.Run(project, text) : null,
         };
     }
+
+    private static object SettingsDto(RuleFolder folder)
+    {
+        var (settings, errors) = folder.ReadSettings();
+        return new
+        {
+            file = RuleSettings.FileName,
+            exists = File.Exists(Path.Combine(folder.Folder, RuleSettings.FileName)),
+            ok = settings != null,
+            ignoreAssemblies = settings?.IgnoreAssemblies ?? [],
+            ignorePaths = settings?.IgnorePaths ?? [],
+            errors,
+        };
+    }
+
+    /// <summary>빈 칸 · 앞뒤 공백 · 중복을 뺀 목록.</summary>
+    private static string[] Clean(string[]? values) =>
+        (values ?? []).Where(v => v != null).Select(v => v.Trim()).Where(v => v.Length > 0).Distinct(StringComparer.Ordinal).ToArray();
 
     private static object StateDto(AppState state)
     {

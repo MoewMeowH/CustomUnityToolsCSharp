@@ -43,6 +43,31 @@ internal sealed partial class RuleFolder
         return path;
     }
 
+    /// <summary>공통 설정 파일 경로 — 폴더 밖을 가리키는 링크면 null (규칙 파일과 같은 제한).</summary>
+    public string? SettingsPath
+    {
+        get
+        {
+            var path = Path.Combine(Folder, RuleSettings.FileName);
+            if (File.Exists(path) && File.ResolveLinkTarget(path, returnFinalTarget: true) is { } target
+                && !string.Equals(Path.GetDirectoryName(target.FullName), Folder, StringComparison.OrdinalIgnoreCase))
+                return null;
+            return path;
+        }
+    }
+
+    /// <summary>공통 설정 (없으면 Empty). 오류가 있으면 Settings는 null.</summary>
+    public (RuleSettings? Settings, IReadOnlyList<string> Errors) ReadSettings() => RuleSettings.ReadFolder(Folder);
+
+    /// <summary>공통 설정을 쓴다 (CLI와 같은 모양). 링크가 폴더 밖이면 false.</summary>
+    public bool WriteSettings(RuleSettings settings)
+    {
+        if (SettingsPath is not { } path)
+            return false;
+        OutputFile.WriteIfChanged(path, settings.ToJson());
+        return true;
+    }
+
     /// <summary>생성(= CLI)이 읽는 파일 전부. 앱에서 열 수 없는 것(이름 규칙 밖 · 폴더 밖 링크)도 보이되 Editable이 false.</summary>
     public IReadOnlyList<RuleSummary> List()
     {
@@ -94,7 +119,7 @@ internal sealed partial class RuleFolder
     /// </summary>
     public (RuleSet Set, string? Refused) Generate()
     {
-        var set = RuleSet.Build(RuleSet.ReadFolder(Folder));
+        var set = RuleSet.FromFolder(Folder);
         if (set.Text == null)
             return (set, null);
         if (File.Exists(Output) && !IsGeneratedFile(Output))

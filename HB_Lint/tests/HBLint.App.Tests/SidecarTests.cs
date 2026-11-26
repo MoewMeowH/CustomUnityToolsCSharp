@@ -116,7 +116,7 @@ public class SidecarTests
         var text = Rule(type, member);
 
         var ours = NameCheck.Run(project, text).Select(p => p.Value).ToList();
-        var analyzer = Preview.Run(project, Parse(text), CancellationToken.None).Hits.Where(h => h.Id == "CLL9001").ToList();
+        var analyzer = Preview.Run(project, Parse(text), HBLint.Core.Generation.RuleSettings.Empty, CancellationToken.None).Hits.Where(h => h.Id == "CLL9001").ToList();
 
         Assert.Single(ours);
         Assert.Single(analyzer);
@@ -129,7 +129,7 @@ public class SidecarTests
         using var dir = new TempDir();
         var project = Load(FakeUnity.Project(dir, Game));
 
-        var result = Preview.Run(project, Parse(Rule()), CancellationToken.None);
+        var result = Preview.Run(project, Parse(Rule()), HBLint.Core.Generation.RuleSettings.Empty, CancellationToken.None);
 
         var hit = Assert.Single(result.Hits);
         Assert.Equal("CLL0002", hit.Id);
@@ -144,8 +144,8 @@ public class SidecarTests
         using var dir = new TempDir();
         var project = Load(FakeUnity.Project(dir, Game, assemblyName: "Game.Editor"), "Game.Editor.csproj");
 
-        Assert.Single(Preview.Run(project, Parse(Rule()), CancellationToken.None).Hits);
-        Assert.Empty(Preview.Run(project, Parse(Rule(head: "\n  \"ignoreAssemblies\": [\"*.Editor\"],")), CancellationToken.None).Hits);
+        Assert.Single(Preview.Run(project, Parse(Rule()), HBLint.Core.Generation.RuleSettings.Empty, CancellationToken.None).Hits);
+        Assert.Empty(Preview.Run(project, Parse(Rule(head: "\n  \"ignoreAssemblies\": [\"*.Editor\"],")), HBLint.Core.Generation.RuleSettings.Empty, CancellationToken.None).Hits);
     }
 
     [Fact]
@@ -157,7 +157,7 @@ public class SidecarTests
         var rules = FakeUnity.Emit(dir.Path, "CLL.LintRules", $"[assembly: HBLint.Rule({literal})]", [attributes]);
         var project = Load(FakeUnity.Project(dir, Game, extraReferences: [attributes, rules]));
 
-        var result = Preview.Run(project, Parse(Rule()), CancellationToken.None);
+        var result = Preview.Run(project, Parse(Rule()), HBLint.Core.Generation.RuleSettings.Empty, CancellationToken.None);
 
         Assert.Single(result.Hits);
         Assert.Equal("CLL0002", result.Hits[0].Id);
@@ -177,7 +177,7 @@ public class SidecarTests
         File.WriteAllText(csproj, File.ReadAllText(csproj).Replace("<Compile Include=\"Assets\\Game.cs\" />", "<Compile Include=\"Assets\\LintRules.g.cs\" />\n    <Compile Include=\"Assets\\Game.cs\" />"));
         var project = Load(dir.Path);
 
-        var result = Preview.Run(project, Parse(Rule()), CancellationToken.None);
+        var result = Preview.Run(project, Parse(Rule()), HBLint.Core.Generation.RuleSettings.Empty, CancellationToken.None);
 
         Assert.Equal(7, Assert.Single(result.Hits).Line); // Update 쪽 (옛 규칙이면 Start = 10줄)
         Assert.Equal(0, result.CompileErrors);
@@ -194,7 +194,7 @@ public class SidecarTests
         var game = Game.Replace("public class Player : MonoBehaviour", "public class Player : Shared.Base");
         var project = Load(FakeUnity.Project(dir, game, extraReferences: [attributes, shared]));
 
-        var result = Preview.Run(project, Parse(Rule()), CancellationToken.None);
+        var result = Preview.Run(project, Parse(Rule()), HBLint.Core.Generation.RuleSettings.Empty, CancellationToken.None);
 
         Assert.Equal(0, result.CompileErrors);
         Assert.Equal(7, Assert.Single(result.Hits).Line);

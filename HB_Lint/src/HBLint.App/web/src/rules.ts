@@ -16,6 +16,50 @@ export function filterRules(rules: RuleSummary[], query: string): RuleSummary[] 
   });
 }
 
+export type ScopeSource = 'common' | 'rule';
+
+export interface ScopeEntry {
+  pattern: string;
+  source: ScopeSource;
+}
+
+/** 규칙 하나에서 빠지는 것 · 다시 넣는 것 — 공통 설정과 규칙 머리를 합친 표시용 (분석기 판정: 제외에 맞고 다시 넣기에 안 맞으면 빠짐). */
+export interface ScopeSummary {
+  ignoreAssemblies: ScopeEntry[];
+  ignorePaths: ScopeEntry[];
+  includeAssemblies: string[];
+  includePaths: string[];
+}
+
+const strings = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string' && v.trim().length > 0) : [];
+
+/** 생성물과 같은 순서 (공통 먼저, 같은 글자는 한 번 — 공통이 이김). */
+function merge(common: string[], own: string[]): ScopeEntry[] {
+  const seen = new Set<string>();
+  const result: ScopeEntry[] = [];
+  for (const [list, source] of [[common, 'common'], [own, 'rule']] as const) {
+    for (const pattern of list) {
+      if (seen.has(pattern)) continue;
+      seen.add(pattern);
+      result.push({ pattern, source });
+    }
+  }
+  return result;
+}
+
+export function scopeSummary(
+  settings: { ignoreAssemblies: string[]; ignorePaths: string[] } | null,
+  head: Record<string, unknown>,
+): ScopeSummary {
+  return {
+    ignoreAssemblies: merge(settings?.ignoreAssemblies ?? [], strings(head.ignoreAssemblies)),
+    ignorePaths: merge(settings?.ignorePaths ?? [], strings(head.ignorePaths)),
+    includeAssemblies: strings(head.includeAssemblies),
+    includePaths: strings(head.includePaths),
+  };
+}
+
 /** 사이드바 넓이 범위 (px). 기억한 값이 창보다 크거나 이상하면 이 안으로. */
 export const SIDEBAR_MIN = 180;
 export const SIDEBAR_MAX = 480;

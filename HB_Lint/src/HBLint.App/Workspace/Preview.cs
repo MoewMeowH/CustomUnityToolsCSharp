@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using HBLint.Analyzers;
+using HBLint.Core.Generation;
 using HBLint.Core.Ir;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -27,11 +28,12 @@ internal static class Preview
     /// <summary>규칙을 찾을 수 없음 — 이 규칙의 것만 보인다. 규칙 오류(CLL9002)는 앞서 읽은 이 규칙이 이겨 밀려난 옛 같은 id 규칙의 것이라 뺀다.</summary>
     private static readonly string TargetNotFoundId = RuleIds.Prefix + "9001";
 
-    public static PreviewResult Run(ProjectSession project, RuleIr rule, CancellationToken ct)
+    /// <summary>settings = 규칙 폴더 공통 설정 — 생성물처럼 규칙 런타임 JSON에 합쳐 돌린다.</summary>
+    public static PreviewResult Run(ProjectSession project, RuleIr rule, RuleSettings settings, CancellationToken ct)
     {
         var watch = System.Diagnostics.Stopwatch.StartNew();
         var source = project.Compilation;
-        var literal = SymbolDisplay.FormatLiteral(rule.ToRuntimeJson(), quote: true);
+        var literal = SymbolDisplay.FormatLiteral(rule.ToRuntimeJson(settings.IgnoreAssemblies, settings.IgnorePaths), quote: true);
         var first = new List<SyntaxTree>
         {
             CSharpSyntaxTree.ParseText($"[assembly: HBLint.Rule({literal})]", project.ParseOptions, "HBLintPreview.Rule.g.cs", cancellationToken: ct),

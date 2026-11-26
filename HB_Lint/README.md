@@ -61,9 +61,30 @@ samples/more/                 예시 규칙 더 (CLL0004~0012 — 할당 · Unit
 | `title` | 설명 (생성물 주석) |
 | `severity` | `error` · `warning`(기본) · `info`. Unity 콘솔에는 info가 보이지 않는다. `error`는 Unity 컴파일을 막는다 |
 | `requires` | 검사 중인 어셈블리가 이 어셈블리들을 모두 참조할 때만 규칙을 쓴다 |
-| `ignoreAssemblies` | `*` 와일드카드 어셈블리 이름 — 맞으면 검사하지 않는다 (분석기는 asmdef를 못 읽으므로 에디터 전용 어셈블리 등을 이름으로) |
+| `ignoreAssemblies` | `*` 와일드카드 어셈블리 이름 — 맞으면 검사하지 않는다 (분석기는 asmdef를 못 읽으므로 에디터 전용 어셈블리 등을 이름으로). 공통 설정의 제외도 함께 |
+| `ignorePaths` | 파일 경로 패턴(`filter.location`과 같음) — 맞는 파일은 보고하지 않는다 |
+| `includeAssemblies` · `includePaths` | 제외(공통 설정 · 이 규칙)에 걸려도 **다시 검사**할 어셈블리 · 경로. 판정: 제외에 맞고 다시 넣기에 안 맞으면 빠짐 (같은 글자를 빼면서 다시 넣으면 경고) |
 | `nodes` | 노드 이름 → 노드 (필수) |
 | `layout` | 편집기용 노드 위치 · 메모 (분석기에 넘기지 않음) |
+
+### 공통 제외 설정 (hblint.settings.json)
+
+외부 플러그인(DOTween 등)처럼 **모든 규칙**에서 뺄 것은 규칙 폴더 바로 아래 `hblint.settings.json`에 한 번만 적는다 (편집 앱 도구줄 "공통 설정"으로도 고친다).
+
+```json
+{
+  "version": 1,
+  "ignoreAssemblies": ["Assembly-CSharp-firstpass", "DOTween*"],
+  "ignorePaths": ["Plugins/Demigiant/**"]
+}
+```
+
+- 분석기는 생성물만 읽으므로 **생성할 때** 규칙마다 런타임 JSON에 합친다 — 설정을 고치면 다시 생성해야 반영된다 (`generate --check`가 다르다고 알림). 설정이 없으면 생성물은 예전과 같다.
+- 한 규칙에서만 다시 보려면 그 규칙 머리에 `includeAssemblies` · `includePaths`. **어셈블리와 경로는 따로 판정**한다 — 위 예처럼 경로로도 뺐다면 둘 다 다시 넣어야 한다: `"includeAssemblies": ["DOTween.Modules"], "includePaths": ["Plugins/Demigiant/DOTween/Modules/**"]`.
+- Unity `Plugins` 폴더 스크립트(asmdef 없음)는 `Assembly-CSharp-firstpass`로 컴파일된다. 어느 어셈블리인지는 Unity에서 .cs 파일을 눌러 Inspector의 *Assembly Information*으로 본다. 미리 컴파일된 DLL(DOTween 본체)은 원래 검사되지 않는다.
+- 설정 파일 오류(모르는 칸 · 빈 항목 · 경로 패턴)는 `hblint.settings.json(줄,칸): …`로 보이고 생성을 막는다. 파일 이름이 `*.hblint.json`이 아니라 규칙으로 읽히지 않는다.
+- 편집 앱 규칙 시작 노드에 "이 규칙에서 빠지는 것"(공통 · 규칙 표시, 다시 넣는 것)이 보인다. 미리 보기도 공통 제외를 따른다 (설정 파일에 오류가 있으면 미리 보기를 돌리지 않는다).
+- 공통 설정이나 새 머리 칸(`ignorePaths` · `include…`)을 쓴 생성물은 **패키지 0.5.0 이상**의 분석기가 읽는다 — 옛 분석기는 모르는 칸으로 보고 그 규칙을 CLL9002로 끈다. 생성기와 패키지를 함께 올린다.
 
 ### 처음 보는 사람용
 

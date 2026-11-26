@@ -3,10 +3,11 @@ import {
   Background, Controls, MiniMap, ReactFlow, useReactFlow,
   type Connection, type Edge as FlowEdge, type EdgeChange, type NodeChange,
 } from '@xyflow/react';
-import { api, ApiError, type AppStateDto, type GenerateResult, type PreviewResult, type RecentEntry, type RuleSummary, type Validation } from './api';
+import { api, ApiError, type AppStateDto, type SettingsDto, type GenerateResult, type PreviewResult, type RecentEntry, type RuleSummary, type Validation } from './api';
 import { findSpec, groupHelp, paletteGroup, paletteTitle, socketColor, type Catalog } from './catalog';
 import { clampSidebar } from './rules';
 import { RulePicker } from './RulePicker';
+import { SettingsWindow } from './SettingsWindow';
 import { Guide } from './Guide';
 import { Inspector } from './Inspector';
 import {
@@ -75,10 +76,16 @@ export function App() {
   const fail = (e: unknown) => setStatus({ text: e instanceof Error ? e.message : String(e), error: true });
   const info = (t: string) => setStatus({ text: t, error: false });
 
+  /** 규칙 폴더 공통 설정 (모든 규칙에서 뺄 것) — 규칙 목록과 함께 읽는다. */
+  const [settings, setSettings] = useState<SettingsDto | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
   const refreshRules = useCallback(async () => {
     const list = await api.rules();
     setRules(list.rules);
     setNextId(list.nextId);
+    // 설정을 못 읽어도 규칙 목록은 보이게 — 단추만 꺼진다
+    setSettings(await api.settings().catch(() => null));
   }, []);
 
   // 처음: 카탈로그 · 상태, 실행 인자로 경로를 받았으면 바로 연다
@@ -279,6 +286,8 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
+      // 공통 설정 · 읽는 법 창이 열려 있으면 뒤 규칙 문서를 건드리지 않는다
+      if (document.querySelector('[role="dialog"]')) return;
       const key = e.key.toLowerCase();
       if (key === 's') {
         e.preventDefault();
@@ -458,7 +467,14 @@ export function App() {
   if (!state.rules && !manual) {
     return (
       <div className="app">
-        <StartScreen recent={state.recent} busy={busy !== null} onUnity={(p) => void openUnity(p)} onRecent={(r) => void openRecent(r)} onManual={() => setManual(true)} />
+        <StartScreen
+          recent={state.recent}
+          busy={busy !== null}
+          onUnity={(p) => void openUnity(p)}
+          onRecent={(r) => void openRecent(r)}
+          onForget={(r) => void api.forgetRecent(r.rules).then(setState).catch(fail)}
+          onManual={() => setManual(true)}
+        />
         <div className="start-status">{statusLine}</div>
       </div>
     );
@@ -531,7 +547,16 @@ export function App() {
               {busy === '미리 보기' ? '돌리는 중…' : '미리 보기'}
             </button>
             {status && <span className={`status ${status.error ? 'error' : ''}`} onClick={() => setStatus(null)}>{status.text}</span>}
-            <button className="guide-button" onClick={() => setGuide(true)} title="소켓 색 · 용어 설명">? 읽는 법</button>
+            <button
+              className="guide-button"
+              disabled={!settings}
+              onClick={() => setSettingsOpen(true)}
+              title="모든 규칙에서 뺄 어셈블리 · 경로 (hblint.settings.json)"
+            >
+              공통 설정{settings && (settings.ignoreAssemblies.length + settings.ignorePaths.length > 0) ? ` (${settings.ignoreAssemblies.length + settings.ignorePaths.length})` : ''}
+              {settings && !settings.ok && <span className="badge error" title="설정 파일 오류">!</span>}
+            </button>
+            <button className="guide-button-next" onClick={() => setGuide(true)} title="소켓 색 · 용어 설명">? 읽는 법</button>
           </div>
           {open ? (
             <ReactFlow
@@ -563,6 +588,7 @@ export function App() {
             doc={doc}
             selected={selected}
             projectLoaded={!!state.project}
+            settings={settings}
             errors={validation?.errors ?? []}
             names={validation?.names ?? []}
             onField={(node, field, value) =>
@@ -580,6 +606,18 @@ export function App() {
         )}
       </div>
       {guide && <Guide catalog={catalog} onClose={closeGuide} />}
+      {settingsOpen && settings && (
+        <SettingsWindow
+          settings={settings}
+          onClose={() => setSettingsOpen(false)}
+          onSaved={(saved) => {
+            setSettings(saved);
+            setSettingsOpen(false);
+            info(`${saved.file} 저장 — 생성을 눌러야 Unity에 반영됩니다`);
+            if (open) void api.validate(text).then(setValidation).catch(fail);
+          }}
+        />
+      )}
       {open && <Problems validation={validation} preview={preview} generate={generate} tab={tab} onTab={setTab} onSelect={setSelected} />}
     </div>
   );

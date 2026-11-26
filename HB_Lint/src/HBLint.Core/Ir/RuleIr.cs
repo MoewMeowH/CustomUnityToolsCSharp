@@ -126,19 +126,22 @@ namespace HBLint.Core.Ir
         /// <summary>편집용 칸 — 분석기에 넘기는 IR에서는 뺀다.</summary>
         private static readonly string[] EditorOnlyKeys = { "$schema", "layout" };
 
-        private static readonly string[] HeadKeys = { "$schema", "version", "id", "title", "severity", "requires", "ignoreAssemblies", "nodes", "layout" };
+        private static readonly string[] HeadKeys = { "$schema", "version", "id", "title", "severity", "requires", "ignoreAssemblies", "ignorePaths", "includeAssemblies", "includePaths", "nodes", "layout" };
         private static readonly Regex NodeName = new Regex("^[A-Za-z0-9_.-]+$");
 
         private readonly JsonObject _json;
 
-        private RuleIr(JsonObject json, string id, string title, string severity, string[] requires, string[] ignoreAssemblies, List<IrNode> nodes)
+        private RuleIr(JsonObject json, string id, string title, string severity, string[] requires, Scope scope, List<IrNode> nodes)
         {
             _json = json;
             Id = id;
             Title = title;
             Severity = severity;
             Requires = requires;
-            IgnoreAssemblies = ignoreAssemblies;
+            IgnoreAssemblies = scope.IgnoreAssemblies;
+            IgnorePaths = scope.IgnorePaths;
+            IncludeAssemblies = scope.IncludeAssemblies;
+            IncludePaths = scope.IncludePaths;
             Nodes = nodes;
             Report = nodes.Single(n => n.Kind == NodeCatalog.ReportKind);
         }
@@ -153,8 +156,25 @@ namespace HBLint.Core.Ir
         /// <summary>검사 중인 어셈블리가 이것들을 모두 참조할 때만 규칙을 쓴다.</summary>
         public string[] Requires { get; }
 
-        /// <summary>* 와일드카드 어셈블리 이름 패턴 — 맞으면 검사하지 않는다.</summary>
+        /// <summary>* 와일드카드 어셈블리 이름 패턴 — 맞으면 검사하지 않는다 (IncludeAssemblies에도 맞으면 검사).</summary>
         public string[] IgnoreAssemblies { get; }
+
+        /// <summary>경로 패턴(PathPattern) — 맞는 파일의 사이트는 보고하지 않는다 (IncludePaths에도 맞으면 보고).</summary>
+        public string[] IgnorePaths { get; }
+
+        /// <summary>제외(공통 설정 + 이 규칙)에 걸려도 다시 검사할 어셈블리 패턴.</summary>
+        public string[] IncludeAssemblies { get; }
+
+        /// <summary>제외에 걸려도 다시 보고할 경로 패턴.</summary>
+        public string[] IncludePaths { get; }
+
+        /// <summary>어셈블리를 검사하지 않는가 — 제외 패턴에 맞고 다시 넣기 패턴에는 안 맞음.</summary>
+        public bool SkipsAssembly(string assemblyName) =>
+            IgnoreAssemblies.Any(p => WildcardMatch(p, assemblyName)) && !IncludeAssemblies.Any(p => WildcardMatch(p, assemblyName));
+
+        /// <summary>* 와일드카드 패턴 (대소문자 가림).</summary>
+        public static bool WildcardMatch(string pattern, string value) =>
+            Regex.IsMatch(value, "^" + Regex.Escape(pattern).Replace("\\*", ".*") + "$");
 
         public IReadOnlyList<IrNode> Nodes { get; }
 
@@ -162,16 +182,62 @@ namespace HBLint.Core.Ir
 
         public IrNode? Find(string name) => Nodes.FirstOrDefault(n => n.Name == name);
 
-        /// <summary>분석기에 넘기는 한 줄 JSON ($schema · layout 뺌).</summary>
-        public string ToRuntimeJson()
+        /// <summary>
+        /// 분석기에 넘기는 한 줄 JSON ($schema · layout 뺌). 공통 제외(규칙 폴더 설정)를 주면 규칙의 ignoreAssemblies · ignorePaths 앞에 합친다
+        /// (중복 뺌) — 분석기는 생성물만 읽으므로 생성 때 넣는다. 공통이 비면 원래와 같은 출력.
+        /// </summary>
+        public string ToRuntimeJson(IReadOnlyList<string>? commonIgnoreAssemblies = null, IReadOnlyList<string>? commonIgnorePaths = null)
         {
+            var assemblies = Merge(commonIgnoreAssemblies, IgnoreAssemblies);
+            var paths = Merge(commonIgnorePaths, IgnorePaths);
             var copy = new JsonObject();
+            var wroteAssemblies = false;
+            var wrotePaths = false;
             foreach (var member in _json.Members)
             {
-                if (Array.IndexOf(EditorOnlyKeys, member.Key) < 0)
-                    copy.Add(member.Key, member.Value);
+                if (Array.IndexOf(EditorOnlyKeys, member.Key) >= 0)
+                    continue;
+                if (member.Key == "ignoreAssemblies" && assemblies != null)
+                {
+                    copy.Add(member.Key, Strings(assemblies));
+                    wroteAssemblies = true;
+                    continue;
+                }
+                if (member.Key == "ignorePaths" && paths != null)
+                {
+                    copy.Add(member.Key, Strings(paths));
+                    wrotePaths = true;
+                    continue;
+                }
+                // 규칙에 칸이 없으면 공통 목록을 nodes 앞에 넣는다
+                if (member.Key == "nodes")
+                {
+                    if (assemblies != null && !wroteAssemblies)
+                    {
+                        copy.Add("ignoreAssemblies", Strings(assemblies));
+                        wroteAssemblies = true;
+                    }
+                    if (paths != null && !wrotePaths)
+                    {
+                        copy.Add("ignorePaths", Strings(paths));
+                        wrotePaths = true;
+                    }
+                }
+                copy.Add(member.Key, member.Value);
             }
             return JsonWriter.WriteCompact(copy);
+        }
+
+        /// <summary>공통이 비었으면 null (원래 칸 그대로), 아니면 공통 먼저 · 중복 뺌.</summary>
+        private static string[]? Merge(IReadOnlyList<string>? common, string[] own) =>
+            common == null || common.Count == 0 ? null : common.Concat(own).Distinct(StringComparer.Ordinal).ToArray();
+
+        private static JsonArray Strings(IEnumerable<string> values)
+        {
+            var array = new JsonArray();
+            foreach (var value in values)
+                array.Add(new JsonString(value));
+            return array;
         }
 
         public static RuleParseResult Parse(string text)
@@ -216,7 +282,14 @@ namespace HBLint.Core.Ir
             if (Array.IndexOf(Severities, severity) < 0)
                 errors.Add(Error(obj.Get("severity")!, $"severity는 {string.Join(" · ", Severities)} 가운데 하나여야 합니다"));
             var requires = StringArray(obj, "requires", errors);
-            var ignore = StringArray(obj, "ignoreAssemblies", errors);
+            var scope = new Scope(
+                StringArray(obj, "ignoreAssemblies", errors),
+                PathArray(obj, "ignorePaths", errors),
+                StringArray(obj, "includeAssemblies", errors),
+                PathArray(obj, "includePaths", errors));
+            // 같은 글자를 빼면서 다시 넣으면 다시 넣기가 이겨 제외가 아무 일도 안 한다 — 헷갈리므로 알린다
+            WarnBoth(obj, "ignoreAssemblies", "includeAssemblies", scope.IgnoreAssemblies, scope.IncludeAssemblies, errors);
+            WarnBoth(obj, "ignorePaths", "includePaths", scope.IgnorePaths, scope.IncludePaths, errors);
 
             var nodes = new List<IrNode>();
             if (!(obj.Get("nodes") is JsonObject nodesJson))
@@ -245,7 +318,7 @@ namespace HBLint.Core.Ir
 
             if (errors.Any(e => !e.IsWarning))
                 return new RuleParseResult(null, errors, id);
-            return new RuleParseResult(new RuleIr(obj, id!, title, severity, requires, ignore, nodes), errors, id);
+            return new RuleParseResult(new RuleIr(obj, id!, title, severity, requires, scope, nodes), errors, id);
         }
 
         private static IrNode? ParseNode(string name, JsonValue value, List<IrError> errors)
@@ -509,6 +582,48 @@ namespace HBLint.Core.Ir
                 return str.Value;
             errors.Add(Error(value, $"'{name}'은(는) 문자열이어야 합니다"));
             return null;
+        }
+
+        private static void WarnBoth(JsonObject obj, string ignoreKey, string includeKey, string[] ignored, string[] included, List<IrError> errors)
+        {
+            foreach (var both in ignored.Intersect(included, StringComparer.Ordinal))
+                errors.Add(Error(obj.Get(includeKey)!, $"'{both}'를 {ignoreKey}와 {includeKey}에 함께 적었습니다 — 다시 넣기가 이겨 제외가 효과 없습니다", isWarning: true));
+        }
+
+        /// <summary>경로 패턴 배열 — 패턴마다 PathPattern으로 읽혀야 한다.</summary>
+        private static string[] PathArray(JsonObject obj, string name, List<IrError> errors)
+        {
+            var values = StringArray(obj, name, errors);
+            if (obj.Get(name) is JsonArray array)
+            {
+                foreach (var item in array.Items.OfType<JsonString>())
+                {
+                    PathPattern.Parse(item.Value, out var error);
+                    if (error != null)
+                        errors.Add(Error(item, $"{name}: '{item.Value}' — {error}"));
+                }
+            }
+            return values;
+        }
+
+        /// <summary>머리의 제외 · 다시 넣기 칸.</summary>
+        private sealed class Scope
+        {
+            public Scope(string[] ignoreAssemblies, string[] ignorePaths, string[] includeAssemblies, string[] includePaths)
+            {
+                IgnoreAssemblies = ignoreAssemblies;
+                IgnorePaths = ignorePaths;
+                IncludeAssemblies = includeAssemblies;
+                IncludePaths = includePaths;
+            }
+
+            public string[] IgnoreAssemblies { get; }
+
+            public string[] IgnorePaths { get; }
+
+            public string[] IncludeAssemblies { get; }
+
+            public string[] IncludePaths { get; }
         }
 
         private static string[] StringArray(JsonObject obj, string name, List<IrError> errors)
