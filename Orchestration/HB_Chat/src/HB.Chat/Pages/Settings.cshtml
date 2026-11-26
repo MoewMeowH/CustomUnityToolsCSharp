@@ -358,7 +358,7 @@
                                     var install = CliTools.Installs(toolName, toolPaths);
                                     var same = versions is { Installed: not null } && versions.Installed == versions.Latest;
                                     // agy는 백그라운드에서 스스로 올라간다 — 카나리를 확인한 판과 다르면 중계가 막혀 있다
-                                    var agyCanary = toolName == CliTools.Agy && versions?.Installed is { } agyInstalled && agyInstalled != Model.AgyState.VerifiedVersion;
+                                    var agyCanary = toolName == CliTools.Agy && versions?.Installed is { } agyInstalled && !AgyRelay.Verified(Model.AgyState, agyInstalled);
                                     <tr>
                                         <td>@toolLabel<br /><span class="muted mono" style="font-size:12px">@(toolPaths.Exe(toolName) ?? "찾지 못함")</span></td>
                                         <td>@(versions?.Installed ?? "—")@if (agyCanary) { <br /><span class="badge warn" title="agy 중계 절에서 카나리를 다시 하세요">카나리 다시</span> }</td>
@@ -430,12 +430,12 @@
                     </form>
                 </section>
 
-                @* agy 수동 중계: 앱은 agy 설정을 검사만 하고(결정 "검사 + 추천 JSON만"), agy에는 사용자가 곁칸 셸에서 직접 입력한다 *@
+                @* agy 수동 중계: 중계 규칙은 앱이 쓰는 중계 설정 파일(--settings)에, 전역 agy 설정은 검사만(결정 "검사 + 추천 JSON만"). agy에는 사용자가 곁칸 셸에서 직접 입력한다 *@
                 @{
                     var agyState = Model.AgyState;
                     var agyCheck = Model.AgyChecked;
                     var agyVersion = Model.Agy.LastVersion;
-                    var agyVerified = agyVersion is not null && agyVersion == agyState.VerifiedVersion;
+                    var agyVerified = AgyRelay.Verified(agyState, agyVersion);
                     var agyWarn = agyState.Enabled && (!agyCheck.Ok || agyVersion is not null && !agyVerified || Model.AgyRelayProblem is not null);
                 }
                 <section class="panel" id="agy" style="padding:12px 14px@(agyWarn ? ";border-color:var(--warn)" : "")">
@@ -475,31 +475,40 @@
                         "Google employees and contractors may access, view, review and use Interactions" · 보관은 삭제 요청(antigravity-support@google.com) 전까지.
                     </p>
 
-                    <h4 class="u-sub-title" style="margin-top:12px">agy 설정 검사 <span class="muted mono" style="font-size:12px">@Model.Agy.SettingsPath</span></h4>
+                    <h4 class="u-sub-title" style="margin-top:12px">중계 설정 <span class="muted mono" style="font-size:12px">@Model.Agy.RelaySettingsPath</span></h4>
                     @if (agyCheck.Ok)
                     {
-                        <p class="u-lead">필수 항목 통과 (Default 모드 · 터미널 샌드박스 · deny).</p>
+                        <p class="u-lead">앱이 맞춰 둠 (Default 모드 · 터미널 샌드박스 · deny) — 'agy 중계 셸'에서 친 <code class="mono">agy</code>만 이 파일로 뜹니다 (<code class="mono">--settings</code>). 따로 쓰는 agy는 이 규칙을 받지 않습니다.</p>
                     }
                     @foreach (var problem in agyCheck.Problems)
                     {
                         <p class="u-warn-line-tight">@problem</p>
                     }
+                    @if (agyCheck.RelayJson is { } relayJson)
+                    {
+                        <details>
+                            <summary class="muted" style="font-size:12.5px">중계 설정 파일 내용 (앱이 씀 — 작업 폴더 · 드라이브가 바뀌면 따라감)</summary>
+                            <textarea class="mono" readonly rows="10" style="width:100%;font-size:12px;margin-top:6px">@relayJson</textarea>
+                        </details>
+                    }
+
+                    <h4 class="u-sub-title" style="margin-top:12px">전역 agy 설정 <span class="muted mono" style="font-size:12px">@Model.Agy.SettingsPath</span></h4>
+                    <p class="u-hint muted">
+                        모드 · 샌드박스 · deny는 위 중계 설정 파일이 정합니다. 전역 permissions가 중계에도 합쳐지는지는 확인되지 않아, 넓은 allow와 중계 폴더를 덮는 deny는 경고합니다.
+                        그 밖에 AGY 한도(statusLine)와 남은 옛 중계 규칙을 봅니다.
+                    </p>
                     @foreach (var warning in agyCheck.Warnings)
                     {
                         <p class="muted" style="margin:2px 0;font-size:12.5px">@warning</p>
                     }
-                    @if (agyCheck.MissingDeny.Count + agyCheck.MissingRecommended.Count > 0)
+                    @if (agyCheck.SuggestedJson.Length > 0)
                     {
-                        <ul class="mono" style="font-size:12px;margin:4px 0">
-                            @foreach (var p in agyCheck.MissingDeny) { <li>필수 · read_file(@p)</li> }
-                            @foreach (var p in agyCheck.MissingRecommended) { <li class="muted">권장 · read_file(@p)</li> }
-                        </ul>
+                        <details open="@agyCheck.OpenSuggestion">
+                            <summary class="muted" style="font-size:12.5px">넣을 JSON — agy를 끄고 이 내용으로 settings.json을 바꾼 뒤 다시 띄우세요 (앱은 고치지 않음)</summary>
+                            <textarea id="agy-json" class="mono" readonly rows="14" style="width:100%;font-size:12px;margin-top:6px">@agyCheck.SuggestedJson</textarea>
+                            <button class="btn" type="button" onclick="navigator.clipboard.writeText(document.getElementById('agy-json').value); this.textContent = '복사함';">복사</button>
+                        </details>
                     }
-                    <details open="@(!agyCheck.Ok || agyCheck.OpenSuggestion)">
-                        <summary class="muted" style="font-size:12.5px">넣을 JSON — agy를 끄고 이 내용으로 settings.json을 바꾼 뒤 다시 띄우세요 (앱은 고치지 않음)</summary>
-                        <textarea id="agy-json" class="mono" readonly rows="14" style="width:100%;font-size:12px;margin-top:6px">@agyCheck.SuggestedJson</textarea>
-                        <button class="btn" type="button" onclick="navigator.clipboard.writeText(document.getElementById('agy-json').value); this.textContent = '복사함';">복사</button>
-                    </details>
                     <form method="post" asp-page-handler="AgyCheck" class="u-gap-above"><button class="btn" type="submit">@Icons.Svg("check") agy 판 · 설정 다시 보기</button></form>
 
                     <h4 class="u-sub-title" style="margin-top:12px">카나리 확인 (agy를 올린 뒤마다)</h4>

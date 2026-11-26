@@ -308,22 +308,31 @@ public sealed partial class Terminals : IDisposable
         return Launch(roomId, TerminalKind.Agent, name, command, workingDirectory, () => PipedProcess.Start(command, workingDirectory), out session);
     }
 
-    /// <summary>내 셸을 연다 (ConPTY, 곁칸 "+"). shell = <see cref="Shells"/>의 키. label을 주면 탭 이름을 그것으로 (agy 중계 셸).</summary>
-    public string? OpenShell(string roomId, string shell, string workingDirectory, out TerminalSession? session, string? label = null)
+    /// <summary>
+    /// 내 셸을 연다 (ConPTY, 곁칸 "+"). shell = <see cref="Shells"/>의 키. label을 주면 탭 이름을 그것으로 (agy 중계 셸).
+    /// startup은 PowerShell이 시작할 때 돌리고 셸을 남긴다 (agy 중계 셸의 agy 함수).
+    /// </summary>
+    public string? OpenShell(string roomId, string shell, string workingDirectory, out TerminalSession? session, string? label = null, string? startup = null)
     {
         session = null;
         if (!Shells.TryGetValue(shell, out var shellLabel)) return "모르는 셸입니다.";
         label ??= shellLabel;
-        var system = Environment.GetFolderPath(Environment.SpecialFolder.System);
-        // 전체 경로로 — 작업 폴더 · PATH의 같은 이름 실행 파일이 대신 뜨지 않게
-        var commandLine = shell == "powershell"
-            ? $"\"{Path.Combine(system, "WindowsPowerShell", "v1.0", "powershell.exe")}\" -NoLogo"
-            : $"\"{Path.Combine(system, "cmd.exe")}\"";
+        var commandLine = ShellCommandLine(shell, Environment.GetFolderPath(Environment.SpecialFolder.System), startup);
         int count;
         lock (_gate) count = _byRoom.TryGetValue(roomId, out var l) ? l.Count(s => s.Kind == TerminalKind.Shell && s.Name.StartsWith(label + " ", StringComparison.Ordinal)) : 0;
         return Launch(roomId, TerminalKind.Shell, $"{label} {count + 1}", shell, workingDirectory,
             () => PseudoConsole.Start(commandLine, workingDirectory, DefaultCols, DefaultRows), out session);
     }
+
+    /// <summary>
+    /// 셸 명령 줄 — 전체 경로로 (작업 폴더 · PATH의 같은 이름 실행 파일이 대신 뜨지 않게). PowerShell startup은 -EncodedCommand(UTF-16 base64)로 넘겨
+    /// 경로 속 따옴표 · 공백이 명령 줄에서 깨지지 않게 하고 -NoExit로 셸을 남긴다.
+    /// </summary>
+    internal static string ShellCommandLine(string shell, string system, string? startup = null) =>
+        shell == "powershell"
+            ? $"\"{Path.Combine(system, "WindowsPowerShell", "v1.0", "powershell.exe")}\" -NoLogo" +
+              (startup is null ? "" : " -NoExit -EncodedCommand " + Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(startup)))
+            : $"\"{Path.Combine(system, "cmd.exe")}\"";
 
     private string? Launch(string roomId, TerminalKind kind, string name, string command, string workingDirectory, Func<ITerminalProcess> start,
         out TerminalSession? session)

@@ -126,10 +126,11 @@ public sealed class LimitAlertsTests : IDisposable
 
     // ---- agy 설정 검사 statusLine ----
 
-    private const string GoodSettings = """{"agentMode":"","enableTerminalSandbox":true,"permissions":{"deny":["read_file(C:/Users)"],"allow":["write_file(C:/relay/current)"]}}""";
+    private const string GoodSettings = """{"trustedWorkspaces":["C:\\x"]}""";
 
-    private static AgyCheck.Result Inspect(string json, string script) =>
-        AgyCheck.Inspect(json, [@"C:\Users"], [], @"C:\relay\current", script);
+    private static readonly string RelayJson = AgyCheck.RelaySettings([@"C:\Users"], [], @"C:\relay\current", @"C:\Data");
+
+    private static AgyCheck.Result Inspect(string json, string script) => AgyCheck.Inspect(json, RelayJson, @"C:\relay\current", script);
 
     [Fact]
     public void Check_StatusLine_SuggestsOnlyWhenMissing()
@@ -143,34 +144,31 @@ public sealed class LimitAlertsTests : IDisposable
         Assert.Contains(missing.Warnings, w => w.Contains("statusLine이 없습니다"));
         var suggested = JsonNode.Parse(missing.SuggestedJson)!["statusLine"]!;
         Assert.Equal((command, true, "command"), (suggested["command"]!.GetValue<string>(), suggested["stack_with_default"]!.GetValue<bool>(), suggested["type"]!.GetValue<string>()));
-        // 스크립트는 agy가 샌드박스 밖에서 돌린다 — 스크립트 폴더 쓰기도 막게 (지휘자 K1)
-        Assert.Contains("write_file(C:/Data/agy-status)", JsonNode.Parse(missing.SuggestedJson)!["permissions"]!["deny"]!.AsArray().Select(n => n!.GetValue<string>()));
-        Assert.Contains(missing.Warnings, w => w.Contains("write_file deny가 없습니다"));
+        // 스크립트는 agy가 샌드박스 밖에서 돌린다 — 쓰기는 중계 설정 파일의 데이터 폴더 write_file deny가 막는다 (전역에는 넣지 않음)
+        Assert.Null(JsonNode.Parse(missing.SuggestedJson)!["permissions"]);
+        Assert.Contains("write_file(C:/Data)", RelayJson);
 
-        string With(JsonObject statusLine, bool writeDeny = false)
+        string With(JsonObject statusLine)
         {
             var root = JsonNode.Parse(GoodSettings)!.AsObject();
             root["statusLine"] = statusLine;
-            if (writeDeny) root["permissions"]!["deny"]!.AsArray().Add("write_file(C:/Data)");
             return root.ToJsonString();
         }
-        var done = Inspect(With(new() { ["type"] = "command", ["command"] = command }, writeDeny: true), script);
+        var done = Inspect(With(new() { ["type"] = "command", ["command"] = command }), script);
         Assert.DoesNotContain(done.Warnings, w => w.StartsWith("AGY", StringComparison.Ordinal));
         Assert.False(done.OpenSuggestion);
-        Assert.Contains(Inspect(With(new() { ["type"] = "command", ["command"] = command }), script).Warnings, w => w.Contains("write_file deny가 없습니다"));
         Assert.Contains(Inspect(With(new() { ["type"] = "command", ["command"] = command, ["enabled"] = false }), script).Warnings, w => w.Contains("꺼져"));
 
         var other = With(new() { ["type"] = "command", ["command"] = "my-line.cmd" });
         var otherResult = Inspect(other, script);
         Assert.Contains(otherResult.Warnings, w => w.Contains("다른 statusLine"));
         Assert.Equal("my-line.cmd", JsonNode.Parse(otherResult.SuggestedJson)!["statusLine"]!["command"]!.GetValue<string>()); // 덮지 않음
-        Assert.DoesNotContain(otherResult.Warnings, w => w.Contains("write_file deny")); // 이 스크립트를 안 쓰면 막을 것도 없음
 
         var spaced = Inspect(GoodSettings, @"C:\Users\Jane Doe\AppData\Local\HB_Chat\agy-status\statusline.ps1");
         Assert.Contains(spaced.Warnings, w => w.Contains("공백"));
         Assert.Null(JsonNode.Parse(spaced.SuggestedJson)!["statusLine"]);
 
-        Assert.DoesNotContain(AgyCheck.Inspect(GoodSettings, [@"C:\Users"], [], @"C:\relay\current").Warnings, w => w.StartsWith("AGY", StringComparison.Ordinal)); // 스크립트를 안 주면 보지 않음
+        Assert.DoesNotContain(AgyCheck.Inspect(GoodSettings, RelayJson, @"C:\relay\current").Warnings, w => w.StartsWith("AGY", StringComparison.Ordinal)); // 스크립트를 안 주면 보지 않음
     }
 
     // ---- 문턱 알림 ----

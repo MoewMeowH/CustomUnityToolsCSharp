@@ -39,27 +39,12 @@ public sealed class AgyTests : IDisposable
 
     private AgyRelay Relay() => new(Options, () => _settings, _ => Task.FromResult(_version), () => _home, () => _temps);
 
-    /// <summary>통과하는 agy 설정 (필수 deny · Default · 샌드박스 · allow) — 다른 키는 남기는지 보려고 trustedWorkspaces도.</summary>
     /// <summary>agy.json을 직접 바꾼다 (앱 재시작 뒤 남은 상태 흉내).</summary>
     private void WriteState(AgyRelay relay, Func<AgyRelay.State, AgyRelay.State> change) =>
         File.WriteAllText(Path.Combine(_data, "agy.json"),
             System.Text.Json.JsonSerializer.Serialize(change(relay.Read(out _)), new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)));
 
-    private void WriteGoodSettings(AgyRelay relay, string agentMode = "", bool sandbox = true)
-    {
-        var json = new JsonObject
-        {
-            ["agentMode"] = agentMode,
-            ["enableTerminalSandbox"] = sandbox,
-            ["permissions"] = new JsonObject
-            {
-                ["deny"] = new JsonArray([.. relay.RequiredDeny().Select(p => (JsonNode?)JsonValue.Create($"read_file({p})"))]),
-                ["allow"] = new JsonArray(JsonValue.Create($"write_file({AgyCheck.RulePath(relay.CurrentFolder)})")),
-            },
-            ["trustedWorkspaces"] = new JsonArray(JsonValue.Create(@"C:\x")),
-        };
-        File.WriteAllText(_settings, json.ToJsonString());
-    }
+    private static List<string> Strings(JsonNode? node) => [.. node!.AsArray().Select(x => x!.GetValue<string>())];
 
     [Fact]
     public void RulePath_And_Covers_NeedDriveLetter_AndSegmentBoundary()
@@ -75,46 +60,65 @@ public sealed class AgyTests : IDisposable
     }
 
     [Fact]
-    public void Inspect_Problems_ForModeSandboxDeny_WarningsForAllow()
+    public void RelaySettings_ModeSandbox_DenyRequiredRecommendedAndDataWrite_AllowCurrent()
     {
-        string[] required = [@"C:\home", @"F:\"];
-        Assert.False(AgyCheck.Inspect(null, required, [], @"C:\relay\current").Ok);
+        var s = JsonNode.Parse(AgyCheck.RelaySettings([@"C:\home", @"F:\"], [@"C:\ProgramData", @"c:\home\"], @"C:\relay\current", @"C:\home\data"))!;
+        Assert.Equal("", s["agentMode"]!.GetValue<string>());
+        Assert.True(s["enableTerminalSandbox"]!.GetValue<bool>());
+        // 쓰기 deny: 필수 경로(프로필 — PowerShell 프로필 · ~/.gemini statusLine) · 데이터 폴더(이 파일 · statusLine 스크립트 · 보관함)를 중계 중인 agy가 고치지 못하게
+        Assert.Equal(["read_file(C:/home)", "read_file(F:/)", "read_file(C:/ProgramData)", "write_file(C:/home)", "write_file(F:/)", "write_file(C:/home/data)"],
+            Strings(s["permissions"]!["deny"]));
+        Assert.Equal(["write_file(C:/relay/current)"], Strings(s["permissions"]!["allow"]));
+    }
 
-        var good = """{"agentMode":"","enableTerminalSandbox":true,"permissions":{"deny":["read_file(C:/home)","read_file(F:/)"],"allow":["write_file(C:/relay/current)"]}}""";
-        var ok = AgyCheck.Inspect(good, required, [], @"C:\relay\current");
-        Assert.True(ok.Ok);
-        Assert.Empty(ok.Warnings);
+    private const string Current = @"C:\relay\current";
 
-        Assert.Contains(AgyCheck.Inspect(good.Replace("\"agentMode\":\"\"", "\"agentMode\":\"auto\""), required, [], @"C:\relay\current").Problems, p => p.Contains("Default"));
-        Assert.Contains(AgyCheck.Inspect(good.Replace("\"agentMode\":\"\",", ""), required, [], @"C:\relay\current").Problems, p => p.Contains("Default"));
-        Assert.Contains(AgyCheck.Inspect(good.Replace("true", "false"), required, [], @"C:\relay\current").Problems, p => p.Contains("샌드박스"));
+    [Fact]
+    public void Inspect_Global_NeverBlocks_RemovesOldRelayRulesOnly_KeepsOtherKeys()
+    {
+        var relayJson = AgyCheck.RelaySettings([@"C:\home", @"G:\"], [], Current, @"C:\home\data");
+        // 전역이 없어도 · auto여도 · 샌드박스가 꺼져도 중계를 막지 않는다 (규칙은 중계 설정 파일에)
+        Assert.True(AgyCheck.Inspect(null, relayJson, Current).Ok);
+        var mine = """{"agentMode":"auto","enableTerminalSandbox":false,"trustedWorkspaces":["C:\\x"],"permissions":{"deny":["read_file(D:/mine)"],"allow":["command(git)"]}}""";
+        var own = AgyCheck.Inspect(mine, relayJson, Current);
+        Assert.True(own.Ok);
+        Assert.Empty(own.Warnings);
+        Assert.False(own.OpenSuggestion);
+        Assert.Equal(0, own.OldRelayRules);
 
-        var driveless = AgyCheck.Inspect(good.Replace("read_file(F:/)", "read_file(/AI)"), required, [], @"C:\relay\current");
-        Assert.Equal(["F:/"], driveless.MissingDeny);
-        Assert.Contains(driveless.Warnings, w => w.Contains("드라이브 문자가 없는"));
+        // 옛 중계 규칙(대소문자만 달라도)은 넣을 JSON에서 빼고, 사용자 항목 · 다른 키는 그대로
+        var old = """{"agentMode":"","trustedWorkspaces":["C:\\x"],"permissions":{"deny":["read_file(c:/home)","read_file(G:/)","read_file(D:/mine)"],"allow":["write_file(C:/relay/current)","command(git)"]}}""";
+        var r = AgyCheck.Inspect(old, relayJson, Current);
+        Assert.True(r.Ok);
+        Assert.True(r.OpenSuggestion);
+        Assert.Equal(3, r.OldRelayRules);
+        Assert.Contains(r.Warnings, w => w.Contains("옛 중계 규칙 3개"));
+        var s = JsonNode.Parse(r.SuggestedJson)!;
+        Assert.Equal(["read_file(D:/mine)"], Strings(s["permissions"]!["deny"]));
+        Assert.Equal(["command(git)"], Strings(s["permissions"]!["allow"]));
+        Assert.Equal(@"C:\x", s["trustedWorkspaces"]![0]!.GetValue<string>());
+        Assert.Equal("", s["agentMode"]!.GetValue<string>()); // 모드는 사용자 몫 — 넣을 JSON이 바꾸지 않는다
 
-        var noAllow = AgyCheck.Inspect(good.Replace("\"write_file(C:/relay/current)\"", ""), required, [], @"C:\relay\current");
-        Assert.True(noAllow.Ok); // 승인창이 늘 뿐 — 막지 않는다
-        Assert.Contains(noAllow.Warnings, w => w.Contains("write_file(C:/relay/current)"));
+        // 옛 권고(statusLine 스크립트 폴더 write_file deny)도 옛 중계 규칙
+        var status = AgyCheck.Inspect("""{"permissions":{"deny":["write_file(C:/home/data/agy-status)"]}}""", relayJson, Current, @"C:\home\data\agy-status\statusline.ps1");
+        Assert.Equal(1, status.OldRelayRules);
+
+        // 깨진 파일: 막지 않고, 필요한 키만 담았다고 경고 (덮으라고 권하지 않게)
+        var broken = AgyCheck.Inspect("{ not json", relayJson, Current);
+        Assert.True(broken.Ok);
+        Assert.Contains(broken.Warnings, w => w.Contains("기존 내용과 합쳐"));
     }
 
     [Fact]
-    public void Inspect_SuggestedJson_KeepsOtherKeys_AddsMissing()
+    public void Inspect_Global_WarnsWideAllow_AndDenyOverRelay()
     {
-        var json = """{"agentMode":"auto","trustedWorkspaces":["C:\\x"],"permissions":{"deny":["read_file(G:/)"]}}""";
-        var r = AgyCheck.Inspect(json, [@"C:\home", @"G:\"], [@"C:\ProgramData"], @"C:\relay\current");
-        var s = JsonNode.Parse(r.SuggestedJson)!;
-        Assert.Equal("", s["agentMode"]!.GetValue<string>());
-        Assert.True(s["enableTerminalSandbox"]!.GetValue<bool>());
-        Assert.Equal(@"C:\x", s["trustedWorkspaces"]![0]!.GetValue<string>());
-        var deny = s["permissions"]!["deny"]!.AsArray().Select(x => x!.GetValue<string>()).ToList();
-        Assert.Equal(["read_file(G:/)", "read_file(C:/home)", "read_file(C:/ProgramData)"], deny);
-        Assert.Equal(["write_file(C:/relay/current)"], s["permissions"]!["allow"]!.AsArray().Select(x => x!.GetValue<string>()));
-
-        // 깨진 파일: 막고, 필요한 키만 담는다 (덮으라고 권하지 않게 경고)
-        var broken = AgyCheck.Inspect("{ not json", [@"C:\home"], [], @"C:\relay\current");
-        Assert.False(broken.Ok);
-        Assert.Contains(broken.Warnings, w => w.Contains("기존 내용과 합쳐"));
+        // agy가 --settings와 전역 permissions를 합치는지 모름 — 합쳐지면 중계에도 걸리는 항목은 경고
+        var relayJson = AgyCheck.RelaySettings([@"C:\home"], [], Current, @"C:\home\data");
+        var wide = AgyCheck.Inspect("""{"permissions":{"allow":["read_file(*)","command(*)","command(git)"]}}""", relayJson, Current);
+        Assert.True(wide.Ok);
+        Assert.Equal(2, wide.Warnings.Count(w => w.Contains("넓은 항목")));
+        var over = AgyCheck.Inspect("""{"permissions":{"deny":["read_file(C:/)","write_file(D:/x)"]}}""", relayJson, Current);
+        Assert.Single(over.Warnings, w => w.Contains("중계 폴더"));
     }
 
     [Fact]
@@ -152,14 +156,18 @@ public sealed class AgyTests : IDisposable
         Assert.True(relay.Enabled);
         Assert.True(Directory.Exists(relay.CurrentFolder));
 
-        Assert.Contains("설정 검사", await relay.WhyNotReadyAsync()); // 설정 파일 없음
-        WriteGoodSettings(relay, agentMode: "auto");
-        Assert.Contains("Default", await relay.WhyNotReadyAsync());
-        WriteGoodSettings(relay);
+        // 전역 agy 설정이 없어도 막지 않는다 — 중계 규칙은 앱이 쓰는 중계 설정 파일에
+        Assert.False(File.Exists(_settings));
         Assert.Contains("카나리", await relay.WhyNotReadyAsync());
+        Assert.True(File.Exists(relay.RelaySettingsPath));
+        Assert.False(File.Exists(_settings)); // 전역은 고치지 않는다
 
         await PassCanary(relay);
         Assert.Null(await relay.WhyNotReadyAsync());
+        // 전역 settings.json 방식 때 통과한 같은 판 — 막는 방식이 바뀌었으니 다시 확인
+        WriteState(relay, s => s with { VerifiedScheme = null });
+        Assert.Contains("막는 방식", await relay.WhyNotReadyAsync());
+        WriteState(relay, s => s with { VerifiedScheme = AgyRelay.Scheme });
         _version = "1.5.15"; // 올라가면 다시 카나리 (1.3.3 → 1.5.14 때 기본 모드가 바뀜)
         Assert.Contains("1.5.15", await relay.WhyNotReadyAsync());
     }
@@ -179,7 +187,6 @@ public sealed class AgyTests : IDisposable
     {
         var relay = Relay();
         Assert.Null(relay.SetEnabled(true, true));
-        WriteGoodSettings(relay);
         Assert.Null(relay.CreateCanary());
         Assert.True(File.Exists(relay.CanaryFile));
         Assert.StartsWith(_data, relay.CanaryFile); // deny 구역(데이터 폴더)
@@ -209,8 +216,15 @@ public sealed class AgyTests : IDisposable
         Assert.Contains(AgyRelay.CanaryOut2, refused.Message);
 
         File.WriteAllText(Path.Combine(relay.CurrentFolder, AgyRelay.CanaryOut2), "Access is denied\n" + control);
+        // 전역에 옛 중계 규칙이 남아 있으면 --settings가 막았는지 가를 수 없다 — 통과로 적지 않는다
+        File.WriteAllText(_settings, $$$"""{"permissions":{"deny":["read_file({{{AgyCheck.RulePath(_home)}}})"]}}""");
+        var old = await relay.JudgeCanaryAsync();
+        Assert.False(old.Passed);
+        Assert.Contains("옛 중계 규칙", old.Message);
+        File.WriteAllText(_settings, "{}");
         Assert.True((await relay.JudgeCanaryAsync()).Passed);
         Assert.Equal("1.5.14", relay.Read(out _).VerifiedVersion);
+        Assert.Equal(AgyRelay.Scheme, relay.Read(out _).VerifiedScheme);
         Assert.False(File.Exists(relay.CanaryFile));
         Assert.Empty(Directory.EnumerateFileSystemEntries(relay.CurrentFolder));
     }
@@ -220,7 +234,6 @@ public sealed class AgyTests : IDisposable
     {
         var relay = Relay();
         Assert.Null(relay.SetEnabled(true, true));
-        WriteGoodSettings(relay);
         await PassCanary(relay);
         Directory.CreateDirectory(Path.Combine(_ws, "src"));
         File.WriteAllText(Path.Combine(_ws, "src", "a.cs"), "class A {}");
@@ -283,7 +296,6 @@ public sealed class AgyTests : IDisposable
         // 5291 실측: 샌드박스가 임시 폴더를 deny와 상관없이 열어 %TEMP% 안 카나리를 셸이 읽었다
         var relay = Relay();
         Assert.Null(relay.SetEnabled(true, true));
-        WriteGoodSettings(relay);
         Assert.True(relay.Check().Ok);
         _temps = [AgyCheck.RulePath(_dir)];
         Assert.Contains(relay.Check().Problems, p => p.Contains("임시 폴더"));
@@ -291,25 +303,83 @@ public sealed class AgyTests : IDisposable
     }
 
     [Fact]
-    public void Inspect_BadShapes_AreProblemsNotExceptions_JsoncAccepted_DenyOverRelay()
+    public void Inspect_BadShapes_NoExceptions_JsoncAccepted()
     {
-        string[] required = [@"C:\home"];
-        // permissions가 객체가 아니면 예외가 아니라 문제 (설정 화면이 500이 되지 않게)
-        Assert.Contains(AgyCheck.Inspect("""{"agentMode":"","enableTerminalSandbox":true,"permissions":[]}""", required, [], @"C:\relay\current").Problems,
-            p => p.Contains("permissions"));
+        var relayJson = AgyCheck.RelaySettings([@"C:\home"], [], @"C:\relay\current", @"C:\home\data");
+        // permissions가 객체가 아니어도 예외가 아니다 (설정 화면이 500이 되지 않게)
+        Assert.True(AgyCheck.Inspect("""{"permissions":[]}""", relayJson, Current).Ok);
         // 주석 · 끝 쉼표
         var jsonc = """
             {
               // 손으로 고친 줄
-              "agentMode": "",
-              "enableTerminalSandbox": true,
-              "permissions": { "deny": ["read_file(C:/home)",], "allow": ["write_file(C:/relay/current)"] },
+              "permissions": { "deny": ["read_file(C:/home)",], "allow": [] },
             }
             """;
-        Assert.True(AgyCheck.Inspect(jsonc, required, [], @"C:\relay\current").Ok);
-        // deny가 중계 폴더까지 덮으면 agy가 요청을 못 읽는다
-        Assert.Contains(AgyCheck.Inspect("""{"agentMode":"","enableTerminalSandbox":true,"permissions":{"deny":["read_file(C:/home)","read_file(C:/)"]}}""",
-            required, [], @"C:\relay\current").Problems, p => p.Contains("중계 폴더"));
+        var r = AgyCheck.Inspect(jsonc, relayJson, Current);
+        Assert.DoesNotContain(r.Warnings, w => w.Contains("읽지 못했습니다"));
+        Assert.Contains(r.Warnings, w => w.Contains("옛 중계 규칙 1개"));
+    }
+
+    [Fact]
+    public void RelaySettingsFile_WrittenByCheck_RestoredWhenChanged_GlobalUntouched()
+    {
+        var relay = Relay();
+        File.WriteAllText(_settings, """{"agentMode":"auto"}""");
+        var check = relay.Check();
+        Assert.True(check.Ok, string.Join(" / ", check.Problems));
+        var json = File.ReadAllText(relay.RelaySettingsPath);
+        Assert.Equal(check.RelayJson, json);
+        Assert.StartsWith(_data, relay.RelaySettingsPath); // deny 구역(데이터 폴더)
+        Assert.Contains($"read_file({AgyCheck.RulePath(_ws)})", json); // 등록된 작업 폴더
+        Assert.Contains($"write_file({AgyCheck.RulePath(_data)})", json);
+
+        File.WriteAllText(relay.RelaySettingsPath, """{"agentMode":"auto"}"""); // 바뀐 파일은 다시 맞춘다
+        relay.Check();
+        Assert.Equal(json, File.ReadAllText(relay.RelaySettingsPath));
+        Assert.Equal("""{"agentMode":"auto"}""", File.ReadAllText(_settings));
+
+        // 전역을 못 읽으면(잠금) 넣을 JSON을 만들지 않는다 — 필요한 키만 든 JSON으로 덮으면 사용자 설정이 사라진다
+        using (new FileStream(_settings, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            var locked = relay.Check();
+            Assert.Equal("", locked.SuggestedJson);
+            Assert.False(locked.OpenSuggestion);
+            Assert.Contains(locked.Warnings, w => w.Contains("읽지 못했습니다"));
+        }
+
+        // 중계 설정 파일을 못 쓰면 막고, 계산값을 '앱이 쓴 내용'으로 보이지 않는다
+        File.Delete(relay.RelaySettingsPath);
+        Directory.CreateDirectory(relay.RelaySettingsPath);
+        var unwritable = relay.Check();
+        Assert.False(unwritable.Ok);
+        Assert.Null(unwritable.RelayJson);
+    }
+
+    [Fact]
+    public void ShellStartup_DefinesAgyWithSettings_QuotesPaths_EncodedForPowerShell()
+    {
+        var relay = Relay();
+        var startup = relay.ShellStartup()!;
+        Assert.Contains("Remove-Item Alias:agy, Alias:agy.exe", startup); // 프로필 별칭이 함수보다 먼저 잡히지 않게
+        var call = $"& '{Environment.ProcessPath}' --settings '{relay.RelaySettingsPath}' @args";
+        Assert.Contains($"function global:agy {{ {call} }}", startup);
+        Assert.Contains($"function global:agy.exe {{ {call} }}", startup);
+        Assert.Contains("Write-Warning", startup); // 함수로 잡히지 않으면(지울 수 없는 별칭) 알린다
+
+        var o = Options();
+        o.DataDir = Path.Combine(_dir, "it's data");
+        Assert.Contains("it''s data", new AgyRelay(() => o, () => _settings, _ => Task.FromResult(_version), () => _home, () => _temps).ShellStartup());
+        // PowerShell은 ‘ ’ ‚ ‛도 작은따옴표로 읽는다 — 모두 두 번
+        Assert.Equal("'O’’Brien ‘‘x‚‚‛‛ y''z'", AgyRelay.PowerShellQuote("O’Brien ‘x‚‛ y'z"));
+        // 상대 AgyPath: 셸은 current에서 시작하므로 앱 기준 전체 경로로
+        var rel = Options();
+        rel.AgyPath = Path.GetRelativePath(Environment.CurrentDirectory, Environment.ProcessPath!);
+        Assert.Contains($"& '{Environment.ProcessPath}' --settings", new AgyRelay(() => rel, () => _settings, _ => Task.FromResult(_version), () => _home, () => _temps).ShellStartup());
+
+        var line = Terminals.ShellCommandLine("powershell", @"C:\Windows\System32", startup);
+        Assert.StartsWith("\"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\" -NoLogo -NoExit -EncodedCommand ", line);
+        Assert.Equal(startup, System.Text.Encoding.Unicode.GetString(Convert.FromBase64String(line.Split(' ')[^1])));
+        Assert.Equal("\"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\" -NoLogo", Terminals.ShellCommandLine("powershell", @"C:\Windows\System32"));
     }
 
     [Theory]
@@ -326,7 +396,6 @@ public sealed class AgyTests : IDisposable
     {
         var relay = Relay();
         Assert.Null(relay.SetEnabled(true, true));
-        WriteGoodSettings(relay);
         await PassCanary(relay);
         Directory.CreateDirectory(Path.Combine(_ws, "src"));
         File.WriteAllText(Path.Combine(_ws, "src", "a.cs"), "class A {}");
@@ -350,7 +419,6 @@ public sealed class AgyTests : IDisposable
     {
         var relay = Relay();
         Assert.Null(relay.SetEnabled(true, true));
-        WriteGoodSettings(relay);
         Assert.NotNull((await relay.RequestRunAsync("r1", "x")).Error); // 카나리 확인 전
         await PassCanary(relay);
 
@@ -392,7 +460,6 @@ public sealed class AgyTests : IDisposable
     {
         var relay = Relay();
         Assert.Null(relay.SetEnabled(true, true));
-        WriteGoodSettings(relay);
         await PassCanary(relay);
 
         // 턴 · 실행이 끝남 (서버가 cancel 없이 꺼짐): 그 방 것만 푼다

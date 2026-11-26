@@ -43,12 +43,14 @@ public sealed partial class RoomModel
     {
         if (!RoomStore.IsRoomId(id) || store.Get(id) is not { } room) return NotFound();
         if (room.DeletedAt is not null) return BadRequest("휴지통에 있는 방입니다.");
-        // agy 중계 셸: 보통 PowerShell을 중계 폴더 current에서 연다 — agy는 사용자가 직접 띄우고 입력한다 (앱은 이 셸에 쓰지 않는다 — Antigravity 약관)
+        // agy 중계 셸: PowerShell을 중계 폴더 current에서 열고, 그 셸에서만 agy가 중계 설정 파일(--settings)로 뜨게 함수를 둔다 —
+        // agy는 사용자가 직접 띄우고 입력한다 (앱은 이 셸에 쓰지 않는다 — Antigravity 약관)
         if (shell == "agy")
         {
             var agy = HttpContext.RequestServices.GetRequiredService<AgyRelay>();
             if (agy.WhyNoShell() is { } whyNot) return BadRequest(whyNot);
-            return terminals.OpenShell(id, "powershell", agy.CurrentFolder, out var relayShell, label: "agy 중계") is { } relayWhy
+            if (agy.ShellStartup() is not { } startup) return BadRequest("agy를 찾지 못했습니다.");
+            return terminals.OpenShell(id, "powershell", agy.CurrentFolder, out var relayShell, label: "agy 중계", startup: startup) is { } relayWhy
                 ? BadRequest(relayWhy)
                 : new JsonResult(new { ok = true, id = relayShell!.Id });
         }

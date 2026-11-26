@@ -25,6 +25,12 @@ public sealed class AgyRelay(Func<ChatOptions> options, Func<string>? settingsPa
     /// <summary>사용자가 agy에 칠 한 줄.</summary>
     public const string TypeLine = "request.md를 읽고 그대로 해줘";
 
+    /// <summary>지금 막는 방식: 중계 셸의 agy 함수가 붙이는 --settings 중계 설정 파일 (전에는 전역 settings.json — 그때 통과한 카나리는 다시 해야 한다).</summary>
+    public const string Scheme = "relay-settings";
+
+    /// <summary>카나리를 이 방식 · 판으로 확인했는지.</summary>
+    public static bool Verified(State state, string? version) => version is not null && state.VerifiedVersion == version && state.VerifiedScheme == Scheme;
+
     /// <summary>보낼 파일 상한 (하나 · 합 · 개수), 요청 글 · 결과 글 상한, run_mode가 맡기는 프롬프트(첨부 코드 포함) 상한.</summary>
     public const int MaxFileBytes = 512 * 1024, MaxTotalBytes = 4 * 1024 * 1024, MaxFiles = 50, MaxRequestChars = 64_000, MaxOutputBytes = 256 * 1024,
         MaxRunPromptChars = 1_000_000;
@@ -52,6 +58,10 @@ public sealed class AgyRelay(Func<ChatOptions> options, Func<string>? settingsPa
         public DateTimeOffset? TelemetryOffAt { get; init; }
 
         public string? VerifiedVersion { get; init; }
+
+        /// <summary>카나리가 확인한 막는 방식 (<see cref="Scheme"/>) — 방식이 바뀌면 같은 판이라도 다시 확인한다.</summary>
+        public string? VerifiedScheme { get; init; }
+
         public DateTimeOffset? VerifiedAt { get; init; }
         public CanaryInfo? Canary { get; init; }
         public string? LastCanary { get; init; }
@@ -64,6 +74,10 @@ public sealed class AgyRelay(Func<ChatOptions> options, Func<string>? settingsPa
     private ChatOptions O => options();
     private string StatePath => Path.Combine(O.DataFolder, "agy.json");
     public string SettingsPath => settingsPath?.Invoke() ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".gemini", "antigravity-cli", "settings.json");
+
+    /// <summary>중계 설정 파일 (<c>agy --settings</c>) — 데이터 폴더(deny 구역)라 중계 중인 agy가 읽거나 고치지 못한다.</summary>
+    public string RelaySettingsPath => Path.Combine(O.DataFolder, "agy-relay-settings.json");
+
     public string RelayRoot => O.AgyRelayFolder;
     public string CurrentFolder => Path.Combine(RelayRoot, "current");
     public string ArchiveRoot => Path.Combine(O.DataFolder, "agy-runs");
@@ -195,21 +209,79 @@ public sealed class AgyRelay(Func<ChatOptions> options, Func<string>? settingsPa
         return null;
     }
 
+    /// <summary>
+    /// 중계 설정 파일을 지금 계산한 내용으로 맞춘다 (작업 폴더 · 드라이브가 바뀌면 따라가게, 같으면 쓰지 않음 — 사용자 결정 "앱이 직접 씀").
+    /// 돌려줌: 전문 · 쓰지 못한 까닭(없으면 null).
+    /// </summary>
+    public (string Json, string? Error) WriteRelaySettings()
+    {
+        var json = AgyCheck.RelaySettings(RequiredDeny(), RecommendedDeny(), CurrentFolder, O.DataFolder);
+        try
+        {
+            // 설정 화면 · 셸 열기 · prepare가 겹치면 AtomicFile의 같은 .tmp가 부딪힌다 — 비교와 쓰기를 한 번에 하나만
+            lock (_gate)
+                if (!File.Exists(RelaySettingsPath) || File.ReadAllText(RelaySettingsPath) != json) AtomicFile.WriteAllText(RelaySettingsPath, json);
+            return (json, null);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return (json, $"중계 설정 파일을 쓰지 못했습니다 ({RelaySettingsPath}): {ex.Message}");
+        }
+    }
+
+    /// <summary>중계 설정 파일을 맞추고 전역 settings.json은 statusLine · 옛 중계 규칙만 본다 (전역은 고치지 않음).</summary>
     public AgyCheck.Result Check()
     {
-        string? json = null;
+        var (relayJson, writeError) = WriteRelaySettings();
+        string? json = null, readError = null;
         try { if (File.Exists(SettingsPath)) json = File.ReadAllText(SettingsPath); }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { json = "{ 읽지 못함: " + ex.Message; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { readError = ex.Message; }
+        // 전역을 읽지 못했으면 넣을 JSON을 만들지 않는다 — 필요한 키만 든 JSON으로 덮으면 사용자 설정이 사라진다
+        AgyCheck.Result Unread(string why) =>
+            AgyCheck.Inspect(null, relayJson, CurrentFolder) with { Warnings = [why + " — 넣을 JSON은 만들지 않았습니다."], SuggestedJson = "", OpenSuggestion = false };
         AgyCheck.Result result;
-        try { result = AgyCheck.Inspect(json, RequiredDeny(), RecommendedDeny(), CurrentFolder, AgyLimits.ScriptPath(O.DataFolder)); }
-        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException) // 같은 키가 두 번 든 파일 등
-        {
-            result = AgyCheck.Inspect("{ 읽지 못함", RequiredDeny(), RecommendedDeny(), CurrentFolder) with { Problems = [$"agy 설정 파일 모양이 올바르지 않습니다: {ex.Message}"] };
-        }
+        if (readError is not null) result = Unread($"전역 agy 설정 파일을 읽지 못했습니다: {readError}");
+        else
+            try { result = AgyCheck.Inspect(json, relayJson, CurrentFolder, AgyLimits.ScriptPath(O.DataFolder)); }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException) // 같은 키가 두 번 든 파일 등
+            {
+                result = Unread($"전역 agy 설정 파일 모양이 올바르지 않습니다: {ex.Message}");
+            }
+        if (writeError is not null) result = result with { Problems = [.. result.Problems, writeError] };
         // 5291 실측(2026-11-22): 샌드박스가 임시 폴더를 deny와 상관없이 열어 %TEMP% 안 카나리를 셸 type이 읽었다 — 데이터 폴더(보관함 · 카나리)가 그 안이면 막는다
-        return AgyCheck.InsideAny(O.DataFolder, temps?.Invoke() ?? TempFolders()) is { } temp
-            ? result with { Problems = [.. result.Problems, $"데이터 폴더가 임시 폴더({temp}) 안입니다 — agy 셸 샌드박스는 임시 폴더를 deny와 상관없이 읽습니다. 설정 Chat:DataDir을 옮기세요."] }
-            : result;
+        if (AgyCheck.InsideAny(O.DataFolder, temps?.Invoke() ?? TempFolders()) is { } temp)
+            result = result with { Problems = [.. result.Problems, $"데이터 폴더가 임시 폴더({temp}) 안입니다 — agy 셸 샌드박스는 임시 폴더를 deny와 상관없이 읽습니다. 설정 Chat:DataDir을 옮기세요."] };
+        return result with { RelayJson = writeError is null ? relayJson : null };
+    }
+
+    /// <summary>
+    /// 중계 셸(PowerShell)이 시작할 때 돌릴 글: 그 셸에서만 <c>agy</c>를 중계 설정 파일(<c>--settings</c>)과 함께 띄우는 함수 — 플래그를 빼먹으면
+    /// 중계 규칙 없이 뜬다 (2026-11-26 실측, 사용자 결정 "셸에 agy 함수"). 앱은 셸 시작 명령만 정하고 agy에는 입력하지 않는다.
+    /// 프로필의 agy 별칭은 함수보다 먼저 잡히므로 지우고, 그래도 agy가 함수가 아니면(지울 수 없는 별칭 등) 경고한다. agy.exe로 쳐도 같은 함수.
+    /// 하위 셸 · 전체 경로로 띄우면 함수를 거치지 않는다 — 안내 글로만 알린다. agy를 찾지 못하면 null.
+    /// </summary>
+    public string? ShellStartup()
+    {
+        if (O.ResolveAgy() is not { } found) return null;
+        var exe = Path.GetFullPath(found); // 셸은 current에서 시작한다 — 상대 경로면 다른 곳을 가리킨다
+        var call = $"& {PowerShellQuote(exe)} --settings {PowerShellQuote(RelaySettingsPath)} @args";
+        return "Remove-Item Alias:agy, Alias:agy.exe -Force -ErrorAction SilentlyContinue\n" +
+               $"function global:agy {{ {call} }}\n" +
+               $"function global:agy.exe {{ {call} }}\n" +
+               "if ((Get-Command agy).CommandType -ne 'Function') { Write-Warning 'agy가 중계 설정 함수로 잡히지 않습니다 — 이 셸에서 agy를 띄우지 말고 설정 화면을 보세요.' }\n" +
+               "else { Write-Host 'agy를 새로 띄우세요 (실행마다 새 세션) — 이 셸의 agy는 중계 설정(--settings)으로 뜹니다. 전체 경로 · 다른 셸에서 띄우면 중계 규칙 없이 뜹니다.' }\n";
+    }
+
+    /// <summary>PowerShell 작은따옴표 글자 — ' 와 ‘ ’ ‚ ‛도 작은따옴표로 읽으므로 모두 두 번 쓴다.</summary>
+    internal static string PowerShellQuote(string s)
+    {
+        var sb = new StringBuilder("'");
+        foreach (var c in s)
+        {
+            sb.Append(c);
+            if (c is '\'' or '‘' or '’' or '‚' or '‛') sb.Append(c);
+        }
+        return sb.Append('\'').ToString();
     }
 
     /// <summary>agy 셸 샌드박스가 deny와 상관없이 여는 임시 폴더 (사용자 TEMP · TMP · Windows\Temp).</summary>
@@ -240,13 +312,15 @@ public sealed class AgyRelay(Func<ChatOptions> options, Func<string>? settingsPa
         return Update(s => s with { Enabled = enabled, TelemetryOffAt = enabled ? s.TelemetryOffAt ?? DateTimeOffset.Now : s.TelemetryOffAt });
     }
 
-    /// <summary>중계 셸을 열 수 없는 까닭 (켜기 · 폴더만 — 카나리 확인도 이 셸에서 하므로 판 확인은 보지 않는다).</summary>
+    /// <summary>중계 셸을 열 수 없는 까닭 (켜기 · 폴더 · agy · 중계 설정 파일 — 카나리 확인도 이 셸에서 하므로 판 확인은 보지 않는다).</summary>
     public string? WhyNoShell()
     {
         Read(out var error);
         if (error is not null) return error;
         if (!Enabled) return "agy 중계가 꺼져 있습니다 — 설정 → 연결 → agy 중계에서 켜세요.";
-        return WhyBadRelay();
+        if (WhyBadRelay() is { } why) return why;
+        if (O.ResolveAgy() is null) return "agy를 찾지 못했습니다 (설정 Chat:AgyPath 또는 %LOCALAPPDATA%\\agy\\bin\\agy.exe).";
+        return WriteRelaySettings().Error;
     }
 
     /// <summary>중계 도구를 쓸 수 없는 까닭 — 켜기 · 폴더 · agy · 설정 검사 · 카나리 확인한 판.</summary>
@@ -256,8 +330,10 @@ public sealed class AgyRelay(Func<ChatOptions> options, Func<string>? settingsPa
         if (await VersionAsync() is not { } version) return "agy --version을 읽지 못했습니다 (설정 Chat:AgyPath 또는 %LOCALAPPDATA%\\agy\\bin\\agy.exe).";
         if (Check() is { Ok: false } check) return "agy 설정 검사: " + string.Join(" / ", check.Problems);
         var state = Read(out _);
-        if (state.VerifiedVersion != version)
-            return $"agy {version}는 아직 카나리 확인을 하지 않았습니다{(state.VerifiedVersion is { } v ? $" (확인한 판 {v})" : "")} — 설정 → 연결 → agy 중계에서 카나리 확인.";
+        if (!Verified(state, version))
+            return state.VerifiedVersion == version
+                ? $"막는 방식이 중계 설정 파일(--settings)로 바뀌어 agy {version}도 카나리 확인을 다시 해야 합니다 — 설정 → 연결 → agy 중계에서 카나리 확인."
+                : $"agy {version}는 아직 카나리 확인을 하지 않았습니다{(state.VerifiedVersion is { } v ? $" (확인한 판 {v})" : "")} — 설정 → 연결 → agy 중계에서 카나리 확인.";
         return null;
     }
 
@@ -323,15 +399,20 @@ public sealed class AgyRelay(Func<ChatOptions> options, Func<string>? settingsPa
         var leaked = new List<string>();
         if (tool?.Contains(canary.Token, StringComparison.Ordinal) == true) leaked.Add("도구 읽기");
         if (shell?.Contains(canary.Token, StringComparison.Ordinal) == true) leaked.Add("셸 읽기");
+        var check = Check();
         string message;
         var passed = false;
-        if (leaked.Count > 0) message = $"카나리 실패 — {string.Join(" · ", leaked)}로 deny 구역이 읽혔습니다. agy 설정(모드 · 샌드박스 · deny)을 확인하세요.";
+        if (leaked.Count > 0) message = $"카나리 실패 — {string.Join(" · ", leaked)}로 deny 구역이 읽혔습니다. 곁칸 'agy 중계 셸'에서 띄운 agy인지 보세요 " +
+                                        "(다른 셸에서 띄우면 중계 설정 --settings가 붙지 않습니다). 같은 셸이었다면 이 agy 판이 --settings를 따르지 않는 것일 수 있습니다.";
         else if (tool is null || shell is null) message = $"확인 못 함 — {(tool is null ? CanaryOut : CanaryOut2)}가 없습니다. 곁칸 agy 중계 셸에서 \"{CanaryTypeLine}\"을 입력했는지, agy가 셸 명령을 거절하지 않았는지 보세요.";
         else if (canary.Control is not { } control || !tool.Contains(control, StringComparison.Ordinal) || !shell.Contains(control, StringComparison.Ordinal))
             message = $"확인 못 함 — {(canary.Control is not null && tool.Contains(canary.Control, StringComparison.Ordinal) ? CanaryOut2 : CanaryOut)}에 {ControlFile}의 확인 코드가 없습니다. " +
                       "agy가 읽기 · 셸 명령을 실제로 돌리지 않았을 수 있습니다 (승인창에서 Yes를 눌렀는지 보고 카나리를 다시 만드세요).";
         else if (version is null) message = "확인 못 함 — agy --version을 읽지 못했습니다.";
-        else if (Check() is { Ok: false } check) message = "확인 못 함 — agy 설정 검사: " + string.Join(" / ", check.Problems);
+        else if (!check.Ok) message = "확인 못 함 — agy 설정 검사: " + string.Join(" / ", check.Problems);
+        else if (check.OldRelayRules > 0)
+            message = $"확인 못 함 — 전역 settings.json에 옛 중계 규칙 {check.OldRelayRules}개가 남아 있어, --settings가 아니라 전역 규칙이 막았을 수 있습니다. " +
+                      "설정 화면의 넣을 JSON대로 뺀 뒤 카나리를 다시 만드세요.";
         else
         {
             passed = true;
@@ -349,7 +430,7 @@ public sealed class AgyRelay(Func<ChatOptions> options, Func<string>? settingsPa
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
             }
         var saved = Update(s => passed
-            ? s with { VerifiedVersion = version, VerifiedAt = DateTimeOffset.Now, Canary = null, LastCanary = label }
+            ? s with { VerifiedVersion = version, VerifiedScheme = Scheme, VerifiedAt = DateTimeOffset.Now, Canary = null, LastCanary = label }
             : s with { LastCanary = label });
         return saved is null ? (passed, message) : (false, saved);
     }
