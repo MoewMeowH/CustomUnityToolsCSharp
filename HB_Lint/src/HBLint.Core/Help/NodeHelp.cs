@@ -37,7 +37,7 @@ namespace HBLint.Core.Help
                 "범위 안 클래스에서 이름이 같은 메서드만 고릅니다. 그 메서드 몸통 안 코드만 검사하고 싶을 때 씁니다.",
                 "MonoBehaviour → 메서드 이름(Update, LateUpdate) → Update · LateUpdate 안만 검사"),
             ["methods.coroutine"] = new HelpText(
-                "범위 안 클래스에서 코루틴(IEnumerator를 돌려주는 메서드)만 고릅니다.",
+                "범위 안 클래스에서 코루틴(IEnumerator · IEnumerator<T>를 돌려주는 일반 메서드)만 고릅니다. 반환형만 보므로 코루틴이 아닌 GetEnumerator도 들어갑니다.",
                 "MonoBehaviour → 코루틴 → 코루틴 안의 new WaitForSeconds 찾기"),
             ["methods.follow"] = new HelpText(
                 "고른 메서드가 부르는 같은 클래스의 메서드까지 따라가서 범위에 넣습니다. depth만큼 몇 단계 따라갈지 정합니다.",

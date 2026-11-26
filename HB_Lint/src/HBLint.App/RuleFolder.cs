@@ -61,8 +61,15 @@ internal sealed partial class RuleFolder
             }
             result.Add(new RuleSummary(name, parsed.Id, title, parsed.Errors.Count(e => !e.IsWarning), parsed.Errors.Count(e => e.IsWarning), PathOf(name) != null));
         }
-        return result;
+        // id 숫자 순 (파일 이름 글자 순이면 rule10이 rule2 앞에 온다), id가 없거나 잘못된 파일은 뒤, 같으면 파일 이름 순
+        return result
+            .OrderBy(r => IdNumber(r.Id) ?? int.MaxValue)
+            .ThenBy(r => r.File, StringComparer.Ordinal)
+            .ToList();
     }
+
+    private static int? IdNumber(string? id) =>
+        id != null && RuleIds.IsRuleId(id) ? int.Parse(id.AsSpan(RuleIds.Prefix.Length), NumberStyles.None, CultureInfo.InvariantCulture) : null;
 
     /// <summary>폴더 안 가장 큰 id + 1 (빈 번호는 채우지 않는다 — 지운 규칙의 id를 다시 쓰지 않게). 다 찼으면 null.</summary>
     public string? NextId(IEnumerable<RuleSummary> rules)
@@ -70,8 +77,8 @@ internal sealed partial class RuleFolder
         var max = RuleIds.First - 1;
         foreach (var rule in rules)
         {
-            if (rule.Id != null && RuleIds.IsRuleId(rule.Id))
-                max = Math.Max(max, int.Parse(rule.Id.AsSpan(RuleIds.Prefix.Length), NumberStyles.None, CultureInfo.InvariantCulture));
+            if (IdNumber(rule.Id) is { } number)
+                max = Math.Max(max, number);
         }
         return max + 1 <= RuleIds.Last ? RuleIds.Format(max + 1) : null;
     }

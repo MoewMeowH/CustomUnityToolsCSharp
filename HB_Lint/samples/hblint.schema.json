@@ -106,8 +106,8 @@
             }
           },
           {
-            "title": "methods.coroutine — 코루틴 (IEnumerator · IEnumerator<T> 반환 일반 메서드) (→ Methods)",
-            "description": "범위 안 클래스에서 코루틴(IEnumerator를 돌려주는 메서드)만 고릅니다. 예: MonoBehaviour → 코루틴 → 코루틴 안의 new WaitForSeconds 찾기",
+            "title": "methods.coroutine — 코루틴 (→ Methods)",
+            "description": "범위 안 클래스에서 코루틴(IEnumerator · IEnumerator<T>를 돌려주는 일반 메서드)만 고릅니다. 반환형만 보므로 코루틴이 아닌 GetEnumerator도 들어갑니다. 예: MonoBehaviour → 코루틴 → 코루틴 안의 new WaitForSeconds 찾기",
             "type": "object",
             "required": [
               "kind",
@@ -475,7 +475,7 @@
             ]
           },
           {
-            "title": "filter.location — 코드 자리 (파일 · 클래스) (→ Sites)",
+            "title": "filter.location — 코드 자리 (→ Sites)",
             "description": "코드가 있는 파일 · 감싸는 클래스로 거릅니다. 파일 이름이나 폴더, 클래스 이름이 바뀌면 이 칸만 고치면 됩니다. 어느 사이트 뒤에나 이을 수 있습니다. 예: 선언(enum) → 코드 자리(CommonEnum.cs · CommonEnum 클래스, outside) → 밖에 선언된 enum",
             "type": "object",
             "required": [

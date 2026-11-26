@@ -130,7 +130,7 @@ samples/more/                 예시 규칙 더 (CLL0004~0012 — 할당 · Unit
 | CLL0011 | `position-rotation-pair` | MonoBehaviour → 짝 묶기(a: `Transform.position` 쓰기, b: `rotation` 쓰기, `methodAndTarget`) |
 | CLL0012 | `transform-repeat-in-update` | MonoBehaviour → Update 계열 → `sites.member`(`transform` 읽기) → 묶기(`methodAndTarget`) → 개수(4) |
 
-코드 규약 예시 (`samples/client-conventions/`, 쓰는 법은 위와 같다 — id가 겹치면 바꿔서):
+코드 규약 예 — 선언 · 이름 · 코드 자리 노드로 만든 규칙. 팀 규약이라 규칙 파일은 각 프로젝트 규칙 폴더에 두고, 이 저장소에는 시험용 사본만 둔다 (`tests/HBLint.Core.Tests/TestData/conventions/` — 가져다 쓸 때는 id가 겹치지 않게):
 
 | id | 파일 | 그래프 |
 |---|---|---|

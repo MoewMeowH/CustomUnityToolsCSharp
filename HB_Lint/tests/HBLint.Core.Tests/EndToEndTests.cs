@@ -131,7 +131,8 @@ public class EndToEndTests
     [Fact]
     public void 클라_규약_예시_셋이_각각_걸림()
     {
-        var set = RuleSet.Build(RuleSet.ReadFolder(Path.Combine(Samples, "client-conventions")));
+        // 코드 규약 규칙은 각 프로젝트 규칙 폴더에 두고, 여기에는 시험용 사본만 둔다
+        var set = RuleSet.Build(RuleSet.ReadFolder(Path.Combine(TestCompiler.RepoRoot(), "tests", "HBLint.Core.Tests", "TestData", "conventions")));
         Assert.Empty(set.Errors);
         Assert.Empty(set.Warnings);
 

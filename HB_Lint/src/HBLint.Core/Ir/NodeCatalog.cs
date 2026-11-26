@@ -144,7 +144,7 @@ namespace HBLint.Core.Ir
                 new[] { new InputSpec("from", false, Socket.Types) },
                 new[] { new FieldSpec("names", FieldType.StringArray, true, "메서드 이름 (예 Update) — 범위 타입에 선언된 것") }),
             // 반환형만 본다 — IEnumerable 구현의 GetEnumerator 같은 코루틴 아닌 메서드도 들어간다
-            new NodeSpec("methods.coroutine", "코루틴 (IEnumerator · IEnumerator<T> 반환 일반 메서드)", Socket.Methods,
+            new NodeSpec("methods.coroutine", "코루틴", Socket.Methods,
                 new[] { new InputSpec("from", false, Socket.Types) },
                 new FieldSpec[0]),
             new NodeSpec("methods.follow", "호출 따라가기", Socket.Methods,
@@ -200,7 +200,7 @@ namespace HBLint.Core.Ir
                     new FieldSpec("keep", FieldType.Choice, true, "matching = 맞는 이름만 남김, notMatching = 안 맞는 이름만 남김 (규칙을 어긴 이름 찾기). 이름은 선언 사이트에만 있다 — 다른 사이트는 늘 빠짐") { Choices = NameKeeps },
                 },
                 requireOneOf: new[] { "startsWith", "pattern" }),
-            new NodeSpec("filter.location", "코드 자리 (파일 · 클래스)", Socket.Sites,
+            new NodeSpec("filter.location", "코드 자리", Socket.Sites,
                 new[] { new InputSpec("from", false, Socket.Sites) },
                 new[]
                 {

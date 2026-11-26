@@ -61,6 +61,25 @@ public class RuleApiTests
     }
 
     [Fact]
+    public void 목록은_id_숫자_순이고_id가_없는_파일은_뒤()
+    {
+        using var dir = new TempDir();
+        // 파일 이름 글자 순(a10 · a2 · a9 · b · z)과 id 순이 다르게
+        void Rule(string file, string? id) =>
+            File.WriteAllText(Path.Combine(dir.Path, file), id == null ? "{ \"version\": 1, \"nodes\": {} }" : $$"""{ "version": 1, "id": "{{id}}", "nodes": {} }""");
+        Rule("a10.hblint.json", "CLL0010");
+        Rule("a2.hblint.json", "CLL0002");
+        Rule("a9.hblint.json", "CLL0100");
+        Rule("b.hblint.json", null);
+        Rule("z.hblint.json", "CLL0001");
+        Rule("y.hblint.json", "XYZ");
+
+        var list = new RuleFolder(dir.Path, Path.Combine(dir.Path, "x.cs")).List();
+
+        Assert.Equal(["z", "a2", "a10", "a9", "b", "y"], list.Select(r => r.File.Replace(".hblint.json", "")));
+    }
+
+    [Fact]
     public void 다음_id는_빈_번호를_채우지_않음()
     {
         var folder = new RuleFolder(Path.GetTempPath(), "x.cs");

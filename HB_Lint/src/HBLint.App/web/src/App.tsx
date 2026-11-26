@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import {
   Background, Controls, MiniMap, ReactFlow, useReactFlow,
   type Connection, type Edge as FlowEdge, type EdgeChange, type NodeChange,
 } from '@xyflow/react';
 import { api, ApiError, type AppStateDto, type GenerateResult, type PreviewResult, type RecentEntry, type RuleSummary, type Validation } from './api';
 import { findSpec, groupHelp, paletteGroup, paletteTitle, socketColor, type Catalog } from './catalog';
+import { clampSidebar } from './rules';
+import { RulePicker } from './RulePicker';
 import { Guide } from './Guide';
 import { Inspector } from './Inspector';
 import {
@@ -58,6 +60,14 @@ export function App() {
   const [manual, setManual] = useState(false);
   /** React Flow가 잰 노드 크기 — 통제 모드라 돌려 넣어야 미니맵 · 맞춤 보기가 노드를 안다. */
   const [measured, setMeasured] = useState<Map<string, { width: number; height: number }>>(new Map());
+  /** 읽는 법 창 — 처음 한 번은 저절로 연다. */
+  const [guide, setGuide] = useState(() => localStorage.getItem('hblint.guide.seen') !== '1');
+  const closeGuide = useCallback(() => {
+    localStorage.setItem('hblint.guide.seen', '1');
+    setGuide(false);
+  }, []);
+  /** 팔레트 넓이 — 오른쪽 경계를 끌어 바꾸고 기억한다. */
+  const [sidebarWidth, setSidebarWidth] = useState(() => clampSidebar(localStorage.getItem('hblint.sidebar')));
   const flow = useReactFlow();
   const text = useMemo(() => docText(doc), [doc]);
   const dirty = open !== null && (open.created || text !== open.savedText);
@@ -410,6 +420,26 @@ export function App() {
     setSelected(added.name);
   };
 
+  const startResize = (e: ReactPointerEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = sidebarWidth;
+    let width = startWidth;
+    const move = (ev: PointerEvent) => {
+      width = clampSidebar(startWidth + ev.clientX - startX);
+      setSidebarWidth(width);
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      document.body.classList.remove('resizing');
+      localStorage.setItem('hblint.sidebar', String(width));
+    };
+    document.body.classList.add('resizing');
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
     const kind = e.dataTransfer.getData('application/hblint-kind');
@@ -455,33 +485,13 @@ export function App() {
         {manual && <OpenPanel state={state} busy={busy} candidates={candidates} onOpen={openWorkspace} onProject={loadProject} />}
       </header>
       <div className="main">
-        <aside className="sidebar">
-          <section>
-            <h4>규칙 <button className="small" disabled={!state.rules || !nextId} onClick={createRule} title={nextId ? `다음 id ${nextId}` : ''}>+ 새 규칙</button></h4>
-            {!state.rules && <p className="muted">규칙 폴더를 여세요</p>}
-            <ul className="rule-list">
-              {rules.map((r) => (
-                <li
-                  key={r.file}
-                  className={`${open?.file === r.file ? 'on' : ''} ${r.editable ? '' : 'locked'}`}
-                  onClick={() => r.editable && openRule(r.file)}
-                  title={r.editable ? (r.title ?? '') : '앱에서 열 수 없는 파일 (이름에 글자 · 숫자 · _ . - 밖의 문자, 또는 폴더 밖을 가리키는 링크) — 생성에는 들어갑니다'}
-                >
-                  <span className="rule-id">{r.id ?? '?'}</span> {r.file.replace(/\.hblint\.json$/, '')}
-                  {r.errors > 0 && <span className="badge error">{r.errors}</span>}
-                </li>
-              ))}
-              {open?.created && <li className="on"><span className="rule-id">{String(doc.id)}</span> {open.file} (새)</li>}
-            </ul>
-          </section>
+        <aside className="sidebar" style={{ width: sidebarWidth }}>
           <section className="palette">
-            <h4>노드 (끌어 놓거나 누르기)</h4>
-            <Guide catalog={catalog} />
+            <h4>노드 <small>끌어 놓거나 누르기</small></h4>
             {[...groups].map(([group, specs]) => (
               <div key={group}>
                 <h5 style={{ color: group in socketColor ? socketColor[group as keyof typeof socketColor] : undefined }} title={groupHelp(catalog, group)}>
                   {group}
-                  {groupHelp(catalog, group) && <span className="group-help"> — {groupHelp(catalog, group)}</span>}
                 </h5>
                 {specs.map((spec) => (
                   <div
@@ -499,9 +509,20 @@ export function App() {
             ))}
           </section>
         </aside>
+        <div className="sidebar-resizer" onPointerDown={startResize} onDoubleClick={() => { setSidebarWidth(clampSidebar(null)); localStorage.removeItem('hblint.sidebar'); }} title="끌어서 넓이 조절 (두 번 누르면 기본 넓이)" />
         <main className="canvas" onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
           <div className="toolbar">
-            <span className="file">{open ? `${open.file}${dirty ? ' ●' : ''}` : '규칙을 고르세요'}</span>
+            <RulePicker
+              rules={rules}
+              current={open?.file ?? null}
+              currentId={open ? (typeof doc.id === 'string' ? doc.id : null) : null}
+              dirty={dirty}
+              created={open?.created ?? false}
+              enabled={!!state.rules}
+              nextId={nextId}
+              onOpen={(file) => void openRule(file)}
+              onCreate={createRule}
+            />
             <button disabled={!open || !dirty} onClick={() => void save()} title="Ctrl+S">저장</button>
             <button disabled={!history.canUndo} onClick={history.undo} title="Ctrl+Z">되돌리기</button>
             <button disabled={!history.canRedo} onClick={history.redo} title="Ctrl+Y">다시</button>
@@ -510,6 +531,7 @@ export function App() {
               {busy === '미리 보기' ? '돌리는 중…' : '미리 보기'}
             </button>
             {status && <span className={`status ${status.error ? 'error' : ''}`} onClick={() => setStatus(null)}>{status.text}</span>}
+            <button className="guide-button" onClick={() => setGuide(true)} title="소켓 색 · 용어 설명">? 읽는 법</button>
           </div>
           {open ? (
             <ReactFlow
@@ -532,7 +554,7 @@ export function App() {
               <MiniMap pannable zoomable bgColor="#252931" maskColor="rgba(29, 32, 38, 0.7)" nodeColor={(n) => (n.data as { spec?: { output?: string } }).spec?.output ? socketColor[(n.data as { spec: { output: keyof typeof socketColor } }).spec.output] : socketColor.Scope} />
             </ReactFlow>
           ) : (
-            <div className="placeholder">왼쪽에서 규칙을 고르거나 새 규칙을 만드세요.</div>
+            <div className="placeholder">위 규칙 목록(▾)에서 고르거나 + 새 규칙을 누르세요.</div>
           )}
         </main>
         {open && (
@@ -557,6 +579,7 @@ export function App() {
           />
         )}
       </div>
+      {guide && <Guide catalog={catalog} onClose={closeGuide} />}
       {open && <Problems validation={validation} preview={preview} generate={generate} tab={tab} onTab={setTab} onSelect={setSelected} />}
     </div>
   );
